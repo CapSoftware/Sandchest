@@ -179,7 +179,7 @@ All TypeScript packages need consistent compiler settings. The SDK targets Node.
 
 ## Task 3: Create contract package — REST API types
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `feat`
 - **Commit message**: `feat: add REST API contract types for all endpoints`
 
@@ -244,7 +244,11 @@ Reference `docs/spec/02-api-contract.md` for the full specification. Key types:
 - Types are exported from the package entry point
 
 ### Learnings
-<!-- Filled in after completion -->
+- All types use `export type` re-exports from index.ts since they're type-only (no runtime values)
+- Used `| undefined` on optional properties for `exactOptionalPropertyTypes` compatibility (required by base tsconfig)
+- Replay bundle has a recursive `ReplayForkTreeNode` type (children are same type), while API `ForkTreeNode` uses flat `children: string[]` (just IDs)
+- Added `FileEntry` and `ListFilesResponse` types for the file listing endpoint — not in the task list but present in the API spec
+- `ExecOutputEntry` type added for per-exec JSONL log format from spec 04
 
 ---
 
