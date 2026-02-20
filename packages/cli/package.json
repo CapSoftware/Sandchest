@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'no lint configured yet'",
+    "lint": "eslint src/",
     "test": "echo 'no tests yet'"
   }
 }

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "echo 'astro build placeholder'",
     "typecheck": "echo 'no typecheck configured yet'",
-    "lint": "echo 'no lint configured yet'",
+    "lint": "eslint src/",
     "test": "echo 'no tests yet'"
   }
 }

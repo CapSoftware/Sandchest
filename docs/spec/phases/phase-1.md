@@ -113,7 +113,7 @@ sandchest/
 
 ## Task 2: Set up shared TypeScript configuration
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `chore`
 - **Commit message**: `chore: add shared tsconfig, eslint, and prettier configuration`
 
@@ -169,7 +169,11 @@ All TypeScript packages need consistent compiler settings. The SDK targets Node.
 - Prettier formats a sample file correctly
 
 ### Learnings
-<!-- Filled in after completion -->
+- Base tsconfig lives in `packages/config/tsconfig.base.json`; all packages extend it with only `outDir`/`rootDir` overrides
+- Root `eslint.config.mjs` re-exports from `packages/config/eslint.config.mjs` — ESLint flat config resolves from the root automatically
+- ESLint 10 + typescript-eslint 8.56 work with flat config out of the box
+- Prettier config at root is picked up by all packages without per-package config
+- `exactOptionalPropertyTypes` is enabled in the shared base — this is stricter than default strict mode
 
 ---
 
