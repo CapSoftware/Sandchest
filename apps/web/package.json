@@ -1,0 +1,12 @@
+{
+  "name": "@sandchest/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'astro build placeholder'",
+    "typecheck": "echo 'no typecheck configured yet'",
+    "lint": "echo 'no lint configured yet'",
+    "test": "echo 'no tests yet'"
+  }
+}

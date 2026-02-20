@@ -1,0 +1,10 @@
+{
+  "name": "@sandchest/config",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "echo 'no build needed'",
+    "lint": "echo 'no lint configured yet'",
+    "test": "echo 'no tests yet'"
+  }
+}
