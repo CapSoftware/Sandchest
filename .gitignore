@@ -27,5 +27,4 @@ Thumbs.db
 # Logs
 *.log
 
-# Docs (keep docs tracked)
-!docs/
+docs/
