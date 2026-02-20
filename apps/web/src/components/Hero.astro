@@ -1,0 +1,228 @@
+---
+---
+
+<section
+  class="flex flex-col"
+  style={`padding: var(--vertical-padding) var(--padding);`}
+>
+  <h1 class="hero-reveal hero-reveal-delay-1 text-text-strong font-bold" style="font-size: 38px; margin-bottom: 8px;">
+    The sandbox platform for AI agents.
+  </h1>
+
+  <p class="hero-reveal hero-reveal-delay-2 text-text" style="margin-bottom: 32px; max-width: 82%;">
+    Sandchest gives your agent isolated Linux VMs that fork in under 100ms. It tries ideas in parallel, backtracks bad paths instantly, and iterates faster than any human could.
+  </p>
+
+  <div id="install-widget" class="hero-reveal hero-reveal-delay-3">
+    <div
+      class="bg-surface"
+      style="border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 0 20px;"
+    >
+      <div class="pkg-tabs flex items-center">
+        <button class="pkg-tab active" data-pkg="bun">bun</button>
+        <button class="pkg-tab" data-pkg="pnpm">pnpm</button>
+        <button class="pkg-tab" data-pkg="yarn">yarn</button>
+        <button class="pkg-tab" data-pkg="npm">npm</button>
+      </div>
+    </div>
+
+    <div
+      class="bg-surface flex items-center justify-between"
+      style="border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; padding: 16px;"
+    >
+      <div
+        id="install-cmd"
+        class="flex items-center"
+        style="gap: 16px; padding: 8px 16px 8px 8px; border-radius: 4px; cursor: pointer;"
+      >
+        <code id="install-text" class="install-text text-text-strong">bun add @sandchest/sdk</code>
+        <button
+          id="copy-btn"
+          class="text-text-weak transition-colors hover:text-text-strong shrink-0"
+          style="background: none; border: none; cursor: pointer; padding: 0;"
+          aria-label="Copy to clipboard"
+        >
+          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square">
+            <rect x="9" y="9" width="13" height="13" rx="1" />
+            <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-reveal hero-reveal-delay-3 how-it-works" style="margin-top: 40px;">
+    <p class="text-text-weak" style="font-size: 13px; margin-bottom: 16px; letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600;">How it works</p>
+    <ol class="steps">
+      <li>
+        <span class="step-num">1</span>
+        <div>
+          <span class="text-text-strong font-medium">Add Sandchest to your agent</span>
+          <span class="text-text-weak"> — install the SDK or connect the MCP server. Your agent gets sandbox tools automatically.</span>
+        </div>
+      </li>
+      <li>
+        <span class="step-num">2</span>
+        <div>
+          <span class="text-text-strong font-medium">Your agent iterates faster</span>
+          <span class="text-text-weak"> — it spins up VMs, runs code, and forks state in milliseconds. No waiting, no setup. Faster feedback loops mean more iterations per task.</span>
+        </div>
+      </li>
+      <li>
+        <span class="step-num">3</span>
+        <div>
+          <span class="text-text-strong font-medium">Your agent gets smarter</span>
+          <span class="text-text-weak"> — it explores multiple approaches in parallel, discards bad paths instantly, and keeps the best result. More attempts, better outcomes.</span>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<style>
+  .steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-weak);
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .steps code {
+    font-family: inherit;
+  }
+  @media (max-width: 60rem) {
+    h1 {
+      font-size: 22px !important;
+    }
+  }
+
+  @media (max-width: 50rem) {
+    p {
+      max-width: 100% !important;
+    }
+  }
+
+  @media (max-width: 36rem) {
+    .pkg-tab {
+      font-size: 13px;
+    }
+  }
+
+  @media (max-width: 30rem) {
+    section {
+      padding: var(--vertical-padding) var(--padding) !important;
+    }
+  }
+
+  #install-cmd:hover {
+    background: var(--color-surface-hover);
+  }
+
+  .install-text {
+    font-size: 16px;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 30rem) {
+    .install-text {
+      font-size: 14px;
+    }
+  }
+
+  .pkg-tabs {
+    gap: 40px;
+  }
+
+  @media (max-width: 30rem) {
+    .pkg-tabs {
+      gap: 20px;
+    }
+  }
+
+  .pkg-tab {
+    padding: 16px 0;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    line-height: 1;
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--color-text-weak);
+  }
+
+  .pkg-tab.active {
+    color: var(--color-text-strong);
+    border-bottom-color: var(--color-text-strong);
+  }
+
+  .pkg-tab:hover:not(.active) {
+    color: var(--color-text);
+  }
+</style>
+
+<script>
+  const commands: Record<string, string> = {
+    bun: 'bun add @sandchest/sdk',
+    pnpm: 'pnpm add @sandchest/sdk',
+    yarn: 'yarn add @sandchest/sdk',
+    npm: 'npm install @sandchest/sdk',
+  };
+
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.pkg-tab');
+  const installText = document.getElementById('install-text');
+  const copyBtn = document.getElementById('copy-btn');
+  const installCmd = document.getElementById('install-cmd');
+
+  let activePkg = 'bun';
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const pkg = tab.dataset.pkg;
+      if (!pkg || pkg === activePkg) return;
+
+      activePkg = pkg;
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      if (installText) {
+        installText.textContent = commands[pkg];
+      }
+    });
+  });
+
+  function doCopy() {
+    navigator.clipboard.writeText(commands[activePkg]);
+    const svg = copyBtn?.querySelector('svg');
+    if (svg) {
+      const original = svg.innerHTML;
+      svg.innerHTML = '<polyline points="20 6 9 17 4 12" stroke="#03B000" stroke-width="2" fill="none" />';
+      setTimeout(() => { svg.innerHTML = original; }, 1500);
+    }
+  }
+
+  [copyBtn, installCmd].forEach(el => el?.addEventListener('click', doCopy));
+</script>

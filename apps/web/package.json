@@ -4,9 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo 'astro build placeholder'",
-    "typecheck": "echo 'no typecheck configured yet'",
-    "lint": "eslint src/",
-    "test": "echo 'no tests yet'"
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check"
+  },
+  "dependencies": {
+    "astro": "^5.2.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
   }
 }

@@ -1,0 +1,34 @@
+---
+const links = [
+  { label: "GitHub", href: "https://github.com/sandchest" },
+  { label: "Docs", href: "#" },
+  { label: "Discord", href: "#" },
+  { label: "X", href: "#" },
+];
+---
+
+<footer style="display: flex; flex-direction: row; flex-wrap: wrap; padding: var(--vertical-padding) var(--padding); gap: 24px 32px;">
+  {links.map((link) => (
+    <div
+      class="footer-cell"
+    >
+      <a
+        href={link.href}
+        class="text-text-weak block no-underline hover:no-underline"
+        target={link.href.startsWith("http") ? "_blank" : undefined}
+        rel={link.href.startsWith("http") ? "noopener" : undefined}
+      >
+        {link.label}
+      </a>
+    </div>
+  ))}
+</footer>
+
+<style>
+  .footer-cell a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+    color: var(--color-text-strong);
+  }
+</style>

@@ -1,0 +1,44 @@
+---
+---
+
+<section id="code" class="section">
+  <div class="section-header">
+    <h3 class="section-title">See it in action</h3>
+    <p class="text-[13px] text-text-weak" style="line-height: 1.5;">A few lines of TypeScript. That's it.</p>
+  </div>
+
+  <div style="border-radius: 6px; overflow: hidden;">
+    <div class="bg-surface" style="padding: 12px 20px;">
+      <span class="text-[13px] text-text-weak">agent.ts</span>
+    </div>
+
+    <pre class="bg-surface overflow-x-auto code-block" style="padding: 20px; line-height: 1.75;"><code><span class="text-text-weak">import</span> <span class="text-text-strong">Sandchest</span> <span class="text-text-weak">from</span> <span class="text-accent">"@sandchest/sdk"</span><span class="text-text-weak">;</span>
+
+<span class="text-text-weak">const</span> <span class="text-text-strong">sandchest</span> <span class="text-text-weak">=</span> <span class="text-text-weak">new</span> <span class="text-text-strong">Sandchest</span><span class="text-text-weak">();</span>
+
+<span class="text-border">// Create a sandbox and set up the environment</span>
+<span class="text-text-weak">const</span> <span class="text-text-strong">sb</span> <span class="text-text-weak">=</span> <span class="text-text-weak">await</span> <span class="text-text-strong">sandchest</span><span class="text-text-weak">.</span><span class="text-text">create</span><span class="text-text-weak">();</span>
+<span class="text-text-weak">await</span> <span class="text-text-strong">sb</span><span class="text-text-weak">.</span><span class="text-text">exec</span><span class="text-text-weak">(</span><span class="text-accent">"git clone repo && npm install"</span><span class="text-text-weak">);</span>
+
+<span class="text-border">// Try something risky in a fork</span>
+<span class="text-text-weak">const</span> <span class="text-text-strong">fork</span> <span class="text-text-weak">=</span> <span class="text-text-weak">await</span> <span class="text-text-strong">sb</span><span class="text-text-weak">.</span><span class="text-text">fork</span><span class="text-text-weak">();</span>
+<span class="text-text-weak">const</span> <span class="text-text-strong">result</span> <span class="text-text-weak">=</span> <span class="text-text-weak">await</span> <span class="text-text-strong">fork</span><span class="text-text-weak">.</span><span class="text-text">exec</span><span class="text-text-weak">(</span><span class="text-accent">"npm test"</span><span class="text-text-weak">);</span>
+
+<span class="text-text-weak">if</span> <span class="text-text-weak">(</span><span class="text-text-strong">result</span><span class="text-text-weak">.</span><span class="text-text">exitCode</span> <span class="text-text-weak">!==</span> <span class="text-accent">0</span><span class="text-text-weak">) {</span>
+  <span class="text-text-weak">await</span> <span class="text-text-strong">fork</span><span class="text-text-weak">.</span><span class="text-text">destroy</span><span class="text-text-weak">();</span> <span class="text-border">// original untouched</span>
+<span class="text-text-weak">}</span></code></pre>
+  </div>
+</section>
+
+<style>
+  .code-block {
+    font-size: 14px;
+  }
+
+  @media (max-width: 36rem) {
+    .code-block {
+      font-size: 12px;
+      padding: 16px !important;
+    }
+  }
+</style>

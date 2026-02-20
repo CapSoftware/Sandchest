@@ -1,0 +1,49 @@
+---
+const features = [
+  {
+    title: "Sub-100ms forking",
+    description: "Fork a running sandbox's full state — memory and disk — in under 100 milliseconds. Agents can branch, explore, and backtrack instantly.",
+  },
+  {
+    title: "VM-grade isolation",
+    description: "Every sandbox is a real Firecracker microVM. Not a container, not a namespace trick. Full hardware-level isolation.",
+  },
+  {
+    title: "TypeScript SDK",
+    description: "A simple, modern SDK. Create sandboxes, execute commands, fork state, and manage sessions with a few lines of code.",
+  },
+  {
+    title: "Session replay",
+    description: "Every sandbox session is fully replayable. Logs, actions, file changes — viewable from the dashboard or as context for agents.",
+  },
+  {
+    title: "MCP server",
+    description: "First-class MCP support for Claude Code and other AI tools. Your agents get sandbox access through the protocol they already speak.",
+  },
+  {
+    title: "CLI",
+    description: "Create, exec, fork, and SSH into sandboxes from your terminal. Built for developers who live in the command line.",
+  },
+];
+---
+
+<section class="section">
+  <div class="section-header">
+    <h3 class="section-title">What is Sandchest?</h3>
+    <p class="text-text">
+      Sandchest is a Linux-only sandbox platform for AI agent code execution. Every sandbox is a Firecracker microVM with VM-grade isolation, sub-second fork capability, and a permanent session replay URL.
+    </p>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    {features.map((feature) => (
+      <div class="flex" style="gap: 12px;">
+        <span class="text-text-weak shrink-0">[*]</span>
+        <div>
+          <span class="font-medium text-text-strong">{feature.title}</span>
+          <span class="text-text"> — {feature.description}</span>
+        </div>
+      </div>
+    ))}
+  </div>
+</section>
