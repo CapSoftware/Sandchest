@@ -5,6 +5,8 @@ import { describe, expect, test } from 'bun:test'
 import { AppLive } from './server.js'
 import { AuthContext } from './context.js'
 import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
+import { ExecRepoMemory } from './services/exec-repo.memory.js'
+import { NodeClientMemory } from './services/node-client.memory.js'
 import { RedisMemory } from './services/redis.memory.js'
 
 const TEST_ORG = 'org_test_123'
@@ -18,6 +20,8 @@ const TestAuthLayer = Layer.succeed(AuthContext, {
 const TestLayer = AppLive.pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(SandboxRepoMemory),
+  Layer.provide(ExecRepoMemory),
+  Layer.provide(NodeClientMemory),
   Layer.provide(RedisMemory),
   Layer.provide(TestAuthLayer),
 )
@@ -552,20 +556,6 @@ describe('DELETE /v1/sandboxes/:id — delete sandbox', () => {
 // ---------------------------------------------------------------------------
 
 describe('Route stubs', () => {
-  test('POST /v1/sandboxes/:id/exec returns 501', async () => {
-    const result = await runTest(
-      Effect.gen(function* () {
-        const client = yield* HttpClient.HttpClient
-        const response = yield* client.execute(
-          HttpClientRequest.post('/v1/sandboxes/sb_test123/exec'),
-        )
-        return response.status
-      }),
-    )
-
-    expect(result).toBe(501)
-  })
-
   test('POST /v1/sandboxes/:id/sessions returns 501', async () => {
     const result = await runTest(
       Effect.gen(function* () {

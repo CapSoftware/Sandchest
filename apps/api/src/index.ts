@@ -6,6 +6,8 @@ import { ApiRouter } from './server.js'
 import { withAuth, withRequestId } from './middleware.js'
 import { withRateLimit } from './middleware/rate-limit.js'
 import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
+import { ExecRepoMemory } from './services/exec-repo.memory.js'
+import { NodeClientMemory } from './services/node-client.memory.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
 
@@ -19,6 +21,8 @@ const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL) : RedisMemory
 
 const ServerLive = AppLive.pipe(
   Layer.provide(SandboxRepoMemory),
+  Layer.provide(ExecRepoMemory),
+  Layer.provide(NodeClientMemory),
   Layer.provide(RedisLive),
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT })),
 )
