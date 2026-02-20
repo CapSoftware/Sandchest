@@ -254,7 +254,7 @@ Reference `docs/spec/02-api-contract.md` for the full specification. Key types:
 
 ## Task 4: Create Protobuf definitions for internal RPCs
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `feat`
 - **Commit message**: `feat: add protobuf definitions for node and guest agent RPCs`
 
@@ -377,7 +377,12 @@ These protobufs will be compiled to:
 - `npx tsc --noEmit` passes in `packages/contract/` (generated stubs typecheck)
 
 ### Learnings
-<!-- Filled in after completion -->
+- ts-proto v2.11 generates code using `@bufbuild/protobuf/wire` (not protobufjs/minimal) — need `@bufbuild/protobuf` as a runtime dependency
+- Generated code uses `Buffer` (Node.js) for `bytes` fields — requires `@types/node` for typecheck
+- buf STANDARD lint rules conflict with the spec's naming (no `Service` suffix, reused `Empty` type) — disabled `SERVICE_SUFFIX`, `RPC_REQUEST_STANDARD_NAME`, `RPC_RESPONSE_STANDARD_NAME`, `RPC_REQUEST_RESPONSE_UNIQUE`
+- Generated types have naming conflicts with hand-written REST API types (e.g., both have `ExecRequest`) — used namespace re-exports: `export * as agentRpc` / `export * as nodeRpc`
+- `outputServices=generic-definitions` generates framework-agnostic service definitions (no @grpc/grpc-js dependency) with full method metadata (request/response types, streaming flags)
+- ExecEvent/ExitEvent defined separately in both agent.proto and node.proto to keep proto packages independent
 
 ---
 

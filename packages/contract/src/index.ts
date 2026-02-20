@@ -60,3 +60,6 @@ export type {
 } from './replay.js'
 
 export type { ApiError, ErrorCode } from './errors.js'
+
+export * as agentRpc from './generated/sandchest/agent/v1/agent.js'
+export * as nodeRpc from './generated/sandchest/node/v1/node.js'

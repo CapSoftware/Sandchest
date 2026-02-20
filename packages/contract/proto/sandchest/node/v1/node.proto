@@ -1,0 +1,262 @@
+syntax = "proto3";
+
+package sandchest.node.v1;
+
+import "google/protobuf/empty.proto";
+
+// Node service — hosted on the node daemon. The control plane connects to
+// each node's gRPC port to issue commands.
+service Node {
+  rpc CreateSandbox(CreateSandboxRequest) returns (CreateSandboxResponse);
+  rpc CreateSandboxFromSnapshot(CreateSandboxFromSnapshotRequest) returns (CreateSandboxResponse);
+  rpc ForkSandbox(ForkSandboxRequest) returns (ForkSandboxResponse);
+  rpc Exec(NodeExecRequest) returns (stream ExecEvent);
+  rpc CreateSession(NodeCreateSessionRequest) returns (NodeCreateSessionResponse);
+  rpc SessionExec(NodeSessionExecRequest) returns (stream ExecEvent);
+  rpc SessionInput(NodeSessionInputRequest) returns (google.protobuf.Empty);
+  rpc DestroySession(NodeDestroySessionRequest) returns (google.protobuf.Empty);
+  rpc PutFile(stream NodeFileChunk) returns (NodePutFileResponse);
+  rpc GetFile(NodeGetFileRequest) returns (stream NodeFileChunk);
+  rpc ListFiles(NodeListFilesRequest) returns (NodeListFilesResponse);
+  rpc CollectArtifacts(CollectArtifactsRequest) returns (CollectArtifactsResponse);
+  rpc StopSandbox(StopSandboxRequest) returns (StopSandboxResponse);
+  rpc DestroySandbox(DestroySandboxRequest) returns (google.protobuf.Empty);
+}
+
+// Control service — hosted on the control plane. Node daemons connect and
+// open the StreamEvents bidirectional stream to send lifecycle events.
+service Control {
+  rpc StreamEvents(stream NodeToControl) returns (stream ControlToNode);
+}
+
+// --- Node service messages ---
+
+message CreateSandboxRequest {
+  string sandbox_id = 1;
+  string kernel_ref = 2;
+  string rootfs_ref = 3;
+  uint32 cpu_cores = 4;
+  uint32 memory_mb = 5;
+  uint32 disk_gb = 6;
+  map<string, string> env = 7;
+  uint32 ttl_seconds = 8;
+}
+
+message CreateSandboxFromSnapshotRequest {
+  string sandbox_id = 1;
+  string snapshot_ref = 2;
+  map<string, string> env = 3;
+  uint32 ttl_seconds = 4;
+}
+
+message CreateSandboxResponse {
+  string sandbox_id = 1;
+}
+
+message ForkSandboxRequest {
+  string source_sandbox_id = 1;
+  string new_sandbox_id = 2;
+}
+
+message ForkSandboxResponse {
+  string sandbox_id = 1;
+}
+
+message NodeExecRequest {
+  string sandbox_id = 1;
+  string exec_id = 2;
+  repeated string cmd = 3;
+  string shell_cmd = 4;
+  string cwd = 5;
+  map<string, string> env = 6;
+  uint32 timeout_seconds = 7;
+}
+
+message ExecEvent {
+  uint64 seq = 1;
+  oneof event {
+    bytes stdout = 2;
+    bytes stderr = 3;
+    ExitEvent exit = 4;
+  }
+}
+
+message ExitEvent {
+  int32 exit_code = 1;
+  uint64 cpu_ms = 2;
+  uint64 peak_memory_bytes = 3;
+  uint64 duration_ms = 4;
+}
+
+message NodeCreateSessionRequest {
+  string sandbox_id = 1;
+  string session_id = 2;
+  string shell = 3;
+  map<string, string> env = 4;
+}
+
+message NodeCreateSessionResponse {
+  string session_id = 1;
+}
+
+message NodeSessionExecRequest {
+  string sandbox_id = 1;
+  string session_id = 2;
+  string exec_id = 3;
+  string cmd = 4;
+  uint32 timeout_seconds = 5;
+}
+
+message NodeSessionInputRequest {
+  string sandbox_id = 1;
+  string session_id = 2;
+  bytes data = 3;
+}
+
+message NodeDestroySessionRequest {
+  string sandbox_id = 1;
+  string session_id = 2;
+}
+
+message NodeFileChunk {
+  string sandbox_id = 1;
+  string path = 2;
+  bytes data = 3;
+  uint64 offset = 4;
+  bool done = 5;
+}
+
+message NodePutFileResponse {
+  uint64 bytes_written = 1;
+}
+
+message NodeGetFileRequest {
+  string sandbox_id = 1;
+  string path = 2;
+}
+
+message NodeListFilesRequest {
+  string sandbox_id = 1;
+  string path = 2;
+}
+
+message NodeListFilesResponse {
+  repeated NodeFileInfo files = 1;
+}
+
+message NodeFileInfo {
+  string path = 1;
+  uint64 size = 2;
+  bool is_dir = 3;
+  int64 modified_at = 4;
+}
+
+message CollectArtifactsRequest {
+  string sandbox_id = 1;
+  repeated string paths = 2;
+}
+
+message CollectArtifactsResponse {
+  repeated CollectedArtifact artifacts = 1;
+}
+
+message CollectedArtifact {
+  string name = 1;
+  string mime = 2;
+  uint64 bytes = 3;
+  string sha256 = 4;
+  string ref = 5;
+}
+
+message StopSandboxRequest {
+  string sandbox_id = 1;
+}
+
+message StopSandboxResponse {
+  string sandbox_id = 1;
+}
+
+message DestroySandboxRequest {
+  string sandbox_id = 1;
+}
+
+// --- Control service messages ---
+
+// Wraps all Node -> Control event types in a single oneof.
+message NodeToControl {
+  oneof event {
+    Heartbeat heartbeat = 1;
+    ExecOutput exec_output = 2;
+    SessionOutput session_output = 3;
+    ExecCompleted exec_completed = 4;
+    SandboxEvent sandbox_event = 5;
+    ArtifactReport artifact_report = 6;
+  }
+}
+
+// Acknowledgement / reserved for future control-plane-to-node commands.
+message ControlToNode {
+  string noop = 1;
+}
+
+message Heartbeat {
+  string node_id = 1;
+  repeated string active_sandbox_ids = 2;
+  uint32 slots_total = 3;
+  uint32 slots_used = 4;
+  repeated string snapshot_ids = 5;
+}
+
+message ExecOutput {
+  string exec_id = 1;
+  uint64 seq = 2;
+  oneof output {
+    bytes stdout = 3;
+    bytes stderr = 4;
+  }
+}
+
+message SessionOutput {
+  string session_id = 1;
+  uint64 seq = 2;
+  oneof output {
+    bytes stdout = 3;
+    bytes stderr = 4;
+  }
+}
+
+message ExecCompleted {
+  string exec_id = 1;
+  int32 exit_code = 2;
+  uint64 cpu_ms = 3;
+  uint64 peak_memory_bytes = 4;
+  uint64 duration_ms = 5;
+}
+
+message SandboxEvent {
+  string sandbox_id = 1;
+  SandboxEventType event_type = 2;
+  string message = 3;
+}
+
+enum SandboxEventType {
+  SANDBOX_EVENT_TYPE_UNSPECIFIED = 0;
+  SANDBOX_EVENT_TYPE_CREATED = 1;
+  SANDBOX_EVENT_TYPE_READY = 2;
+  SANDBOX_EVENT_TYPE_STOPPED = 3;
+  SANDBOX_EVENT_TYPE_FAILED = 4;
+  SANDBOX_EVENT_TYPE_FORKED = 5;
+}
+
+message ArtifactReport {
+  string sandbox_id = 1;
+  repeated ReportedArtifact artifacts = 2;
+}
+
+message ReportedArtifact {
+  string name = 1;
+  string mime = 2;
+  uint64 bytes = 3;
+  string sha256 = 4;
+  string ref = 5;
+}

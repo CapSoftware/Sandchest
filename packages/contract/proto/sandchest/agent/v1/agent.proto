@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package sandchest.agent.v1;
+
+import "google/protobuf/empty.proto";
+
+// GuestAgent runs inside each Firecracker microVM.
+// Communication is via gRPC over vsock (CID=3, port=52).
+service GuestAgent {
+  rpc Health(google.protobuf.Empty) returns (HealthResponse);
+  rpc Exec(ExecRequest) returns (stream ExecEvent);
+  rpc CreateSession(CreateSessionRequest) returns (SessionResponse);
+  rpc SessionExec(SessionExecRequest) returns (stream ExecEvent);
+  rpc SessionInput(SessionInputRequest) returns (google.protobuf.Empty);
+  rpc DestroySession(DestroySessionRequest) returns (google.protobuf.Empty);
+  rpc PutFile(stream FileChunk) returns (PutFileResponse);
+  rpc GetFile(GetFileRequest) returns (stream FileChunk);
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  rpc Shutdown(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+message HealthResponse {
+  bool ready = 1;
+  string version = 2;
+}
+
+message ExecRequest {
+  repeated string cmd = 1;
+  string shell_cmd = 2;
+  string cwd = 3;
+  map<string, string> env = 4;
+  uint32 timeout_seconds = 5;
+}
+
+message ExecEvent {
+  uint64 seq = 1;
+  oneof event {
+    bytes stdout = 2;
+    bytes stderr = 3;
+    ExitEvent exit = 4;
+  }
+}
+
+message ExitEvent {
+  int32 exit_code = 1;
+  uint64 cpu_ms = 2;
+  uint64 peak_memory_bytes = 3;
+  uint64 duration_ms = 4;
+}
+
+message CreateSessionRequest {
+  string shell = 1;
+  map<string, string> env = 2;
+}
+
+message SessionResponse {
+  string session_id = 1;
+}
+
+message SessionExecRequest {
+  string session_id = 1;
+  string cmd = 2;
+  uint32 timeout_seconds = 3;
+}
+
+message SessionInputRequest {
+  string session_id = 1;
+  bytes data = 2;
+}
+
+message DestroySessionRequest {
+  string session_id = 1;
+}
+
+message FileChunk {
+  string path = 1;
+  bytes data = 2;
+  uint64 offset = 3;
+  bool done = 4;
+}
+
+message PutFileResponse {
+  uint64 bytes_written = 1;
+}
+
+message GetFileRequest {
+  string path = 1;
+}
+
+message ListFilesRequest {
+  string path = 1;
+}
+
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+}
+
+message FileInfo {
+  string path = 1;
+  uint64 size = 2;
+  bool is_dir = 3;
+  int64 modified_at = 4;
+}
