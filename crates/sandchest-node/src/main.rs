@@ -91,9 +91,19 @@ impl proto::node_server::Node for NodeService {
 
     async fn fork_sandbox(
         &self,
-        _request: Request<proto::ForkSandboxRequest>,
+        request: Request<proto::ForkSandboxRequest>,
     ) -> Result<Response<proto::ForkSandboxResponse>, Status> {
-        Err(Status::unimplemented("fork implemented in Phase 3"))
+        let req = request.into_inner();
+
+        let _info = self
+            .sandbox_manager
+            .fork_sandbox(&req.source_sandbox_id, &req.new_sandbox_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(proto::ForkSandboxResponse {
+            sandbox_id: req.new_sandbox_id,
+        }))
     }
 
     type ExecStream = ReceiverStream<Result<proto::ExecEvent, Status>>;
