@@ -1,3 +1,5 @@
+mod exec;
+mod proc;
 mod service;
 mod vsock;
 

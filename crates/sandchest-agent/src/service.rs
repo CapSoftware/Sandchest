@@ -32,9 +32,10 @@ impl GuestAgent for GuestAgentService {
 
     async fn exec(
         &self,
-        _request: Request<ExecRequest>,
+        request: Request<ExecRequest>,
     ) -> Result<Response<Self::ExecStream>, Status> {
-        Err(Status::unimplemented("exec not yet implemented"))
+        let stream = crate::exec::spawn_exec(request.into_inner());
+        Ok(Response::new(stream))
     }
 
     async fn create_session(
