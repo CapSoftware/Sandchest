@@ -6,10 +6,12 @@ import { AppLive } from '../server.js'
 import { AuthContext } from '../context.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ExecRepo } from '../services/exec-repo.js'
+import { SessionRepo } from '../services/session-repo.js'
 import { NodeClient } from '../services/node-client.js'
 import { RedisService } from '../services/redis.js'
 import { createInMemorySandboxRepo } from '../services/sandbox-repo.memory.js'
 import { createInMemoryExecRepo } from '../services/exec-repo.memory.js'
+import { createInMemorySessionRepo } from '../services/session-repo.memory.js'
 import { createInMemoryNodeClient } from '../services/node-client.memory.js'
 import { createInMemoryRedisApi } from '../services/redis.memory.js'
 import { idToBytes } from '@sandchest/contract'
@@ -20,6 +22,7 @@ const TEST_USER = 'user_test_456'
 function createTestEnv() {
   const sandboxRepo = createInMemorySandboxRepo()
   const execRepo = createInMemoryExecRepo()
+  const sessionRepo = createInMemorySessionRepo()
   const nodeClient = createInMemoryNodeClient()
   const redis = createInMemoryRedisApi()
 
@@ -27,6 +30,7 @@ function createTestEnv() {
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provide(Layer.succeed(SandboxRepo, sandboxRepo)),
     Layer.provide(Layer.succeed(ExecRepo, execRepo)),
+    Layer.provide(Layer.succeed(SessionRepo, sessionRepo)),
     Layer.provide(Layer.succeed(NodeClient, nodeClient)),
     Layer.provide(Layer.succeed(RedisService, redis)),
     Layer.provide(
