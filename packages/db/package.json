@@ -2,9 +2,30 @@
   "name": "@sandchest/db",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts",
+    "./client": "./src/client.ts",
+    "./seed": "./src/seed.ts"
+  },
   "scripts": {
-    "build": "echo 'no build needed'",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint configured yet'",
-    "test": "echo 'no tests yet'"
+    "test": "echo 'no tests yet'",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.39.0",
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
   }
 }
