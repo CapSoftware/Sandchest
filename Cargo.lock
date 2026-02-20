@@ -964,9 +964,17 @@ dependencies = [
 name = "sandchest-node"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "prost",
+ "prost-types",
  "serde",
+ "serde_json",
  "tokio",
+ "tokio-stream",
  "tonic",
+ "tonic-build",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
