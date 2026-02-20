@@ -30,6 +30,10 @@ export class SandboxNotRunningError extends Data.TaggedError('SandboxNotRunningE
   readonly message: string
 }> {}
 
+export class NoCapacityError extends Data.TaggedError('NoCapacityError')<{
+  readonly message: string
+}> {}
+
 export class NotImplementedError extends Data.TaggedError('NotImplementedError')<{
   readonly message: string
 }> {}
@@ -42,6 +46,7 @@ export type ApiError =
   | ConflictError
   | RateLimitedError
   | SandboxNotRunningError
+  | NoCapacityError
   | NotImplementedError
 
 const STATUS_MAP: Record<ApiError['_tag'], number> = {
@@ -52,6 +57,7 @@ const STATUS_MAP: Record<ApiError['_tag'], number> = {
   ConflictError: 409,
   RateLimitedError: 429,
   SandboxNotRunningError: 409,
+  NoCapacityError: 503,
   NotImplementedError: 501,
 }
 
@@ -63,6 +69,7 @@ const CODE_MAP: Record<ApiError['_tag'], string> = {
   ConflictError: 'conflict',
   RateLimitedError: 'rate_limited',
   SandboxNotRunningError: 'sandbox_not_running',
+  NoCapacityError: 'no_capacity',
   NotImplementedError: 'not_implemented',
 }
 

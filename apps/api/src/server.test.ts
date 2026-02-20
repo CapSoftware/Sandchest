@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { AppLive } from './server.js'
 import { AuthContext } from './context.js'
 import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
+import { RedisMemory } from './services/redis.memory.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -17,6 +18,7 @@ const TestAuthLayer = Layer.succeed(AuthContext, {
 const TestLayer = AppLive.pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(SandboxRepoMemory),
+  Layer.provide(RedisMemory),
   Layer.provide(TestAuthLayer),
 )
 
