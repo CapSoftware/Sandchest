@@ -520,7 +520,7 @@ The complete data model is in `docs/spec/08-data-model.md`. PlanetScale (Vitess)
 
 ## Task 6: Build SDK skeleton with core types and client class
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `feat`
 - **Commit message**: `feat: scaffold TypeScript SDK with client classes and full type surface`
 
@@ -605,7 +605,13 @@ The SDK API surface is fully specified in `docs/spec/06-sdk-cli.md` → "SDK: @s
 - SDK imports types from `@sandchest/contract`
 
 ### Learnings
-<!-- Filled in after completion -->
+- SDK defines its own `SdkErrorCode` type instead of importing `ErrorCode` from contract — contract uses `export type` re-exports which work fine, but keeping the SDK self-contained avoids coupling to contract's internal type naming
+- Used `Uint8Array` instead of `Buffer` for file operations — SDK targets both Node.js and browsers, and `Uint8Array` is universal
+- `Symbol.asyncDispose` requires `"lib": ["ES2022", "ESNext.Disposable"]` in tsconfig — the base config only has `ES2022`
+- `exactOptionalPropertyTypes` interacts with fetch's `RequestInit.body` — must conditionally assign instead of passing `undefined` for body
+- Contract package must be built first (`tsc`) to produce `dist/` type declarations before dependents can typecheck — turbo pipeline handles this via `dependsOn: ["^build"]`
+- All skeleton methods throw `'Not implemented'` but have full signatures matching the spec — this lets dependents typecheck against the API surface immediately
+- Internal fields (`_http`, `_sandboxId`) use `_` prefix + `@internal` JSDoc to satisfy `noUnusedLocals` while signaling they're reserved for implementation
 
 ---
 

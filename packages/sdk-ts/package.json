@@ -15,5 +15,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "echo 'no tests yet'"
+  },
+  "dependencies": {
+    "@sandchest/contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0"
   }
 }

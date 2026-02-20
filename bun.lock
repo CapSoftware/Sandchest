@@ -64,6 +64,12 @@
     "packages/sdk-ts": {
       "name": "@sandchest/sdk",
       "version": "0.0.1",
+      "dependencies": {
+        "@sandchest/contract": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^25.3.0",
+      },
     },
   },
   "packages": {
