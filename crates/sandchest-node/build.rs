@@ -1,8 +1,8 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Node proto — server stubs (control plane connects to us)
+    // Node proto — server stubs for Node service, client stubs for Control service
     tonic_build::configure()
         .build_server(true)
-        .build_client(false)
+        .build_client(true)
         .compile_protos(
             &["sandchest/node/v1/node.proto"],
             &["../../packages/contract/proto"],

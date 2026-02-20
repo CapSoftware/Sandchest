@@ -147,6 +147,7 @@ pub struct NodeConfig {
     pub grpc_port: u16,
     pub data_dir: String,
     pub kernel_path: String,
+    pub control_plane_url: Option<String>,
 }
 
 impl NodeConfig {
@@ -162,6 +163,7 @@ impl NodeConfig {
                 .unwrap_or_else(|_| "/var/sandchest".to_string()),
             kernel_path: std::env::var("SANDCHEST_KERNEL_PATH")
                 .unwrap_or_else(|_| "/var/sandchest/images/vmlinux-5.10".to_string()),
+            control_plane_url: std::env::var("SANDCHEST_CONTROL_PLANE_URL").ok(),
         }
     }
 

@@ -9,8 +9,10 @@ use tracing::{error, info, warn};
 use crate::agent_client::AgentClient;
 use crate::config::{NodeConfig, Profile, VmConfig};
 use crate::disk;
+use crate::events::{self, EventSender};
 use crate::firecracker::FirecrackerVm;
 use crate::network;
+use crate::proto;
 use crate::slot::SlotManager;
 use crate::snapshot::FirecrackerApi;
 
@@ -55,6 +57,7 @@ pub struct SandboxManager {
     vms: RwLock<HashMap<String, FirecrackerVm>>,
     node_config: Arc<NodeConfig>,
     slot_manager: SlotManager,
+    event_sender: Option<EventSender>,
 }
 
 impl SandboxManager {
@@ -64,7 +67,19 @@ impl SandboxManager {
             vms: RwLock::new(HashMap::new()),
             node_config,
             slot_manager: SlotManager::new(),
+            event_sender: None,
         }
+    }
+
+    /// Set the event sender for reporting sandbox lifecycle events.
+    pub fn with_event_sender(mut self, sender: EventSender) -> Self {
+        self.event_sender = Some(sender);
+        self
+    }
+
+    /// Get current slot utilization count.
+    pub fn slots_used(&self) -> u32 {
+        self.slot_manager.active_count() as u32
     }
 
     /// Create a new sandbox via cold boot.
@@ -96,6 +111,11 @@ impl SandboxManager {
 
         // Insert as provisioning
         self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot)).await?;
+        self.report_event(events::sandbox_event(
+            sandbox_id,
+            proto::SandboxEventType::Created,
+            "provisioning started",
+        ));
 
         // Step 1: Set up networking (TAP device + NAT)
         let net_config = match network::setup_network(sandbox_id, slot).await {
@@ -103,6 +123,7 @@ impl SandboxManager {
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to set up network");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("network setup failed: {}", e)));
                 self.slot_manager.release(slot);
                 return Err(SandboxError::CreateFailed(format!("network setup failed: {}", e)));
             }
@@ -114,6 +135,7 @@ impl SandboxManager {
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
                 network::teardown_network(sandbox_id, slot).await;
                 self.slot_manager.release(slot);
                 return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
@@ -126,6 +148,7 @@ impl SandboxManager {
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to start Firecracker");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("firecracker failed: {}", e)));
                 network::teardown_network(sandbox_id, slot).await;
                 self.slot_manager.release(slot);
                 // Best-effort cleanup of cloned disk
@@ -138,6 +161,7 @@ impl SandboxManager {
         if let Err(e) = self.wait_for_agent_health(sandbox_id).await {
             error!(sandbox_id = %sandbox_id, error = %e, "guest agent health check failed");
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("agent health check failed: {}", e)));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -148,6 +172,12 @@ impl SandboxManager {
         let boot_duration_ms = start.elapsed().as_millis() as u64;
         self.vms.write().await.insert(sandbox_id.to_string(), vm);
         self.finalize_running(sandbox_id, boot_duration_ms).await;
+
+        self.report_event(events::sandbox_event(
+            sandbox_id,
+            proto::SandboxEventType::Ready,
+            &format!("running (cold boot: {}ms)", boot_duration_ms),
+        ));
 
         info!(
             sandbox_id = %sandbox_id,
@@ -203,6 +233,11 @@ impl SandboxManager {
             .map_err(|e| SandboxError::CreateFailed(e.to_string()))?;
 
         self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot)).await?;
+        self.report_event(events::sandbox_event(
+            sandbox_id,
+            proto::SandboxEventType::Created,
+            "provisioning started (warm start)",
+        ));
 
         // Step 1a: Set up networking
         // Network is set up but config isn't passed to Firecracker in snapshot mode
@@ -212,6 +247,7 @@ impl SandboxManager {
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to set up network");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("network setup failed: {}", e)));
                 self.slot_manager.release(slot);
                 return Err(SandboxError::CreateFailed(format!("network setup failed: {}", e)));
             }
@@ -223,6 +259,7 @@ impl SandboxManager {
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
                 network::teardown_network(sandbox_id, slot).await;
                 self.slot_manager.release(slot);
                 return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
@@ -239,12 +276,14 @@ impl SandboxManager {
         let local_snapshot = format!("{}/snapshot_file", sandbox_dir);
         if let Err(e) = tokio::fs::copy(&snapshot_mem, &local_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("copy mem file failed: {}", e)));
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!("failed to copy mem file: {}", e)));
         }
         if let Err(e) = tokio::fs::copy(&snapshot_state, &local_snapshot).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("copy snapshot file failed: {}", e)));
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!("failed to copy snapshot file: {}", e)));
@@ -276,6 +315,7 @@ impl SandboxManager {
         let fc_api = FirecrackerApi::new(&api_socket_path);
         if let Err(e) = fc_api.wait_for_ready(Duration::from_secs(5)).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("firecracker API not ready: {}", e)));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -287,6 +327,7 @@ impl SandboxManager {
 
         if let Err(e) = fc_api.restore_snapshot(&local_snapshot, &local_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("snapshot restore failed: {}", e)));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -299,6 +340,7 @@ impl SandboxManager {
         // Step 4: Resume VM
         if let Err(e) = fc_api.resume_vm().await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("VM resume failed: {}", e)));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -312,6 +354,7 @@ impl SandboxManager {
         if let Err(e) = self.wait_for_agent_health(sandbox_id).await {
             warn!(sandbox_id = %sandbox_id, error = %e, "agent health check failed after warm start");
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("agent health check failed: {}", e)));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -325,6 +368,12 @@ impl SandboxManager {
         let boot_duration_ms = start.elapsed().as_millis() as u64;
         self.vms.write().await.insert(sandbox_id.to_string(), vm);
         self.finalize_running(sandbox_id, boot_duration_ms).await;
+
+        self.report_event(events::sandbox_event(
+            sandbox_id,
+            proto::SandboxEventType::Ready,
+            &format!("running (warm start: {}ms)", boot_duration_ms),
+        ));
 
         info!(
             sandbox_id = %sandbox_id,
@@ -363,6 +412,11 @@ impl SandboxManager {
 
         // Update status and remove from tracking
         self.set_status(sandbox_id, SandboxStatus::Stopped).await;
+        self.report_event(events::sandbox_event(
+            sandbox_id,
+            proto::SandboxEventType::Stopped,
+            "destroyed",
+        ));
         self.sandboxes.write().await.remove(sandbox_id);
 
         info!(sandbox_id = %sandbox_id, "sandbox destroyed");
@@ -420,6 +474,15 @@ impl SandboxManager {
                     || s.status == SandboxStatus::Provisioning
             })
             .count()
+    }
+
+    // --- Event reporting ---
+
+    fn report_event(&self, event: proto::NodeToControl) {
+        if let Some(ref sender) = self.event_sender {
+            // Non-blocking send — drop if channel is full
+            let _ = sender.try_send(event);
+        }
     }
 
     // --- Internal helpers ---
@@ -559,6 +622,7 @@ mod tests {
             grpc_port: 50051,
             data_dir: "/tmp/sandchest-test".to_string(),
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
+            control_plane_url: None,
         })
     }
 
@@ -604,5 +668,41 @@ mod tests {
             .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(1))
             .await;
         assert!(matches!(result, Err(SandboxError::AlreadyExists(_))));
+    }
+
+    #[tokio::test]
+    async fn with_event_sender_reports_events() {
+        let (tx, mut rx) = crate::events::channel(16);
+        let manager = SandboxManager::new(test_node_config()).with_event_sender(tx);
+
+        // report_event should send through the channel
+        manager.report_event(crate::events::sandbox_event(
+            "sb_test",
+            proto::SandboxEventType::Created,
+            "test",
+        ));
+
+        let msg = rx.try_recv().unwrap();
+        assert!(matches!(
+            msg.event,
+            Some(proto::node_to_control::Event::SandboxEvent(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn slots_used_starts_at_zero() {
+        let manager = SandboxManager::new(test_node_config());
+        assert_eq!(manager.slots_used(), 0);
+    }
+
+    #[tokio::test]
+    async fn report_event_without_sender_is_noop() {
+        let manager = SandboxManager::new(test_node_config());
+        // Should not panic when no event sender is set
+        manager.report_event(crate::events::sandbox_event(
+            "sb_test",
+            proto::SandboxEventType::Created,
+            "test",
+        ));
     }
 }

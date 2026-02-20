@@ -1,7 +1,9 @@
 pub mod agent_client;
 pub mod config;
 pub mod disk;
+pub mod events;
 pub mod firecracker;
+pub mod heartbeat;
 pub mod id;
 pub mod network;
 pub mod router;
@@ -351,7 +353,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let node_config = Arc::new(NodeConfig::from_env());
-    let sandbox_manager = Arc::new(SandboxManager::new(Arc::clone(&node_config)));
+
+    // Create event channel for heartbeat and lifecycle events
+    let (event_sender, event_rx) = events::channel(256);
+
+    let sandbox_manager = Arc::new(
+        SandboxManager::new(Arc::clone(&node_config)).with_event_sender(event_sender.clone()),
+    );
+
+    // Spawn heartbeat loop
+    tokio::spawn(heartbeat::start_heartbeat(
+        Arc::clone(&node_config),
+        Arc::clone(&sandbox_manager),
+        event_sender,
+    ));
+
+    // Spawn event stream to control plane (if URL configured)
+    if let Some(ref url) = node_config.control_plane_url {
+        info!(url = %url, "starting event stream to control plane");
+        tokio::spawn(events::run_event_stream(event_rx, url.clone()));
+    } else {
+        info!("no control plane URL configured, event stream disabled");
+        // Spawn a drain task so events don't pile up
+        tokio::spawn(async move {
+            let mut rx = event_rx;
+            while rx.recv().await.is_some() {}
+        });
+    }
 
     let addr = format!("0.0.0.0:{}", node_config.grpc_port)
         .parse()

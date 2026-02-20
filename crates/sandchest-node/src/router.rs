@@ -423,6 +423,7 @@ mod tests {
             grpc_port: 50051,
             data_dir: "/tmp/sandchest-test".to_string(),
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
+            control_plane_url: None,
         });
         let manager = Arc::new(SandboxManager::new(config));
         let router = Router::new(manager);
