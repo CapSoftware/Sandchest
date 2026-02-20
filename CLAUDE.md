@@ -318,6 +318,8 @@ perf: use overlayfs instead of device-mapper for CoW clones
 
 One commit per task. Stage specific files — never `git add -A` blindly.
 
+**Never commit anything under `docs/`.** The `docs/` directory (including `docs/spec/phases/`) is local-only and must never be staged, committed, or pushed to git. It is in `.gitignore` — do not use `-f` to override this.
+
 ---
 
 ## Skills to Use
