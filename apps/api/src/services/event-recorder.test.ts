@@ -322,7 +322,7 @@ describe('EventRecorder', () => {
   })
 
   test('getEvents falls back to object storage when Redis is empty', async () => {
-    const { recorder, objectStorage, redis } = createTestRecorder()
+    const { recorder, objectStorage } = createTestRecorder()
 
     // Manually write to object storage to simulate post-TTL state
     const event: ReplayEvent = {
