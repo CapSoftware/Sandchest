@@ -789,7 +789,7 @@ From `docs/spec/09-infrastructure.md` → "Build tooling" and `docs/spec/11-mile
 
 ## Task 9: Set up BetterAuth with organization and API key plugins
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `feat`
 - **Commit message**: `feat: configure BetterAuth with org and API key plugins`
 
@@ -870,4 +870,10 @@ Reference `docs/spec/10-security.md` → "Authentication" and `docs/spec/08-data
 - Auth config includes `organization()` plugin
 
 ### Learnings
-<!-- Filled in after completion -->
+- BetterAuth v1.4.18 uses `mysql2/promise` `createPool()` directly as its database adapter — the `{ type: 'mysql', url }` shorthand from some docs is not the preferred approach for mysql2
+- `@better-auth/cli generate` requires a running MySQL database to introspect existing schema — migration SQL was hand-written based on BetterAuth source code schema definitions since no local MySQL is available
+- Organization plugin adds `activeOrganizationId` column to the `session` table for tracking which org a user is operating in
+- API key plugin has built-in rate limiting columns (`rateLimitEnabled`, `rateLimitTimeWindow`, `rateLimitMax`, `requestCount`) — separate from Redis-backed rate limiting at the API layer
+- `enableMetadata: true` on apiKey plugin allows storing `org_id` and `environment` in the `metadata` JSON column for org/env scoping
+- `@types/node` needed as devDependency in `apps/api` since `process.env` is used for config
+- All BetterAuth tables use `VARCHAR(36)` string IDs (not UUIDv7/BINARY(16)) — consistent with the spec's guidance that BetterAuth owns its ID format
