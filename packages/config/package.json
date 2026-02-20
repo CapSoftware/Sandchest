@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "echo 'no build needed'",
+    "typecheck": "echo 'no typecheck needed'",
     "lint": "echo 'no lint configured yet'",
     "test": "echo 'no tests yet'"
   }

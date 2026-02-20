@@ -11,7 +11,7 @@ import type {
   SessionManager,
   CreateSessionOptions,
 } from './types.js'
-import { Session } from './session.js'
+import type { Session } from './session.js'
 
 /**
  * A Sandchest sandbox — an isolated Firecracker microVM.

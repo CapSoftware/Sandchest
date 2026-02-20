@@ -1,6 +1,6 @@
 import type { SandchestOptions, CreateSandboxOptions, ListSandboxesOptions } from './types.js'
 import { HttpClient } from './http.js'
-import { Sandbox } from './sandbox.js'
+import type { Sandbox } from './sandbox.js'
 
 const DEFAULT_BASE_URL = 'https://api.sandchest.com'
 const DEFAULT_TIMEOUT = 30_000

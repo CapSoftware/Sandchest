@@ -5,6 +5,7 @@ import type {
   Artifact,
   FileEntry,
 } from '@sandchest/contract'
+import type { Session } from './session.js'
 
 // ---------------------------------------------------------------------------
 // Client options
@@ -108,5 +109,5 @@ export interface ArtifactOperations {
 }
 
 export interface SessionManager {
-  create(options?: CreateSessionOptions): Promise<import('./session.js').Session>
+  create(options?: CreateSessionOptions): Promise<Session>
 }

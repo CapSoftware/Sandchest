@@ -703,7 +703,7 @@ Note: Organization and API key IDs are managed by BetterAuth (string IDs) — no
 
 
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `ci`
 - **Commit message**: `ci: add GitHub Actions workflow for PR checks`
 
@@ -777,7 +777,13 @@ From `docs/spec/09-infrastructure.md` → "Build tooling" and `docs/spec/11-mile
 - All currently-existing code passes CI (even if it's just placeholders)
 
 ### Learnings
-<!-- Filled in after completion -->
+- Used `bun` (oven-sh/setup-bun@v2) instead of Node.js setup — per project convention, bun is the package manager and test runner
+- `bun install --frozen-lockfile` for reproducible CI installs
+- Added concurrency group with `cancel-in-progress: true` to avoid wasting CI minutes on superseded pushes
+- Used `dtolnay/rust-toolchain@stable` + `Swatinem/rust-cache@v2` for fast Rust CI with caching
+- Fixed 3 pre-existing lint errors in `packages/sdk-ts` — `import` should be `import type` for type-only imports (`Sandbox` in client.ts, `Session` in sandbox.ts, inline `import()` in types.ts)
+- The `@sandchest/config` package was missing a `typecheck` script — added no-op echo
+- All packages already had `typecheck`, `lint`, `test` scripts from earlier tasks (except config missing typecheck)
 
 ---
 
