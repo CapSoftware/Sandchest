@@ -1,7 +1,10 @@
+pub mod agent_client;
 pub mod config;
+pub mod disk;
 pub mod firecracker;
 pub mod id;
 pub mod sandbox;
+pub mod snapshot;
 
 pub mod proto {
     tonic::include_proto!("sandchest.node.v1");
@@ -54,11 +57,23 @@ impl proto::node_server::Node for NodeService {
 
     async fn create_sandbox_from_snapshot(
         &self,
-        _request: Request<proto::CreateSandboxFromSnapshotRequest>,
+        request: Request<proto::CreateSandboxFromSnapshotRequest>,
     ) -> Result<Response<proto::CreateSandboxResponse>, Status> {
-        Err(Status::unimplemented(
-            "snapshot-based creation implemented in Task 6",
-        ))
+        let req = request.into_inner();
+
+        let _info = self
+            .sandbox_manager
+            .create_sandbox_from_snapshot(
+                &req.sandbox_id,
+                &req.snapshot_ref,
+                req.env,
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(proto::CreateSandboxResponse {
+            sandbox_id: req.sandbox_id,
+        }))
     }
 
     async fn fork_sandbox(

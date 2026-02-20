@@ -16,6 +16,23 @@ pub struct FirecrackerVm {
 }
 
 impl FirecrackerVm {
+    /// Construct a FirecrackerVm from pre-existing parts (used for snapshot warm start).
+    pub fn from_parts(
+        sandbox_id: String,
+        api_socket_path: String,
+        vsock_path: String,
+        data_dir: String,
+        child: Child,
+    ) -> Self {
+        Self {
+            sandbox_id,
+            api_socket_path,
+            vsock_path,
+            data_dir,
+            child,
+        }
+    }
+
     /// Start a new Firecracker VM with the given configuration.
     ///
     /// 1. Creates the sandbox data directory

@@ -485,6 +485,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-unix-socket"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c255628da188a9d9ee218bae99da33a4b684ed63abe140a94d0f6e4b5af9a090"
+dependencies = [
+ "bytes",
+ "hyper",
+ "hyper-util",
+ "pin-project-lite",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
 name = "hyper-util"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,6 +978,10 @@ dependencies = [
 name = "sandchest-node"
 version = "0.1.0"
 dependencies = [
+ "http-body-util",
+ "hyper",
+ "hyper-unix-socket",
+ "hyper-util",
  "libc",
  "prost",
  "prost-types",
@@ -973,6 +991,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-build",
+ "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
  "uuid",
