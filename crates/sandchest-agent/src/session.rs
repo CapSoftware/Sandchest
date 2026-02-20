@@ -175,6 +175,18 @@ impl SessionManager {
         }
     }
 
+    /// Get the number of active sessions.
+    #[cfg(test)]
+    pub async fn session_count(&self) -> usize {
+        self.sessions.read().await.len()
+    }
+
+    /// Public accessor for checking if a session exists.
+    #[cfg(test)]
+    pub async fn get_session_public(&self, session_id: &str) -> Result<(), Status> {
+        self.get_session(session_id).await.map(|_| ())
+    }
+
     async fn get_session(&self, session_id: &str) -> Result<Arc<Session>, Status> {
         self.sessions
             .read()

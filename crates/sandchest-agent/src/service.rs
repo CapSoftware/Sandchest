@@ -21,6 +21,11 @@ impl GuestAgentService {
             session_manager: Arc::new(SessionManager::new()),
         }
     }
+
+    /// Get a reference to the session manager for sharing with the snapshot watcher.
+    pub fn session_manager(&self) -> Arc<SessionManager> {
+        Arc::clone(&self.session_manager)
+    }
 }
 
 #[tonic::async_trait]

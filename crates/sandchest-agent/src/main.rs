@@ -22,13 +22,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    // Check for snapshot restore before anything else
+    // Create service first so we have access to the session manager
+    let service = service::GuestAgentService::new();
+    let session_manager = service.session_manager();
+
+    // Check for snapshot restore at startup (warm boot from snapshot)
     if snapshot::detect_snapshot_restore() {
         snapshot::handle_restore();
     }
 
-    // Start periodic heartbeat file writer
-    snapshot::start_heartbeat_writer();
+    // Start snapshot watcher: combines heartbeat writing + continuous restore detection.
+    // On fork, the watcher detects the stale heartbeat and runs full recovery
+    // (destroy sessions, re-seed randomness, correct clock, kill orphaned processes).
+    snapshot::start_snapshot_watcher(session_manager);
 
     let tcp_port: u16 = std::env::var("SANDCHEST_AGENT_TCP_PORT")
         .ok()
@@ -39,8 +45,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(52);
-
-    let service = service::GuestAgentService::new();
 
     let use_tcp = std::env::var("SANDCHEST_AGENT_DEV").is_ok() || !vsock::is_available();
 
