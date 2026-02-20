@@ -203,7 +203,7 @@ async fn kill_with_grace(pid: u32, child: &mut tokio::process::Child) {
     }
     #[cfg(not(unix))]
     {
-        let _ = child.kill();
+        drop(child.kill());
         return;
     }
 
@@ -211,7 +211,7 @@ async fn kill_with_grace(pid: u32, child: &mut tokio::process::Child) {
         Ok(_) => {}
         Err(_) => {
             warn!(pid, "process did not exit after SIGTERM, sending SIGKILL");
-            let _ = child.kill();
+            let _ = child.kill().await;
         }
     }
 }

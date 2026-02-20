@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -7,12 +9,17 @@ use crate::proto::{
     GetFileRequest, HealthResponse, ListFilesRequest, ListFilesResponse, PutFileResponse,
     SessionExecRequest, SessionInputRequest, SessionResponse,
 };
+use crate::session::SessionManager;
 
-pub struct GuestAgentService;
+pub struct GuestAgentService {
+    session_manager: Arc<SessionManager>,
+}
 
 impl GuestAgentService {
     pub fn new() -> Self {
-        Self
+        Self {
+            session_manager: Arc::new(SessionManager::new()),
+        }
     }
 }
 
@@ -40,34 +47,50 @@ impl GuestAgent for GuestAgentService {
 
     async fn create_session(
         &self,
-        _request: Request<CreateSessionRequest>,
+        request: Request<CreateSessionRequest>,
     ) -> Result<Response<SessionResponse>, Status> {
-        Err(Status::unimplemented("create_session not yet implemented"))
+        let req = request.into_inner();
+        let session_id = self
+            .session_manager
+            .create_session(&req.shell, &req.env)
+            .await?;
+        Ok(Response::new(SessionResponse { session_id }))
     }
 
     type SessionExecStream = ReceiverStream<Result<ExecEvent, Status>>;
 
     async fn session_exec(
         &self,
-        _request: Request<SessionExecRequest>,
+        request: Request<SessionExecRequest>,
     ) -> Result<Response<Self::SessionExecStream>, Status> {
-        Err(Status::unimplemented("session_exec not yet implemented"))
+        let req = request.into_inner();
+        let stream = self
+            .session_manager
+            .spawn_session_exec(&req.session_id, req.cmd, req.timeout_seconds)
+            .await?;
+        Ok(Response::new(stream))
     }
 
     async fn session_input(
         &self,
-        _request: Request<SessionInputRequest>,
+        request: Request<SessionInputRequest>,
     ) -> Result<Response<()>, Status> {
-        Err(Status::unimplemented("session_input not yet implemented"))
+        let req = request.into_inner();
+        self.session_manager
+            .session_input(&req.session_id, &req.data)
+            .await?;
+        Ok(Response::new(()))
     }
 
     async fn destroy_session(
         &self,
-        _request: Request<DestroySessionRequest>,
+        request: Request<DestroySessionRequest>,
     ) -> Result<Response<()>, Status> {
-        Err(Status::unimplemented(
-            "destroy_session not yet implemented",
-        ))
+        let req = request.into_inner();
+        self.session_manager
+            .destroy_session(&req.session_id)
+            .await?;
+        Ok(Response::new(()))
     }
 
     async fn put_file(

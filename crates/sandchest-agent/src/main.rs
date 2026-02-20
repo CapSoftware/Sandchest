@@ -1,6 +1,7 @@
 mod exec;
 mod proc;
 mod service;
+mod session;
 mod vsock;
 
 pub mod proto {
