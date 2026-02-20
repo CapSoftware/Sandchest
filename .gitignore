@@ -27,9 +27,6 @@ Thumbs.db
 # Logs
 *.log
 
-docs
 docs/
-docs/spec
-docs/spec/phases
 
 skills
