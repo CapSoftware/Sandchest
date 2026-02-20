@@ -95,31 +95,38 @@ impl GuestAgent for GuestAgentService {
 
     async fn put_file(
         &self,
-        _request: Request<Streaming<FileChunk>>,
+        request: Request<Streaming<FileChunk>>,
     ) -> Result<Response<PutFileResponse>, Status> {
-        Err(Status::unimplemented("put_file not yet implemented"))
+        let response = crate::files::put_file(request.into_inner()).await?;
+        Ok(Response::new(response))
     }
 
     type GetFileStream = ReceiverStream<Result<FileChunk, Status>>;
 
     async fn get_file(
         &self,
-        _request: Request<GetFileRequest>,
+        request: Request<GetFileRequest>,
     ) -> Result<Response<Self::GetFileStream>, Status> {
-        Err(Status::unimplemented("get_file not yet implemented"))
+        let stream = crate::files::spawn_get_file(request.into_inner());
+        Ok(Response::new(stream))
     }
 
     async fn list_files(
         &self,
-        _request: Request<ListFilesRequest>,
+        request: Request<ListFilesRequest>,
     ) -> Result<Response<ListFilesResponse>, Status> {
-        Err(Status::unimplemented("list_files not yet implemented"))
+        let response = crate::files::list_files(request.into_inner()).await?;
+        Ok(Response::new(response))
     }
 
     async fn shutdown(
         &self,
         _request: Request<()>,
     ) -> Result<Response<()>, Status> {
-        Err(Status::unimplemented("shutdown not yet implemented"))
+        let sm = Arc::clone(&self.session_manager);
+        tokio::spawn(async move {
+            crate::shutdown::shutdown(sm).await;
+        });
+        Ok(Response::new(()))
     }
 }

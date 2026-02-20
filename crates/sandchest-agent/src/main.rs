@@ -1,7 +1,10 @@
 mod exec;
+mod files;
 mod proc;
 mod service;
 mod session;
+mod shutdown;
+mod snapshot;
 mod vsock;
 
 pub mod proto {
@@ -18,6 +21,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    // Check for snapshot restore before anything else
+    if snapshot::detect_snapshot_restore() {
+        snapshot::handle_restore();
+    }
+
+    // Start periodic heartbeat file writer
+    snapshot::start_heartbeat_writer();
 
     let tcp_port: u16 = std::env::var("SANDCHEST_AGENT_TCP_PORT")
         .ok()

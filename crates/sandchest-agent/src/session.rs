@@ -165,6 +165,16 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Destroy all active sessions. Used during shutdown.
+    pub async fn destroy_all(&self) {
+        let ids: Vec<String> = self.sessions.read().await.keys().cloned().collect();
+        for id in ids {
+            if let Err(e) = self.destroy_session(&id).await {
+                warn!(session_id = %id, error = %e, "failed to destroy session during shutdown");
+            }
+        }
+    }
+
     async fn get_session(&self, session_id: &str) -> Result<Arc<Session>, Status> {
         self.sessions
             .read()
