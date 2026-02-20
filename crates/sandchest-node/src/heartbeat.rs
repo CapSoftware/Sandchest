@@ -131,4 +131,73 @@ mod tests {
 
         handle.abort();
     }
+
+    #[tokio::test]
+    async fn scan_snapshots_empty_directory() {
+        let dir = std::env::temp_dir().join("sandchest-empty-snapshots");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+
+        let ids = scan_snapshots(dir.to_str().unwrap()).await;
+        assert!(ids.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn scan_snapshots_returns_sorted() {
+        let dir = std::env::temp_dir().join("sandchest-sorted-snapshots");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        // Create in reverse order
+        tokio::fs::create_dir(dir.join("snap_z")).await.unwrap();
+        tokio::fs::create_dir(dir.join("snap_a")).await.unwrap();
+        tokio::fs::create_dir(dir.join("snap_m")).await.unwrap();
+
+        let ids = scan_snapshots(dir.to_str().unwrap()).await;
+        assert_eq!(ids, vec!["snap_a", "snap_m", "snap_z"]);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn scan_snapshots_ignores_files_only() {
+        let dir = std::env::temp_dir().join("sandchest-files-only-snapshots");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("file1.txt"), b"").await.unwrap();
+        tokio::fs::write(dir.join("file2.txt"), b"").await.unwrap();
+
+        let ids = scan_snapshots(dir.to_str().unwrap()).await;
+        assert!(ids.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn heartbeat_sends_multiple_ticks() {
+        let (tx, mut rx) = crate::events::channel(16);
+        let config = Arc::new(NodeConfig {
+            node_id: "node_multi_tick".to_string(),
+            grpc_port: 50051,
+            data_dir: "/tmp/sandchest-hb-multi".to_string(),
+            kernel_path: "/tmp/vmlinux".to_string(),
+            control_plane_url: None,
+        });
+        let manager = Arc::new(SandboxManager::new(Arc::clone(&config)));
+
+        let handle = tokio::spawn(start_heartbeat(config, manager, tx));
+
+        // First tick (immediate)
+        let msg1 = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            msg1.event,
+            Some(crate::proto::node_to_control::Event::Heartbeat(_))
+        ));
+
+        handle.abort();
+    }
 }

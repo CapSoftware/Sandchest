@@ -297,4 +297,132 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SnapshotError::Timeout(_)));
     }
+
+    #[test]
+    fn parse_status_code_500() {
+        assert_eq!(
+            parse_status_code("HTTP/1.1 500 Internal Server Error").unwrap(),
+            500
+        );
+    }
+
+    #[test]
+    fn parse_status_code_empty_response() {
+        let result = parse_status_code("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_status_code_malformed() {
+        let result = parse_status_code("GARBAGE DATA");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_status_code_no_status_number() {
+        let result = parse_status_code("HTTP/1.1 abc OK");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_content_length_mixed_case() {
+        assert_eq!(
+            parse_content_length("CONTENT-LENGTH: 50\r\n"),
+            Some(50)
+        );
+    }
+
+    #[test]
+    fn parse_content_length_with_spaces() {
+        assert_eq!(
+            parse_content_length("Content-Length:   200  \r\n"),
+            Some(200)
+        );
+    }
+
+    #[test]
+    fn parse_content_length_zero() {
+        assert_eq!(parse_content_length("Content-Length: 0\r\n"), Some(0));
+    }
+
+    #[test]
+    fn parse_content_length_among_many_headers() {
+        let headers = "Host: localhost\r\nContent-Type: application/json\r\nContent-Length: 150\r\nAccept: */*";
+        assert_eq!(parse_content_length(headers), Some(150));
+    }
+
+    #[test]
+    fn parse_content_length_invalid_value() {
+        assert_eq!(
+            parse_content_length("Content-Length: notanumber\r\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn snapshot_error_timeout_display() {
+        let err = SnapshotError::Timeout("socket not ready".to_string());
+        assert_eq!(err.to_string(), "timeout: socket not ready");
+    }
+
+    #[test]
+    fn snapshot_error_api_display() {
+        let err = SnapshotError::Api("PUT failed".to_string());
+        assert_eq!(err.to_string(), "firecracker API error: PUT failed");
+    }
+
+    #[test]
+    fn snapshot_error_is_std_error() {
+        let err = SnapshotError::Timeout("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn snapshot_error_debug() {
+        let err = SnapshotError::Api("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Api"));
+    }
+
+    #[tokio::test]
+    async fn firecracker_api_wait_for_ready_succeeds_with_existing_file() {
+        // Create a temp file to simulate socket presence
+        let tmp = std::env::temp_dir().join("sandchest-api-ready-test.sock");
+        std::fs::write(&tmp, b"").unwrap();
+
+        let api = FirecrackerApi::new(tmp.to_str().unwrap());
+        let result = api.wait_for_ready(Duration::from_millis(500)).await;
+        assert!(result.is_ok());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[tokio::test]
+    async fn firecracker_api_send_request_fails_on_nonexistent_socket() {
+        let api = FirecrackerApi::new("/tmp/nonexistent-socket-send-test.sock");
+        let result = api.restore_snapshot("/snap", "/mem").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SnapshotError::Api(_)));
+    }
+
+    #[tokio::test]
+    async fn firecracker_api_resume_fails_on_nonexistent_socket() {
+        let api = FirecrackerApi::new("/tmp/nonexistent-socket-resume-test.sock");
+        let result = api.resume_vm().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn firecracker_api_pause_fails_on_nonexistent_socket() {
+        let api = FirecrackerApi::new("/tmp/nonexistent-socket-pause-test.sock");
+        let result = api.pause_vm().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn firecracker_api_take_snapshot_fails_on_nonexistent_socket() {
+        let api = FirecrackerApi::new("/tmp/nonexistent-socket-take-test.sock");
+        let result = api.take_snapshot("/snap", "/mem").await;
+        assert!(result.is_err());
+    }
 }

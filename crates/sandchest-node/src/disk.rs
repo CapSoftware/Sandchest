@@ -148,4 +148,70 @@ mod tests {
         let result = cleanup_disk("sb_nonexistent", "/tmp/sandchest-idempotent-test").await;
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn disk_error_source_not_found_display() {
+        let err = DiskError::SourceNotFound("/missing/rootfs.ext4".to_string());
+        assert_eq!(
+            err.to_string(),
+            "source image not found: /missing/rootfs.ext4"
+        );
+    }
+
+    #[test]
+    fn disk_error_io_display() {
+        let err = DiskError::Io("permission denied".to_string());
+        assert_eq!(err.to_string(), "disk I/O error: permission denied");
+    }
+
+    #[test]
+    fn disk_error_is_std_error() {
+        let err = DiskError::SourceNotFound("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn disk_error_debug_format() {
+        let err = DiskError::Io("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Io"));
+    }
+
+    #[tokio::test]
+    async fn clone_disk_output_path_format() {
+        let tmp = std::env::temp_dir().join("sandchest-disk-path-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let src_dir = tmp.join("images");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let src_file = src_dir.join("base.ext4");
+        std::fs::write(&src_file, b"data").unwrap();
+
+        let data_dir = tmp.to_str().unwrap();
+        let dest = clone_disk(src_file.to_str().unwrap(), "sb_pathtest", data_dir)
+            .await
+            .unwrap();
+
+        // Verify the output path matches expected format
+        assert!(dest.ends_with("/sandboxes/sb_pathtest/rootfs.ext4"));
+        assert!(dest.starts_with(data_dir));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn cleanup_disk_removes_nested_files() {
+        let tmp = std::env::temp_dir().join("sandchest-nested-cleanup");
+        let sandbox_dir = tmp.join("sandboxes").join("sb_nested");
+        let nested = sandbox_dir.join("subdir");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("file.txt"), b"nested").unwrap();
+        std::fs::write(sandbox_dir.join("rootfs.ext4"), b"root").unwrap();
+
+        let result = cleanup_disk("sb_nested", tmp.to_str().unwrap()).await;
+        assert!(result.is_ok());
+        assert!(!sandbox_dir.exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

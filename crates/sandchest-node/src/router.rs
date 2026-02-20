@@ -433,4 +433,108 @@ mod tests {
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::NotFound);
     }
+
+    #[tokio::test]
+    async fn router_not_found_error_contains_sandbox_id() {
+        let config = Arc::new(crate::config::NodeConfig {
+            node_id: "node_test".to_string(),
+            grpc_port: 50051,
+            data_dir: "/tmp/sandchest-test".to_string(),
+            kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
+            control_plane_url: None,
+        });
+        let manager = Arc::new(SandboxManager::new(config));
+        let router = Router::new(manager);
+
+        let result = router.get_agent("sb_specific_id").await;
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        assert!(status.message().contains("sb_specific_id"));
+    }
+
+    #[tokio::test]
+    async fn router_remove_client_noop_for_unknown() {
+        let config = Arc::new(crate::config::NodeConfig {
+            node_id: "node_test".to_string(),
+            grpc_port: 50051,
+            data_dir: "/tmp/sandchest-test".to_string(),
+            kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
+            control_plane_url: None,
+        });
+        let manager = Arc::new(SandboxManager::new(config));
+        let router = Router::new(manager);
+
+        // Should not panic
+        router.remove_client("sb_unknown").await;
+    }
+
+    #[test]
+    fn exec_event_none_event_conversion() {
+        let agent_event = agent_proto::ExecEvent {
+            seq: 99,
+            event: None,
+        };
+        let node_event = to_node_exec_event(agent_event);
+        assert_eq!(node_event.seq, 99);
+        assert!(node_event.event.is_none());
+    }
+
+    #[test]
+    fn exec_request_shell_cmd_preserved() {
+        let node_req = proto::NodeExecRequest {
+            sandbox_id: "sb_test".to_string(),
+            exec_id: "ex_1".to_string(),
+            cmd: vec![],
+            shell_cmd: "echo hello && echo world".to_string(),
+            cwd: String::new(),
+            env: Default::default(),
+            timeout_seconds: 0,
+        };
+        let agent_req = to_agent_exec_request(node_req);
+        assert_eq!(agent_req.shell_cmd, "echo hello && echo world");
+        assert!(agent_req.cmd.is_empty());
+    }
+
+    #[test]
+    fn file_chunk_preserves_offset() {
+        let node_chunk = proto::NodeFileChunk {
+            sandbox_id: "sb_test".to_string(),
+            path: "/file.txt".to_string(),
+            data: b"data".to_vec(),
+            offset: 1024,
+            done: false,
+        };
+        let agent_chunk = to_agent_file_chunk(node_chunk);
+        assert_eq!(agent_chunk.offset, 1024);
+        assert!(!agent_chunk.done);
+    }
+
+    #[test]
+    fn list_files_response_empty() {
+        let agent_resp = agent_proto::ListFilesResponse { files: vec![] };
+        let node_resp = to_node_list_files_response(agent_resp);
+        assert!(node_resp.files.is_empty());
+    }
+
+    #[test]
+    fn exit_event_negative_exit_code() {
+        let agent_event = agent_proto::ExecEvent {
+            seq: 1,
+            event: Some(agent_proto::exec_event::Event::Exit(
+                agent_proto::ExitEvent {
+                    exit_code: -1,
+                    cpu_ms: 0,
+                    peak_memory_bytes: 0,
+                    duration_ms: 0,
+                },
+            )),
+        };
+        let node_event = to_node_exec_event(agent_event);
+        match node_event.event {
+            Some(proto::exec_event::Event::Exit(exit)) => {
+                assert_eq!(exit.exit_code, -1);
+            }
+            _ => panic!("expected Exit event"),
+        }
+    }
 }

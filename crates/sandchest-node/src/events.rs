@@ -448,4 +448,160 @@ mod tests {
         drain_during_sleep(&mut rx, &mut buffer, Duration::from_millis(50)).await;
         assert_eq!(buffer.len(), 2);
     }
+
+    #[test]
+    fn exec_output_with_no_data() {
+        let msg = exec_output("ex_none", 0, None, None);
+        match msg.event {
+            Some(proto::node_to_control::Event::ExecOutput(eo)) => {
+                assert_eq!(eo.exec_id, "ex_none");
+                assert!(eo.output.is_none());
+            }
+            _ => panic!("expected ExecOutput"),
+        }
+    }
+
+    #[test]
+    fn exec_output_stdout_takes_priority_over_stderr() {
+        // When both are provided, stdout wins
+        let msg = exec_output(
+            "ex_both",
+            1,
+            Some(b"out".to_vec()),
+            Some(b"err".to_vec()),
+        );
+        match msg.event {
+            Some(proto::node_to_control::Event::ExecOutput(eo)) => {
+                assert!(matches!(
+                    eo.output,
+                    Some(proto::exec_output::Output::Stdout(_))
+                ));
+            }
+            _ => panic!("expected ExecOutput"),
+        }
+    }
+
+    #[test]
+    fn session_output_with_no_data() {
+        let msg = session_output("sess_none", 0, None, None);
+        match msg.event {
+            Some(proto::node_to_control::Event::SessionOutput(so)) => {
+                assert_eq!(so.session_id, "sess_none");
+                assert!(so.output.is_none());
+            }
+            _ => panic!("expected SessionOutput"),
+        }
+    }
+
+    #[test]
+    fn exec_completed_with_nonzero_exit_code() {
+        let msg = exec_completed("ex_fail", 1, 50, 512, 100);
+        match msg.event {
+            Some(proto::node_to_control::Event::ExecCompleted(ec)) => {
+                assert_eq!(ec.exit_code, 1);
+                assert_eq!(ec.cpu_ms, 50);
+            }
+            _ => panic!("expected ExecCompleted"),
+        }
+    }
+
+    #[test]
+    fn heartbeat_msg_with_empty_fields() {
+        let msg = heartbeat_msg("node_empty", vec![], 0, 0, vec![]);
+        match msg.event {
+            Some(proto::node_to_control::Event::Heartbeat(hb)) => {
+                assert_eq!(hb.node_id, "node_empty");
+                assert!(hb.active_sandbox_ids.is_empty());
+                assert_eq!(hb.slots_total, 0);
+                assert_eq!(hb.slots_used, 0);
+                assert!(hb.snapshot_ids.is_empty());
+            }
+            _ => panic!("expected Heartbeat"),
+        }
+    }
+
+    #[test]
+    fn buffer_event_single_item() {
+        let mut buffer = VecDeque::new();
+        buffer_event(
+            &mut buffer,
+            sandbox_event("sb_1", proto::SandboxEventType::Created, ""),
+        );
+        assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn buffer_event_drops_oldest_at_capacity() {
+        let mut buffer = VecDeque::new();
+        // Fill to MAX_BUFFER_SIZE
+        for i in 0..MAX_BUFFER_SIZE {
+            buffer_event(
+                &mut buffer,
+                heartbeat_msg(&format!("node_{}", i), vec![], 0, 0, vec![]),
+            );
+        }
+        assert_eq!(buffer.len(), MAX_BUFFER_SIZE);
+
+        // Add one more — should drop node_0
+        buffer_event(
+            &mut buffer,
+            heartbeat_msg("node_new", vec![], 0, 0, vec![]),
+        );
+        assert_eq!(buffer.len(), MAX_BUFFER_SIZE);
+
+        // First should be node_1 (node_0 was dropped)
+        match &buffer.front().unwrap().event {
+            Some(proto::node_to_control::Event::Heartbeat(hb)) => {
+                assert_eq!(hb.node_id, "node_1");
+            }
+            _ => panic!("expected Heartbeat"),
+        }
+
+        // Last should be node_new
+        match &buffer.back().unwrap().event {
+            Some(proto::node_to_control::Event::Heartbeat(hb)) => {
+                assert_eq!(hb.node_id, "node_new");
+            }
+            _ => panic!("expected Heartbeat"),
+        }
+    }
+
+    #[tokio::test]
+    async fn channel_with_size_1() {
+        let (tx, mut rx) = channel(1);
+        tx.send(sandbox_event("sb_1", proto::SandboxEventType::Created, ""))
+            .await
+            .unwrap();
+
+        let received = rx.recv().await.unwrap();
+        assert!(matches!(
+            received.event,
+            Some(proto::node_to_control::Event::SandboxEvent(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn drain_during_sleep_empty_channel() {
+        let (_tx, mut rx) = channel(16);
+        let mut buffer = VecDeque::new();
+
+        // No events sent — drain should just wait for the sleep duration
+        drain_during_sleep(&mut rx, &mut buffer, Duration::from_millis(50)).await;
+        assert_eq!(buffer.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn drain_during_sleep_stops_on_channel_close() {
+        let (tx, mut rx) = channel(16);
+        let mut buffer = VecDeque::new();
+
+        tx.send(sandbox_event("sb_1", proto::SandboxEventType::Created, ""))
+            .await
+            .unwrap();
+        drop(tx); // Close the channel
+
+        drain_during_sleep(&mut rx, &mut buffer, Duration::from_secs(10)).await;
+        // Should return quickly after draining the one event + seeing channel closed
+        assert_eq!(buffer.len(), 1);
+    }
 }

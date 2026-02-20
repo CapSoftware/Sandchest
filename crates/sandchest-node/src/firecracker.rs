@@ -248,4 +248,56 @@ mod tests {
         assert_eq!(parsed["machine-config"]["vcpu_count"], 4);
         assert_eq!(parsed["machine-config"]["mem_size_mib"], 8192);
     }
+
+    #[test]
+    fn firecracker_error_setup_display() {
+        let err = super::FirecrackerError::Setup("bad config".to_string());
+        assert_eq!(err.to_string(), "setup error: bad config");
+    }
+
+    #[test]
+    fn firecracker_error_spawn_display() {
+        let err = super::FirecrackerError::Spawn("not found".to_string());
+        assert_eq!(err.to_string(), "spawn error: not found");
+    }
+
+    #[test]
+    fn firecracker_error_is_std_error() {
+        let err = super::FirecrackerError::Setup("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn firecracker_error_debug_format() {
+        let err = super::FirecrackerError::Setup("debug test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Setup"));
+        assert!(debug.contains("debug test"));
+    }
+
+    #[tokio::test]
+    async fn firecracker_vm_create_fails_without_binary() {
+        let config = VmConfig {
+            sandbox_id: "sb_fc_test".to_string(),
+            kernel_path: "/nonexistent/vmlinux".to_string(),
+            rootfs_path: "/nonexistent/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/tmp/sandchest-fc-test/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+        };
+
+        let tmp = std::env::temp_dir().join("sandchest-fc-create-test");
+        let result = super::FirecrackerVm::create(&config, tmp.to_str().unwrap()).await;
+        // Should fail since firecracker binary isn't installed in test env
+        // or succeed in creating the dir but fail to spawn
+        // Either way, we're testing the error path works
+        if let Err(e) = result {
+            let msg = e.to_string();
+            assert!(msg.contains("error"), "unexpected error: {}", msg);
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

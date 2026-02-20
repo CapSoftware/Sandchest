@@ -181,3 +181,273 @@ impl NodeConfig {
 }
 
 use crate::id;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_small_resources() {
+        assert_eq!(Profile::Small.vcpu_count(), 2);
+        assert_eq!(Profile::Small.mem_size_mib(), 4096);
+    }
+
+    #[test]
+    fn profile_medium_resources() {
+        assert_eq!(Profile::Medium.vcpu_count(), 4);
+        assert_eq!(Profile::Medium.mem_size_mib(), 8192);
+    }
+
+    #[test]
+    fn profile_large_resources() {
+        assert_eq!(Profile::Large.vcpu_count(), 8);
+        assert_eq!(Profile::Large.mem_size_mib(), 16384);
+    }
+
+    #[test]
+    fn from_resources_small_exact_boundary() {
+        let p = Profile::from_resources(2, 4096);
+        assert_eq!(p.vcpu_count(), 2);
+    }
+
+    #[test]
+    fn from_resources_small_under() {
+        let p = Profile::from_resources(1, 2048);
+        assert_eq!(p.vcpu_count(), 2);
+    }
+
+    #[test]
+    fn from_resources_medium_cpu_over_small() {
+        let p = Profile::from_resources(3, 4096);
+        assert_eq!(p.vcpu_count(), 4);
+    }
+
+    #[test]
+    fn from_resources_medium_mem_over_small() {
+        let p = Profile::from_resources(2, 5000);
+        assert_eq!(p.vcpu_count(), 4);
+    }
+
+    #[test]
+    fn from_resources_medium_exact_boundary() {
+        let p = Profile::from_resources(4, 8192);
+        assert_eq!(p.vcpu_count(), 4);
+    }
+
+    #[test]
+    fn from_resources_large_high_cpu() {
+        let p = Profile::from_resources(16, 4096);
+        assert_eq!(p.vcpu_count(), 8);
+    }
+
+    #[test]
+    fn from_resources_large_high_mem() {
+        let p = Profile::from_resources(2, 32768);
+        assert_eq!(p.vcpu_count(), 8);
+    }
+
+    #[test]
+    fn from_resources_large_both_over() {
+        let p = Profile::from_resources(8, 16384);
+        assert_eq!(p.vcpu_count(), 8);
+    }
+
+    #[test]
+    fn vm_config_boot_args_contain_overlay_init() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+        };
+        let fc = config.to_firecracker_config();
+        assert!(fc.boot_source.boot_args.contains("overlay-init"));
+        assert!(fc.boot_source.boot_args.contains("console=ttyS0"));
+    }
+
+    #[test]
+    fn vm_config_vsock_guest_cid_is_3() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/custom/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+        };
+        let fc = config.to_firecracker_config();
+        assert_eq!(fc.vsock.guest_cid, 3);
+        assert_eq!(fc.vsock.uds_path, "/custom/vsock.sock");
+    }
+
+    #[test]
+    fn vm_config_drive_is_root_and_writable() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/my/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+        };
+        let fc = config.to_firecracker_config();
+        assert_eq!(fc.drives.len(), 1);
+        assert_eq!(fc.drives[0].drive_id, "rootfs");
+        assert!(fc.drives[0].is_root_device);
+        assert!(!fc.drives[0].is_read_only);
+        assert_eq!(fc.drives[0].path_on_host, "/my/rootfs.ext4");
+    }
+
+    #[test]
+    fn vm_config_smt_always_disabled() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 4,
+            mem_size_mib: 8192,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+        };
+        let fc = config.to_firecracker_config();
+        assert!(!fc.machine_config.smt);
+        assert_eq!(fc.machine_config.vcpu_count, 4);
+        assert_eq!(fc.machine_config.mem_size_mib, 8192);
+    }
+
+    #[test]
+    fn vm_config_no_network_when_only_tap() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: Some("tap0".to_string()),
+            guest_mac: None,
+        };
+        let fc = config.to_firecracker_config();
+        assert!(fc.network_interfaces.is_empty());
+    }
+
+    #[test]
+    fn vm_config_no_network_when_only_mac() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
+        };
+        let fc = config.to_firecracker_config();
+        assert!(fc.network_interfaces.is_empty());
+    }
+
+    #[test]
+    fn vm_config_network_with_both_tap_and_mac() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: Some("tap-sb_test".to_string()),
+            guest_mac: Some("AA:FC:00:00:00:01".to_string()),
+        };
+        let fc = config.to_firecracker_config();
+        assert_eq!(fc.network_interfaces.len(), 1);
+        assert_eq!(fc.network_interfaces[0].iface_id, "eth0");
+        assert_eq!(fc.network_interfaces[0].host_dev_name, "tap-sb_test");
+        assert_eq!(fc.network_interfaces[0].guest_mac, "AA:FC:00:00:00:01");
+    }
+
+    #[test]
+    fn vm_config_to_json_is_valid() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+        };
+        let json = config.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("boot-source").is_some());
+        assert!(parsed.get("drives").is_some());
+        assert!(parsed.get("machine-config").is_some());
+        assert!(parsed.get("vsock").is_some());
+    }
+
+    #[test]
+    fn node_config_sandboxes_dir() {
+        let config = NodeConfig {
+            node_id: "node_test".to_string(),
+            grpc_port: 50051,
+            data_dir: "/var/sandchest".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            control_plane_url: None,
+        };
+        assert_eq!(config.sandboxes_dir(), "/var/sandchest/sandboxes");
+    }
+
+    #[test]
+    fn node_config_images_dir() {
+        let config = NodeConfig {
+            node_id: "node_test".to_string(),
+            grpc_port: 50051,
+            data_dir: "/data".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            control_plane_url: None,
+        };
+        assert_eq!(config.images_dir(), "/data/images");
+    }
+
+    #[test]
+    fn node_config_snapshots_dir() {
+        let config = NodeConfig {
+            node_id: "node_test".to_string(),
+            grpc_port: 50051,
+            data_dir: "/data".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            control_plane_url: None,
+        };
+        assert_eq!(config.snapshots_dir(), "/data/snapshots");
+    }
+
+    #[test]
+    fn profile_debug_impl() {
+        // Ensure Debug is derived
+        let s = format!("{:?}", Profile::Small);
+        assert_eq!(s, "Small");
+        let m = format!("{:?}", Profile::Medium);
+        assert_eq!(m, "Medium");
+        let l = format!("{:?}", Profile::Large);
+        assert_eq!(l, "Large");
+    }
+
+    #[test]
+    fn profile_clone_and_copy() {
+        let p = Profile::Small;
+        let p2 = p;
+        // Both should still be valid (Copy trait)
+        assert_eq!(p.vcpu_count(), p2.vcpu_count());
+    }
+}

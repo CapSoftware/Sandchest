@@ -251,4 +251,80 @@ mod tests {
         // slot_hi = 1, slot_lo = 0
         assert_eq!(mac_for_slot(256), "AA:FC:00:00:01:00");
     }
+
+    #[test]
+    fn mac_for_slot_max_u16() {
+        let mac = mac_for_slot(u16::MAX);
+        assert_eq!(mac, "AA:FC:00:00:FF:FF");
+    }
+
+    #[test]
+    fn mac_for_slot_512() {
+        assert_eq!(mac_for_slot(512), "AA:FC:00:00:02:00");
+    }
+
+    #[test]
+    fn tap_name_exact_11_chars() {
+        // ID is exactly 11 chars → tap- + 11 = 15
+        let name = tap_name_for("sb_12345678");
+        assert_eq!(name, "tap-sb_12345678");
+        assert_eq!(name.len(), 15);
+    }
+
+    #[test]
+    fn tap_name_empty_id() {
+        let name = tap_name_for("");
+        assert_eq!(name, "tap-");
+    }
+
+    #[test]
+    fn network_error_display() {
+        let err = NetworkError::Command("ip link failed".to_string());
+        assert_eq!(err.to_string(), "network command failed: ip link failed");
+    }
+
+    #[test]
+    fn network_error_is_std_error() {
+        let err = NetworkError::Command("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn network_error_debug() {
+        let err = NetworkError::Command("debug".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Command"));
+    }
+
+    #[test]
+    fn network_config_clone() {
+        let config = NetworkConfig {
+            tap_name: "tap-test".to_string(),
+            host_ip: "172.16.0.1".to_string(),
+            guest_ip: "172.16.0.2".to_string(),
+            gateway: "172.16.0.1".to_string(),
+            guest_mac: "AA:FC:00:00:00:00".to_string(),
+            dns: "1.1.1.1".to_string(),
+            slot: 0,
+        };
+        let cloned = config.clone();
+        assert_eq!(cloned.tap_name, "tap-test");
+        assert_eq!(cloned.slot, 0);
+    }
+
+    #[test]
+    fn network_config_debug() {
+        let config = NetworkConfig {
+            tap_name: "tap-test".to_string(),
+            host_ip: "172.16.0.1".to_string(),
+            guest_ip: "172.16.0.2".to_string(),
+            gateway: "172.16.0.1".to_string(),
+            guest_mac: "AA:FC:00:00:00:00".to_string(),
+            dns: "1.1.1.1".to_string(),
+            slot: 0,
+        };
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("tap-test"));
+        assert!(debug.contains("172.16.0.1"));
+    }
 }

@@ -167,4 +167,102 @@ mod tests {
         let reconstructed = bytes_to_id("art_", &bytes);
         assert_eq!(id, reconstructed);
     }
+
+    #[test]
+    fn base62_decode_wrong_length_short() {
+        let result = base62_decode("abc");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected 22 characters"));
+    }
+
+    #[test]
+    fn base62_decode_wrong_length_long() {
+        let result = base62_decode("0123456789012345678901234");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn base62_decode_empty_string() {
+        let result = base62_decode("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn base62_decode_invalid_character() {
+        let result = base62_decode("!!!!!!!!!!!!!!!!!!!!!!"); // 22 chars
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid base62 character"));
+    }
+
+    #[test]
+    fn base62_decode_special_chars() {
+        let result = base62_decode("00000000000000000000+/"); // 22 chars with +/
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_id_missing_prefix_separator() {
+        let result = parse_id("nounderscore");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing prefix separator"));
+    }
+
+    #[test]
+    fn parse_id_invalid_base62_after_prefix() {
+        let result = parse_id("sb_tooshort");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn id_to_bytes_invalid_id() {
+        let result = id_to_bytes("invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn generate_id_various_prefixes_have_correct_length() {
+        let sb = generate_id(SANDBOX_PREFIX);
+        assert!(sb.starts_with("sb_"));
+        assert_eq!(sb.len(), 3 + 22);
+
+        let sess = generate_id(SESSION_PREFIX);
+        assert!(sess.starts_with("sess_"));
+        assert_eq!(sess.len(), 5 + 22);
+
+        let node = generate_id(NODE_PREFIX);
+        assert!(node.starts_with("node_"));
+        assert_eq!(node.len(), 5 + 22);
+    }
+
+    #[test]
+    fn base62_alphabet_only_alphanumeric() {
+        let encoded = base62_encode(&generate_uuidv7());
+        for c in encoded.chars() {
+            assert!(c.is_ascii_alphanumeric(), "unexpected char: {}", c);
+        }
+    }
+
+    #[test]
+    fn multiple_ids_are_unique() {
+        let mut ids: Vec<String> = (0..100).map(|_| generate_id("sb_")).collect();
+        let len_before = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), len_before, "generated duplicate IDs");
+    }
+
+    #[test]
+    fn parse_id_preserves_multi_char_prefix() {
+        let id = generate_id("prof_");
+        let (prefix, _) = parse_id(&id).unwrap();
+        assert_eq!(prefix, "prof_");
+    }
+
+    #[test]
+    fn bytes_to_id_and_back_with_known_bytes() {
+        let original = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let id = bytes_to_id("img_", &original);
+        let recovered = id_to_bytes(&id).unwrap();
+        assert_eq!(original, recovered);
+    }
 }

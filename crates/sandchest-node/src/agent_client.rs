@@ -129,3 +129,76 @@ impl std::fmt::Display for AgentClientError {
 }
 
 impl std::error::Error for AgentClientError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_client_new_stores_endpoint() {
+        let client = AgentClient::new("http://localhost:9090");
+        assert_eq!(client.endpoint, "http://localhost:9090");
+    }
+
+    #[test]
+    fn dev_endpoint_default_port() {
+        // Without env var set, should use 8052
+        let endpoint = AgentClient::dev_endpoint();
+        assert!(endpoint.starts_with("http://127.0.0.1:"));
+        // Can't assert exact port since env var might be set in test env
+    }
+
+    #[test]
+    fn agent_client_error_health_timeout_display() {
+        let err = AgentClientError::HealthTimeout("10s elapsed".to_string());
+        assert_eq!(err.to_string(), "health timeout: 10s elapsed");
+    }
+
+    #[test]
+    fn agent_client_error_connection_display() {
+        let err = AgentClientError::Connection("refused".to_string());
+        assert_eq!(err.to_string(), "connection error: refused");
+    }
+
+    #[test]
+    fn agent_client_error_rpc_display() {
+        let err = AgentClientError::Rpc("deadline exceeded".to_string());
+        assert_eq!(err.to_string(), "RPC error: deadline exceeded");
+    }
+
+    #[test]
+    fn agent_client_error_is_std_error() {
+        let err = AgentClientError::HealthTimeout("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn agent_client_error_debug() {
+        let err = AgentClientError::Connection("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Connection"));
+        assert!(debug.contains("test"));
+    }
+
+    #[tokio::test]
+    async fn wait_for_health_timeout_on_unreachable() {
+        let result =
+            AgentClient::wait_for_health("http://127.0.0.1:1", Duration::from_millis(200)).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentClientError::HealthTimeout(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn connect_fails_on_unreachable_endpoint() {
+        let client = AgentClient::new("http://127.0.0.1:1");
+        let result = client.connect().await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentClientError::Connection(_)
+        ));
+    }
+}

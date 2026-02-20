@@ -705,4 +705,231 @@ mod tests {
             "test",
         ));
     }
+
+    #[test]
+    fn sandbox_error_already_exists_display() {
+        let err = SandboxError::AlreadyExists("sb_dup".to_string());
+        assert_eq!(err.to_string(), "sandbox already exists: sb_dup");
+    }
+
+    #[test]
+    fn sandbox_error_not_found_display() {
+        let err = SandboxError::NotFound("sb_missing".to_string());
+        assert_eq!(err.to_string(), "sandbox not found: sb_missing");
+    }
+
+    #[test]
+    fn sandbox_error_create_failed_display() {
+        let err = SandboxError::CreateFailed("disk clone failed".to_string());
+        assert_eq!(
+            err.to_string(),
+            "sandbox creation failed: disk clone failed"
+        );
+    }
+
+    #[test]
+    fn sandbox_error_is_std_error() {
+        let err = SandboxError::NotFound("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn sandbox_status_equality() {
+        assert_eq!(SandboxStatus::Running, SandboxStatus::Running);
+        assert_ne!(SandboxStatus::Running, SandboxStatus::Stopped);
+        assert_ne!(SandboxStatus::Provisioning, SandboxStatus::Failed);
+    }
+
+    #[test]
+    fn sandbox_status_clone_and_copy() {
+        let s = SandboxStatus::Running;
+        let s2 = s; // Copy
+        let s3 = s; // Another Copy
+        assert_eq!(s, s2);
+        assert_eq!(s, s3);
+    }
+
+    #[test]
+    fn sandbox_status_debug() {
+        let debug = format!("{:?}", SandboxStatus::Provisioning);
+        assert_eq!(debug, "Provisioning");
+    }
+
+    #[tokio::test]
+    async fn get_sandbox_returns_correct_fields() {
+        let manager = SandboxManager::new(test_node_config());
+        let mut env = HashMap::new();
+        env.insert("KEY".to_string(), "value".to_string());
+
+        manager
+            .insert_provisioning("sb_fields", Profile::Medium, &env, Instant::now(), Some(5))
+            .await
+            .unwrap();
+
+        let info = manager.get_sandbox("sb_fields").await.unwrap();
+        assert_eq!(info.sandbox_id, "sb_fields");
+        assert_eq!(info.status, SandboxStatus::Provisioning);
+        assert_eq!(info.profile.vcpu_count(), 4); // Medium
+        assert_eq!(info.env.get("KEY").unwrap(), "value");
+        assert!(info.boot_duration_ms.is_none());
+        assert_eq!(info.network_slot, Some(5));
+    }
+
+    #[tokio::test]
+    async fn list_sandboxes_returns_all() {
+        let manager = SandboxManager::new(test_node_config());
+        let env = HashMap::new();
+
+        manager
+            .insert_provisioning("sb_a", Profile::Small, &env, Instant::now(), Some(0))
+            .await
+            .unwrap();
+        manager
+            .insert_provisioning("sb_b", Profile::Large, &env, Instant::now(), Some(1))
+            .await
+            .unwrap();
+
+        let list = manager.list_sandboxes().await;
+        assert_eq!(list.len(), 2);
+
+        let ids: Vec<&str> = list.iter().map(|s| s.sandbox_id.as_str()).collect();
+        assert!(ids.contains(&"sb_a"));
+        assert!(ids.contains(&"sb_b"));
+    }
+
+    #[tokio::test]
+    async fn finalize_running_updates_status_and_boot_time() {
+        let manager = SandboxManager::new(test_node_config());
+        let env = HashMap::new();
+
+        manager
+            .insert_provisioning("sb_fin", Profile::Small, &env, Instant::now(), Some(0))
+            .await
+            .unwrap();
+
+        manager.finalize_running("sb_fin", 250).await;
+
+        let info = manager.get_sandbox("sb_fin").await.unwrap();
+        assert_eq!(info.status, SandboxStatus::Running);
+        assert_eq!(info.boot_duration_ms, Some(250));
+    }
+
+    #[tokio::test]
+    async fn set_status_updates_sandbox() {
+        let manager = SandboxManager::new(test_node_config());
+        let env = HashMap::new();
+
+        manager
+            .insert_provisioning("sb_status", Profile::Small, &env, Instant::now(), Some(0))
+            .await
+            .unwrap();
+
+        manager
+            .set_status("sb_status", SandboxStatus::Failed)
+            .await;
+
+        let info = manager.get_sandbox("sb_status").await.unwrap();
+        assert_eq!(info.status, SandboxStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn set_status_nonexistent_is_noop() {
+        let manager = SandboxManager::new(test_node_config());
+        // Should not panic
+        manager
+            .set_status("sb_ghost", SandboxStatus::Stopped)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn active_sandbox_ids_only_includes_running() {
+        let manager = SandboxManager::new(test_node_config());
+        let env = HashMap::new();
+
+        manager
+            .insert_provisioning("sb_prov", Profile::Small, &env, Instant::now(), Some(0))
+            .await
+            .unwrap();
+        manager
+            .insert_provisioning("sb_run", Profile::Small, &env, Instant::now(), Some(1))
+            .await
+            .unwrap();
+
+        // Only sb_run is Running after finalize
+        manager.finalize_running("sb_run", 100).await;
+
+        let ids = manager.active_sandbox_ids().await;
+        assert_eq!(ids, vec!["sb_run"]);
+    }
+
+    #[tokio::test]
+    async fn active_count_includes_provisioning_and_running() {
+        let manager = SandboxManager::new(test_node_config());
+        let env = HashMap::new();
+
+        manager
+            .insert_provisioning("sb_p", Profile::Small, &env, Instant::now(), Some(0))
+            .await
+            .unwrap();
+        manager
+            .insert_provisioning("sb_r", Profile::Small, &env, Instant::now(), Some(1))
+            .await
+            .unwrap();
+        manager.finalize_running("sb_r", 50).await;
+
+        // 1 provisioning + 1 running = 2 active
+        assert_eq!(manager.active_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn active_count_excludes_failed_and_stopped() {
+        let manager = SandboxManager::new(test_node_config());
+        let env = HashMap::new();
+
+        manager
+            .insert_provisioning("sb_f", Profile::Small, &env, Instant::now(), Some(0))
+            .await
+            .unwrap();
+        manager
+            .set_status("sb_f", SandboxStatus::Failed)
+            .await;
+
+        manager
+            .insert_provisioning("sb_s", Profile::Small, &env, Instant::now(), Some(1))
+            .await
+            .unwrap();
+        manager
+            .set_status("sb_s", SandboxStatus::Stopped)
+            .await;
+
+        assert_eq!(manager.active_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn destroy_sandbox_nonexistent_succeeds() {
+        let manager = SandboxManager::new(test_node_config());
+        // Destroying a sandbox that doesn't exist in VM map should still succeed
+        // because the sandbox info won't be found for network slot
+        let result = manager.destroy_sandbox("sb_ghost").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn event_dropped_when_channel_full() {
+        let (tx, _rx) = crate::events::channel(1);
+        let manager = SandboxManager::new(test_node_config()).with_event_sender(tx);
+
+        // Fill the channel
+        manager.report_event(crate::events::sandbox_event(
+            "sb_1",
+            proto::SandboxEventType::Created,
+            "",
+        ));
+        // This should not panic — just silently dropped
+        manager.report_event(crate::events::sandbox_event(
+            "sb_2",
+            proto::SandboxEventType::Created,
+            "",
+        ));
+    }
 }
