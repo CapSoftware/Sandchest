@@ -617,7 +617,7 @@ The SDK API surface is fully specified in `docs/spec/06-sdk-cli.md` → "SDK: @s
 
 ## Task 7: Implement UUIDv7 ID generation with prefixed base62 encoding
 
-- [ ] **Status**: Pending
+- [x] **Status**: Done
 - **Commit type**: `feat`
 - **Commit message**: `feat: implement UUIDv7 ID generation with prefixed base62 encoding`
 
@@ -690,7 +690,12 @@ Note: Organization and API key IDs are managed by BetterAuth (string IDs) — no
 - Prefix table matches the spec exactly
 
 ### Learnings
-<!-- Filled in after completion -->
+- Used `bun test` (project convention) instead of vitest — bun's test runner is Jest-compatible and already available
+- Added `@types/bun` as devDependency for `bun:test` type declarations; excluded `*.test.ts` from tsconfig to prevent tsc errors on bun-specific imports
+- TypeScript UUIDv7 uses `node:crypto` randomBytes (zero external deps) with BigInt for 128-bit base62 math
+- Rust UUIDv7 delegates to `uuid` crate v1 with `v7` feature — native u128 makes base62 encode/decode trivial
+- Base62 alphabet `0-9A-Za-z` is in ASCII sort order, so base62-encoded UUIDv7s are lexicographically sortable (timestamp in MSBs)
+- Timestamp bytes use `Math.floor(timestamp / 2**N)` instead of bitwise ops to avoid JS 32-bit truncation on values > 2^32
 
 ---
 

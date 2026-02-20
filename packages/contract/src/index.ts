@@ -61,5 +61,23 @@ export type {
 
 export type { ApiError, ErrorCode } from './errors.js'
 
+export {
+  generateUUIDv7,
+  base62Encode,
+  base62Decode,
+  generateId,
+  parseId,
+  idToBytes,
+  bytesToId,
+  SANDBOX_PREFIX,
+  EXEC_PREFIX,
+  SESSION_PREFIX,
+  ARTIFACT_PREFIX,
+  IMAGE_PREFIX,
+  PROFILE_PREFIX,
+  NODE_PREFIX,
+  PROJECT_PREFIX,
+} from './id.js'
+
 export * as agentRpc from './generated/sandchest/agent/v1/agent.js'
 export * as nodeRpc from './generated/sandchest/node/v1/node.js'

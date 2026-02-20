@@ -14,11 +14,12 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "echo 'no tests yet'",
+    "test": "bun test",
     "codegen": "buf generate proto/"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.65.0",
+    "@types/bun": "^1.3.9",
     "@types/node": "^25.3.0",
     "ts-proto": "^2.11.2"
   },
