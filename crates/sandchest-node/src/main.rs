@@ -3,7 +3,9 @@ pub mod config;
 pub mod disk;
 pub mod firecracker;
 pub mod id;
+pub mod network;
 pub mod sandbox;
+pub mod slot;
 pub mod snapshot;
 
 pub mod proto {

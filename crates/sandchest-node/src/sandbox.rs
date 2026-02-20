@@ -10,6 +10,8 @@ use crate::agent_client::AgentClient;
 use crate::config::{NodeConfig, Profile, VmConfig};
 use crate::disk;
 use crate::firecracker::FirecrackerVm;
+use crate::network;
+use crate::slot::SlotManager;
 use crate::snapshot::FirecrackerApi;
 
 /// Health check timeout for guest agent after boot.
@@ -23,6 +25,7 @@ pub struct SandboxInfo {
     pub env: HashMap<String, String>,
     pub created_at: Instant,
     pub boot_duration_ms: Option<u64>,
+    pub network_slot: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +54,7 @@ pub struct SandboxManager {
     sandboxes: RwLock<HashMap<String, SandboxInfo>>,
     vms: RwLock<HashMap<String, FirecrackerVm>>,
     node_config: Arc<NodeConfig>,
+    slot_manager: SlotManager,
 }
 
 impl SandboxManager {
@@ -59,6 +63,7 @@ impl SandboxManager {
             sandboxes: RwLock::new(HashMap::new()),
             vms: RwLock::new(HashMap::new()),
             node_config,
+            slot_manager: SlotManager::new(),
         }
     }
 
@@ -83,40 +88,63 @@ impl SandboxManager {
 
         info!(sandbox_id = %sandbox_id, ?profile, "creating sandbox via cold boot");
 
-        // Insert as provisioning
-        self.insert_provisioning(sandbox_id, profile, &env, start).await?;
+        // Allocate network slot
+        let slot = self
+            .slot_manager
+            .allocate()
+            .map_err(|e| SandboxError::CreateFailed(e.to_string()))?;
 
-        // Step 1: Clone base image ext4
+        // Insert as provisioning
+        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot)).await?;
+
+        // Step 1: Set up networking (TAP device + NAT)
+        let net_config = match network::setup_network(sandbox_id, slot).await {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                error!(sandbox_id = %sandbox_id, error = %e, "failed to set up network");
+                self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.slot_manager.release(slot);
+                return Err(SandboxError::CreateFailed(format!("network setup failed: {}", e)));
+            }
+        };
+
+        // Step 2: Clone base image ext4
         let rootfs_path = match disk::clone_disk(rootfs_ref, sandbox_id, &self.node_config.data_dir).await {
             Ok(path) => path,
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                network::teardown_network(sandbox_id, slot).await;
+                self.slot_manager.release(slot);
                 return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
             }
         };
 
-        // Step 2: Configure and start Firecracker
-        let vm = match self.start_firecracker(sandbox_id, kernel_ref, &rootfs_path, profile).await {
+        // Step 3: Configure and start Firecracker (with networking)
+        let vm = match self.start_firecracker(sandbox_id, kernel_ref, &rootfs_path, profile, &net_config).await {
             Ok(vm) => vm,
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to start Firecracker");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                network::teardown_network(sandbox_id, slot).await;
+                self.slot_manager.release(slot);
                 // Best-effort cleanup of cloned disk
                 let _ = disk::cleanup_disk(sandbox_id, &self.node_config.data_dir).await;
                 return Err(e);
             }
         };
 
-        // Step 3: Wait for guest agent health
+        // Step 4: Wait for guest agent health
         if let Err(e) = self.wait_for_agent_health(sandbox_id).await {
             error!(sandbox_id = %sandbox_id, error = %e, "guest agent health check failed");
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             let _ = vm.destroy().await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!("agent health check failed: {}", e)));
         }
 
-        // Step 4 + 5: Store VM handle, env vars already stored, mark running
+        // Step 5 + 6: Store VM handle, env vars already stored, mark running
         let boot_duration_ms = start.elapsed().as_millis() as u64;
         self.vms.write().await.insert(sandbox_id.to_string(), vm);
         self.finalize_running(sandbox_id, boot_duration_ms).await;
@@ -168,14 +196,35 @@ impl SandboxManager {
             "creating sandbox via warm start"
         );
 
-        self.insert_provisioning(sandbox_id, profile, &env, start).await?;
+        // Allocate network slot
+        let slot = self
+            .slot_manager
+            .allocate()
+            .map_err(|e| SandboxError::CreateFailed(e.to_string()))?;
 
-        // Step 1: Clone snapshot's disk state
+        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot)).await?;
+
+        // Step 1a: Set up networking
+        // Network is set up but config isn't passed to Firecracker in snapshot mode
+        // (snapshot already has networking baked in). We keep the TAP/NAT rules active.
+        let _net_config = match network::setup_network(sandbox_id, slot).await {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                error!(sandbox_id = %sandbox_id, error = %e, "failed to set up network");
+                self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                self.slot_manager.release(slot);
+                return Err(SandboxError::CreateFailed(format!("network setup failed: {}", e)));
+            }
+        };
+
+        // Step 1b: Clone snapshot's disk state
         let _rootfs_path = match disk::clone_disk(&snapshot_rootfs, sandbox_id, &self.node_config.data_dir).await {
             Ok(path) => path,
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                network::teardown_network(sandbox_id, slot).await;
+                self.slot_manager.release(slot);
                 return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
             }
         };
@@ -190,10 +239,14 @@ impl SandboxManager {
         let local_snapshot = format!("{}/snapshot_file", sandbox_dir);
         if let Err(e) = tokio::fs::copy(&snapshot_mem, &local_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!("failed to copy mem file: {}", e)));
         }
         if let Err(e) = tokio::fs::copy(&snapshot_state, &local_snapshot).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!("failed to copy snapshot file: {}", e)));
         }
 
@@ -207,6 +260,7 @@ impl SandboxManager {
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| {
+                // Note: network cleanup on spawn failure is best-effort since we can't await in map_err
                 SandboxError::CreateFailed(format!("failed to spawn firecracker: {}", e))
             })?;
 
@@ -223,6 +277,8 @@ impl SandboxManager {
         if let Err(e) = fc_api.wait_for_ready(Duration::from_secs(5)).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             let _ = vm.destroy().await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!(
                 "firecracker API not ready: {}",
                 e
@@ -232,6 +288,8 @@ impl SandboxManager {
         if let Err(e) = fc_api.restore_snapshot(&local_snapshot, &local_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             let _ = vm.destroy().await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!(
                 "snapshot restore failed: {}",
                 e
@@ -242,6 +300,8 @@ impl SandboxManager {
         if let Err(e) = fc_api.resume_vm().await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             let _ = vm.destroy().await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!(
                 "VM resume failed: {}",
                 e
@@ -253,6 +313,8 @@ impl SandboxManager {
             warn!(sandbox_id = %sandbox_id, error = %e, "agent health check failed after warm start");
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             let _ = vm.destroy().await;
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!(
                 "agent health check failed: {}",
                 e
@@ -273,11 +335,17 @@ impl SandboxManager {
         self.get_sandbox_or_err(sandbox_id).await
     }
 
-    /// Destroy a sandbox: kill the VM and clean up state.
+    /// Destroy a sandbox: kill the VM, tear down networking, and clean up state.
     pub async fn destroy_sandbox(&self, sandbox_id: &str) -> Result<(), SandboxError> {
         info!(sandbox_id = %sandbox_id, "destroying sandbox");
 
         self.set_status(sandbox_id, SandboxStatus::Stopping).await;
+
+        // Get the network slot before removing sandbox info
+        let network_slot = {
+            let sandboxes = self.sandboxes.read().await;
+            sandboxes.get(sandbox_id).and_then(|s| s.network_slot)
+        };
 
         // Remove and destroy the VM
         let vm = self.vms.write().await.remove(sandbox_id);
@@ -285,6 +353,12 @@ impl SandboxManager {
             if let Err(e) = vm.destroy().await {
                 error!(sandbox_id = %sandbox_id, error = %e, "error destroying VM");
             }
+        }
+
+        // Tear down networking
+        if let Some(slot) = network_slot {
+            network::teardown_network(sandbox_id, slot).await;
+            self.slot_manager.release(slot);
         }
 
         // Update status and remove from tracking
@@ -305,6 +379,7 @@ impl SandboxManager {
             env: info.env.clone(),
             created_at: info.created_at,
             boot_duration_ms: info.boot_duration_ms,
+            network_slot: info.network_slot,
         })
     }
 
@@ -320,6 +395,7 @@ impl SandboxManager {
                 env: info.env.clone(),
                 created_at: info.created_at,
                 boot_duration_ms: info.boot_duration_ms,
+                network_slot: info.network_slot,
             })
             .collect()
     }
@@ -354,6 +430,7 @@ impl SandboxManager {
         profile: Profile,
         env: &HashMap<String, String>,
         created_at: Instant,
+        network_slot: Option<u16>,
     ) -> Result<(), SandboxError> {
         let mut sandboxes = self.sandboxes.write().await;
         if sandboxes.contains_key(sandbox_id) {
@@ -368,6 +445,7 @@ impl SandboxManager {
                 env: env.clone(),
                 created_at,
                 boot_duration_ms: None,
+                network_slot,
             },
         );
         Ok(())
@@ -379,6 +457,7 @@ impl SandboxManager {
         kernel_ref: &str,
         rootfs_path: &str,
         profile: Profile,
+        net_config: &network::NetworkConfig,
     ) -> Result<FirecrackerVm, SandboxError> {
         let sandbox_dir = format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
         let vsock_path = format!("{}/vsock.sock", sandbox_dir);
@@ -396,8 +475,8 @@ impl SandboxManager {
             vcpu_count: profile.vcpu_count(),
             mem_size_mib: profile.mem_size_mib(),
             vsock_uds_path: vsock_path,
-            tap_dev_name: None, // Networking added in Task 7
-            guest_mac: None,
+            tap_dev_name: Some(net_config.tap_name.clone()),
+            guest_mac: Some(net_config.guest_mac.clone()),
         };
 
         FirecrackerVm::create(&vm_config, &self.node_config.data_dir)
@@ -517,12 +596,12 @@ mod tests {
 
         let env = HashMap::new();
         let result = manager
-            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now())
+            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(0))
             .await;
         assert!(result.is_ok());
 
         let result = manager
-            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now())
+            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(1))
             .await;
         assert!(matches!(result, Err(SandboxError::AlreadyExists(_))));
     }
