@@ -301,6 +301,167 @@ describe('updateStatus', () => {
 // softDelete
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// createFork
+// ---------------------------------------------------------------------------
+
+describe('createFork', () => {
+  test('creates a fork with correct parent reference', async () => {
+    const parent = makeSandbox()
+    const parentRow = await run(repo.create(parent))
+    await run(repo.updateStatus(parent.id, ORG_A, 'running'))
+
+    const forkId = generateUUIDv7()
+    const parentRunning = (await run(repo.findById(parent.id, ORG_A)))!
+    const fork = await run(
+      repo.createFork({
+        id: forkId,
+        orgId: ORG_A,
+        source: parentRunning,
+        env: { TEST: 'value' },
+        ttlSeconds: 1800,
+      }),
+    )
+
+    expect(fork.status).toBe('running')
+    expect(fork.forkedFrom).toBe(parentRunning.id)
+    expect(fork.forkDepth).toBe(1)
+    expect(fork.forkCount).toBe(0)
+    expect(fork.env).toEqual({ TEST: 'value' })
+    expect(fork.imageRef).toBe(parentRunning.imageRef)
+    expect(fork.profileName).toBe(parentRunning.profileName)
+    expect(fork.startedAt).toBeInstanceOf(Date)
+  })
+
+  test('fork depth increments from parent', async () => {
+    const p1 = makeSandbox()
+    await run(repo.create(p1))
+    await run(repo.updateStatus(p1.id, ORG_A, 'running'))
+    const p1Row = (await run(repo.findById(p1.id, ORG_A)))!
+
+    const f1Id = generateUUIDv7()
+    const f1 = await run(
+      repo.createFork({ id: f1Id, orgId: ORG_A, source: p1Row, env: null, ttlSeconds: 3600 }),
+    )
+    expect(f1.forkDepth).toBe(1)
+
+    const f2Id = generateUUIDv7()
+    const f2 = await run(
+      repo.createFork({ id: f2Id, orgId: ORG_A, source: f1, env: null, ttlSeconds: 3600 }),
+    )
+    expect(f2.forkDepth).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// incrementForkCount
+// ---------------------------------------------------------------------------
+
+describe('incrementForkCount', () => {
+  test('increments fork count by 1', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    const updated = await run(repo.incrementForkCount(params.id, ORG_A))
+    expect(updated).not.toBeNull()
+    expect(updated!.forkCount).toBe(1)
+  })
+
+  test('increments multiple times', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.incrementForkCount(params.id, ORG_A))
+    const updated = await run(repo.incrementForkCount(params.id, ORG_A))
+    expect(updated!.forkCount).toBe(2)
+  })
+
+  test('returns null for unknown sandbox', async () => {
+    const result = await run(repo.incrementForkCount(generateUUIDv7(), ORG_A))
+    expect(result).toBeNull()
+  })
+
+  test('returns null when orgId does not match', async () => {
+    const params = makeSandbox(ORG_A)
+    await run(repo.create(params))
+    const result = await run(repo.incrementForkCount(params.id, ORG_B))
+    expect(result).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getForkTree
+// ---------------------------------------------------------------------------
+
+describe('getForkTree', () => {
+  test('returns single node for sandbox with no forks', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    const tree = await run(repo.getForkTree(params.id, ORG_A))
+    expect(tree.length).toBe(1)
+    expect(tree[0].id).toBe(params.id)
+  })
+
+  test('returns parent and children in tree', async () => {
+    const parent = makeSandbox()
+    await run(repo.create(parent))
+    await run(repo.updateStatus(parent.id, ORG_A, 'running'))
+    const parentRow = (await run(repo.findById(parent.id, ORG_A)))!
+
+    const f1Id = generateUUIDv7()
+    await run(
+      repo.createFork({ id: f1Id, orgId: ORG_A, source: parentRow, env: null, ttlSeconds: 3600 }),
+    )
+
+    const f2Id = generateUUIDv7()
+    await run(
+      repo.createFork({ id: f2Id, orgId: ORG_A, source: parentRow, env: null, ttlSeconds: 3600 }),
+    )
+
+    const tree = await run(repo.getForkTree(parent.id, ORG_A))
+    expect(tree.length).toBe(3)
+  })
+
+  test('traverses up to root from child', async () => {
+    const parent = makeSandbox()
+    await run(repo.create(parent))
+    await run(repo.updateStatus(parent.id, ORG_A, 'running'))
+    const parentRow = (await run(repo.findById(parent.id, ORG_A)))!
+
+    const childId = generateUUIDv7()
+    await run(
+      repo.createFork({
+        id: childId,
+        orgId: ORG_A,
+        source: parentRow,
+        env: null,
+        ttlSeconds: 3600,
+      }),
+    )
+
+    // Query tree from child — should still include parent
+    const tree = await run(repo.getForkTree(childId, ORG_A))
+    expect(tree.length).toBe(2)
+    const ids = tree.map((r) => bytesToId(SANDBOX_PREFIX, r.id))
+    expect(ids).toContain(bytesToId(SANDBOX_PREFIX, parent.id))
+    expect(ids).toContain(bytesToId(SANDBOX_PREFIX, childId))
+  })
+
+  test('returns empty array for unknown sandbox', async () => {
+    const tree = await run(repo.getForkTree(generateUUIDv7(), ORG_A))
+    expect(tree).toEqual([])
+  })
+
+  test('returns empty array when orgId does not match', async () => {
+    const params = makeSandbox(ORG_A)
+    await run(repo.create(params))
+    const tree = await run(repo.getForkTree(params.id, ORG_B))
+    expect(tree).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// softDelete
+// ---------------------------------------------------------------------------
+
 describe('softDelete', () => {
   test('sets status to deleted', async () => {
     const params = makeSandbox()

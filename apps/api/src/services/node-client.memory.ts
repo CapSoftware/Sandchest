@@ -77,6 +77,8 @@ export function createInMemoryNodeClient(): NodeClientApi {
           }
         }
       }),
+
+    forkSandbox: () => Effect.void,
   }
 }
 

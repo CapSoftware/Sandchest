@@ -9,6 +9,10 @@ import {
 import type {
   CreateSandboxRequest,
   CreateSandboxResponse,
+  ForkSandboxRequest,
+  ForkSandboxResponse,
+  ForkTreeNode,
+  GetForkTreeResponse,
   GetSandboxResponse,
   ListSandboxesResponse,
   StopSandboxResponse,
@@ -16,9 +20,17 @@ import type {
   SandboxStatus,
   SandboxSummary,
 } from '@sandchest/contract'
-import { NotFoundError, NotImplementedError, ValidationError } from '../errors.js'
+import {
+  ForkDepthExceededError,
+  ForkLimitExceededError,
+  NotFoundError,
+  NotImplementedError,
+  SandboxNotRunningError,
+  ValidationError,
+} from '../errors.js'
 import { AuthContext } from '../context.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
+import { NodeClient } from '../services/node-client.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
 const VALID_PROFILES: ProfileName[] = ['small', 'medium', 'large']
@@ -307,14 +319,183 @@ const deleteSandbox = Effect.gen(function* () {
   )
 })
 
+// -- Fork sandbox ------------------------------------------------------------
+
+const MAX_FORK_DEPTH = 5
+const MAX_FORKS_PER_SANDBOX = 10
+const DEFAULT_FORK_TTL = 3600
+
+const forkSandbox = Effect.gen(function* () {
+  const auth = yield* AuthContext
+  const repo = yield* SandboxRepo
+  const nodeClient = yield* NodeClient
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const params = yield* HttpRouter.params
+
+  const id = params.id
+  if (!id) {
+    return yield* Effect.fail(new ValidationError({ message: 'Missing sandbox ID' }))
+  }
+
+  let sourceIdBytes: Uint8Array
+  try {
+    sourceIdBytes = idToBytes(id)
+  } catch {
+    return yield* Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${id}` }))
+  }
+
+  const source = yield* repo.findById(sourceIdBytes, auth.orgId)
+  if (!source) {
+    return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
+  }
+
+  if (source.status !== 'running') {
+    return yield* Effect.fail(
+      new SandboxNotRunningError({
+        message: `Sandbox ${id} is not running (current: ${source.status})`,
+      }),
+    )
+  }
+
+  if (source.forkDepth + 1 > MAX_FORK_DEPTH) {
+    return yield* Effect.fail(
+      new ForkDepthExceededError({
+        message: `Fork depth limit exceeded (max: ${MAX_FORK_DEPTH})`,
+      }),
+    )
+  }
+
+  if (source.forkCount >= MAX_FORKS_PER_SANDBOX) {
+    return yield* Effect.fail(
+      new ForkLimitExceededError({
+        message: `Fork limit exceeded for sandbox ${id} (max: ${MAX_FORKS_PER_SANDBOX})`,
+      }),
+    )
+  }
+
+  const raw = yield* request.json.pipe(Effect.orElseSucceed(() => ({})))
+  const body: ForkSandboxRequest =
+    raw && typeof raw === 'object' ? (raw as ForkSandboxRequest) : {}
+
+  const ttlSeconds = body.ttl_seconds ?? DEFAULT_FORK_TTL
+
+  if (ttlSeconds < 1 || ttlSeconds > 86400) {
+    return yield* Effect.fail(
+      new ValidationError({ message: 'ttl_seconds must be between 1 and 86400' }),
+    )
+  }
+
+  // Merge env: source env + request env overrides
+  const mergedEnv =
+    body.env || source.env
+      ? { ...(source.env ?? {}), ...(body.env ?? {}) }
+      : null
+
+  const forkId = generateUUIDv7()
+
+  // Create fork row in DB
+  const forkRow = yield* repo.createFork({
+    id: forkId,
+    orgId: auth.orgId,
+    source,
+    env: mergedEnv,
+    ttlSeconds,
+  })
+
+  // Increment parent's fork count
+  yield* repo.incrementForkCount(sourceIdBytes, auth.orgId)
+
+  // Tell the node to fork the VM
+  yield* nodeClient.forkSandbox({
+    sourceSandboxId: sourceIdBytes,
+    newSandboxId: forkId,
+  })
+
+  const sandboxId = bytesToId(SANDBOX_PREFIX, forkRow.id)
+  const response: ForkSandboxResponse = {
+    sandbox_id: sandboxId,
+    forked_from: id,
+    status: forkRow.status,
+    replay_url: replayUrl(sandboxId),
+    created_at: forkRow.createdAt.toISOString(),
+  }
+
+  return HttpServerResponse.unsafeJson(response, { status: 201 })
+})
+
+// -- Get fork tree -----------------------------------------------------------
+
+const getForkTree = Effect.gen(function* () {
+  const auth = yield* AuthContext
+  const repo = yield* SandboxRepo
+  const params = yield* HttpRouter.params
+
+  const id = params.id
+  if (!id) {
+    return yield* Effect.fail(new ValidationError({ message: 'Missing sandbox ID' }))
+  }
+
+  let idBytes: Uint8Array
+  try {
+    idBytes = idToBytes(id)
+  } catch {
+    return yield* Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${id}` }))
+  }
+
+  const row = yield* repo.findById(idBytes, auth.orgId)
+  if (!row) {
+    return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
+  }
+
+  const treeRows = yield* repo.getForkTree(idBytes, auth.orgId)
+
+  // Build a map of children per sandbox
+  const childrenMap = new Map<string, string[]>()
+  let rootId = ''
+
+  for (const r of treeRows) {
+    const sid = bytesToId(SANDBOX_PREFIX, r.id)
+    if (!childrenMap.has(sid)) {
+      childrenMap.set(sid, [])
+    }
+    if (r.forkedFrom) {
+      const parentId = bytesToId(SANDBOX_PREFIX, r.forkedFrom)
+      if (!childrenMap.has(parentId)) {
+        childrenMap.set(parentId, [])
+      }
+      childrenMap.get(parentId)!.push(sid)
+    } else {
+      rootId = sid
+    }
+  }
+
+  const tree: ForkTreeNode[] = treeRows.map((r) => {
+    const sid = bytesToId(SANDBOX_PREFIX, r.id)
+    return {
+      sandbox_id: sid,
+      status: r.status,
+      forked_from: r.forkedFrom ? bytesToId(SANDBOX_PREFIX, r.forkedFrom) : null,
+      forked_at: r.forkedFrom ? r.createdAt.toISOString() : null,
+      children: childrenMap.get(sid) ?? [],
+    }
+  })
+
+  const response: GetForkTreeResponse = {
+    root: rootId,
+    tree,
+  }
+
+  return HttpServerResponse.unsafeJson(response)
+})
+
 // -- Router ------------------------------------------------------------------
 
 export const SandboxRouter = HttpRouter.empty.pipe(
   HttpRouter.post('/v1/sandboxes', createSandbox),
   HttpRouter.get('/v1/sandboxes', listSandboxes),
   HttpRouter.get('/v1/sandboxes/:id', getSandbox),
-  HttpRouter.post('/v1/sandboxes/:id/fork', stub('Fork sandbox')),
-  HttpRouter.get('/v1/sandboxes/:id/forks', stub('Get fork tree')),
+  HttpRouter.post('/v1/sandboxes/:id/fork', forkSandbox),
+  HttpRouter.get('/v1/sandboxes/:id/forks', getForkTree),
   HttpRouter.post('/v1/sandboxes/:id/stop', stopSandbox),
   HttpRouter.del('/v1/sandboxes/:id', deleteSandbox),
   HttpRouter.get('/v1/sandboxes/:id/replay', stub('Get replay')),

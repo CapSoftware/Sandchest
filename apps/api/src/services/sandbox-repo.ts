@@ -16,6 +16,7 @@ export interface SandboxRow {
   readonly status: SandboxStatus
   readonly env: Record<string, string> | null
   readonly forkedFrom: Uint8Array | null
+  readonly forkDepth: number
   readonly forkCount: number
   readonly ttlSeconds: number
   readonly failureReason: FailureReason | null
@@ -77,6 +78,27 @@ export interface SandboxRepoApi {
     id: Uint8Array,
     orgId: string,
   ) => Effect.Effect<SandboxRow | null, never, never>
+
+  /** Create a forked sandbox row. Sets forkedFrom and forkDepth from source. */
+  readonly createFork: (params: {
+    id: Uint8Array
+    orgId: string
+    source: SandboxRow
+    env: Record<string, string> | null
+    ttlSeconds: number
+  }) => Effect.Effect<SandboxRow, never, never>
+
+  /** Increment the fork count of a sandbox. Returns the updated row or null. */
+  readonly incrementForkCount: (
+    id: Uint8Array,
+    orgId: string,
+  ) => Effect.Effect<SandboxRow | null, never, never>
+
+  /** Get all sandboxes in the fork tree containing the given sandbox. */
+  readonly getForkTree: (
+    id: Uint8Array,
+    orgId: string,
+  ) => Effect.Effect<SandboxRow[], never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}

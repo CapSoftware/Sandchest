@@ -90,6 +90,12 @@ export interface NodeClientApi {
     sandboxId: Uint8Array
     path: string
   }) => Effect.Effect<void, never, never>
+
+  /** Fork a running sandbox. Returns the new sandbox ID. */
+  readonly forkSandbox: (params: {
+    sourceSandboxId: Uint8Array
+    newSandboxId: Uint8Array
+  }) => Effect.Effect<void, never, never>
 }
 
 export class NodeClient extends Context.Tag('NodeClient')<NodeClient, NodeClientApi>() {}

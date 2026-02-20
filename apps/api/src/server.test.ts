@@ -1,10 +1,12 @@
 import { HttpClient, HttpClientRequest } from '@effect/platform'
+import { idToBytes } from '@sandchest/contract'
 import { NodeHttpServer } from '@effect/platform-node'
 import { Effect, Layer } from 'effect'
 import { describe, expect, test } from 'bun:test'
 import { AppLive } from './server.js'
 import { AuthContext } from './context.js'
 import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
+import { SandboxRepo } from './services/sandbox-repo.js'
 import { ExecRepoMemory } from './services/exec-repo.memory.js'
 import { SessionRepoMemory } from './services/session-repo.memory.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
@@ -20,7 +22,7 @@ const TestAuthLayer = Layer.succeed(AuthContext, {
 
 const TestLayer = AppLive.pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
-  Layer.provide(SandboxRepoMemory),
+  Layer.provideMerge(SandboxRepoMemory),
   Layer.provide(ExecRepoMemory),
   Layer.provide(SessionRepoMemory),
   Layer.provide(NodeClientMemory),
@@ -543,6 +545,293 @@ describe('DELETE /v1/sandboxes/:id — delete sandbox', () => {
         const client = yield* HttpClient.HttpClient
         const response = yield* client.execute(
           HttpClientRequest.del('/v1/sandboxes/sb_0000000000000000000000'),
+        )
+        const body = yield* response.json
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(404)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fork sandbox
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/sandboxes/:id/fork — fork sandbox', () => {
+  /** Helper: create a sandbox and transition it to running via repo. */
+  function createRunningSandbox() {
+    return Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const repo = yield* SandboxRepo
+
+      const createRes = yield* client.execute(
+        HttpClientRequest.post('/v1/sandboxes').pipe(
+          HttpClientRequest.bodyUnsafeJson({}),
+        ),
+      )
+      const created = (yield* createRes.json) as { sandbox_id: string }
+      const idBytes = idToBytes(created.sandbox_id)
+      yield* repo.updateStatus(idBytes, TEST_ORG, 'running')
+      return created.sandbox_id
+    })
+  }
+
+  test('forks a running sandbox', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const sandboxId = yield* createRunningSandbox()
+
+        const forkRes = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* forkRes.json
+        return { status: forkRes.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(201)
+    const body = result.body as Record<string, unknown>
+    expect(body.sandbox_id).toBeDefined()
+    expect((body.sandbox_id as string).startsWith('sb_')).toBe(true)
+    expect(body.forked_from).toBeDefined()
+    expect(body.status).toBe('running')
+    expect(body.replay_url).toBeDefined()
+    expect(body.created_at).toBeDefined()
+  })
+
+  test('fork inherits parent env and merges request env', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const repo = yield* SandboxRepo
+
+        // Create sandbox with env
+        const createRes = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({ env: { A: '1', B: '2' } }),
+          ),
+        )
+        const created = (yield* createRes.json) as { sandbox_id: string }
+        yield* repo.updateStatus(idToBytes(created.sandbox_id), TEST_ORG, 'running')
+
+        // Fork with additional env
+        const forkRes = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${created.sandbox_id}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({ env: { B: 'override', C: '3' } }),
+          ),
+        )
+        const forkBody = (yield* forkRes.json) as { sandbox_id: string }
+
+        // Get the fork to verify env
+        const getRes = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${forkBody.sandbox_id}`),
+        )
+        const body = yield* getRes.json
+        return { body }
+      }),
+    )
+
+    const body = result.body as Record<string, unknown>
+    expect(body.env).toEqual({ A: '1', B: 'override', C: '3' })
+  })
+
+  test('increments parent fork count', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const sandboxId = yield* createRunningSandbox()
+
+        yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+
+        const getRes = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}`),
+        )
+        const body = yield* getRes.json
+        return { body }
+      }),
+    )
+
+    const body = result.body as Record<string, unknown>
+    expect(body.fork_count).toBe(1)
+  })
+
+  test('rejects fork of non-running sandbox', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+
+        // Create sandbox (status: queued — not running)
+        const createRes = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const created = (yield* createRes.json) as { sandbox_id: string }
+
+        const forkRes = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${created.sandbox_id}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* forkRes.json
+        return { status: forkRes.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(409)
+    const body = result.body as Record<string, unknown>
+    expect(body.error).toBe('sandbox_not_running')
+  })
+
+  test('rejects fork of non-existent sandbox', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes/sb_0000000000000000000000/fork').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(404)
+  })
+
+  test('rejects invalid ttl_seconds', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const sandboxId = yield* createRunningSandbox()
+
+        const forkRes = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({ ttl_seconds: 0 }),
+          ),
+        )
+        const body = yield* forkRes.json
+        return { status: forkRes.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(400)
+  })
+
+  test('forked sandbox shows forked_from in get response', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const sandboxId = yield* createRunningSandbox()
+
+        const forkRes = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const forkBody = (yield* forkRes.json) as { sandbox_id: string }
+
+        const getRes = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${forkBody.sandbox_id}`),
+        )
+        const body = yield* getRes.json
+        return { body, parentId: sandboxId }
+      }),
+    )
+
+    const body = result.body as Record<string, unknown>
+    expect(body.forked_from).toBe(result.parentId)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Get fork tree
+// ---------------------------------------------------------------------------
+
+describe('GET /v1/sandboxes/:id/forks — get fork tree', () => {
+  test('returns tree for sandbox with no forks', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+
+        const createRes = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const created = (yield* createRes.json) as { sandbox_id: string }
+
+        const treeRes = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${created.sandbox_id}/forks`),
+        )
+        const body = yield* treeRes.json
+        return { status: treeRes.status, body, sandboxId: created.sandbox_id }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    const body = result.body as { root: string; tree: unknown[] }
+    expect(body.root).toBe(result.sandboxId)
+    expect(body.tree.length).toBe(1)
+  })
+
+  test('returns tree with parent and fork', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const repo = yield* SandboxRepo
+
+        // Create parent and set to running
+        const createRes = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const parent = (yield* createRes.json) as { sandbox_id: string }
+        yield* repo.updateStatus(idToBytes(parent.sandbox_id), TEST_ORG, 'running')
+
+        // Fork it
+        const forkRes = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parent.sandbox_id}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const fork = (yield* forkRes.json) as { sandbox_id: string }
+
+        // Get tree from parent
+        const treeRes = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${parent.sandbox_id}/forks`),
+        )
+        const body = yield* treeRes.json
+        return { body, parentId: parent.sandbox_id, forkId: fork.sandbox_id }
+      }),
+    )
+
+    const body = result.body as { root: string; tree: Array<{ sandbox_id: string; children: string[] }> }
+    expect(body.root).toBe(result.parentId)
+    expect(body.tree.length).toBe(2)
+
+    const rootNode = body.tree.find((n) => n.sandbox_id === result.parentId)
+    expect(rootNode).toBeDefined()
+    expect(rootNode!.children).toContain(result.forkId)
+  })
+
+  test('returns 404 for non-existent sandbox', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get('/v1/sandboxes/sb_0000000000000000000000/forks'),
         )
         const body = yield* response.json
         return { status: response.status, body }

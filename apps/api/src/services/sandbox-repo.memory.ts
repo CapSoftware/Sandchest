@@ -55,6 +55,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           status: 'queued',
           env: params.env,
           forkedFrom: null,
+          forkDepth: 0,
           forkCount: 0,
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
@@ -140,6 +141,75 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         }
         store.set(key, updated)
         return updated
+      }),
+
+    createFork: (params) =>
+      Effect.sync(() => {
+        const now = new Date()
+        const row: SandboxRow = {
+          id: params.id,
+          orgId: params.orgId,
+          imageId: params.source.imageId,
+          profileId: params.source.profileId,
+          profileName: params.source.profileName,
+          status: 'running',
+          env: params.env,
+          forkedFrom: params.source.id,
+          forkDepth: params.source.forkDepth + 1,
+          forkCount: 0,
+          ttlSeconds: params.ttlSeconds,
+          failureReason: null,
+          createdAt: now,
+          updatedAt: now,
+          startedAt: now,
+          endedAt: null,
+          imageRef: params.source.imageRef,
+        }
+        store.set(keyFor(params.id), row)
+        return row
+      }),
+
+    incrementForkCount: (id, orgId) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        if (!row || row.orgId !== orgId) return null
+        const updated: SandboxRow = {
+          ...row,
+          forkCount: row.forkCount + 1,
+          updatedAt: new Date(),
+        }
+        store.set(key, updated)
+        return updated
+      }),
+
+    getForkTree: (id, orgId) =>
+      Effect.sync(() => {
+        const start = store.get(keyFor(id))
+        if (!start || start.orgId !== orgId) return []
+
+        // Walk up to find root
+        let root = start
+        while (root.forkedFrom) {
+          const parent = store.get(keyFor(root.forkedFrom))
+          if (!parent || parent.orgId !== orgId) break
+          root = parent
+        }
+
+        // BFS down from root to find all descendants
+        const result: SandboxRow[] = [root]
+        const queue = [root]
+        while (queue.length > 0) {
+          const current = queue.shift()!
+          for (const row of store.values()) {
+            if (row.forkedFrom && bytesEqual(row.forkedFrom, current.id) && row.orgId === orgId) {
+              result.push(row)
+              queue.push(row)
+            }
+          }
+        }
+
+        return result
       }),
   }
 }

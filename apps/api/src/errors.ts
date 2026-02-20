@@ -34,6 +34,14 @@ export class NoCapacityError extends Data.TaggedError('NoCapacityError')<{
   readonly message: string
 }> {}
 
+export class ForkDepthExceededError extends Data.TaggedError('ForkDepthExceededError')<{
+  readonly message: string
+}> {}
+
+export class ForkLimitExceededError extends Data.TaggedError('ForkLimitExceededError')<{
+  readonly message: string
+}> {}
+
 export class NotImplementedError extends Data.TaggedError('NotImplementedError')<{
   readonly message: string
 }> {}
@@ -47,6 +55,8 @@ export type ApiError =
   | RateLimitedError
   | SandboxNotRunningError
   | NoCapacityError
+  | ForkDepthExceededError
+  | ForkLimitExceededError
   | NotImplementedError
 
 const STATUS_MAP: Record<ApiError['_tag'], number> = {
@@ -58,6 +68,8 @@ const STATUS_MAP: Record<ApiError['_tag'], number> = {
   RateLimitedError: 429,
   SandboxNotRunningError: 409,
   NoCapacityError: 503,
+  ForkDepthExceededError: 422,
+  ForkLimitExceededError: 422,
   NotImplementedError: 501,
 }
 
@@ -70,6 +82,8 @@ const CODE_MAP: Record<ApiError['_tag'], string> = {
   RateLimitedError: 'rate_limited',
   SandboxNotRunningError: 'sandbox_not_running',
   NoCapacityError: 'no_capacity',
+  ForkDepthExceededError: 'fork_depth_exceeded',
+  ForkLimitExceededError: 'fork_limit_exceeded',
   NotImplementedError: 'not_implemented',
 }
 
