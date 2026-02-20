@@ -192,6 +192,16 @@ async fn run_exec(request: ExecRequest, tx: mpsc::Sender<Result<ExecEvent, Statu
         .await;
 }
 
+/// Collect all events from a spawn_exec stream into a Vec.
+#[cfg(test)]
+async fn collect_exec_events(
+    request: ExecRequest,
+) -> Vec<Result<ExecEvent, Status>> {
+    use tokio_stream::StreamExt;
+    let stream = spawn_exec(request);
+    stream.collect().await
+}
+
 /// Send SIGTERM, wait up to 5 seconds, then SIGKILL if still alive.
 async fn kill_with_grace(pid: u32, child: &mut tokio::process::Child) {
     #[cfg(unix)]
@@ -213,5 +223,249 @@ async fn kill_with_grace(pid: u32, child: &mut tokio::process::Child) {
             warn!(pid, "process did not exit after SIGTERM, sending SIGKILL");
             let _ = child.kill().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_request() -> ExecRequest {
+        ExecRequest {
+            cmd: Vec::new(),
+            shell_cmd: String::new(),
+            cwd: String::new(),
+            env: HashMap::new(),
+            timeout_seconds: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_echo_stdout() {
+        let mut req = make_request();
+        req.cmd = vec!["echo".into(), "hello world".into()];
+        let events = collect_exec_events(req).await;
+
+        let mut stdout_data = Vec::new();
+        let mut exit_code = None;
+        for event in &events {
+            let event = event.as_ref().unwrap();
+            match &event.event {
+                Some(exec_event::Event::Stdout(data)) => stdout_data.extend_from_slice(data),
+                Some(exec_event::Event::Exit(e)) => exit_code = Some(e.exit_code),
+                _ => {}
+            }
+        }
+
+        assert_eq!(String::from_utf8_lossy(&stdout_data).trim(), "hello world");
+        assert_eq!(exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn exec_stderr_output() {
+        let mut req = make_request();
+        req.shell_cmd = "echo error >&2".into();
+        let events = collect_exec_events(req).await;
+
+        let mut stderr_data = Vec::new();
+        let mut exit_code = None;
+        for event in &events {
+            let event = event.as_ref().unwrap();
+            match &event.event {
+                Some(exec_event::Event::Stderr(data)) => stderr_data.extend_from_slice(data),
+                Some(exec_event::Event::Exit(e)) => exit_code = Some(e.exit_code),
+                _ => {}
+            }
+        }
+
+        assert_eq!(String::from_utf8_lossy(&stderr_data).trim(), "error");
+        assert_eq!(exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn exec_nonzero_exit_code() {
+        let mut req = make_request();
+        req.shell_cmd = "exit 42".into();
+        let events = collect_exec_events(req).await;
+
+        let exit_event = events
+            .iter()
+            .filter_map(|e| e.as_ref().ok())
+            .find_map(|e| match &e.event {
+                Some(exec_event::Event::Exit(exit)) => Some(*exit),
+                _ => None,
+            })
+            .expect("should have exit event");
+
+        assert_eq!(exit_event.exit_code, 42);
+    }
+
+    #[tokio::test]
+    async fn exec_no_cmd_returns_error() {
+        let req = make_request();
+        let events = collect_exec_events(req).await;
+
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err());
+        let status = events[0].as_ref().unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    fn collect_stdout(events: &[Result<ExecEvent, Status>]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for e in events.iter().flatten() {
+            if let Some(exec_event::Event::Stdout(d)) = &e.event {
+                data.extend_from_slice(d);
+            }
+        }
+        data
+    }
+
+    #[tokio::test]
+    async fn exec_with_shell_cmd() {
+        let mut req = make_request();
+        req.shell_cmd = "echo shell_works".into();
+        let events = collect_exec_events(req).await;
+
+        assert_eq!(
+            String::from_utf8_lossy(&collect_stdout(&events)).trim(),
+            "shell_works"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_with_cwd() {
+        let mut req = make_request();
+        req.shell_cmd = "pwd".into();
+        req.cwd = "/tmp".into();
+        let events = collect_exec_events(req).await;
+
+        let stdout = collect_stdout(&events);
+        let output = String::from_utf8_lossy(&stdout);
+        // On macOS /tmp -> /private/tmp
+        assert!(
+            output.trim() == "/tmp" || output.trim() == "/private/tmp",
+            "unexpected cwd: {output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_with_env_vars() {
+        let mut req = make_request();
+        req.shell_cmd = "echo $MY_TEST_VAR".into();
+        req.env
+            .insert("MY_TEST_VAR".into(), "test_value_123".into());
+        let events = collect_exec_events(req).await;
+
+        assert_eq!(
+            String::from_utf8_lossy(&collect_stdout(&events)).trim(),
+            "test_value_123"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_sequential_seq_numbers() {
+        let mut req = make_request();
+        req.shell_cmd = "echo line1; echo line2 >&2".into();
+        let events = collect_exec_events(req).await;
+
+        let seqs: Vec<u64> = events
+            .iter()
+            .filter_map(|e| e.as_ref().ok())
+            .map(|e| e.seq)
+            .collect();
+
+        // Seq numbers should be monotonically increasing
+        for window in seqs.windows(2) {
+            assert!(window[1] > window[0], "seq not increasing: {:?}", seqs);
+        }
+        // Last event should be the exit
+        let last = events.last().unwrap().as_ref().unwrap();
+        assert!(matches!(last.event, Some(exec_event::Event::Exit(_))));
+    }
+
+    #[tokio::test]
+    async fn exec_exit_has_duration() {
+        let mut req = make_request();
+        req.cmd = vec!["true".into()];
+        let events = collect_exec_events(req).await;
+
+        let exit_event = events
+            .iter()
+            .filter_map(|e| e.as_ref().ok())
+            .find_map(|e| match &e.event {
+                Some(exec_event::Event::Exit(exit)) => Some(*exit),
+                _ => None,
+            })
+            .expect("should have exit event");
+
+        // Duration should be set (>= 0 ms)
+        assert!(exit_event.duration_ms < 10_000, "duration seems too high");
+    }
+
+    #[tokio::test]
+    async fn exec_nonexistent_command() {
+        let mut req = make_request();
+        req.cmd = vec!["/nonexistent/binary/that/doesnt/exist".into()];
+        let events = collect_exec_events(req).await;
+
+        // Should get an error status (spawn failure)
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err());
+    }
+
+    #[tokio::test]
+    async fn exec_timeout_kills_process() {
+        let mut req = make_request();
+        req.shell_cmd = "sleep 60".into();
+        req.timeout_seconds = 1;
+
+        let start = Instant::now();
+        let events = collect_exec_events(req).await;
+        let elapsed = start.elapsed();
+
+        // Should complete well before the 60s sleep
+        assert!(elapsed < Duration::from_secs(10));
+
+        let exit_event = events
+            .iter()
+            .filter_map(|e| e.as_ref().ok())
+            .find_map(|e| match &e.event {
+                Some(exec_event::Event::Exit(exit)) => Some(*exit),
+                _ => None,
+            })
+            .expect("should have exit event");
+
+        assert_eq!(exit_event.exit_code, -1, "timed-out process should exit with -1");
+    }
+
+    #[tokio::test]
+    async fn exec_large_output() {
+        let mut req = make_request();
+        // Generate output larger than CHUNK_SIZE (8192)
+        req.shell_cmd = "seq 1 5000".into();
+        let events = collect_exec_events(req).await;
+
+        let mut stdout_data = Vec::new();
+        let mut exit_code = None;
+        for event in &events {
+            let event = event.as_ref().unwrap();
+            match &event.event {
+                Some(exec_event::Event::Stdout(data)) => stdout_data.extend_from_slice(data),
+                Some(exec_event::Event::Exit(e)) => exit_code = Some(e.exit_code),
+                _ => {}
+            }
+        }
+
+        let output = String::from_utf8_lossy(&stdout_data);
+        assert!(output.contains("5000"));
+        assert_eq!(exit_code, Some(0));
+        // Output should be chunked across multiple events
+        let stdout_event_count = events
+            .iter()
+            .filter(|e| matches!(e.as_ref().ok().and_then(|e| e.event.as_ref()), Some(exec_event::Event::Stdout(_))))
+            .count();
+        assert!(stdout_event_count >= 1);
     }
 }

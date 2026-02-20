@@ -507,8 +507,10 @@ fn strip_command_echo(output: &[u8], cmd: &str) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    // ---- extract_sentinel tests ----
+
     #[test]
-    fn test_extract_sentinel_found() {
+    fn extract_sentinel_found() {
         let marker = "__SC_SENTINEL_123_";
         let buf = b"hello world\n__SC_SENTINEL_123_0__\n";
         let (output, code) = extract_sentinel(buf, marker).unwrap();
@@ -517,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_sentinel_nonzero_exit() {
+    fn extract_sentinel_nonzero_exit() {
         let marker = "__SC_SENTINEL_456_";
         let buf = b"error output\n__SC_SENTINEL_456_42__\n";
         let (output, code) = extract_sentinel(buf, marker).unwrap();
@@ -526,17 +528,214 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_sentinel_not_found() {
+    fn extract_sentinel_not_found() {
         let marker = "__SC_SENTINEL_123_";
         let buf = b"hello world\nstill going...";
         assert!(extract_sentinel(buf, marker).is_none());
     }
 
     #[test]
-    fn test_extract_sentinel_partial() {
+    fn extract_sentinel_partial() {
         let marker = "__SC_SENTINEL_123_";
         let buf = b"output\n__SC_SENTINEL_123_";
-        // Sentinel suffix not yet received
         assert!(extract_sentinel(buf, marker).is_none());
+    }
+
+    #[test]
+    fn extract_sentinel_negative_exit() {
+        let marker = "__SC_SENTINEL_789_";
+        let buf = b"__SC_SENTINEL_789_-1__\n";
+        let (output, code) = extract_sentinel(buf, marker).unwrap();
+        assert!(output.is_empty());
+        assert_eq!(code, -1);
+    }
+
+    #[test]
+    fn extract_sentinel_no_output_before() {
+        let marker = "__SC_SENTINEL_100_";
+        let buf = b"__SC_SENTINEL_100_0__";
+        let (output, code) = extract_sentinel(buf, marker).unwrap();
+        assert!(output.is_empty());
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn extract_sentinel_wrong_marker() {
+        let marker = "__SC_SENTINEL_AAA_";
+        let buf = b"output\n__SC_SENTINEL_BBB_0__\n";
+        assert!(extract_sentinel(buf, marker).is_none());
+    }
+
+    #[test]
+    fn extract_sentinel_invalid_exit_code() {
+        let marker = "__SC_SENTINEL_999_";
+        let buf = b"__SC_SENTINEL_999_notanumber__\n";
+        let (_, code) = extract_sentinel(buf, marker).unwrap();
+        assert_eq!(code, -1); // parse failure falls back to -1
+    }
+
+    #[test]
+    fn extract_sentinel_multiline_output() {
+        let marker = "__SC_SENTINEL_555_";
+        let buf = b"line1\nline2\nline3\n__SC_SENTINEL_555_0__\n";
+        let (output, code) = extract_sentinel(buf, marker).unwrap();
+        assert_eq!(String::from_utf8_lossy(&output), "line1\nline2\nline3\n");
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn extract_sentinel_large_exit_code() {
+        let marker = "__SC_SENTINEL_001_";
+        let buf = b"__SC_SENTINEL_001_255__";
+        let (_, code) = extract_sentinel(buf, marker).unwrap();
+        assert_eq!(code, 255);
+    }
+
+    // ---- strip_command_echo tests ----
+
+    #[test]
+    fn strip_echo_with_sc_exit_marker() {
+        let output = b"ls -la; __sc_exit=$?; echo \"__SC_SENTINEL_123_${__sc_exit}__\"\nfile1.txt\nfile2.txt\n";
+        let cmd = "ls -la";
+        let result = strip_command_echo(output, cmd);
+        assert_eq!(String::from_utf8_lossy(&result), "file1.txt\nfile2.txt\n");
+    }
+
+    #[test]
+    fn strip_echo_command_at_start() {
+        let output = b"echo hello\nhello\n";
+        let cmd = "echo hello";
+        let result = strip_command_echo(output, cmd);
+        assert_eq!(String::from_utf8_lossy(&result), "hello\n");
+    }
+
+    #[test]
+    fn strip_echo_no_matching_command() {
+        let output = b"some random output\n";
+        let cmd = "ls -la";
+        let result = strip_command_echo(output, cmd);
+        assert_eq!(result, output);
+    }
+
+    #[test]
+    fn strip_echo_empty_output() {
+        let result = strip_command_echo(b"", "ls");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn strip_echo_only_command_no_newline() {
+        let output = b"echo hello";
+        let cmd = "echo hello";
+        // No newline to split on, so output stays
+        let result = strip_command_echo(output, cmd);
+        assert_eq!(result, output);
+    }
+
+    // ---- SessionManager unit tests ----
+
+    #[tokio::test]
+    async fn session_manager_destroy_nonexistent() {
+        let manager = SessionManager::new();
+        let result = manager.destroy_session("sess_9999").await;
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn session_manager_get_nonexistent() {
+        let manager = SessionManager::new();
+        let result = manager.get_session("sess_nonexistent").await;
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn session_manager_create_and_destroy() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+        let session_id = manager.create_session("/bin/sh", &env).await.unwrap();
+        assert!(session_id.starts_with("sess_"));
+
+        // Session should be accessible
+        assert!(manager.get_session(&session_id).await.is_ok());
+
+        // Destroy should succeed
+        manager.destroy_session(&session_id).await.unwrap();
+
+        // Session should be gone
+        assert!(manager.get_session(&session_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn session_manager_unique_ids() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+
+        let id1 = manager.create_session("/bin/sh", &env).await.unwrap();
+        let id2 = manager.create_session("/bin/sh", &env).await.unwrap();
+        assert_ne!(id1, id2);
+
+        manager.destroy_session(&id1).await.unwrap();
+        manager.destroy_session(&id2).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_manager_max_sessions() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+
+        let mut ids = Vec::new();
+        for _ in 0..MAX_SESSIONS {
+            let id = manager.create_session("/bin/sh", &env).await.unwrap();
+            ids.push(id);
+        }
+
+        // Next session should fail with resource exhausted
+        let result = manager.create_session("/bin/sh", &env).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::ResourceExhausted);
+
+        // Clean up
+        for id in ids {
+            manager.destroy_session(&id).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn session_manager_default_shell() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+        // Empty shell should default to /bin/bash
+        let id = manager.create_session("", &env).await.unwrap();
+        assert!(id.starts_with("sess_"));
+        manager.destroy_session(&id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_manager_destroy_all() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+
+        manager.create_session("/bin/sh", &env).await.unwrap();
+        manager.create_session("/bin/sh", &env).await.unwrap();
+
+        manager.destroy_all().await;
+
+        // All sessions should be gone
+        let sessions = manager.sessions.read().await;
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_manager_invalid_shell() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+        let result = manager
+            .create_session("/nonexistent/shell", &env)
+            .await;
+        assert!(result.is_err());
     }
 }

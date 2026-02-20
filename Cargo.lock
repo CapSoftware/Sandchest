@@ -965,6 +965,7 @@ dependencies = [
  "prost",
  "prost-types",
  "sha2",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-vsock",
