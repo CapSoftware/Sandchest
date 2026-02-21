@@ -6,6 +6,7 @@ export { sandboxSessions } from './sandbox-sessions'
 export { execs } from './execs'
 export { artifacts } from './artifacts'
 export { orgQuotas } from './org-quotas'
+export { orgUsage } from './org-usage'
 export { idempotencyKeys } from './idempotency-keys'
 
 export {
