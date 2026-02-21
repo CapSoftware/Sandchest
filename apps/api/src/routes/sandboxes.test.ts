@@ -374,6 +374,65 @@ describe('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
 
     expect(result.status).toBe('in_progress')
   })
+
+  test('returns 410 Gone when replay has expired', async () => {
+    const env = createTestEnv()
+    const sandboxId = await createRunningSandbox(env)
+
+    // Stop the sandbox and set replay_expires_at to the past
+    const idBytes = idToBytes(sandboxId)
+    await Effect.runPromise(
+      env.sandboxRepo.updateStatus(idBytes, TEST_ORG, 'stopped', {
+        endedAt: new Date(Date.now() - 86_400_000),
+      }),
+    )
+    await Effect.runPromise(
+      env.sandboxRepo.setReplayExpiresAt(idBytes, new Date(Date.now() - 1000)),
+    )
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}/replay`),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(410)
+    expect(result.body.error).toBe('gone')
+    expect(result.body.message).toContain('expired')
+  })
+
+  test('returns 200 when replay has future expiry', async () => {
+    const env = createTestEnv()
+    const sandboxId = await createRunningSandbox(env)
+
+    const idBytes = idToBytes(sandboxId)
+    await Effect.runPromise(
+      env.sandboxRepo.updateStatus(idBytes, TEST_ORG, 'stopped', {
+        endedAt: new Date(),
+      }),
+    )
+    // Set expiry 30 days in the future
+    await Effect.runPromise(
+      env.sandboxRepo.setReplayExpiresAt(idBytes, new Date(Date.now() + 30 * 86_400_000)),
+    )
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}/replay`),
+        )
+        return { status: response.status }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+  })
 })
 
 // ---------------------------------------------------------------------------

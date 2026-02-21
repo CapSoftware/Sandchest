@@ -13,6 +13,7 @@ export const orgQuotas = mysqlTable('org_quotas', {
   idleTimeoutSeconds: int('idle_timeout_seconds').notNull().default(900),
   maxForkDepth: int('max_fork_depth').notNull().default(5),
   maxForksPerSandbox: int('max_forks_per_sandbox').notNull().default(10),
+  replayRetentionDays: int('replay_retention_days').notNull().default(30),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 })

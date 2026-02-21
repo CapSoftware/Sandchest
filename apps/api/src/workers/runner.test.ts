@@ -18,7 +18,10 @@ import { queueTimeoutWorker } from './queue-timeout.js'
 import { idempotencyCleanupWorker } from './idempotency-cleanup.js'
 import { artifactRetentionWorker } from './artifact-retention.js'
 import { orgHardDeleteWorker } from './org-hard-delete.js'
-import { generateUUIDv7, base62Encode } from '@sandchest/contract'
+import { replayRetentionWorker, PURGED_SENTINEL } from './replay-retention.js'
+import { generateUUIDv7, base62Encode, bytesToId, SANDBOX_PREFIX } from '@sandchest/contract'
+import { QuotaService, type QuotaApi } from '../services/quota.js'
+import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import type { WorkerDeps } from './index.js'
 
 let redis: RedisApi
@@ -27,6 +30,7 @@ let artifactRepo: ArtifactRepoApi
 let objectStorage: ObjectStorageApi
 let idempotencyApi: IdempotencyRepoApi
 let idempotencyStore: Map<string, { createdAt: Date }>
+let quotaApi: QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, unknown>) => void }
 let testLayer: Layer.Layer<WorkerDeps | RedisService>
 
 function run<A>(effect: Effect.Effect<A, never, WorkerDeps | RedisService>): Promise<A> {
@@ -44,6 +48,7 @@ beforeEach(() => {
   const testable = createTestableIdempotencyRepo()
   idempotencyApi = testable.api
   idempotencyStore = testable.store
+  quotaApi = createInMemoryQuotaApi()
 
   testLayer = Layer.mergeAll(
     Layer.succeed(RedisService, redis),
@@ -51,6 +56,7 @@ beforeEach(() => {
     Layer.succeed(ArtifactRepo, artifactRepo),
     Layer.succeed(ObjectStorage, objectStorage),
     Layer.succeed(IdempotencyRepo, idempotencyApi),
+    Layer.succeed(QuotaService, quotaApi),
   )
 })
 
@@ -543,5 +549,200 @@ describe('org-hard-delete', () => {
   test('returns 0 (stub)', async () => {
     const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
     expect(count).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Replay retention worker
+// ---------------------------------------------------------------------------
+
+describe('replay-retention', () => {
+  async function createStoppedSandbox(orgId: string, endedAt: Date) {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(
+      sandboxRepo.updateStatus(id, orgId, 'stopped', { endedAt }),
+    )
+    return id
+  }
+
+  test('returns 0 when no sandboxes exist', async () => {
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('sets replay_expires_at on terminal sandboxes missing it', async () => {
+    const endedAt = new Date(Date.now() - 1000)
+    const id = await createStoppedSandbox('org_test', endedAt)
+
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(row?.replayExpiresAt).not.toBeNull()
+    // Default retention is 30 days
+    const expectedExpiry = endedAt.getTime() + 30 * 86_400_000
+    expect(row!.replayExpiresAt!.getTime()).toBe(expectedExpiry)
+  })
+
+  test('uses org-specific retention days', async () => {
+    quotaApi.setOrgQuota('org_custom', { replayRetentionDays: 7 })
+    const endedAt = new Date(Date.now() - 1000)
+    const id = await createStoppedSandbox('org_custom', endedAt)
+
+    await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_custom'))
+    const expectedExpiry = endedAt.getTime() + 7 * 86_400_000
+    expect(row!.replayExpiresAt!.getTime()).toBe(expectedExpiry)
+  })
+
+  test('does not set expiry on running sandboxes', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'running'))
+
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(0)
+
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(row?.replayExpiresAt).toBeNull()
+  })
+
+  test('does not re-process sandboxes that already have expiry set', async () => {
+    const endedAt = new Date(Date.now() - 1000)
+    await createStoppedSandbox('org_test', endedAt)
+
+    // First run sets expiry
+    await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+
+    // Second run should not re-process (already has expiry)
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('purges expired replays and deletes events from storage', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    const endedAt = new Date(Date.now() - 31 * 86_400_000) // 31 days ago
+    await Effect.runPromise(
+      sandboxRepo.updateStatus(id, 'org_test', 'stopped', { endedAt }),
+    )
+
+    // Put events in storage
+    const sandboxIdStr = bytesToId(SANDBOX_PREFIX, id)
+    const eventsKey = `org_test/${sandboxIdStr}/events.jsonl`
+    await Effect.runPromise(objectStorage.putObject(eventsKey, 'event data'))
+
+    // Single run handles both: sets expiry (past) then immediately purges
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(2) // 1 expiry set + 1 purge
+
+    // Events should be deleted from storage
+    const events = await Effect.runPromise(objectStorage.getObject(eventsKey))
+    expect(events).toBeNull()
+
+    // replay_expires_at should be set to sentinel
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(row!.replayExpiresAt!.getTime()).toBe(PURGED_SENTINEL.getTime())
+  })
+
+  test('does not purge replays that have not expired yet', async () => {
+    const endedAt = new Date() // Just ended
+    const id = await createStoppedSandbox('org_test', endedAt)
+
+    // Set expiry (endedAt + 30 days = 30 days from now)
+    await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(row!.replayExpiresAt!.getTime()).toBeGreaterThan(Date.now())
+
+    // Second run should not purge
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('does not re-purge already purged replays', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    const endedAt = new Date(Date.now() - 31 * 86_400_000)
+    await Effect.runPromise(
+      sandboxRepo.updateStatus(id, 'org_test', 'stopped', { endedAt }),
+    )
+
+    // First run: sets expiry
+    await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    // Second run: purges
+    await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+
+    // Third run: should not re-process (sentinel blocks re-set and re-purge)
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('handles multiple orgs with different retention periods', async () => {
+    quotaApi.setOrgQuota('org_short', { replayRetentionDays: 1 })
+    // org_long uses default 30 days
+
+    const endedAt = new Date(Date.now() - 2 * 86_400_000) // 2 days ago
+
+    const shortId = await createStoppedSandbox('org_short', endedAt)
+    const longId = await createStoppedSandbox('org_long', endedAt)
+
+    // Single run: sets both expiries + purges the already-expired short one
+    const count = await run(runWorkerTick(replayRetentionWorker, 'inst-1'))
+    expect(count).toBe(3) // 2 expiries set + 1 purge
+
+    const shortRow = await Effect.runPromise(sandboxRepo.findById(shortId, 'org_short'))
+    const longRow = await Effect.runPromise(sandboxRepo.findById(longId, 'org_long'))
+
+    // org_short: purged (sentinel)
+    expect(shortRow!.replayExpiresAt!.getTime()).toBe(PURGED_SENTINEL.getTime())
+    // org_long: endedAt + 30 days = 28 days from now (not expired)
+    expect(longRow!.replayExpiresAt!.getTime()).toBeGreaterThan(Date.now())
   })
 })

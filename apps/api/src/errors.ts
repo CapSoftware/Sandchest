@@ -46,6 +46,10 @@ export class QuotaExceededError extends Data.TaggedError('QuotaExceededError')<{
   readonly message: string
 }> {}
 
+export class GoneError extends Data.TaggedError('GoneError')<{
+  readonly message: string
+}> {}
+
 export class NotImplementedError extends Data.TaggedError('NotImplementedError')<{
   readonly message: string
 }> {}
@@ -62,6 +66,7 @@ export type ApiError =
   | ForkDepthExceededError
   | ForkLimitExceededError
   | QuotaExceededError
+  | GoneError
   | NotImplementedError
 
 const STATUS_MAP: Record<ApiError['_tag'], number> = {
@@ -76,6 +81,7 @@ const STATUS_MAP: Record<ApiError['_tag'], number> = {
   ForkDepthExceededError: 422,
   ForkLimitExceededError: 422,
   QuotaExceededError: 429,
+  GoneError: 410,
   NotImplementedError: 501,
 }
 
@@ -91,6 +97,7 @@ const CODE_MAP: Record<ApiError['_tag'], string> = {
   ForkDepthExceededError: 'fork_depth_exceeded',
   ForkLimitExceededError: 'fork_limit_exceeded',
   QuotaExceededError: 'quota_exceeded',
+  GoneError: 'gone',
   NotImplementedError: 'not_implemented',
 }
 

@@ -38,6 +38,7 @@ export const sandboxes = mysqlTable(
       'queue_timeout',
     ]),
     replayBundleRef: varchar('replay_bundle_ref', { length: 1024 }),
+    replayExpiresAt: timestampMicro('replay_expires_at'),
     lastActivityAt: timestampMicro('last_activity_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -61,6 +61,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
           replayPublic: false,
+          replayExpiresAt: null,
           lastActivityAt: null,
           createdAt: now,
           updatedAt: now,
@@ -164,6 +165,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
           replayPublic: false,
+          replayExpiresAt: null,
           lastActivityAt: now,
           createdAt: now,
           updatedAt: now,
@@ -309,6 +311,31 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           (r) => r.orgId === orgId && active.includes(r.status),
         ).length
       }),
+
+    findMissingReplayExpiry: () =>
+      Effect.sync(() => {
+        const terminal: SandboxStatus[] = ['stopped', 'failed']
+        return Array.from(store.values()).filter(
+          (r) => terminal.includes(r.status) && r.endedAt !== null && r.replayExpiresAt === null,
+        )
+      }),
+
+    setReplayExpiresAt: (id, expiresAt) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        if (!row) return
+        store.set(key, { ...row, replayExpiresAt: expiresAt, updatedAt: new Date() })
+      }),
+
+    findPurgableReplays: (cutoff, minDate) =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter((r) => {
+          if (!r.replayExpiresAt) return false
+          return r.replayExpiresAt.getTime() > minDate.getTime() &&
+            r.replayExpiresAt.getTime() <= cutoff.getTime()
+        }),
+      ),
   }
 }
 

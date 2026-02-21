@@ -12,6 +12,7 @@ export interface OrgQuota {
   readonly idleTimeoutSeconds: number
   readonly maxForkDepth: number
   readonly maxForksPerSandbox: number
+  readonly replayRetentionDays: number
 }
 
 /** Default quotas matching the DB column defaults in org_quotas. */
@@ -26,6 +27,7 @@ export const DEFAULT_QUOTA: OrgQuota = {
   idleTimeoutSeconds: 900,
   maxForkDepth: 5,
   maxForksPerSandbox: 10,
+  replayRetentionDays: 30,
 }
 
 export interface QuotaApi {

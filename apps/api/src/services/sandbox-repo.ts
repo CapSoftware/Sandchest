@@ -22,6 +22,7 @@ export interface SandboxRow {
   readonly ttlSeconds: number
   readonly failureReason: FailureReason | null
   readonly replayPublic: boolean
+  readonly replayExpiresAt: Date | null
   readonly lastActivityAt: Date | null
   readonly createdAt: Date
   readonly updatedAt: Date
@@ -147,6 +148,21 @@ export interface SandboxRepoApi {
   readonly countActive: (
     orgId: string,
   ) => Effect.Effect<number, never, never>
+
+  /** Find terminal sandboxes with endedAt set but no replay_expires_at. */
+  readonly findMissingReplayExpiry: () => Effect.Effect<SandboxRow[], never, never>
+
+  /** Set replay_expires_at for a sandbox. */
+  readonly setReplayExpiresAt: (
+    id: Uint8Array,
+    expiresAt: Date,
+  ) => Effect.Effect<void, never, never>
+
+  /** Find sandboxes with replay_expires_at between minDate (exclusive) and cutoff (inclusive). */
+  readonly findPurgableReplays: (
+    cutoff: Date,
+    minDate: Date,
+  ) => Effect.Effect<SandboxRow[], never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}

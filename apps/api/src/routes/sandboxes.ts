@@ -31,6 +31,7 @@ import type {
 import {
   ForkDepthExceededError,
   ForkLimitExceededError,
+  GoneError,
   NotFoundError,
   QuotaExceededError,
   SandboxNotRunningError,
@@ -668,6 +669,10 @@ const getReplay = Effect.gen(function* () {
     return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
   }
 
+  if (row.replayExpiresAt && row.replayExpiresAt.getTime() <= Date.now()) {
+    return yield* Effect.fail(new GoneError({ message: `Replay for sandbox ${id} has expired` }))
+  }
+
   // Fetch fork tree
   const treeRows = yield* sandboxRepo.getForkTree(idBytes, auth.orgId)
 
@@ -796,6 +801,10 @@ const getPublicReplay = Effect.gen(function* () {
   const row = yield* sandboxRepo.findByIdPublic(idBytes)
   if (!row) {
     return yield* Effect.fail(new NotFoundError({ message: 'Replay not found or is private' }))
+  }
+
+  if (row.replayExpiresAt && row.replayExpiresAt.getTime() <= Date.now()) {
+    return yield* Effect.fail(new GoneError({ message: 'Replay has expired' }))
   }
 
   // Fetch fork tree using the sandbox's orgId

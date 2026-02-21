@@ -8,6 +8,7 @@ import {
   RateLimitedError,
   SandboxNotRunningError,
   NoCapacityError,
+  GoneError,
   NotImplementedError,
   errorToResponse,
   formatApiError,
@@ -96,6 +97,13 @@ describe('errorToResponse', () => {
     expect(extractBody(response).error).toBe('no_capacity')
   })
 
+  test('GoneError maps to 410 with gone code', () => {
+    const error = new GoneError({ message: 'Replay has expired' })
+    const response = errorToResponse(error, 'req_gone')
+    expect(extractStatus(response)).toBe(410)
+    expect(extractBody(response).error).toBe('gone')
+  })
+
   test('NotImplementedError maps to 501 with not_implemented code', () => {
     const error = new NotImplementedError({ message: 'Fork not yet implemented' })
     const response = errorToResponse(error, 'req_yza')
@@ -118,6 +126,7 @@ describe('errorToResponse', () => {
       new ConflictError({ message: 'x' }),
       new SandboxNotRunningError({ message: 'x' }),
       new NoCapacityError({ message: 'x' }),
+      new GoneError({ message: 'x' }),
       new NotImplementedError({ message: 'x' }),
     ]
     for (const error of errors) {
