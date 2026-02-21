@@ -26,7 +26,7 @@ export const withAuth = HttpMiddleware.make((app) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
 
-    if (request.url.startsWith('/health') || request.url.startsWith('/readyz') || request.url.startsWith('/api/auth') || request.url.startsWith('/v1/public/') || request.url.startsWith('/v1/internal/')) {
+    if (request.url.startsWith('/health') || request.url.startsWith('/readyz') || request.url.startsWith('/api/auth') || request.url.startsWith('/v1/public/') || request.url.startsWith('/v1/internal/') || request.url === '/openapi.json' || request.url === '/docs') {
       return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '' })
     }
 
