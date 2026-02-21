@@ -1,17 +1,24 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { apiFetch } from '@/lib/api'
 import { formatRelativeTime, formatDuration, formatCmd, formatBytes } from '@/lib/format'
 import StatusBadge from '@/components/ui/StatusBadge'
+import CopyButton from '@/components/ui/CopyButton'
 import EmptyState from '@/components/ui/EmptyState'
+import Timeline from './Timeline'
+import ForkTree from './ForkTree'
+import AnsiText from './AnsiText'
+import { useReplayBundle, useReplayEvents } from '@/hooks/use-replay'
 import type {
-  ReplayBundle,
   ReplayExec,
   ReplayArtifact,
   ExecOutputEntry,
 } from '@sandchest/contract'
+
+// ---------------------------------------------------------------------------
+// Exec card with expandable ANSI output
+// ---------------------------------------------------------------------------
 
 function ExecCard({ exec }: { exec: ReplayExec }) {
   const [expanded, setExpanded] = useState(false)
@@ -42,6 +49,11 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
     }
   }, [expanded, output, exec.output_ref])
 
+  const combinedOutput = useMemo(() => {
+    if (!output) return ''
+    return output.map((e) => e.data).join('')
+  }, [output])
+
   const exitCodeColor =
     exec.exit_code === null
       ? 'var(--color-text-weak)'
@@ -56,7 +68,7 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
         className="replay-exec-header"
         onClick={handleExpand}
       >
-        <span className="replay-exec-chevron">{expanded ? '▾' : '▸'}</span>
+        <span className="replay-exec-chevron">{expanded ? '\u25be' : '\u25b8'}</span>
         <code className="replay-exec-cmd">{formatCmd(exec.cmd)}</code>
         <span className="replay-exec-meta">
           {exec.exit_code !== null && (
@@ -75,21 +87,8 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
         <div className="replay-exec-output">
           {loadingOutput ? (
             <div className="replay-output-loading">Loading output...</div>
-          ) : output && output.length > 0 ? (
-            <pre className="replay-terminal">
-              {output.map((entry, i) => (
-                <span
-                  key={i}
-                  className={
-                    entry.stream === 'stderr'
-                      ? 'replay-stderr'
-                      : 'replay-stdout'
-                  }
-                >
-                  {entry.data}
-                </span>
-              ))}
-            </pre>
+          ) : combinedOutput ? (
+            <AnsiText text={combinedOutput} />
           ) : (
             <div className="replay-output-empty">No output</div>
           )}
@@ -104,6 +103,10 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Artifact row
+// ---------------------------------------------------------------------------
 
 function ArtifactRow({ artifact }: { artifact: ReplayArtifact }) {
   return (
@@ -123,40 +126,35 @@ function ArtifactRow({ artifact }: { artifact: ReplayArtifact }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Tab types
+// ---------------------------------------------------------------------------
+
+type Tab = 'timeline' | 'execs' | 'sessions' | 'artifacts'
+
+// ---------------------------------------------------------------------------
+// Main viewer
+// ---------------------------------------------------------------------------
+
 interface ReplayViewerProps {
   sandboxId: string
 }
 
 export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
-  const [bundle, setBundle] = useState<ReplayBundle | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'execs' | 'sessions' | 'artifacts'>('execs')
+  const [activeTab, setActiveTab] = useState<Tab>('timeline')
 
-  // Data fetching is external system sync — useEffect is correct here
-  useEffect(() => {
-    let cancelled = false
-    apiFetch<ReplayBundle>(`/v1/public/replay/${sandboxId}`)
-      .then((data) => {
-        if (!cancelled) {
-          setBundle(data)
-          setLoading(false)
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        const message = err instanceof Error ? err.message : 'Failed to load replay'
-        if (message.includes('not found') || message.includes('private')) {
-          setError('This replay is private or does not exist.')
-        } else {
-          setError(message)
-        }
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [sandboxId])
+  const { data: bundle, error, isLoading } = useReplayBundle(sandboxId)
+  const isLive = bundle?.status === 'in_progress'
+  const { data: events = [] } = useReplayEvents(
+    bundle?.events_url,
+    isLive,
+  )
 
-  if (loading) {
+  const replayUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/s/${sandboxId}`
+    : `/s/${sandboxId}`
+
+  if (isLoading) {
     return (
       <div className="replay-container">
         <EmptyState message="Loading replay..." className="replay-loading" />
@@ -165,11 +163,15 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
   }
 
   if (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load replay'
+    const isPrivateOrNotFound = message.includes('not found') || message.includes('private') || message.includes('403') || message.includes('404')
     return (
       <div className="replay-container">
         <div className="replay-error-state">
           <div className="replay-error-icon">&#128274;</div>
-          <h2 className="replay-error-title">{error}</h2>
+          <h2 className="replay-error-title">
+            {isPrivateOrNotFound ? 'This replay is private or does not exist.' : message}
+          </h2>
           <p className="replay-error-desc">
             If you own this sandbox, sign in to view it or make it public.
           </p>
@@ -192,10 +194,22 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
           <span className="replay-sandbox-id">{bundle.sandbox_id}</span>
         </div>
         <div className="replay-header-right">
+          {isLive && (
+            <span className="replay-live-badge">
+              <span className="replay-live-dot" />
+              Live
+            </span>
+          )}
           <StatusBadge
             status={bundle.status}
-            label={bundle.status === 'in_progress' ? 'live' : 'complete'}
+            label={isLive ? 'in progress' : 'complete'}
             className="replay-status"
+          />
+          <CopyButton
+            text={replayUrl}
+            label="Copy URL"
+            copiedLabel="Copied!"
+            className="replay-copy-btn"
           />
         </div>
       </header>
@@ -211,7 +225,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
         </div>
         <div className="replay-meta-row">
           <span className="replay-meta-label">Started</span>
-          <span className="replay-meta-value">
+          <span className="replay-meta-value" title={bundle.started_at}>
             {formatRelativeTime(bundle.started_at)}
           </span>
         </div>
@@ -237,30 +251,32 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
       </div>
 
       <nav className="replay-tabs">
-        <button
-          type="button"
-          className={`replay-tab${activeTab === 'execs' ? ' active' : ''}`}
-          onClick={() => setActiveTab('execs')}
-        >
-          Executions ({bundle.execs.length})
-        </button>
-        <button
-          type="button"
-          className={`replay-tab${activeTab === 'sessions' ? ' active' : ''}`}
-          onClick={() => setActiveTab('sessions')}
-        >
-          Sessions ({bundle.sessions.length})
-        </button>
-        <button
-          type="button"
-          className={`replay-tab${activeTab === 'artifacts' ? ' active' : ''}`}
-          onClick={() => setActiveTab('artifacts')}
-        >
-          Artifacts ({bundle.artifacts.length})
-        </button>
+        {([
+          ['timeline', `Timeline (${events.length})`],
+          ['execs', `Execs (${bundle.execs.length})`],
+          ['sessions', `Sessions (${bundle.sessions.length})`],
+          ['artifacts', `Artifacts (${bundle.artifacts.length})`],
+        ] as const).map(([tab, label]) => (
+          <button
+            key={tab}
+            type="button"
+            className={`replay-tab${activeTab === tab ? ' active' : ''}`}
+            onClick={() => setActiveTab(tab as Tab)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
       <div className="replay-content">
+        {activeTab === 'timeline' && (
+          <Timeline
+            events={events}
+            startedAt={bundle.started_at}
+            isLive={isLive}
+          />
+        )}
+
         {activeTab === 'execs' && (
           <div className="replay-exec-list">
             {bundle.execs.length === 0 ? (
@@ -339,50 +355,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
         )}
       </div>
 
-      {bundle.fork_tree.children.length > 0 && (
-        <div className="replay-fork-tree-section">
-          <h3 className="replay-section-title">Fork Tree</h3>
-          <ForkTreeNode node={bundle.fork_tree} currentId={bundle.sandbox_id} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ForkTreeNode({
-  node,
-  currentId,
-  depth = 0,
-}: {
-  node: ReplayBundle['fork_tree']
-  currentId: string
-  depth?: number
-}) {
-  const isCurrent = node.sandbox_id === currentId
-  return (
-    <div className="replay-fork-node" style={{ marginLeft: depth * 20 }}>
-      <span className="replay-fork-branch">{depth > 0 ? '├─ ' : ''}</span>
-      {isCurrent ? (
-        <span className="replay-fork-current">{node.sandbox_id}</span>
-      ) : (
-        <Link href={`/s/${node.sandbox_id}`} className="replay-fork-link">
-          {node.sandbox_id}
-        </Link>
-      )}
-      {node.forked_at && (
-        <span className="replay-text-weak replay-fork-time">
-          {' '}
-          forked {formatRelativeTime(node.forked_at)}
-        </span>
-      )}
-      {node.children.map((child) => (
-        <ForkTreeNode
-          key={child.sandbox_id}
-          node={child}
-          currentId={currentId}
-          depth={depth + 1}
-        />
-      ))}
+      <ForkTree tree={bundle.fork_tree} currentId={bundle.sandbox_id} />
     </div>
   )
 }
