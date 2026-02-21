@@ -13,6 +13,7 @@ import { NodeClientMemory } from './services/node-client.memory.js'
 import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { RedisMemory } from './services/redis.memory.js'
 import { QuotaMemory } from './services/quota.memory.js'
+import { ShutdownControllerLive } from './shutdown.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -31,6 +32,7 @@ const TestLayer = AppLive.pipe(
   Layer.provide(ArtifactRepoMemory),
   Layer.provide(RedisMemory),
   Layer.provide(QuotaMemory),
+  Layer.provide(ShutdownControllerLive),
   Layer.provide(TestAuthLayer),
 )
 
@@ -122,7 +124,7 @@ describe('Readyz endpoint', () => {
     expect(result.status).toBe(200)
     expect(result.body).toEqual({
       status: 'ok',
-      checks: { redis: 'ok' },
+      checks: { redis: 'ok', shutdown: 'ok' },
     })
   })
 

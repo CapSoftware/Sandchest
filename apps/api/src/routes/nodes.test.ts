@@ -11,6 +11,7 @@ import { NodeClientMemory } from '../services/node-client.memory.js'
 import { ArtifactRepoMemory } from '../services/artifact-repo.memory.js'
 import { RedisMemory } from '../services/redis.memory.js'
 import { QuotaMemory } from '../services/quota.memory.js'
+import { ShutdownControllerLive } from '../shutdown.js'
 
 const TestAuthLayer = Layer.succeed(AuthContext, {
   userId: 'user_test',
@@ -26,6 +27,7 @@ const TestLayer = AppLive.pipe(
   Layer.provide(ArtifactRepoMemory),
   Layer.provide(RedisMemory),
   Layer.provide(QuotaMemory),
+  Layer.provide(ShutdownControllerLive),
   Layer.provide(TestAuthLayer),
 )
 

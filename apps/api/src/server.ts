@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import { auth } from './auth.js'
 import { formatApiError } from './errors.js'
 import { withRequestId } from './middleware.js'
+import { withConnectionDrain } from './middleware/connection-drain.js'
 import { withRateLimit } from './middleware/rate-limit.js'
 import { withSecurityHeaders } from './middleware/security-headers.js'
 import { HealthRouter } from './routes/health.js'
@@ -27,4 +28,4 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.catchAll((error) => Effect.succeed(formatApiError(error))),
 )
 
-export const AppLive = ApiRouter.pipe(withRateLimit, withRequestId, withSecurityHeaders, HttpServer.serve())
+export const AppLive = ApiRouter.pipe(withConnectionDrain, withRateLimit, withRequestId, withSecurityHeaders, HttpServer.serve())

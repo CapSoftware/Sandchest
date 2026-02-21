@@ -18,6 +18,7 @@ import { ArtifactRepo } from '../services/artifact-repo.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
 import { QuotaService } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
+import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 
 const TEST_ORG = 'org_test_123'
@@ -41,6 +42,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(RedisService, redis)),
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
     Layer.provide(Layer.succeed(QuotaService, quotaApi)),
+    Layer.provide(ShutdownControllerLive),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
     ),

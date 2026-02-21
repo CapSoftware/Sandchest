@@ -26,6 +26,7 @@ import { createInMemoryRedisApi } from './services/redis.memory.js'
 import { createInMemoryArtifactRepo } from './services/artifact-repo.memory.js'
 import { createInMemoryQuotaApi } from './services/quota.memory.js'
 import { JsonLoggerLive } from './logger.js'
+import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 import type { SandboxRepoApi } from './services/sandbox-repo.js'
 import type { QuotaApi } from './services/quota.js'
@@ -95,6 +96,7 @@ beforeAll(async () => {
 
   const FullLayer = TestApp.pipe(
     Layer.provide(services),
+    Layer.provide(ShutdownControllerLive),
     Layer.provide(NodeHttpServer.layer(() => nodeServer, { port: 0 })),
     Layer.provide(JsonLoggerLive),
   )

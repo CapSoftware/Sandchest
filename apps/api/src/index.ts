@@ -1,9 +1,10 @@
 import { HttpServer } from '@effect/platform'
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { createServer } from 'node:http'
 import { ApiRouter } from './server.js'
 import { withAuth, withRequestId } from './middleware.js'
+import { withConnectionDrain } from './middleware/connection-drain.js'
 import { withRateLimit } from './middleware/rate-limit.js'
 import { withSecurityHeaders } from './middleware/security-headers.js'
 import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
@@ -18,12 +19,21 @@ import { IdempotencyRepoMemory } from './workers/idempotency-cleanup.memory.js'
 import { QuotaMemory } from './services/quota.memory.js'
 import { startAllWorkers } from './workers/index.js'
 import { JsonLoggerLive } from './logger.js'
+import { ShutdownController, ShutdownControllerLive } from './shutdown.js'
 
 const PORT = Number(process.env.PORT ?? 3000)
 const REDIS_URL = process.env.REDIS_URL
+const DRAIN_TIMEOUT_MS = Number(process.env.DRAIN_TIMEOUT_MS ?? 30_000)
 
-// Production pipeline: withAuth provides AuthContext, withRateLimit uses Redis
-const AppLive = ApiRouter.pipe(withRateLimit, withAuth, withRequestId, withSecurityHeaders, HttpServer.serve())
+// Production pipeline: connection drain is outermost so it gates all requests
+const AppLive = ApiRouter.pipe(
+  withConnectionDrain,
+  withRateLimit,
+  withAuth,
+  withRequestId,
+  withSecurityHeaders,
+  HttpServer.serve(),
+)
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL) : RedisMemory
 
@@ -34,7 +44,43 @@ const WorkersLive = Layer.scopedDiscard(
   }),
 )
 
-const ServerLive = Layer.mergeAll(AppLive, WorkersLive).pipe(
+// Graceful shutdown: listen for SIGTERM/SIGINT, drain connections, then exit.
+// Signal handlers run outside the Effect runtime to avoid racing with
+// NodeRuntime.runMain's own SIGTERM handler (which interrupts the fiber).
+const GracefulShutdownLive = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    const shutdown = yield* ShutdownController
+
+    const handleShutdown = () => {
+      Effect.runFork(
+        shutdown.beginDrain.pipe(
+          Effect.andThen(
+            Effect.race(
+              shutdown.awaitDrained,
+              Effect.sleep(Duration.millis(DRAIN_TIMEOUT_MS)),
+            ),
+          ),
+          Effect.ensuring(Effect.sync(() => process.exit(0))),
+        ),
+      )
+    }
+
+    process.on('SIGTERM', handleShutdown)
+    process.on('SIGINT', handleShutdown)
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        process.removeListener('SIGTERM', handleShutdown)
+        process.removeListener('SIGINT', handleShutdown)
+      }),
+    )
+
+    yield* Effect.log(`Server started on port ${PORT}`)
+  }),
+)
+
+const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pipe(
+  Layer.provide(ShutdownControllerLive),
   Layer.provide(SandboxRepoMemory),
   Layer.provide(ExecRepoMemory),
   Layer.provide(SessionRepoMemory),
