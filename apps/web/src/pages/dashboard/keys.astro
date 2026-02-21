@@ -1,0 +1,8 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro'
+import ApiKeyManager from '../../components/dashboard/ApiKeyManager'
+---
+
+<DashboardLayout title="API Keys" active="keys">
+  <ApiKeyManager client:load />
+</DashboardLayout>

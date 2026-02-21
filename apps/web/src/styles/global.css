@@ -316,3 +316,351 @@ a:hover {
     gap: 6px;
   }
 }
+
+/* ── Dashboard ── */
+.dash-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.dash-page-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-strong);
+}
+
+.dash-section {
+  margin-bottom: 32px;
+}
+
+.dash-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-weak);
+}
+
+/* Filters */
+.dash-filters {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.dash-filter-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-weak);
+  background: none;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.dash-filter-btn:hover {
+  color: var(--color-text-strong);
+  border-color: var(--color-border);
+}
+
+.dash-filter-btn.active {
+  color: var(--color-text-strong);
+  border-color: var(--color-accent);
+  background: var(--color-accent-weak);
+}
+
+/* Table */
+.dash-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dash-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-weak);
+}
+
+.dash-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-weak);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.dash-table tr:last-child td {
+  border-bottom: none;
+}
+
+.dash-table tr:hover td {
+  background: var(--color-surface);
+}
+
+/* Text helpers */
+.dash-text-weak {
+  color: var(--color-text-weak);
+}
+
+.dash-text-strong {
+  color: var(--color-text-strong);
+}
+
+.dash-id-link {
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.dash-status {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Buttons */
+.dash-primary-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-background);
+  background: var(--color-accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.dash-primary-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.dash-primary-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dash-action-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-weak);
+  background: none;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dash-action-btn:hover:not(:disabled) {
+  color: var(--color-text-strong);
+  border-color: var(--color-border);
+}
+
+.dash-action-btn.danger:hover:not(:disabled) {
+  color: hsl(0, 70%, 60%);
+  border-color: hsl(0, 70%, 60%);
+}
+
+.dash-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dash-link-btn {
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-accent);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dash-load-more {
+  display: block;
+  margin: 0 auto;
+  padding: 8px 24px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--color-text-weak);
+  background: none;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dash-load-more:hover {
+  color: var(--color-text-strong);
+  border-color: var(--color-border);
+}
+
+/* Forms */
+.dash-input {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--color-text-strong);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.dash-input::placeholder {
+  color: var(--color-text-weak);
+}
+
+.dash-input:focus {
+  border-color: var(--color-accent);
+}
+
+.dash-input:disabled {
+  opacity: 0.5;
+}
+
+.dash-select {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--color-text-strong);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+
+.dash-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  margin-bottom: 6px;
+}
+
+.dash-field {
+  margin-bottom: 16px;
+}
+
+.dash-static-value {
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.dash-static-value code {
+  font-size: 12px;
+  color: var(--color-text-weak);
+}
+
+.dash-inline-form {
+  max-width: 400px;
+}
+
+.dash-create-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 24px;
+}
+
+.dash-create-form .dash-input {
+  flex: 1;
+}
+
+.dash-invite-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.dash-invite-form .dash-input {
+  flex: 1;
+}
+
+/* Key reveal */
+.dash-key-reveal {
+  padding: 16px;
+  margin-bottom: 24px;
+  background: var(--color-accent-weak);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+}
+
+.dash-key-reveal-label {
+  font-size: 13px;
+  color: var(--color-text);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.dash-key-reveal-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.dash-key-reveal-value {
+  font-size: 12px;
+  color: var(--color-accent);
+  word-break: break-all;
+  flex: 1;
+}
+
+.dash-key-prefix {
+  font-size: 12px;
+  color: var(--color-text-weak);
+}
+
+/* Empty / error states */
+.dash-empty {
+  padding: 40px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-weak);
+}
+
+.dash-error {
+  font-size: 13px;
+  color: hsl(0, 70%, 60%);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+@media (max-width: 768px) {
+  .dash-create-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dash-invite-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dash-table {
+    font-size: 12px;
+  }
+}

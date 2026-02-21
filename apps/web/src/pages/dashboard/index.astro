@@ -1,0 +1,8 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro'
+import SandboxList from '../../components/dashboard/SandboxList'
+---
+
+<DashboardLayout title="Sandboxes" active="sandboxes">
+  <SandboxList client:load />
+</DashboardLayout>

@@ -1,0 +1,8 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro'
+import OrgSettings from '../../components/dashboard/OrgSettings'
+---
+
+<DashboardLayout title="Settings" active="settings">
+  <OrgSettings client:load />
+</DashboardLayout>
