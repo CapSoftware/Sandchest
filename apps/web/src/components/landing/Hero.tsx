@@ -3,7 +3,7 @@ import InstallCommand from './InstallCommand'
 export default function Hero() {
   return (
     <section className="flex flex-col" style={{ padding: 'var(--vertical-padding) var(--padding)' }}>
-      <h1 className="hero-reveal hero-reveal-delay-1 text-text-strong font-bold" style={{ fontSize: 38, marginBottom: 8 }}>
+      <h1 className="hero-reveal hero-reveal-delay-1 text-text-strong font-bold" style={{ fontSize: 38, lineHeight: 1.1, marginBottom: 8 }}>
         The sandbox platform for AI agents.
       </h1>
 
