@@ -9,7 +9,13 @@
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
-    "test": "turbo test"
+    "test": "turbo test",
+    "test:e2e": "turbo test:e2e",
+    "dev": "bun run --filter @sandchest/api dev",
+    "db:generate": "bun run --filter @sandchest/db db:generate",
+    "db:push": "bun run --filter @sandchest/db db:push",
+    "db:migrate": "bun run --filter @sandchest/db db:migrate",
+    "db:studio": "bun run --filter @sandchest/db db:studio"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

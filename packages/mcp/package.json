@@ -1,6 +1,7 @@
 {
   "name": "@sandchest/mcp",
   "version": "0.0.1",
+  "description": "MCP server for Sandchest sandbox environments",
   "type": "module",
   "bin": {
     "sandchest-mcp": "./dist/index.js"
@@ -9,9 +10,25 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
+  },
+  "files": ["dist"],
+  "keywords": ["sandchest", "mcp", "model-context-protocol", "sandbox", "ai-agent"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandchest/sandchest",
+    "directory": "packages/mcp"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc",

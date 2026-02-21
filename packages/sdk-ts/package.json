@@ -29,11 +29,15 @@
   "engines": {
     "node": ">=20"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "bun test"
+    "test": "bun test --ignore='src/e2e.test.ts'",
+    "test:e2e": "bun test src/e2e.test.ts"
   },
   "dependencies": {
     "@sandchest/contract": "workspace:*"

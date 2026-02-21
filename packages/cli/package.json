@@ -1,9 +1,24 @@
 {
   "name": "@sandchest/cli",
   "version": "0.0.1",
+  "description": "CLI for managing Sandchest sandbox environments",
   "type": "module",
   "bin": {
     "sandchest": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "keywords": ["sandchest", "cli", "sandbox", "firecracker", "code-execution"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandchest/sandchest",
+    "directory": "packages/cli"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsup",

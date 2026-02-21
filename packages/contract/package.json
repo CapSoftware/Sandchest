@@ -1,14 +1,31 @@
 {
   "name": "@sandchest/contract",
   "version": "0.0.1",
+  "description": "Shared types, protobuf definitions, and ID utilities for the Sandchest platform",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
+  },
+  "files": ["dist"],
+  "keywords": ["sandchest", "contract", "types", "protobuf", "sandbox"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandchest/sandchest",
+    "directory": "packages/contract"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc",
