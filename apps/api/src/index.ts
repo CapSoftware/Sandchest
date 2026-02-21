@@ -15,6 +15,7 @@ import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
 import { IdempotencyRepoMemory } from './workers/idempotency-cleanup.memory.js'
 import { startAllWorkers } from './workers/index.js'
+import { JsonLoggerLive } from './logger.js'
 
 const PORT = Number(process.env.PORT ?? 3000)
 const REDIS_URL = process.env.REDIS_URL
@@ -41,6 +42,7 @@ const ServerLive = Layer.mergeAll(AppLive, WorkersLive).pipe(
   Layer.provide(IdempotencyRepoMemory),
   Layer.provide(RedisLive),
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT })),
+  Layer.provide(JsonLoggerLive),
 )
 
 NodeRuntime.runMain(Layer.launch(ServerLive))

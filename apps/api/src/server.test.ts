@@ -71,6 +71,74 @@ describe('Health endpoint', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Healthz (liveness)
+// ---------------------------------------------------------------------------
+
+describe('Healthz endpoint', () => {
+  test('GET /healthz returns 200 with status ok', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(HttpClientRequest.get('/healthz'))
+        const body = yield* response.json
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.body).toEqual({ status: 'ok' })
+  })
+
+  test('GET /healthz does not require auth', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(HttpClientRequest.get('/healthz'))
+        return response.status
+      }),
+    )
+
+    expect(result).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Readyz (readiness)
+// ---------------------------------------------------------------------------
+
+describe('Readyz endpoint', () => {
+  test('GET /readyz returns 200 when Redis is healthy', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(HttpClientRequest.get('/readyz'))
+        const body = yield* response.json
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.body).toEqual({
+      status: 'ok',
+      checks: { redis: 'ok' },
+    })
+  })
+
+  test('GET /readyz includes X-Request-Id header', async () => {
+    const result = await runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(HttpClientRequest.get('/readyz'))
+        return response.headers['x-request-id']
+      }),
+    )
+
+    expect(result).toBeDefined()
+    expect(typeof result).toBe('string')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Request ID propagation
 // ---------------------------------------------------------------------------
 
