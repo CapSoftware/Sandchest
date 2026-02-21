@@ -8,6 +8,8 @@ export {
   SandboxNotRunningError,
   ValidationError,
   AuthenticationError,
+  TimeoutError,
+  ConnectionError,
 } from './errors.js'
 export type { SdkErrorCode } from './errors.js'
 export type {

@@ -5,6 +5,8 @@ import {
   SandboxNotRunningError,
   AuthenticationError,
   ValidationError,
+  TimeoutError,
+  ConnectionError,
 } from './errors.js'
 import type { SdkErrorCode } from './errors.js'
 
@@ -38,6 +40,9 @@ function generateIdempotencyKey(): string {
   crypto.getRandomValues(bytes)
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
+
+/** Maximum time to wait on a 429 retry_after value (60 seconds). */
+const MAX_RATE_LIMIT_WAIT_MS = 60_000
 
 /** Add jitter to a delay for exponential backoff. */
 function backoffDelay(attempt: number): number {
@@ -79,16 +84,20 @@ export class HttpClient {
       headers['Idempotency-Key'] = idempotencyKey
     }
 
+    const timeoutMs = options.timeout ?? this.timeout
     let lastError: Error | undefined
 
     for (let attempt = 0; attempt <= this.retries; attempt++) {
-      if (attempt > 0) {
-        await sleep(backoffDelay(attempt - 1))
+      if (attempt > 0 && lastError) {
+        const delay =
+          lastError instanceof RateLimitError
+            ? Math.min(lastError.retryAfter * 1000, MAX_RATE_LIMIT_WAIT_MS)
+            : backoffDelay(attempt - 1)
+        await sleep(delay)
       }
 
       try {
         const controller = new AbortController()
-        const timeoutMs = options.timeout ?? this.timeout
         const timer = setTimeout(() => controller.abort(), timeoutMs)
 
         const fetchInit: RequestInit = {
@@ -106,12 +115,24 @@ export class HttpClient {
         clearTimeout(timer)
 
         if (response.ok) {
+          if (response.status === 204) {
+            return undefined as T
+          }
           return (await response.json()) as T
         }
 
         const errorBody = (await response.json().catch(() => null)) as ApiErrorBody | null
         const requestId = errorBody?.request_id ?? response.headers.get('x-request-id') ?? ''
         const message = errorBody?.message ?? `HTTP ${response.status}`
+
+        if (response.status === 429 && attempt < this.retries) {
+          lastError = new RateLimitError({
+            message,
+            requestId,
+            retryAfter: errorBody?.retry_after ?? 1,
+          })
+          continue
+        }
 
         if (response.status >= 500 && attempt < this.retries) {
           lastError = new SandchestError({
@@ -126,6 +147,10 @@ export class HttpClient {
         throw this.parseErrorResponse(response.status, message, requestId, errorBody)
       } catch (error) {
         if (error instanceof SandchestError) {
+          if (error instanceof RateLimitError && attempt < this.retries) {
+            lastError = error
+            continue
+          }
           throw error
         }
 
@@ -134,11 +159,32 @@ export class HttpClient {
           continue
         }
 
-        throw lastError ?? error
+        const raw = lastError ?? error
+        throw this.wrapRawError(raw, timeoutMs)
       }
     }
 
-    throw lastError ?? new Error('Request failed after retries')
+    throw this.wrapRawError(lastError, timeoutMs)
+  }
+
+  /** Wrap non-SDK errors into typed TimeoutError or ConnectionError. */
+  private wrapRawError(error: unknown, timeoutMs: number): SandchestError {
+    if (error instanceof SandchestError) {
+      return error
+    }
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      return new TimeoutError({
+        message: `Request timed out after ${timeoutMs}ms`,
+        timeoutMs,
+      })
+    }
+
+    const cause = error instanceof Error ? error : new Error(String(error))
+    return new ConnectionError({
+      message: cause.message || 'Network request failed',
+      cause,
+    })
   }
 
   private buildUrl(

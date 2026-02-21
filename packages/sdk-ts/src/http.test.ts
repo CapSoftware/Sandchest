@@ -7,6 +7,8 @@ import {
   SandboxNotRunningError,
   ValidationError,
   AuthenticationError,
+  TimeoutError,
+  ConnectionError,
 } from './errors.js'
 
 function jsonResponse(body: unknown, status = 200, headers?: Record<string, string>): Response {
@@ -46,7 +48,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({ ok: true })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({ method: 'GET', path: '/v1/sandboxes' })
@@ -60,7 +62,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({ ok: true })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({ method: 'GET', path: '/v1/sandboxes' })
@@ -75,7 +77,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({ sandbox_id: 'sb_test' })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({ method: 'POST', path: '/v1/sandboxes', body: {} })
@@ -90,7 +92,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({ items: [] })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({ method: 'GET', path: '/v1/sandboxes' })
@@ -104,7 +106,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({ ok: true })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({
@@ -125,7 +127,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (url: string | URL | Request) => {
         capturedUrl = String(url)
         return jsonResponse({})
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({ method: 'GET', path: '/v1/sandboxes' })
@@ -138,7 +140,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (url: string | URL | Request) => {
         capturedUrl = String(url)
         return jsonResponse({})
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({
@@ -157,7 +159,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (url: string | URL | Request) => {
         capturedUrl = String(url)
         return jsonResponse({})
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({
@@ -176,7 +178,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (url: string | URL | Request) => {
         capturedUrl = String(url)
         return jsonResponse({})
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = new HttpClient({
         apiKey: 'sk_test',
@@ -196,7 +198,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({ sandbox_id: 'sb_test' })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       const body = { image: 'node:20', profile: 'small' }
@@ -211,7 +213,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
         capturedInit = init
         return jsonResponse({})
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient()
       await client.request({ method: 'GET', path: '/v1/sandboxes' })
@@ -223,7 +225,7 @@ describe('HttpClient', () => {
   describe('successful responses', () => {
     test('returns parsed JSON body', async () => {
       const responseData = { sandbox_id: 'sb_abc', status: 'running' }
-      globalThis.fetch = mock(async () => jsonResponse(responseData)) as typeof fetch
+      globalThis.fetch = mock(async () => jsonResponse(responseData)) as unknown as typeof fetch
 
       const client = createClient()
       const result = await client.request<{ sandbox_id: string; status: string }>({
@@ -239,7 +241,7 @@ describe('HttpClient', () => {
     test('400 returns ValidationError', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('validation_error', 'Invalid body'), 400),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -255,7 +257,7 @@ describe('HttpClient', () => {
     test('401 returns AuthenticationError', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('unauthorized', 'Invalid API key'), 401),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -270,7 +272,7 @@ describe('HttpClient', () => {
     test('404 returns NotFoundError', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('not_found', 'Sandbox not found'), 404),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -285,7 +287,7 @@ describe('HttpClient', () => {
     test('409 returns SandboxNotRunningError', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('sandbox_not_running', 'Sandbox is stopped'), 409),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -303,7 +305,7 @@ describe('HttpClient', () => {
           { error: 'rate_limited', message: 'Too many requests', request_id: 'req_rl', retry_after: 30 },
           429,
         ),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -321,7 +323,7 @@ describe('HttpClient', () => {
           { error: 'rate_limited', message: 'Too many requests', request_id: 'req_rl2', retry_after: null },
           429,
         ),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -336,7 +338,7 @@ describe('HttpClient', () => {
     test('unknown status returns generic SandchestError', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('forbidden', 'Forbidden'), 403),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -352,7 +354,7 @@ describe('HttpClient', () => {
     test('extracts requestId from error body', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('not_found', 'Not found', 'req_custom_id'), 404),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient()
       try {
@@ -373,7 +375,7 @@ describe('HttpClient', () => {
           return jsonResponse(errorBody('internal_error', 'Server error'), 500)
         }
         return jsonResponse({ ok: true })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient({ retries: 2 })
       const result = await client.request<{ ok: boolean }>({
@@ -388,7 +390,7 @@ describe('HttpClient', () => {
     test('throws after exhausting retries on 500', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse(errorBody('internal_error', 'Server error'), 500),
-      ) as typeof fetch
+      ) as unknown as typeof fetch
 
       const client = createClient({ retries: 1 })
       try {
@@ -405,7 +407,7 @@ describe('HttpClient', () => {
       globalThis.fetch = mock(async () => {
         callCount++
         return jsonResponse(errorBody('not_found', 'Not found'), 404)
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient({ retries: 2 })
       try {
@@ -425,7 +427,7 @@ describe('HttpClient', () => {
           throw new TypeError('Failed to fetch')
         }
         return jsonResponse({ ok: true })
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const client = createClient({ retries: 1 })
       const result = await client.request<{ ok: boolean }>({
@@ -435,6 +437,128 @@ describe('HttpClient', () => {
 
       expect(result).toEqual({ ok: true })
       expect(callCount).toBe(2)
+    })
+
+    test('retries on 429 rate limit errors', async () => {
+      let callCount = 0
+      globalThis.fetch = mock(async () => {
+        callCount++
+        if (callCount === 1) {
+          return jsonResponse(
+            { error: 'rate_limited', message: 'Too many requests', request_id: 'req_rl', retry_after: 0.001 },
+            429,
+          )
+        }
+        return jsonResponse({ ok: true })
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      const result = await client.request<{ ok: boolean }>({
+        method: 'GET',
+        path: '/v1/sandboxes',
+      })
+
+      expect(result).toEqual({ ok: true })
+      expect(callCount).toBe(2)
+    })
+
+    test('throws RateLimitError after exhausting retries on 429', async () => {
+      globalThis.fetch = mock(async () =>
+        jsonResponse(
+          { error: 'rate_limited', message: 'Too many requests', request_id: 'req_rl', retry_after: 0.001 },
+          429,
+        ),
+      ) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      try {
+        await client.request({ method: 'GET', path: '/v1/sandboxes' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(RateLimitError)
+        expect((err as RateLimitError).status).toBe(429)
+      }
+    })
+  })
+
+  describe('204 No Content', () => {
+    test('returns undefined for 204 responses', async () => {
+      globalThis.fetch = mock(async () =>
+        new Response(null, { status: 204 }),
+      ) as unknown as typeof fetch
+
+      const client = createClient()
+      const result = await client.request<void>({
+        method: 'DELETE',
+        path: '/v1/sandboxes/sb_x',
+      })
+
+      expect(result).toBeUndefined()
+    })
+  })
+
+  describe('error wrapping', () => {
+    test('wraps timeout abort into TimeoutError', async () => {
+      globalThis.fetch = mock(async () => {
+        const error = new DOMException('The operation was aborted', 'AbortError')
+        throw error
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 0 })
+      try {
+        await client.request({ method: 'GET', path: '/v1/sandboxes', timeout: 100 })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(TimeoutError)
+        expect((err as TimeoutError).timeoutMs).toBe(100)
+        expect((err as TimeoutError).code).toBe('timeout')
+      }
+    })
+
+    test('wraps network errors into ConnectionError', async () => {
+      globalThis.fetch = mock(async () => {
+        throw new TypeError('Failed to fetch')
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 0 })
+      try {
+        await client.request({ method: 'GET', path: '/v1/sandboxes' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConnectionError)
+        expect((err as ConnectionError).code).toBe('connection_error')
+        expect((err as ConnectionError).cause).toBeInstanceOf(TypeError)
+      }
+    })
+
+    test('wraps network errors into ConnectionError after exhausting retries', async () => {
+      globalThis.fetch = mock(async () => {
+        throw new TypeError('Failed to fetch')
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      try {
+        await client.request({ method: 'GET', path: '/v1/sandboxes' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConnectionError)
+        expect((err as ConnectionError).message).toBe('Failed to fetch')
+      }
+    })
+
+    test('preserves SandchestError subclasses through retry exhaustion', async () => {
+      globalThis.fetch = mock(async () =>
+        jsonResponse(errorBody('internal_error', 'Server error'), 500),
+      ) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      try {
+        await client.request({ method: 'GET', path: '/v1/sandboxes' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandchestError)
+        expect((err as SandchestError).status).toBe(500)
+      }
     })
   })
 })

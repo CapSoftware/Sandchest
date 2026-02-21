@@ -6,6 +6,8 @@ import {
   SandboxNotRunningError,
   ValidationError,
   AuthenticationError,
+  TimeoutError,
+  ConnectionError,
 } from './errors.js'
 
 describe('SandchestError', () => {
@@ -112,5 +114,44 @@ describe('AuthenticationError', () => {
   test('is instanceof SandchestError', () => {
     const err = new AuthenticationError({ message: 'unauthed', requestId: 'req_11' })
     expect(err).toBeInstanceOf(SandchestError)
+  })
+})
+
+describe('TimeoutError', () => {
+  test('sets code timeout, status 0, and timeoutMs', () => {
+    const err = new TimeoutError({ message: 'Request timed out after 5000ms', timeoutMs: 5000 })
+    expect(err.code).toBe('timeout')
+    expect(err.status).toBe(0)
+    expect(err.timeoutMs).toBe(5000)
+    expect(err.name).toBe('TimeoutError')
+    expect(err.requestId).toBe('')
+  })
+
+  test('is instanceof SandchestError', () => {
+    const err = new TimeoutError({ message: 'timed out', timeoutMs: 1000 })
+    expect(err).toBeInstanceOf(SandchestError)
+    expect(err).toBeInstanceOf(Error)
+  })
+})
+
+describe('ConnectionError', () => {
+  test('sets code connection_error and status 0', () => {
+    const err = new ConnectionError({ message: 'Failed to fetch' })
+    expect(err.code).toBe('connection_error')
+    expect(err.status).toBe(0)
+    expect(err.name).toBe('ConnectionError')
+    expect(err.requestId).toBe('')
+  })
+
+  test('stores cause when provided', () => {
+    const cause = new TypeError('Failed to fetch')
+    const err = new ConnectionError({ message: 'Network request failed', cause })
+    expect(err.cause).toBe(cause)
+  })
+
+  test('is instanceof SandchestError', () => {
+    const err = new ConnectionError({ message: 'fail' })
+    expect(err).toBeInstanceOf(SandchestError)
+    expect(err).toBeInstanceOf(Error)
   })
 })

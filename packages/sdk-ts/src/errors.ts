@@ -10,6 +10,8 @@ export type SdkErrorCode =
   | 'validation_error'
   | 'internal_error'
   | 'service_unavailable'
+  | 'timeout'
+  | 'connection_error'
 
 /** Base error for all Sandchest SDK errors. */
 export class SandchestError extends Error {
@@ -86,5 +88,37 @@ export class AuthenticationError extends SandchestError {
       requestId: opts.requestId,
     })
     this.name = 'AuthenticationError'
+  }
+}
+
+/** Request timed out before receiving a response. */
+export class TimeoutError extends SandchestError {
+  constructor(opts: { message: string; timeoutMs: number }) {
+    super({
+      code: 'timeout',
+      message: opts.message,
+      status: 0,
+      requestId: '',
+    })
+    this.name = 'TimeoutError'
+    this.timeoutMs = opts.timeoutMs
+  }
+
+  readonly timeoutMs: number
+}
+
+/** Network-level failure — could not connect to the server. */
+export class ConnectionError extends SandchestError {
+  constructor(opts: { message: string; cause?: Error | undefined }) {
+    super({
+      code: 'connection_error',
+      message: opts.message,
+      status: 0,
+      requestId: '',
+    })
+    this.name = 'ConnectionError'
+    if (opts.cause) {
+      this.cause = opts.cause
+    }
   }
 }
