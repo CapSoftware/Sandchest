@@ -1,0 +1,104 @@
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { Command } from 'commander'
+import { rmCommand } from './rm.js'
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+const sandboxResponse = {
+  sandbox_id: 'sb_rm',
+  status: 'running',
+  image: 'ubuntu-22.04',
+  profile: 'small',
+  env: {},
+  forked_from: null,
+  fork_count: 0,
+  created_at: '2024-01-01T00:00:00Z',
+  started_at: '2024-01-01T00:00:01Z',
+  ended_at: null,
+  failure_reason: null,
+  replay_url: 'https://replay.sandchest.com/sb_rm',
+}
+
+describe('rm command', () => {
+  let tempDir: string
+  const originalXdg = process.env['XDG_CONFIG_HOME']
+  const originalApiKey = process.env['SANDCHEST_API_KEY']
+  let originalFetch: typeof globalThis.fetch
+  let logSpy: ReturnType<typeof spyOn>
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'sandchest-rm-test-'))
+    process.env['XDG_CONFIG_HOME'] = tempDir
+    process.env['SANDCHEST_API_KEY'] = 'sk_test_key'
+    process.env['NO_COLOR'] = '1'
+    originalFetch = globalThis.fetch
+    logSpy = spyOn(console, 'log').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+    if (originalXdg !== undefined) {
+      process.env['XDG_CONFIG_HOME'] = originalXdg
+    } else {
+      delete process.env['XDG_CONFIG_HOME']
+    }
+    if (originalApiKey !== undefined) {
+      process.env['SANDCHEST_API_KEY'] = originalApiKey
+    } else {
+      delete process.env['SANDCHEST_API_KEY']
+    }
+    delete process.env['NO_COLOR']
+    globalThis.fetch = originalFetch
+    logSpy.mockRestore()
+  })
+
+  test('destroys sandbox with --force flag', async () => {
+    globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        return jsonResponse({ sandbox_id: 'sb_rm', status: 'deleted' })
+      }
+      return jsonResponse(sandboxResponse)
+    }) as unknown as typeof fetch
+
+    const program = new Command()
+    program.addCommand(rmCommand())
+    await program.parseAsync(['node', 'test', 'rm', '-f', 'sb_rm'])
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sb_rm'))
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('destroyed'))
+  })
+
+  test('outputs JSON with --force and --json flags', async () => {
+    globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        return jsonResponse({ sandbox_id: 'sb_rm', status: 'deleted' })
+      }
+      return jsonResponse(sandboxResponse)
+    }) as unknown as typeof fetch
+
+    const program = new Command()
+    program.addCommand(rmCommand())
+    await program.parseAsync(['node', 'test', 'rm', '-f', '--json', 'sb_rm'])
+
+    const jsonCall = logSpy.mock.calls.find((call: unknown[]) => {
+      try {
+        JSON.parse(String(call[0]))
+        return true
+      } catch {
+        return false
+      }
+    })
+    expect(jsonCall).toBeDefined()
+    const parsed = JSON.parse(String(jsonCall![0]))
+    expect(parsed.sandbox_id).toBe('sb_rm')
+    expect(parsed.status).toBe('deleted')
+  })
+})
