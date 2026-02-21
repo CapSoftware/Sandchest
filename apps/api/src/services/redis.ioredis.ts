@@ -19,6 +19,10 @@ function replayEventsKey(sandboxId: string): string {
   return `replay_events:${sandboxId}`
 }
 
+function artifactPathsKey(sandboxId: string): string {
+  return `artifact_paths:${sandboxId}`
+}
+
 export function createIoRedisApi(client: Redis): RedisApi {
   return {
     acquireSlotLease: (nodeId, slot, sandboxId, ttlSeconds) =>
@@ -94,6 +98,26 @@ export function createIoRedisApi(client: Redis): RedisApi {
         const key = replayEventsKey(sandboxId)
         const raw = await client.lrange(key, 0, -1)
         return raw.map((s: string) => JSON.parse(s) as BufferedEvent)
+      }),
+
+    addArtifactPaths: (sandboxId, paths) =>
+      Effect.promise(async () => {
+        if (paths.length === 0) return 0
+        const key = artifactPathsKey(sandboxId)
+        const result = await client.sadd(key, ...paths)
+        return result
+      }),
+
+    getArtifactPaths: (sandboxId) =>
+      Effect.promise(async () => {
+        const key = artifactPathsKey(sandboxId)
+        return client.smembers(key)
+      }),
+
+    countArtifactPaths: (sandboxId) =>
+      Effect.promise(async () => {
+        const key = artifactPathsKey(sandboxId)
+        return client.scard(key)
       }),
 
     ping: () =>

@@ -39,6 +39,8 @@ import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
 import { SessionRepo } from '../services/session-repo.js'
 import { ObjectStorage } from '../services/object-storage.js'
 import { NodeClient } from '../services/node-client.js'
+import { ArtifactRepo } from '../services/artifact-repo.js'
+import { RedisService } from '../services/redis.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
 const VALID_PROFILES: ProfileName[] = ['small', 'medium', 'large']
@@ -233,6 +235,42 @@ const getSandbox = Effect.gen(function* () {
 
 // -- Stop sandbox ------------------------------------------------------------
 
+/** Collect registered artifacts before shutdown. Non-blocking: logs warning on failure. */
+const collectArtifactsOnStop = (
+  sandboxId: string,
+  idBytes: Uint8Array,
+  orgId: string,
+) =>
+  Effect.gen(function* () {
+    const redis = yield* RedisService
+    const nodeClient = yield* NodeClient
+    const artifactRepo = yield* ArtifactRepo
+
+    const paths = yield* redis.getArtifactPaths(sandboxId)
+    if (paths.length === 0) return
+
+    const collected = yield* nodeClient.collectArtifacts({
+      sandboxId: idBytes,
+      paths,
+    })
+
+    for (const artifact of collected) {
+      const artifactId = generateUUIDv7()
+      yield* artifactRepo.create({
+        id: artifactId,
+        sandboxId: idBytes,
+        orgId,
+        name: artifact.name,
+        mime: artifact.mime,
+        bytes: artifact.bytes,
+        sha256: artifact.sha256,
+        ref: artifact.ref,
+      })
+    }
+  }).pipe(
+    Effect.catchAll(() => Effect.void),
+  )
+
 const stopSandbox = Effect.gen(function* () {
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
@@ -277,6 +315,9 @@ const stopSandbox = Effect.gen(function* () {
   const updated = yield* repo.updateStatus(idBytes, auth.orgId, 'stopping', {
     failureReason: 'sandbox_stopped',
   })
+
+  // Collect artifacts before fully stopping (non-blocking)
+  yield* collectArtifactsOnStop(id, idBytes, auth.orgId)
 
   const response: StopSandboxResponse = {
     sandbox_id: id,

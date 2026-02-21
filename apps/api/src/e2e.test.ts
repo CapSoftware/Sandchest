@@ -14,6 +14,8 @@ import { createInMemoryExecRepo } from './services/exec-repo.memory.js'
 import { createInMemorySessionRepo } from './services/session-repo.memory.js'
 import { createInMemoryNodeClient } from './services/node-client.memory.js'
 import { createInMemoryRedisApi } from './services/redis.memory.js'
+import { ArtifactRepo } from './services/artifact-repo.js'
+import { createInMemoryArtifactRepo } from './services/artifact-repo.memory.js'
 import { idToBytes } from '@sandchest/contract'
 
 const TEST_ORG = 'org_test_123'
@@ -25,6 +27,7 @@ function createTestEnv() {
   const sessionRepo = createInMemorySessionRepo()
   const nodeClient = createInMemoryNodeClient()
   const redis = createInMemoryRedisApi()
+  const artifactRepo = createInMemoryArtifactRepo()
 
   const TestLayer = AppLive.pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -33,6 +36,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(SessionRepo, sessionRepo)),
     Layer.provide(Layer.succeed(NodeClient, nodeClient)),
     Layer.provide(Layer.succeed(RedisService, redis)),
+    Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
     ),

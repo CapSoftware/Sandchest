@@ -70,6 +70,22 @@ export interface RedisApi {
     sandboxId: string,
   ) => Effect.Effect<BufferedEvent[], never, never>
 
+  /** Add paths to the artifact registration set for a sandbox. Returns the number of new paths added. */
+  readonly addArtifactPaths: (
+    sandboxId: string,
+    paths: string[],
+  ) => Effect.Effect<number, never, never>
+
+  /** Get all registered artifact paths for a sandbox. */
+  readonly getArtifactPaths: (
+    sandboxId: string,
+  ) => Effect.Effect<string[], never, never>
+
+  /** Get the count of registered artifact paths for a sandbox. */
+  readonly countArtifactPaths: (
+    sandboxId: string,
+  ) => Effect.Effect<number, never, never>
+
   /** Ping to check connectivity. */
   readonly ping: () => Effect.Effect<boolean, never, never>
 }

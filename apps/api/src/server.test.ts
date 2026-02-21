@@ -10,6 +10,7 @@ import { SandboxRepo } from './services/sandbox-repo.js'
 import { ExecRepoMemory } from './services/exec-repo.memory.js'
 import { SessionRepoMemory } from './services/session-repo.memory.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
+import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { RedisMemory } from './services/redis.memory.js'
 
 const TEST_ORG = 'org_test_123'
@@ -26,6 +27,7 @@ const TestLayer = AppLive.pipe(
   Layer.provide(ExecRepoMemory),
   Layer.provide(SessionRepoMemory),
   Layer.provide(NodeClientMemory),
+  Layer.provide(ArtifactRepoMemory),
   Layer.provide(RedisMemory),
   Layer.provide(TestAuthLayer),
 )

@@ -96,6 +96,21 @@ export interface NodeClientApi {
     sourceSandboxId: Uint8Array
     newSandboxId: Uint8Array
   }) => Effect.Effect<void, never, never>
+
+  /** Collect artifacts from a sandbox before shutdown. */
+  readonly collectArtifacts: (params: {
+    sandboxId: Uint8Array
+    paths: string[]
+  }) => Effect.Effect<CollectedArtifact[], never, never>
+}
+
+/** Artifact metadata returned by the node after collection. */
+export interface CollectedArtifact {
+  readonly name: string
+  readonly mime: string
+  readonly bytes: number
+  readonly sha256: string
+  readonly ref: string
 }
 
 export class NodeClient extends Context.Tag('NodeClient')<NodeClient, NodeClientApi>() {}

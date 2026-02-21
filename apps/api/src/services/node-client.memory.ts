@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { NodeClient, type NodeClientApi } from './node-client.js'
+import { NodeClient, type NodeClientApi, type CollectedArtifact } from './node-client.js'
 
 export function createInMemoryNodeClient(): NodeClientApi {
   const files = new Map<string, Uint8Array>()
@@ -79,6 +79,25 @@ export function createInMemoryNodeClient(): NodeClientApi {
       }),
 
     forkSandbox: () => Effect.void,
+
+    collectArtifacts: ({ sandboxId, paths }) =>
+      Effect.sync(() => {
+        const results: CollectedArtifact[] = []
+        for (const path of paths) {
+          const data = files.get(fileKey(sandboxId, path))
+          if (data && data.length > 0) {
+            const name = path.split('/').pop() ?? path
+            results.push({
+              name,
+              mime: 'application/octet-stream',
+              bytes: data.length,
+              sha256: '0'.repeat(64),
+              ref: `test://artifacts/${name}`,
+            })
+          }
+        }
+        return results
+      }),
   }
 }
 

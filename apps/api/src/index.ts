@@ -10,6 +10,7 @@ import { ExecRepoMemory } from './services/exec-repo.memory.js'
 import { SessionRepoMemory } from './services/session-repo.memory.js'
 import { ObjectStorageMemory } from './services/object-storage.memory.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
+import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
 
@@ -27,6 +28,7 @@ const ServerLive = AppLive.pipe(
   Layer.provide(SessionRepoMemory),
   Layer.provide(ObjectStorageMemory),
   Layer.provide(NodeClientMemory),
+  Layer.provide(ArtifactRepoMemory),
   Layer.provide(RedisLive),
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT })),
 )

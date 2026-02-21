@@ -16,6 +16,7 @@ export function createInMemoryRedisApi(): RedisApi {
   const rateLimits = new Map<string, RateEntry>()
   const execEvents = new Map<string, BufferedEvent[]>()
   const replayEvents = new Map<string, BufferedEvent[]>()
+  const artifactPaths = new Map<string, Set<string>>()
 
   function isExpired(entry: SlotEntry): boolean {
     return Date.now() >= entry.expiresAt
@@ -112,6 +113,37 @@ export function createInMemoryRedisApi(): RedisApi {
 
     getReplayEvents: (sandboxId) =>
       Effect.sync(() => replayEvents.get(sandboxId) ?? []),
+
+    addArtifactPaths: (sandboxId, paths) =>
+      Effect.sync(() => {
+        const key = `artifact_paths:${sandboxId}`
+        let set = artifactPaths.get(key)
+        if (!set) {
+          set = new Set()
+          artifactPaths.set(key, set)
+        }
+        let added = 0
+        for (const p of paths) {
+          if (!set.has(p)) {
+            set.add(p)
+            added++
+          }
+        }
+        return added
+      }),
+
+    getArtifactPaths: (sandboxId) =>
+      Effect.sync(() => {
+        const key = `artifact_paths:${sandboxId}`
+        const set = artifactPaths.get(key)
+        return set ? Array.from(set) : []
+      }),
+
+    countArtifactPaths: (sandboxId) =>
+      Effect.sync(() => {
+        const key = `artifact_paths:${sandboxId}`
+        return artifactPaths.get(key)?.size ?? 0
+      }),
 
     ping: () => Effect.succeed(true),
   }
