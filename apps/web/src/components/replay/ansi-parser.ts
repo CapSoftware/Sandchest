@@ -83,6 +83,7 @@ function resetState(): ParserState {
 }
 
 /** ESC[ followed by semicolon-separated numbers, ending with 'm' */
+// eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[([0-9;]*)m/g
 
 /**
@@ -92,6 +93,7 @@ const ANSI_RE = /\x1b\[([0-9;]*)m/g
  */
 export function parseAnsi(input: string): AnsiSegment[] {
   // Strip non-SGR escape sequences (cursor movement, clearing, etc.)
+  // eslint-disable-next-line no-control-regex
   const cleaned = input.replace(/\x1b\[[0-9;]*[A-HJKSTfhilnsu]/g, '')
 
   const segments: AnsiSegment[] = []
