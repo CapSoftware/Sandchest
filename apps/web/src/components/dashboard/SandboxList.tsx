@@ -3,17 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '@/lib/api'
 import { formatRelativeTime } from '@/lib/format'
+import StatusBadge from '@/components/ui/StatusBadge'
+import EmptyState from '@/components/ui/EmptyState'
+import ErrorMessage from '@/components/ui/ErrorMessage'
 import type { SandboxSummary, ListSandboxesResponse, SandboxStatus } from '@sandchest/contract'
-
-const STATUS_COLORS: Record<SandboxStatus, string> = {
-  queued: 'var(--color-text-weak)',
-  provisioning: 'hsl(40, 80%, 60%)',
-  running: 'hsl(140, 60%, 50%)',
-  stopping: 'hsl(40, 80%, 60%)',
-  stopped: 'var(--color-text-weak)',
-  failed: 'hsl(0, 70%, 60%)',
-  deleted: 'var(--color-text-weak)',
-}
 
 const FILTER_OPTIONS: Array<{ label: string; value: SandboxStatus | '' }> = [
   { label: 'All', value: '' },
@@ -101,14 +94,14 @@ export default function SandboxList() {
         ))}
       </div>
 
-      {error && <p className="dash-error">{error}</p>}
+      {error && <ErrorMessage message={error} />}
 
       {loading ? (
-        <div className="dash-empty">Loading sandboxes...</div>
+        <EmptyState message="Loading sandboxes..." />
       ) : sandboxes.length === 0 ? (
-        <div className="dash-empty">
-          {statusFilter ? `No ${statusFilter} sandboxes found.` : 'No sandboxes yet. Create one using the SDK or CLI.'}
-        </div>
+        <EmptyState
+          message={statusFilter ? `No ${statusFilter} sandboxes found.` : 'No sandboxes yet. Create one using the SDK or CLI.'}
+        />
       ) : (
         <>
           <div className="dash-table-wrap">
@@ -137,12 +130,7 @@ export default function SandboxList() {
                       </a>
                     </td>
                     <td>
-                      <span
-                        className="dash-status"
-                        style={{ color: STATUS_COLORS[sb.status] }}
-                      >
-                        {sb.status}
-                      </span>
+                      <StatusBadge status={sb.status} className="dash-status" />
                     </td>
                     <td className="dash-text-weak">{sb.image}</td>
                     <td className="dash-text-weak">{sb.profile}</td>

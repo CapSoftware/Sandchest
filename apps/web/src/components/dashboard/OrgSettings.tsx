@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { authClient } from '@/lib/auth-client'
+import EmptyState from '@/components/ui/EmptyState'
+import ErrorMessage from '@/components/ui/ErrorMessage'
 
 interface OrgData {
   id: string
@@ -133,7 +135,7 @@ export default function OrgSettings() {
   }
 
   if (loading) {
-    return <div className="dash-empty">Loading organization settings...</div>
+    return <EmptyState message="Loading organization settings..." />
   }
 
   if (!org) {
@@ -142,9 +144,7 @@ export default function OrgSettings() {
         <div className="dash-page-header">
           <h1 className="dash-page-title">Settings</h1>
         </div>
-        <div className="dash-empty">
-          No organization found. You may need to create or join one.
-        </div>
+        <EmptyState message="No organization found. You may need to create or join one." />
       </div>
     )
   }
@@ -155,7 +155,7 @@ export default function OrgSettings() {
         <h1 className="dash-page-title">Settings</h1>
       </div>
 
-      {error && <p className="dash-error">{error}</p>}
+      {error && <ErrorMessage message={error} />}
 
       {/* Org name */}
       <section className="dash-section">

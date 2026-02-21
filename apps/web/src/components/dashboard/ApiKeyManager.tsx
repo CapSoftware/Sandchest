@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import { authClient } from '@/lib/auth-client'
 import { formatShortDate } from '@/lib/format'
+import CopyButton from '@/components/ui/CopyButton'
+import EmptyState from '@/components/ui/EmptyState'
+import ErrorMessage from '@/components/ui/ErrorMessage'
 
 interface ApiKey {
   id: string
@@ -19,7 +22,6 @@ export default function ApiKeyManager() {
   const [newKeyName, setNewKeyName] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
   const [revoking, setRevoking] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -91,13 +93,6 @@ export default function ApiKeyManager() {
     }
   }
 
-  async function handleCopy() {
-    if (!newKeyValue) return
-    await navigator.clipboard.writeText(newKeyValue)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   return (
     <div>
       <div className="dash-page-header">
@@ -113,7 +108,7 @@ export default function ApiKeyManager() {
         </button>
       </div>
 
-      {error && <p className="dash-error">{error}</p>}
+      {error && <ErrorMessage message={error} />}
 
       {newKeyValue && (
         <div className="dash-key-reveal">
@@ -122,9 +117,7 @@ export default function ApiKeyManager() {
           </p>
           <div className="dash-key-reveal-row">
             <code className="dash-key-reveal-value">{newKeyValue}</code>
-            <button className="dash-action-btn" onClick={handleCopy}>
-              {copied ? 'Copied' : 'Copy'}
-            </button>
+            <CopyButton text={newKeyValue} />
           </div>
           <button
             className="dash-link-btn"
@@ -160,11 +153,9 @@ export default function ApiKeyManager() {
       )}
 
       {loading ? (
-        <div className="dash-empty">Loading API keys...</div>
+        <EmptyState message="Loading API keys..." />
       ) : keys.length === 0 ? (
-        <div className="dash-empty">
-          No API keys yet. Create one to authenticate SDK and CLI requests.
-        </div>
+        <EmptyState message="No API keys yet. Create one to authenticate SDK and CLI requests." />
       ) : (
         <div className="dash-table-wrap">
           <table className="dash-table">

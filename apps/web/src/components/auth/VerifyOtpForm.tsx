@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { authClient } from '@/lib/auth-client'
+import ErrorMessage from '@/components/ui/ErrorMessage'
 
 const OTP_LENGTH = 6
 
@@ -156,7 +157,7 @@ export default function VerifyOtpForm() {
           ))}
         </div>
 
-        {error && <p className="auth-error" role="alert">{error}</p>}
+        {error && <ErrorMessage message={error} className="auth-error" role="alert" />}
         {resent && <p className="auth-success" role="status">Code resent</p>}
 
         <button type="submit" className="auth-button" disabled={loading || !isComplete}>

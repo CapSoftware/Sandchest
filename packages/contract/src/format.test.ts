@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
-import { formatRelativeTime, formatShortDate, formatDuration, formatCmd } from './format'
+import { formatRelativeTime, formatShortDate, formatDuration, formatCmd, formatBytes } from './format'
 
 describe('formatRelativeTime', () => {
   let realDate: typeof Date
@@ -108,5 +108,29 @@ describe('formatCmd', () => {
 
   test('handles single-element array', () => {
     expect(formatCmd(['ls'])).toBe('ls')
+  })
+})
+
+describe('formatBytes', () => {
+  test('formats bytes', () => {
+    expect(formatBytes(0)).toBe('0B')
+    expect(formatBytes(512)).toBe('512B')
+    expect(formatBytes(1023)).toBe('1023B')
+  })
+
+  test('formats kilobytes', () => {
+    expect(formatBytes(1024)).toBe('1.0KB')
+    expect(formatBytes(1536)).toBe('1.5KB')
+    expect(formatBytes(1048575)).toBe('1024.0KB')
+  })
+
+  test('formats megabytes', () => {
+    expect(formatBytes(1048576)).toBe('1.0MB')
+    expect(formatBytes(5242880)).toBe('5.0MB')
+  })
+
+  test('formats gigabytes', () => {
+    expect(formatBytes(1073741824)).toBe('1.0GB')
+    expect(formatBytes(2147483648)).toBe('2.0GB')
   })
 })

@@ -3,25 +3,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { apiFetch } from '@/lib/api'
-import { formatRelativeTime, formatDuration, formatCmd } from '@/lib/format'
+import { formatRelativeTime, formatDuration, formatCmd, formatBytes } from '@/lib/format'
+import StatusBadge from '@/components/ui/StatusBadge'
+import EmptyState from '@/components/ui/EmptyState'
 import type {
   ReplayBundle,
   ReplayExec,
   ReplayArtifact,
   ExecOutputEntry,
 } from '@sandchest/contract'
-
-const STATUS_COLORS: Record<string, string> = {
-  queued: 'var(--color-text-weak)',
-  provisioning: 'hsl(40, 80%, 60%)',
-  running: 'hsl(140, 60%, 50%)',
-  stopping: 'hsl(40, 80%, 60%)',
-  stopped: 'var(--color-text-weak)',
-  failed: 'hsl(0, 70%, 60%)',
-  deleted: 'var(--color-text-weak)',
-  in_progress: 'hsl(140, 60%, 50%)',
-  complete: 'var(--color-text-weak)',
-}
 
 function ExecCard({ exec }: { exec: ReplayExec }) {
   const [expanded, setExpanded] = useState(false)
@@ -106,8 +96,7 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
           {exec.resource_usage && (
             <div className="replay-exec-resources">
               CPU: {exec.resource_usage.cpu_ms}ms | Memory:{' '}
-              {(exec.resource_usage.peak_memory_bytes / 1024 / 1024).toFixed(1)}
-              MB
+              {formatBytes(exec.resource_usage.peak_memory_bytes)}
             </div>
           )}
         </div>
@@ -117,13 +106,6 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
 }
 
 function ArtifactRow({ artifact }: { artifact: ReplayArtifact }) {
-  const sizeStr =
-    artifact.bytes < 1024
-      ? `${artifact.bytes}B`
-      : artifact.bytes < 1048576
-        ? `${(artifact.bytes / 1024).toFixed(1)}KB`
-        : `${(artifact.bytes / 1048576).toFixed(1)}MB`
-
   return (
     <tr>
       <td>
@@ -136,7 +118,7 @@ function ArtifactRow({ artifact }: { artifact: ReplayArtifact }) {
         </a>
       </td>
       <td className="replay-text-weak">{artifact.mime}</td>
-      <td className="replay-text-weak">{sizeStr}</td>
+      <td className="replay-text-weak">{formatBytes(artifact.bytes)}</td>
     </tr>
   )
 }
@@ -177,7 +159,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
   if (loading) {
     return (
       <div className="replay-container">
-        <div className="replay-loading">Loading replay...</div>
+        <EmptyState message="Loading replay..." className="replay-loading" />
       </div>
     )
   }
@@ -210,12 +192,11 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
           <span className="replay-sandbox-id">{bundle.sandbox_id}</span>
         </div>
         <div className="replay-header-right">
-          <span
+          <StatusBadge
+            status={bundle.status}
+            label={bundle.status === 'in_progress' ? 'live' : 'complete'}
             className="replay-status"
-            style={{ color: STATUS_COLORS[bundle.status] ?? 'var(--color-text)' }}
-          >
-            {bundle.status === 'in_progress' ? 'live' : 'complete'}
-          </span>
+          />
         </div>
       </header>
 
@@ -283,7 +264,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
         {activeTab === 'execs' && (
           <div className="replay-exec-list">
             {bundle.execs.length === 0 ? (
-              <div className="replay-empty">No executions recorded.</div>
+              <EmptyState message="No executions recorded." className="replay-empty" />
             ) : (
               bundle.execs.map((exec) => (
                 <ExecCard key={exec.exec_id} exec={exec} />
@@ -295,7 +276,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
         {activeTab === 'sessions' && (
           <div className="replay-session-list">
             {bundle.sessions.length === 0 ? (
-              <div className="replay-empty">No sessions recorded.</div>
+              <EmptyState message="No sessions recorded." className="replay-empty" />
             ) : (
               <table className="replay-table">
                 <thead>
@@ -319,15 +300,9 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
                         {formatRelativeTime(session.created_at)}
                       </td>
                       <td>
-                        <span
-                          style={{
-                            color: session.destroyed_at
-                              ? 'var(--color-text-weak)'
-                              : 'hsl(140, 60%, 50%)',
-                          }}
-                        >
-                          {session.destroyed_at ? 'destroyed' : 'active'}
-                        </span>
+                        <StatusBadge
+                          status={session.destroyed_at ? 'destroyed' : 'active'}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -340,7 +315,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
         {activeTab === 'artifacts' && (
           <div className="replay-artifact-list">
             {bundle.artifacts.length === 0 ? (
-              <div className="replay-empty">No artifacts collected.</div>
+              <EmptyState message="No artifacts collected." className="replay-empty" />
             ) : (
               <table className="replay-table">
                 <thead>

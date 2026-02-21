@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { authClient } from '@/lib/auth-client'
 import { isValidEmail } from '@/lib/validation'
+import ErrorMessage from '@/components/ui/ErrorMessage'
 
 interface EmailFormProps {
   heading: string
@@ -86,7 +87,7 @@ export default function EmailForm({
           disabled={loading}
         />
 
-        {error && <p className="auth-error" role="alert">{error}</p>}
+        {error && <ErrorMessage message={error} className="auth-error" role="alert" />}
 
         <button type="submit" className="auth-button" disabled={loading || !email.trim()}>
           {loading ? 'Sending...' : buttonText}
