@@ -148,10 +148,13 @@ pub struct NodeConfig {
     pub data_dir: String,
     pub kernel_path: String,
     pub control_plane_url: Option<String>,
+    pub jailer: JailerConfig,
 }
 
 impl NodeConfig {
     pub fn from_env() -> Self {
+        let data_dir = std::env::var("SANDCHEST_DATA_DIR")
+            .unwrap_or_else(|_| "/var/sandchest".to_string());
         Self {
             node_id: std::env::var("SANDCHEST_NODE_ID")
                 .unwrap_or_else(|_| id::generate_id(id::NODE_PREFIX)),
@@ -159,11 +162,11 @@ impl NodeConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(50051),
-            data_dir: std::env::var("SANDCHEST_DATA_DIR")
-                .unwrap_or_else(|_| "/var/sandchest".to_string()),
             kernel_path: std::env::var("SANDCHEST_KERNEL_PATH")
                 .unwrap_or_else(|_| "/var/sandchest/images/vmlinux-5.10".to_string()),
             control_plane_url: std::env::var("SANDCHEST_CONTROL_PLANE_URL").ok(),
+            jailer: JailerConfig::from_env(&data_dir),
+            data_dir,
         }
     }
 
@@ -181,6 +184,7 @@ impl NodeConfig {
 }
 
 use crate::id;
+use crate::jailer::JailerConfig;
 
 #[cfg(test)]
 mod tests {
@@ -404,6 +408,7 @@ mod tests {
             data_dir: "/var/sandchest".to_string(),
             kernel_path: "/vmlinux".to_string(),
             control_plane_url: None,
+            jailer: JailerConfig::disabled(),
         };
         assert_eq!(config.sandboxes_dir(), "/var/sandchest/sandboxes");
     }
@@ -416,6 +421,7 @@ mod tests {
             data_dir: "/data".to_string(),
             kernel_path: "/vmlinux".to_string(),
             control_plane_url: None,
+            jailer: JailerConfig::disabled(),
         };
         assert_eq!(config.images_dir(), "/data/images");
     }
@@ -428,6 +434,7 @@ mod tests {
             data_dir: "/data".to_string(),
             kernel_path: "/vmlinux".to_string(),
             control_plane_url: None,
+            jailer: JailerConfig::disabled(),
         };
         assert_eq!(config.snapshots_dir(), "/data/snapshots");
     }

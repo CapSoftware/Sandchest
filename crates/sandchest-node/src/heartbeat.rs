@@ -108,6 +108,7 @@ mod tests {
             data_dir: "/tmp/sandchest-hb-test".to_string(),
             kernel_path: "/tmp/vmlinux".to_string(),
             control_plane_url: None,
+            jailer: crate::jailer::JailerConfig::disabled(),
         });
         let manager = Arc::new(SandboxManager::new(Arc::clone(&config)));
 
@@ -183,6 +184,7 @@ mod tests {
             data_dir: "/tmp/sandchest-hb-multi".to_string(),
             kernel_path: "/tmp/vmlinux".to_string(),
             control_plane_url: None,
+            jailer: crate::jailer::JailerConfig::disabled(),
         });
         let manager = Arc::new(SandboxManager::new(Arc::clone(&config)));
 

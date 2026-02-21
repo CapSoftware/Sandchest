@@ -11,10 +11,25 @@ use crate::config::{NodeConfig, Profile, VmConfig};
 use crate::disk;
 use crate::events::{self, EventSender};
 use crate::firecracker::FirecrackerVm;
+use crate::jailer;
 use crate::network;
 use crate::proto;
 use crate::slot::SlotManager;
 use crate::snapshot::FirecrackerApi;
+
+/// Paths for a sandbox, accounting for jailer mode.
+struct SandboxPaths {
+    /// Directory containing sandbox files (chroot root when jailed, sandbox dir when not).
+    dir: String,
+    /// Host-visible API socket path.
+    api_socket: String,
+    /// Host-visible vsock path.
+    vsock: String,
+    /// Chroot root (Some when jailed).
+    chroot_root: Option<String>,
+    /// Directory to use as data_dir for cleanup (jail dir when jailed, sandbox dir when not).
+    data_dir: String,
+}
 
 /// Health check timeout for guest agent after boot.
 const AGENT_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -77,6 +92,46 @@ impl SandboxManager {
         self
     }
 
+    /// Compute paths for a sandbox, accounting for jailer mode.
+    fn sandbox_paths(&self, sandbox_id: &str) -> SandboxPaths {
+        if self.node_config.jailer.enabled {
+            let jailer = &self.node_config.jailer;
+            let chroot_root = jailer.chroot_root(sandbox_id);
+            let cr_str = chroot_root.to_str().unwrap_or("").to_string();
+            SandboxPaths {
+                dir: cr_str.clone(),
+                api_socket: jailer
+                    .host_api_socket_path(sandbox_id)
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string(),
+                vsock: jailer
+                    .host_vsock_path(sandbox_id)
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string(),
+                chroot_root: Some(cr_str),
+                data_dir: jailer
+                    .jail_dir(sandbox_id)
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string(),
+            }
+        } else {
+            let dir = format!(
+                "{}/sandboxes/{}",
+                self.node_config.data_dir, sandbox_id
+            );
+            SandboxPaths {
+                api_socket: format!("{}/api.sock", dir),
+                vsock: format!("{}/vsock.sock", dir),
+                chroot_root: None,
+                data_dir: dir.clone(),
+                dir,
+            }
+        }
+    }
+
     /// Get current slot utilization count.
     pub fn slots_used(&self) -> u32 {
         self.slot_manager.active_count() as u32
@@ -130,15 +185,43 @@ impl SandboxManager {
         };
 
         // Step 2: Clone base image ext4
-        let rootfs_path = match disk::clone_disk(rootfs_ref, sandbox_id, &self.node_config.data_dir).await {
-            Ok(path) => path,
-            Err(e) => {
-                error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk");
-                self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
-                network::teardown_network(sandbox_id, slot).await;
-                self.slot_manager.release(slot);
-                return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+        // When jailed, clone directly into the chroot root so Firecracker can access it.
+        let rootfs_path = if self.node_config.jailer.enabled {
+            let paths = self.sandbox_paths(sandbox_id);
+            match jailer::prepare_chroot(&self.node_config.jailer, sandbox_id).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(sandbox_id = %sandbox_id, error = %e, "failed to prepare chroot");
+                    self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("chroot setup failed: {}", e)));
+                    network::teardown_network(sandbox_id, slot).await;
+                    self.slot_manager.release(slot);
+                    return Err(SandboxError::CreateFailed(format!("chroot setup failed: {}", e)));
+                }
+            }
+            match disk::clone_disk_to(rootfs_ref, &paths.dir).await {
+                Ok(path) => path,
+                Err(e) => {
+                    error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk to chroot");
+                    self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    network::teardown_network(sandbox_id, slot).await;
+                    self.slot_manager.release(slot);
+                    jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
+                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                }
+            }
+        } else {
+            match disk::clone_disk(rootfs_ref, sandbox_id, &self.node_config.data_dir).await {
+                Ok(path) => path,
+                Err(e) => {
+                    error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk");
+                    self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    network::teardown_network(sandbox_id, slot).await;
+                    self.slot_manager.release(slot);
+                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                }
             }
         };
 
@@ -254,26 +337,50 @@ impl SandboxManager {
         };
 
         // Step 1b: Clone snapshot's disk state
-        let _rootfs_path = match disk::clone_disk(&snapshot_rootfs, sandbox_id, &self.node_config.data_dir).await {
-            Ok(path) => path,
-            Err(e) => {
-                error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
+        let paths = self.sandbox_paths(sandbox_id);
+        if self.node_config.jailer.enabled {
+            // Prepare chroot directory first
+            if let Err(e) = jailer::prepare_chroot(&self.node_config.jailer, sandbox_id).await {
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("chroot setup failed: {}", e)));
                 network::teardown_network(sandbox_id, slot).await;
                 self.slot_manager.release(slot);
-                return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                return Err(SandboxError::CreateFailed(format!("chroot setup failed: {}", e)));
+            }
+        }
+        let _rootfs_path = if self.node_config.jailer.enabled {
+            match disk::clone_disk_to(&snapshot_rootfs, &paths.dir).await {
+                Ok(path) => path,
+                Err(e) => {
+                    error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
+                    self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    network::teardown_network(sandbox_id, slot).await;
+                    self.slot_manager.release(slot);
+                    jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
+                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                }
+            }
+        } else {
+            match disk::clone_disk(&snapshot_rootfs, sandbox_id, &self.node_config.data_dir).await {
+                Ok(path) => path,
+                Err(e) => {
+                    error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
+                    self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    network::teardown_network(sandbox_id, slot).await;
+                    self.slot_manager.release(slot);
+                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                }
             }
         };
 
         // Step 2: Start Firecracker process (no config-file — we'll load a snapshot)
-        let sandbox_dir = format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
-        let api_socket_path = format!("{}/api.sock", sandbox_dir);
-        let vsock_path = format!("{}/vsock.sock", sandbox_dir);
+        let api_socket_path = paths.api_socket.clone();
 
         // Copy snapshot memory file into sandbox dir for Firecracker to access
-        let local_mem = format!("{}/mem_file", sandbox_dir);
-        let local_snapshot = format!("{}/snapshot_file", sandbox_dir);
+        let local_mem = format!("{}/mem_file", paths.dir);
+        let local_snapshot = format!("{}/snapshot_file", paths.dir);
         if let Err(e) = tokio::fs::copy(&snapshot_mem, &local_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("copy mem file failed: {}", e)));
@@ -289,27 +396,49 @@ impl SandboxManager {
             return Err(SandboxError::CreateFailed(format!("failed to copy snapshot file: {}", e)));
         }
 
-        // Start Firecracker without --config-file (snapshot mode)
-        let child = tokio::process::Command::new("firecracker")
-            .arg("--api-sock")
-            .arg(&api_socket_path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
+        // Start Firecracker (jailed or direct, without config-file for snapshot mode)
+        let vm = if self.node_config.jailer.enabled {
+            let child = jailer::build_jailer_command(
+                &self.node_config.jailer,
+                sandbox_id,
+                false,
+                None,
+                None,
+            )
             .spawn()
             .map_err(|e| {
-                // Note: network cleanup on spawn failure is best-effort since we can't await in map_err
-                SandboxError::CreateFailed(format!("failed to spawn firecracker: {}", e))
+                SandboxError::CreateFailed(format!("failed to spawn jailer: {}", e))
             })?;
-
-        let vm = FirecrackerVm::from_parts(
-            sandbox_id.to_string(),
-            api_socket_path.clone(),
-            vsock_path,
-            sandbox_dir,
-            child,
-        );
+            FirecrackerVm::from_parts(
+                sandbox_id.to_string(),
+                api_socket_path.clone(),
+                paths.vsock.clone(),
+                paths.data_dir,
+                child,
+                paths.chroot_root.clone(),
+            )
+        } else {
+            let sandbox_dir = paths.dir.clone();
+            let child = tokio::process::Command::new("firecracker")
+                .arg("--api-sock")
+                .arg(&api_socket_path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| {
+                    SandboxError::CreateFailed(format!("failed to spawn firecracker: {}", e))
+                })?;
+            FirecrackerVm::from_parts(
+                sandbox_id.to_string(),
+                api_socket_path.clone(),
+                paths.vsock.clone(),
+                sandbox_dir,
+                child,
+                None,
+            )
+        };
 
         // Step 3: Wait for Firecracker API socket, then load snapshot
         let fc_api = FirecrackerApi::new(&api_socket_path);
@@ -325,7 +454,11 @@ impl SandboxManager {
             )));
         }
 
-        if let Err(e) = fc_api.restore_snapshot(&local_snapshot, &local_mem).await {
+        // Use chroot-relative paths when jailed
+        let fc_snapshot = vm.fc_path(&local_snapshot);
+        let fc_mem = vm.fc_path(&local_mem);
+
+        if let Err(e) = fc_api.restore_snapshot(&fc_snapshot, &fc_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("snapshot restore failed: {}", e)));
             let _ = vm.destroy().await;
@@ -423,8 +556,8 @@ impl SandboxManager {
             "forking sandbox"
         );
 
-        // Get source VM's API socket path
-        let source_api_socket = {
+        // Get source VM's API socket path and chroot root
+        let (source_api_socket, source_chroot_root) = {
             let vms = self.vms.read().await;
             let vm = vms.get(source_sandbox_id).ok_or_else(|| {
                 SandboxError::ForkFailed(format!(
@@ -432,7 +565,7 @@ impl SandboxManager {
                     source_sandbox_id
                 ))
             })?;
-            vm.api_socket_path.clone()
+            (vm.api_socket_path.clone(), vm.chroot_root.clone())
         };
 
         // Allocate network slot for the fork
@@ -472,8 +605,8 @@ impl SandboxManager {
         }
 
         // Create fork sandbox directory (needed before Firecracker writes snapshot files)
-        let fork_sandbox_dir =
-            format!("{}/sandboxes/{}", self.node_config.data_dir, new_sandbox_id);
+        let fork_paths = self.sandbox_paths(new_sandbox_id);
+        let fork_sandbox_dir = fork_paths.dir.clone();
         if let Err(e) = tokio::fs::create_dir_all(&fork_sandbox_dir).await {
             self.cleanup_fork_failure(
                 new_sandbox_id,
@@ -488,12 +621,31 @@ impl SandboxManager {
             )));
         }
 
-        let snapshot_path = format!("{}/snapshot_file", fork_sandbox_dir);
-        let mem_path = format!("{}/mem_file", fork_sandbox_dir);
-        let source_rootfs = format!(
-            "{}/sandboxes/{}/rootfs.ext4",
-            self.node_config.data_dir, source_sandbox_id
-        );
+        // Compute snapshot paths. When source is jailed, snapshot files must go
+        // into the source's chroot (Firecracker can only write within its chroot).
+        let (api_snapshot_path, api_mem_path, host_snapshot_path, host_mem_path) =
+            if let Some(ref src_chroot) = source_chroot_root {
+                // Jailed source: write to source chroot, then copy later
+                let api_snap = "/fork_snapshot_file".to_string();
+                let api_mem = "/fork_mem_file".to_string();
+                let host_snap = format!("{}/fork_snapshot_file", src_chroot);
+                let host_mem = format!("{}/fork_mem_file", src_chroot);
+                (api_snap, api_mem, host_snap, host_mem)
+            } else {
+                // Non-jailed: write directly to fork's sandbox dir
+                let snap = format!("{}/snapshot_file", fork_sandbox_dir);
+                let mem = format!("{}/mem_file", fork_sandbox_dir);
+                (snap.clone(), mem.clone(), snap, mem)
+            };
+        let source_rootfs = if source_chroot_root.is_some() {
+            let src_paths = self.sandbox_paths(source_sandbox_id);
+            format!("{}/rootfs.ext4", src_paths.dir)
+        } else {
+            format!(
+                "{}/sandboxes/{}/rootfs.ext4",
+                self.node_config.data_dir, source_sandbox_id
+            )
+        };
 
         // --- Step 1: Pause source VM ---
         let fc_api = FirecrackerApi::new(&source_api_socket);
@@ -512,7 +664,7 @@ impl SandboxManager {
         }
 
         // --- Step 2: Take snapshot (while source is paused) ---
-        if let Err(e) = fc_api.take_snapshot(&snapshot_path, &mem_path).await {
+        if let Err(e) = fc_api.take_snapshot(&api_snapshot_path, &api_mem_path).await {
             let _ = fc_api.resume_vm().await; // Best-effort resume on failure
             self.cleanup_fork_failure(
                 new_sandbox_id,
@@ -528,8 +680,11 @@ impl SandboxManager {
         }
 
         // --- Step 3: Clone disk (while source is paused for consistency) ---
-        let disk_result =
-            disk::clone_disk(&source_rootfs, new_sandbox_id, &self.node_config.data_dir).await;
+        let disk_result = if self.node_config.jailer.enabled {
+            disk::clone_disk_to(&source_rootfs, &fork_sandbox_dir).await
+        } else {
+            disk::clone_disk(&source_rootfs, new_sandbox_id, &self.node_config.data_dir).await
+        };
 
         // --- Step 4: Resume source VM (minimize parent downtime) ---
         if let Err(e) = fc_api.resume_vm().await {
@@ -554,42 +709,116 @@ impl SandboxManager {
             )));
         }
 
-        // --- Step 5: Boot fork from snapshot ---
-        let api_socket_path = format!("{}/api.sock", fork_sandbox_dir);
-        let vsock_path = format!("{}/vsock.sock", fork_sandbox_dir);
-
-        let child = match tokio::process::Command::new("firecracker")
-            .arg("--api-sock")
-            .arg(&api_socket_path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
+        // For jailed source: copy snapshot files from source chroot to fork's dir
+        if source_chroot_root.is_some() {
+            let fork_snap = format!("{}/snapshot_file", fork_sandbox_dir);
+            let fork_mem = format!("{}/mem_file", fork_sandbox_dir);
+            if let Err(e) = tokio::fs::copy(&host_snapshot_path, &fork_snap).await {
                 self.cleanup_fork_failure(
                     new_sandbox_id,
                     slot,
                     None,
-                    &format!("spawn failed: {}", e),
+                    &format!("copy snapshot to fork failed: {}", e),
                 )
                 .await;
+                // Clean up temp files from source chroot
+                let _ = tokio::fs::remove_file(&host_snapshot_path).await;
+                let _ = tokio::fs::remove_file(&host_mem_path).await;
                 return Err(SandboxError::ForkFailed(format!(
-                    "failed to spawn firecracker: {}",
+                    "failed to copy snapshot to fork: {}",
                     e
                 )));
             }
-        };
+            if let Err(e) = tokio::fs::copy(&host_mem_path, &fork_mem).await {
+                self.cleanup_fork_failure(
+                    new_sandbox_id,
+                    slot,
+                    None,
+                    &format!("copy mem to fork failed: {}", e),
+                )
+                .await;
+                let _ = tokio::fs::remove_file(&host_snapshot_path).await;
+                let _ = tokio::fs::remove_file(&host_mem_path).await;
+                return Err(SandboxError::ForkFailed(format!(
+                    "failed to copy mem to fork: {}",
+                    e
+                )));
+            }
+            // Clean up temp files from source chroot
+            let _ = tokio::fs::remove_file(&host_snapshot_path).await;
+            let _ = tokio::fs::remove_file(&host_mem_path).await;
+        }
 
-        let vm = FirecrackerVm::from_parts(
-            new_sandbox_id.to_string(),
-            api_socket_path.clone(),
-            vsock_path,
-            fork_sandbox_dir,
-            child,
-        );
+        // --- Step 5: Boot fork from snapshot ---
+        let api_socket_path = fork_paths.api_socket.clone();
+
+        let vm = if self.node_config.jailer.enabled {
+            let child = match jailer::build_jailer_command(
+                &self.node_config.jailer,
+                new_sandbox_id,
+                false,
+                None,
+                None,
+            )
+            .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    self.cleanup_fork_failure(
+                        new_sandbox_id,
+                        slot,
+                        None,
+                        &format!("spawn jailer failed: {}", e),
+                    )
+                    .await;
+                    return Err(SandboxError::ForkFailed(format!(
+                        "failed to spawn jailer: {}",
+                        e
+                    )));
+                }
+            };
+            FirecrackerVm::from_parts(
+                new_sandbox_id.to_string(),
+                api_socket_path.clone(),
+                fork_paths.vsock.clone(),
+                fork_paths.data_dir,
+                child,
+                fork_paths.chroot_root.clone(),
+            )
+        } else {
+            let child = match tokio::process::Command::new("firecracker")
+                .arg("--api-sock")
+                .arg(&api_socket_path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    self.cleanup_fork_failure(
+                        new_sandbox_id,
+                        slot,
+                        None,
+                        &format!("spawn failed: {}", e),
+                    )
+                    .await;
+                    return Err(SandboxError::ForkFailed(format!(
+                        "failed to spawn firecracker: {}",
+                        e
+                    )));
+                }
+            };
+            FirecrackerVm::from_parts(
+                new_sandbox_id.to_string(),
+                api_socket_path.clone(),
+                fork_paths.vsock.clone(),
+                fork_sandbox_dir.clone(),
+                child,
+                None,
+            )
+        };
 
         // Wait for Firecracker API socket
         let fork_fc_api = FirecrackerApi::new(&api_socket_path);
@@ -607,9 +836,13 @@ impl SandboxManager {
             )));
         }
 
-        // Load snapshot into fork VM
+        // Load snapshot into fork VM (use chroot-relative paths when jailed)
+        let fork_snap_path = format!("{}/snapshot_file", fork_sandbox_dir);
+        let fork_mem_path = format!("{}/mem_file", fork_sandbox_dir);
+        let fc_fork_snap = vm.fc_path(&fork_snap_path);
+        let fc_fork_mem = vm.fc_path(&fork_mem_path);
         if let Err(e) = fork_fc_api
-            .restore_snapshot(&snapshot_path, &mem_path)
+            .restore_snapshot(&fc_fork_snap, &fc_fork_mem)
             .await
         {
             self.cleanup_fork_failure(
@@ -844,29 +1077,45 @@ impl SandboxManager {
         profile: Profile,
         net_config: &network::NetworkConfig,
     ) -> Result<FirecrackerVm, SandboxError> {
-        let sandbox_dir = format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
-        let vsock_path = format!("{}/vsock.sock", sandbox_dir);
-
         let kernel_path = if kernel_ref.is_empty() {
             self.node_config.kernel_path.clone()
         } else {
             kernel_ref.to_string()
         };
 
-        let vm_config = VmConfig {
-            sandbox_id: sandbox_id.to_string(),
-            kernel_path,
-            rootfs_path: rootfs_path.to_string(),
-            vcpu_count: profile.vcpu_count(),
-            mem_size_mib: profile.mem_size_mib(),
-            vsock_uds_path: vsock_path,
-            tap_dev_name: Some(net_config.tap_name.clone()),
-            guest_mac: Some(net_config.guest_mac.clone()),
-        };
-
-        FirecrackerVm::create(&vm_config, &self.node_config.data_dir)
-            .await
-            .map_err(|e| SandboxError::CreateFailed(e.to_string()))
+        if self.node_config.jailer.enabled {
+            let paths = self.sandbox_paths(sandbox_id);
+            let vm_config = VmConfig {
+                sandbox_id: sandbox_id.to_string(),
+                kernel_path,
+                rootfs_path: rootfs_path.to_string(),
+                vcpu_count: profile.vcpu_count(),
+                mem_size_mib: profile.mem_size_mib(),
+                vsock_uds_path: paths.vsock,
+                tap_dev_name: Some(net_config.tap_name.clone()),
+                guest_mac: Some(net_config.guest_mac.clone()),
+            };
+            FirecrackerVm::create_jailed(&vm_config, &self.node_config.jailer)
+                .await
+                .map_err(|e| SandboxError::CreateFailed(e.to_string()))
+        } else {
+            let sandbox_dir =
+                format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
+            let vsock_path = format!("{}/vsock.sock", sandbox_dir);
+            let vm_config = VmConfig {
+                sandbox_id: sandbox_id.to_string(),
+                kernel_path,
+                rootfs_path: rootfs_path.to_string(),
+                vcpu_count: profile.vcpu_count(),
+                mem_size_mib: profile.mem_size_mib(),
+                vsock_uds_path: vsock_path,
+                tap_dev_name: Some(net_config.tap_name.clone()),
+                guest_mac: Some(net_config.guest_mac.clone()),
+            };
+            FirecrackerVm::create(&vm_config, &self.node_config.data_dir)
+                .await
+                .map_err(|e| SandboxError::CreateFailed(e.to_string()))
+        }
     }
 
     async fn wait_for_agent_health(&self, _sandbox_id: &str) -> Result<(), SandboxError> {
@@ -949,6 +1198,7 @@ mod tests {
             data_dir: "/tmp/sandchest-test".to_string(),
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
             control_plane_url: None,
+            jailer: crate::jailer::JailerConfig::disabled(),
         })
     }
 

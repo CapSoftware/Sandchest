@@ -5,6 +5,7 @@ pub mod events;
 pub mod firecracker;
 pub mod heartbeat;
 pub mod id;
+pub mod jailer;
 pub mod network;
 pub mod router;
 pub mod sandbox;

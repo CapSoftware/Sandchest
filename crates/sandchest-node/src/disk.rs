@@ -58,6 +58,52 @@ pub async fn clone_disk(src_ext4: &str, sandbox_id: &str, data_dir: &str) -> Res
     Ok(dest)
 }
 
+/// Clone a base ext4 image to a specific destination directory.
+///
+/// Like `clone_disk` but allows specifying the target directory directly.
+/// The destination directory must already exist.
+pub async fn clone_disk_to(src_ext4: &str, dest_dir: &str) -> Result<String, DiskError> {
+    let dest = format!("{}/rootfs.ext4", dest_dir);
+
+    if !Path::new(src_ext4).exists() {
+        return Err(DiskError::SourceNotFound(src_ext4.to_string()));
+    }
+
+    info!(
+        src = %src_ext4,
+        dest = %dest,
+        "cloning disk with reflink to target directory"
+    );
+
+    let src = src_ext4.to_string();
+    let dst = dest.clone();
+
+    let output = if cfg!(target_os = "linux") {
+        tokio::process::Command::new("cp")
+            .arg("--reflink=auto")
+            .arg(&src)
+            .arg(&dst)
+            .output()
+            .await
+            .map_err(|e| DiskError::Io(format!("failed to run cp: {}", e)))?
+    } else {
+        tokio::process::Command::new("cp")
+            .arg(&src)
+            .arg(&dst)
+            .output()
+            .await
+            .map_err(|e| DiskError::Io(format!("failed to run cp: {}", e)))?
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DiskError::Io(format!("cp failed: {}", stderr)));
+    }
+
+    info!(dest = %dest, "disk clone complete");
+    Ok(dest)
+}
+
 /// Remove a sandbox's data directory and its contents.
 pub async fn cleanup_disk(sandbox_id: &str, data_dir: &str) -> Result<(), DiskError> {
     let sandbox_dir = format!("{}/sandboxes/{}", data_dir, sandbox_id);
@@ -195,6 +241,41 @@ mod tests {
         // Verify the output path matches expected format
         assert!(dest.ends_with("/sandboxes/sb_pathtest/rootfs.ext4"));
         assert!(dest.starts_with(data_dir));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn clone_disk_to_copies_to_target_dir() {
+        let tmp = std::env::temp_dir().join("sandchest-disk-to-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let src_dir = tmp.join("images");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let src_file = src_dir.join("rootfs.ext4");
+        std::fs::write(&src_file, b"fake-ext4-to").unwrap();
+
+        let dest_dir = tmp.join("target");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+
+        let result = clone_disk_to(src_file.to_str().unwrap(), dest_dir.to_str().unwrap()).await;
+        assert!(result.is_ok());
+
+        let dest = result.unwrap();
+        assert!(dest.ends_with("/rootfs.ext4"));
+        assert!(Path::new(&dest).exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"fake-ext4-to");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn clone_disk_to_fails_for_missing_source() {
+        let tmp = std::env::temp_dir().join("sandchest-disk-to-missing");
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let result = clone_disk_to("/nonexistent/rootfs.ext4", tmp.to_str().unwrap()).await;
+        assert!(matches!(result.unwrap_err(), DiskError::SourceNotFound(_)));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
