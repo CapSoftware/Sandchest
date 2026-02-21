@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import MobileMenu from './MobileMenu'
 
 export default function Nav() {
@@ -7,9 +6,9 @@ export default function Nav() {
       <nav
         className="nav-bar sticky top-0 z-10 flex items-center justify-between bg-background"
       >
-        <Link href="/" className="flex items-center no-underline hover:no-underline">
+        <a href="/" className="flex items-center no-underline hover:no-underline">
           <img src="/sandchest-logo-dark.svg" alt="Sandchest" style={{ height: 48 }} />
-        </Link>
+        </a>
 
         <ul className="hidden items-center sm:flex" style={{ gap: 48 }}>
           <li>
@@ -21,11 +20,6 @@ export default function Nav() {
             <a href="#code" className="text-text-weak transition-colors hover:text-text-strong">
               See it in action
             </a>
-          </li>
-          <li>
-            <Link href="/login" className="text-text-weak transition-colors hover:text-text-strong">
-              Log in
-            </Link>
           </li>
           <li className="star-item">
             <a
