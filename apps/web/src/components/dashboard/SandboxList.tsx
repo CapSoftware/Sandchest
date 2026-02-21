@@ -1,6 +1,8 @@
+'use client'
+
 import { useState, useEffect, useCallback } from 'react'
-import { apiFetch } from '../../lib/api'
-import { formatRelativeTime } from '../../lib/format'
+import { apiFetch } from '@/lib/api'
+import { formatRelativeTime } from '@/lib/format'
 import type { SandboxSummary, ListSandboxesResponse, SandboxStatus } from '@sandchest/contract'
 
 const STATUS_COLORS: Record<SandboxStatus, string> = {

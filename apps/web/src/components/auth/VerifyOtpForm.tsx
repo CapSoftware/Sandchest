@@ -1,5 +1,7 @@
+'use client'
+
 import { useState, useRef, useEffect } from 'react'
-import { authClient } from '../../lib/auth-client'
+import { authClient } from '@/lib/auth-client'
 
 const OTP_LENGTH = 6
 

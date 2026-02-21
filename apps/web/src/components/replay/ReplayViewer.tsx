@@ -1,6 +1,9 @@
+'use client'
+
 import { useState, useEffect, useCallback } from 'react'
-import { apiFetch } from '../../lib/api'
-import { formatRelativeTime, formatDuration, formatCmd } from '../../lib/format'
+import Link from 'next/link'
+import { apiFetch } from '@/lib/api'
+import { formatRelativeTime, formatDuration, formatCmd } from '@/lib/format'
 import type {
   ReplayBundle,
   ReplayExec,
@@ -188,9 +191,9 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
           <p className="replay-error-desc">
             If you own this sandbox, sign in to view it or make it public.
           </p>
-          <a href="/login" className="replay-signin-link">
+          <Link href="/login" className="replay-signin-link">
             Sign in
-          </a>
+          </Link>
         </div>
       </div>
     )
@@ -202,7 +205,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
     <div className="replay-container">
       <header className="replay-header">
         <div className="replay-header-left">
-          <a href="/" className="replay-logo">sandchest</a>
+          <Link href="/" className="replay-logo">sandchest</Link>
           <span className="replay-header-sep">/</span>
           <span className="replay-sandbox-id">{bundle.sandbox_id}</span>
         </div>
@@ -242,12 +245,12 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
         {bundle.forked_from && (
           <div className="replay-meta-row">
             <span className="replay-meta-label">Forked from</span>
-            <a
+            <Link
               href={`/s/${bundle.forked_from}`}
               className="replay-fork-link"
             >
               {bundle.forked_from}
-            </a>
+            </Link>
           </div>
         )}
       </div>
@@ -387,9 +390,9 @@ function ForkTreeNode({
       {isCurrent ? (
         <span className="replay-fork-current">{node.sandbox_id}</span>
       ) : (
-        <a href={`/s/${node.sandbox_id}`} className="replay-fork-link">
+        <Link href={`/s/${node.sandbox_id}`} className="replay-fork-link">
           {node.sandbox_id}
-        </a>
+        </Link>
       )}
       {node.forked_at && (
         <span className="replay-text-weak replay-fork-time">

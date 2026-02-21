@@ -1,6 +1,8 @@
+'use client'
+
 import { useState, useEffect } from 'react'
-import { authClient } from '../../lib/auth-client'
-import { formatShortDate } from '../../lib/format'
+import { authClient } from '@/lib/auth-client'
+import { formatShortDate } from '@/lib/format'
 
 interface ApiKey {
   id: string

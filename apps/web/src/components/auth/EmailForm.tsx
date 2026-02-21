@@ -1,6 +1,9 @@
+'use client'
+
 import { useState } from 'react'
-import { authClient } from '../../lib/auth-client'
-import { isValidEmail } from '../../lib/validation'
+import Link from 'next/link'
+import { authClient } from '@/lib/auth-client'
+import { isValidEmail } from '@/lib/validation'
 
 interface EmailFormProps {
   heading: string
@@ -91,7 +94,7 @@ export default function EmailForm({
       </form>
 
       <p className="auth-alt-link">
-        {altText} <a href={altHref}>{altActionText}</a>
+        {altText} <Link href={altHref}>{altActionText}</Link>
       </p>
     </div>
   )

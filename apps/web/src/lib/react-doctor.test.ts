@@ -94,8 +94,13 @@ describe('react-doctor: anti-pattern detection', () => {
   })
 
   describe('no useEffect to notify parent (onChange in effect)', () => {
+    // ScrollReveal uses IntersectionObserver in useEffect — the "onO" in
+    // "IntersectionObserver" is a false positive for the on[A-Z] regex.
+    const FALSE_POSITIVES = new Set(['landing/ScrollReveal.tsx'])
+
     for (const file of componentFiles) {
       test(label(file), () => {
+        if (FALSE_POSITIVES.has(label(file))) return
         const src = readComponent(file)
         const hasNotifyPattern = /useEffect\([^)]*\(\)\s*=>\s*\{[^}]*on[A-Z]\w*\([^)]*\)[^}]*\}/.test(src)
         expect(hasNotifyPattern).toBe(false)
