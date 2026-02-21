@@ -44,6 +44,8 @@ export type {
   RegisterArtifactsRequest,
   RegisterArtifactsResponse,
   ListArtifactsResponse,
+  SetReplayVisibilityRequest,
+  SetReplayVisibilityResponse,
   StopSandboxResponse,
 } from './api.js'
 

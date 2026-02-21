@@ -508,3 +508,108 @@ describe('softDelete', () => {
     expect(row!.status).toBe('deleted')
   })
 })
+
+// ---------------------------------------------------------------------------
+// replayPublic
+// ---------------------------------------------------------------------------
+
+describe('replayPublic', () => {
+  test('new sandboxes have replayPublic=false by default', async () => {
+    const params = makeSandbox()
+    const row = await run(repo.create(params))
+    expect(row.replayPublic).toBe(false)
+  })
+
+  test('setReplayPublic toggles visibility', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+
+    const updated = await run(repo.setReplayPublic(params.id, ORG_A, true))
+    expect(updated).not.toBeNull()
+    expect(updated!.replayPublic).toBe(true)
+
+    const reverted = await run(repo.setReplayPublic(params.id, ORG_A, false))
+    expect(reverted).not.toBeNull()
+    expect(reverted!.replayPublic).toBe(false)
+  })
+
+  test('setReplayPublic returns null for wrong org', async () => {
+    const params = makeSandbox(ORG_A)
+    await run(repo.create(params))
+    const result = await run(repo.setReplayPublic(params.id, ORG_B, true))
+    expect(result).toBeNull()
+  })
+
+  test('setReplayPublic returns null for unknown sandbox', async () => {
+    const result = await run(repo.setReplayPublic(generateUUIDv7(), ORG_A, true))
+    expect(result).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// findByIdPublic
+// ---------------------------------------------------------------------------
+
+describe('findByIdPublic', () => {
+  test('returns null for private sandboxes', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    const result = await run(repo.findByIdPublic(params.id))
+    expect(result).toBeNull()
+  })
+
+  test('returns row for public sandboxes', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.setReplayPublic(params.id, ORG_A, true))
+    const result = await run(repo.findByIdPublic(params.id))
+    expect(result).not.toBeNull()
+    expect(result!.replayPublic).toBe(true)
+  })
+
+  test('does not require orgId', async () => {
+    const params = makeSandbox(ORG_A)
+    await run(repo.create(params))
+    await run(repo.setReplayPublic(params.id, ORG_A, true))
+
+    // findByIdPublic takes only the id, no org
+    const result = await run(repo.findByIdPublic(params.id))
+    expect(result).not.toBeNull()
+    expect(result!.orgId).toBe(ORG_A)
+  })
+
+  test('returns null after setting back to private', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.setReplayPublic(params.id, ORG_A, true))
+    await run(repo.setReplayPublic(params.id, ORG_A, false))
+    const result = await run(repo.findByIdPublic(params.id))
+    expect(result).toBeNull()
+  })
+
+  test('returns null for unknown id', async () => {
+    const result = await run(repo.findByIdPublic(generateUUIDv7()))
+    expect(result).toBeNull()
+  })
+
+  test('forked sandboxes are private by default', async () => {
+    const parent = makeSandbox()
+    const parentRow = await run(repo.create(parent))
+    await run(repo.setReplayPublic(parent.id, ORG_A, true))
+
+    const forkId = generateUUIDv7()
+    const fork = await run(
+      repo.createFork({
+        id: forkId,
+        orgId: ORG_A,
+        source: parentRow,
+        env: null,
+        ttlSeconds: 3600,
+      }),
+    )
+    expect(fork.replayPublic).toBe(false)
+
+    const publicResult = await run(repo.findByIdPublic(forkId))
+    expect(publicResult).toBeNull()
+  })
+})

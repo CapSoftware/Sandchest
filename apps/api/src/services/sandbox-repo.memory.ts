@@ -60,6 +60,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           forkCount: 0,
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
+          replayPublic: false,
           lastActivityAt: null,
           createdAt: now,
           updatedAt: now,
@@ -162,6 +163,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           forkCount: 0,
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
+          replayPublic: false,
           lastActivityAt: now,
           createdAt: now,
           updatedAt: now,
@@ -214,6 +216,27 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         }
 
         return result
+      }),
+
+    findByIdPublic: (id) =>
+      Effect.sync(() => {
+        const row = store.get(keyFor(id))
+        if (!row || !row.replayPublic) return null
+        return row
+      }),
+
+    setReplayPublic: (id, orgId, isPublic) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        if (!row || row.orgId !== orgId) return null
+        const updated: SandboxRow = {
+          ...row,
+          replayPublic: isPublic,
+          updatedAt: new Date(),
+        }
+        store.set(key, updated)
+        return updated
       }),
 
     findExpiredTtl: () =>

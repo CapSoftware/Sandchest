@@ -21,6 +21,7 @@ export interface SandboxRow {
   readonly forkCount: number
   readonly ttlSeconds: number
   readonly failureReason: FailureReason | null
+  readonly replayPublic: boolean
   readonly lastActivityAt: Date | null
   readonly createdAt: Date
   readonly updatedAt: Date
@@ -101,6 +102,18 @@ export interface SandboxRepoApi {
     id: Uint8Array,
     orgId: string,
   ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Find a sandbox by id without org check. Only returns rows with replay_public=true. */
+  readonly findByIdPublic: (
+    id: Uint8Array,
+  ) => Effect.Effect<SandboxRow | null, never, never>
+
+  /** Set replay visibility for a sandbox. Returns the updated row or null. */
+  readonly setReplayPublic: (
+    id: Uint8Array,
+    orgId: string,
+    isPublic: boolean,
+  ) => Effect.Effect<SandboxRow | null, never, never>
 
   /** Find running sandboxes that have exceeded their TTL. */
   readonly findExpiredTtl: () => Effect.Effect<SandboxRow[], never, never>

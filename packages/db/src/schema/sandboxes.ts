@@ -1,4 +1,4 @@
-import { index, int, json, mysqlEnum, mysqlTable, smallint, tinyint, varchar } from 'drizzle-orm/mysql-core'
+import { boolean, index, int, json, mysqlEnum, mysqlTable, smallint, tinyint, varchar } from 'drizzle-orm/mysql-core'
 import { createdAt, timestampMicro, updatedAt, uuidv7Binary } from '../columns'
 
 export const sandboxes = mysqlTable(
@@ -26,6 +26,7 @@ export const sandboxes = mysqlTable(
     forkDepth: tinyint('fork_depth').notNull().default(0),
     forkCount: smallint('fork_count').notNull().default(0),
     ttlSeconds: int('ttl_seconds').notNull().default(3600),
+    replayPublic: boolean('replay_public').notNull().default(false),
     failureReason: mysqlEnum('failure_reason', [
       'capacity_timeout',
       'node_lost',

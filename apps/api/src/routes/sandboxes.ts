@@ -17,6 +17,8 @@ import type {
   GetForkTreeResponse,
   GetSandboxResponse,
   ListSandboxesResponse,
+  SetReplayVisibilityRequest,
+  SetReplayVisibilityResponse,
   StopSandboxResponse,
   ProfileName,
   SandboxStatus,
@@ -84,6 +86,7 @@ function rowToGetResponse(row: SandboxRow): GetSandboxResponse {
     ended_at: row.endedAt?.toISOString() ?? null,
     failure_reason: row.failureReason,
     replay_url: replayUrl(sandboxId),
+    replay_public: row.replayPublic,
   }
 }
 
@@ -700,6 +703,133 @@ const getReplay = Effect.gen(function* () {
   return withReplayWarning(HttpServerResponse.unsafeJson(response))
 })
 
+// -- Set replay visibility ---------------------------------------------------
+
+const setReplayVisibility = Effect.gen(function* () {
+  const auth = yield* AuthContext
+  const repo = yield* SandboxRepo
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const params = yield* HttpRouter.params
+
+  const id = params.id
+  if (!id) {
+    return yield* Effect.fail(new ValidationError({ message: 'Missing sandbox ID' }))
+  }
+
+  let idBytes: Uint8Array
+  try {
+    idBytes = idToBytes(id)
+  } catch {
+    return yield* Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${id}` }))
+  }
+
+  const raw = yield* request.json.pipe(Effect.orElseSucceed(() => ({})))
+  const body: SetReplayVisibilityRequest =
+    raw && typeof raw === 'object' ? (raw as SetReplayVisibilityRequest) : { public: false }
+
+  if (typeof body.public !== 'boolean') {
+    return yield* Effect.fail(
+      new ValidationError({ message: '"public" must be a boolean' }),
+    )
+  }
+
+  const updated = yield* repo.setReplayPublic(idBytes, auth.orgId, body.public)
+  if (!updated) {
+    return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
+  }
+
+  const response: SetReplayVisibilityResponse = {
+    sandbox_id: id,
+    replay_public: updated.replayPublic,
+  }
+
+  return HttpServerResponse.unsafeJson(response)
+})
+
+// -- Get public replay -------------------------------------------------------
+
+const getPublicReplay = Effect.gen(function* () {
+  const sandboxRepo = yield* SandboxRepo
+  const execRepo = yield* ExecRepo
+  const sessionRepo = yield* SessionRepo
+  const objectStorage = yield* ObjectStorage
+  const params = yield* HttpRouter.params
+
+  const id = params.id
+  if (!id) {
+    return yield* Effect.fail(new ValidationError({ message: 'Missing sandbox ID' }))
+  }
+
+  let idBytes: Uint8Array
+  try {
+    idBytes = idToBytes(id)
+  } catch {
+    return yield* Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${id}` }))
+  }
+
+  const row = yield* sandboxRepo.findByIdPublic(idBytes)
+  if (!row) {
+    return yield* Effect.fail(new NotFoundError({ message: 'Replay not found or is private' }))
+  }
+
+  // Fetch fork tree using the sandbox's orgId
+  const treeRows = yield* sandboxRepo.getForkTree(idBytes, row.orgId)
+
+  let rootRow = row
+  for (const r of treeRows) {
+    if (!r.forkedFrom) {
+      rootRow = r
+      break
+    }
+  }
+
+  const forkTree = buildReplayForkTree(rootRow.id, treeRows)
+
+  // Fetch execs
+  const execResult = yield* execRepo.list(idBytes, row.orgId, {})
+  const replayExecs: ReplayExec[] = execResult.rows.map(execRowToReplayExec)
+
+  // Fetch sessions
+  const sessionRows = yield* sessionRepo.list(idBytes, row.orgId)
+  const replaySessions: ReplaySession[] = sessionRows.map((s) => ({
+    session_id: bytesToId(SESSION_PREFIX, s.id),
+    shell: s.shell,
+    created_at: s.createdAt.toISOString(),
+    destroyed_at: s.destroyedAt?.toISOString() ?? null,
+  }))
+
+  // Generate presigned events URL
+  const eventsKey = `${row.orgId}/${id}/events.jsonl`
+  const eventsUrl = yield* objectStorage.getPresignedUrl(eventsKey, EVENTS_PRESIGN_TTL_SECONDS)
+
+  const isRunning = row.status === 'running' || row.status === 'queued' || row.status === 'provisioning'
+  const status = isRunning ? 'in_progress' : 'complete'
+
+  const totalDurationMs =
+    row.endedAt && row.createdAt
+      ? row.endedAt.getTime() - row.createdAt.getTime()
+      : null
+
+  const response: ReplayBundle = {
+    version: 1,
+    sandbox_id: id,
+    status,
+    image: row.imageRef,
+    profile: row.profileName,
+    forked_from: row.forkedFrom ? bytesToId(SANDBOX_PREFIX, row.forkedFrom) : null,
+    fork_tree: forkTree,
+    started_at: row.createdAt.toISOString(),
+    ended_at: row.endedAt?.toISOString() ?? null,
+    total_duration_ms: totalDurationMs,
+    sessions: replaySessions,
+    execs: replayExecs,
+    artifacts: [],
+    events_url: eventsUrl,
+  }
+
+  return HttpServerResponse.unsafeJson(response)
+})
+
 // -- Router ------------------------------------------------------------------
 
 export const SandboxRouter = HttpRouter.empty.pipe(
@@ -711,4 +841,6 @@ export const SandboxRouter = HttpRouter.empty.pipe(
   HttpRouter.post('/v1/sandboxes/:id/stop', stopSandbox),
   HttpRouter.del('/v1/sandboxes/:id', deleteSandbox),
   HttpRouter.get('/v1/sandboxes/:id/replay', getReplay),
+  HttpRouter.patch('/v1/sandboxes/:id/replay', setReplayVisibility),
+  HttpRouter.get('/v1/public/replay/:id', getPublicReplay),
 )

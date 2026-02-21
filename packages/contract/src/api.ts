@@ -49,6 +49,18 @@ export interface GetSandboxResponse {
   ended_at: string | null
   failure_reason: FailureReason | null
   replay_url: string
+  replay_public: boolean
+}
+
+/** PATCH /v1/sandboxes/{id}/replay — request body. */
+export interface SetReplayVisibilityRequest {
+  public: boolean
+}
+
+/** PATCH /v1/sandboxes/{id}/replay — 200 response. */
+export interface SetReplayVisibilityResponse {
+  sandbox_id: string
+  replay_public: boolean
 }
 
 /** GET /v1/sandboxes — query parameters. */

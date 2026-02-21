@@ -23,3 +23,18 @@ export function formatShortDate(date: Date): string {
     year: 'numeric',
   })
 }
+
+/** Formats a duration in milliseconds to a human-readable string. */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const min = Math.floor(ms / 60000)
+  const sec = Math.round((ms % 60000) / 1000)
+  return `${min}m ${sec}s`
+}
+
+/** Formats a command (string or array) to a display string. */
+export function formatCmd(cmd: string | string[]): string {
+  if (Array.isArray(cmd)) return cmd.join(' ')
+  return cmd
+}

@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
-import { formatRelativeTime, formatShortDate } from './format'
+import { formatRelativeTime, formatShortDate, formatDuration, formatCmd } from './format'
 
 describe('formatRelativeTime', () => {
   let realDate: typeof Date
@@ -68,5 +68,45 @@ describe('formatShortDate', () => {
     expect(result).toContain('Dec')
     expect(result).toContain('25')
     expect(result).toContain('2025')
+  })
+})
+
+describe('formatDuration', () => {
+  test('formats sub-second durations in milliseconds', () => {
+    expect(formatDuration(0)).toBe('0ms')
+    expect(formatDuration(50)).toBe('50ms')
+    expect(formatDuration(999)).toBe('999ms')
+  })
+
+  test('formats seconds with one decimal place', () => {
+    expect(formatDuration(1000)).toBe('1.0s')
+    expect(formatDuration(1500)).toBe('1.5s')
+    expect(formatDuration(59999)).toBe('60.0s')
+  })
+
+  test('formats minutes and seconds', () => {
+    expect(formatDuration(60000)).toBe('1m 0s')
+    expect(formatDuration(90000)).toBe('1m 30s')
+    expect(formatDuration(3600000)).toBe('60m 0s')
+  })
+})
+
+describe('formatCmd', () => {
+  test('returns string commands as-is', () => {
+    expect(formatCmd('ls -la')).toBe('ls -la')
+    expect(formatCmd('echo hello')).toBe('echo hello')
+  })
+
+  test('joins array commands with spaces', () => {
+    expect(formatCmd(['ls', '-la'])).toBe('ls -la')
+    expect(formatCmd(['echo', 'hello', 'world'])).toBe('echo hello world')
+  })
+
+  test('handles empty array', () => {
+    expect(formatCmd([])).toBe('')
+  })
+
+  test('handles single-element array', () => {
+    expect(formatCmd(['ls'])).toBe('ls')
   })
 })

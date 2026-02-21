@@ -32,7 +32,7 @@ export const withRateLimit = HttpMiddleware.make((app) =>
     const url = request.url
 
     // Skip non-API paths
-    if (url.startsWith('/health') || url.startsWith('/api/auth')) {
+    if (url.startsWith('/health') || url.startsWith('/api/auth') || url.startsWith('/v1/public/')) {
       return yield* app
     }
 
