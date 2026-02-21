@@ -4,4 +4,4 @@ export {
   formatDuration,
   formatCmd,
   formatBytes,
-} from '@sandchest/contract'
+} from '@sandchest/contract/format'

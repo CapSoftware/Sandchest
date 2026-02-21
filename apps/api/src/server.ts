@@ -1,4 +1,4 @@
-import { HttpApp, HttpRouter, HttpServer } from '@effect/platform'
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from '@effect/platform'
 import { Effect } from 'effect'
 import { auth } from './auth.js'
 import { formatApiError } from './errors.js'
@@ -15,7 +15,12 @@ import { ArtifactRouter } from './routes/artifacts.js'
 import { NodeRouter } from './routes/nodes.js'
 import { DocsRouter } from './routes/docs.js'
 
-const betterAuthApp = HttpApp.fromWebHandler((request: Request) => auth.handler(request))
+const handleBetterAuth = Effect.gen(function* () {
+  const req = yield* HttpServerRequest.HttpServerRequest
+  const webReq = yield* HttpServerRequest.toWeb(req)
+  const webRes = yield* Effect.tryPromise(() => auth.handler(webReq))
+  return yield* Effect.succeed(HttpServerResponse.fromWeb(webRes))
+})
 
 export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(HealthRouter),
@@ -26,7 +31,8 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(ArtifactRouter),
   HttpRouter.concat(NodeRouter),
   HttpRouter.concat(DocsRouter),
-  HttpRouter.mountApp('/api/auth', betterAuthApp, { includePrefix: true }),
+  HttpRouter.all('/api/auth/*', handleBetterAuth),
+  HttpRouter.all('/api/auth', handleBetterAuth),
   HttpRouter.catchAll((error) => Effect.succeed(formatApiError(error))),
 )
 

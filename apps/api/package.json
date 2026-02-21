@@ -9,7 +9,7 @@
     "lint": "eslint src/",
     "test": "bun test --ignore='src/e2e*.test.ts'",
     "test:e2e": "bun test src/e2e.test.ts src/e2e-http.test.ts",
-    "dev": "bun run src/index.ts"
+    "dev": "bun --env-file=../../.env --watch run src/index.ts"
   },
   "dependencies": {
     "@effect/platform": "^0.94.5",

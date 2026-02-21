@@ -3,6 +3,8 @@ import { Suspense } from 'react'
 import AuthLayout from '@/components/AuthLayout'
 import VerifyOtpForm from '@/components/auth/VerifyOtpForm'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Verify — Sandchest',
 }

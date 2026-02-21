@@ -9,5 +9,5 @@ export const timestampMicro = (name: string) => timestamp(name, { fsp: 6, mode: 
 /** created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) */
 export const createdAt = () => timestampMicro('created_at').notNull().defaultNow()
 
-/** updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) */
-export const updatedAt = () => timestampMicro('updated_at').notNull().defaultNow().onUpdateNow()
+/** updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) — set in application code on updates (Vitess rejects ON UPDATE for fractional timestamps) */
+export const updatedAt = () => timestampMicro('updated_at').notNull().defaultNow()
