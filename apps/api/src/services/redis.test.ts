@@ -164,13 +164,20 @@ describe('replay event buffering', () => {
   test('pushReplayEvent and getReplayEvents round-trip', async () => {
     await run(redis.pushReplayEvent('sb_1', event1, 600))
     await run(redis.pushReplayEvent('sb_1', event2, 600))
-    const events = await run(redis.getReplayEvents('sb_1'))
+    const events = await run(redis.getReplayEvents('sb_1', 0))
     expect(events).toEqual([event1, event2])
   })
 
   test('getReplayEvents returns empty for unknown sandbox', async () => {
-    const events = await run(redis.getReplayEvents('sb_unknown'))
+    const events = await run(redis.getReplayEvents('sb_unknown', 0))
     expect(events).toEqual([])
+  })
+
+  test('getReplayEvents filters by afterSeq', async () => {
+    await run(redis.pushReplayEvent('sb_filter', event1, 600))
+    await run(redis.pushReplayEvent('sb_filter', event2, 600))
+    const events = await run(redis.getReplayEvents('sb_filter', 1))
+    expect(events).toEqual([event2])
   })
 })
 

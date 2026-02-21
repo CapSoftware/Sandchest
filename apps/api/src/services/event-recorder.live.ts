@@ -178,7 +178,7 @@ export function createLiveEventRecorder(
     getEvents: (params) =>
       Effect.gen(function* () {
         // Try Redis first (for live/recent sandboxes)
-        const redisEvents = yield* redis.getReplayEvents(params.sandboxId)
+        const redisEvents = yield* redis.getReplayEvents(params.sandboxId, 0)
         if (redisEvents.length > 0) {
           return redisEvents.map((e) => e.data as ReplayEvent)
         }

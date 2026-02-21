@@ -22,6 +22,7 @@ import { QuotaService } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { idToBytes } from '@sandchest/contract'
 import type { ReplayBundle } from '@sandchest/contract'
+import type { BufferedEvent } from '../services/redis.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -55,7 +56,7 @@ function createTestEnv() {
     return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
   }
 
-  return { runTest, sandboxRepo, execRepo, sessionRepo, quotaApi }
+  return { runTest, sandboxRepo, execRepo, sessionRepo, redis, quotaApi }
 }
 
 function createRunningSandbox(
@@ -650,5 +651,154 @@ describe('POST /v1/sandboxes/:id/fork — quota enforcement', () => {
     expect(result.status).toBe(400)
     expect(result.body.error).toBe('validation_error')
     expect(result.body.message).toContain('300')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /v1/sandboxes/:id/stream — sandbox-level SSE
+// ---------------------------------------------------------------------------
+
+describe('GET /v1/sandboxes/:id/stream — sandbox event stream', () => {
+  test('returns SSE content-type with empty body when no events', async () => {
+    const env = createTestEnv()
+    const sandboxId = await createRunningSandbox(env)
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}/stream`),
+        )
+        const body = yield* response.text
+        return {
+          status: response.status,
+          contentType: response.headers['content-type'],
+          cacheControl: response.headers['cache-control'],
+          body,
+        }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.contentType).toContain('text/event-stream')
+    expect(result.cacheControl).toBe('no-cache')
+    expect(result.body).toBe('')
+  })
+
+  test('returns buffered replay events as SSE', async () => {
+    const env = createTestEnv()
+    const sandboxId = await createRunningSandbox(env)
+
+    const event1: BufferedEvent = {
+      seq: 1,
+      ts: '2026-01-01T00:00:00Z',
+      data: { seq: 1, ts: '2026-01-01T00:00:00Z', type: 'sandbox.created', data: { image: 'ubuntu-22.04' } },
+    }
+    const event2: BufferedEvent = {
+      seq: 2,
+      ts: '2026-01-01T00:00:01Z',
+      data: { seq: 2, ts: '2026-01-01T00:00:01Z', type: 'sandbox.ready', data: { boot_duration_ms: 150 } },
+    }
+
+    await Effect.runPromise(env.redis.pushReplayEvent(sandboxId, event1, 600))
+    await Effect.runPromise(env.redis.pushReplayEvent(sandboxId, event2, 600))
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}/stream`),
+        )
+        const body = yield* response.text
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    const lines = result.body.split('\n')
+    expect(lines[0]).toBe('id: 1')
+    expect(lines[1]).toContain('"type":"sandbox.created"')
+    expect(lines[3]).toBe('id: 2')
+    expect(lines[4]).toContain('"type":"sandbox.ready"')
+  })
+
+  test('supports Last-Event-ID for reconnection', async () => {
+    const env = createTestEnv()
+    const sandboxId = await createRunningSandbox(env)
+
+    const event1: BufferedEvent = {
+      seq: 1,
+      ts: '2026-01-01T00:00:00Z',
+      data: { seq: 1, ts: '2026-01-01T00:00:00Z', type: 'sandbox.created', data: { image: 'ubuntu-22.04' } },
+    }
+    const event2: BufferedEvent = {
+      seq: 2,
+      ts: '2026-01-01T00:00:01Z',
+      data: { seq: 2, ts: '2026-01-01T00:00:01Z', type: 'sandbox.ready', data: { boot_duration_ms: 150 } },
+    }
+    const event3: BufferedEvent = {
+      seq: 3,
+      ts: '2026-01-01T00:00:02Z',
+      data: { seq: 3, ts: '2026-01-01T00:00:02Z', type: 'exec.started', data: { exec_id: 'ex_1', cmd: ['ls'] } },
+    }
+
+    await Effect.runPromise(env.redis.pushReplayEvent(sandboxId, event1, 600))
+    await Effect.runPromise(env.redis.pushReplayEvent(sandboxId, event2, 600))
+    await Effect.runPromise(env.redis.pushReplayEvent(sandboxId, event3, 600))
+
+    // Reconnect after seq 1, should only get events 2 and 3
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}/stream`).pipe(
+            HttpClientRequest.setHeader('last-event-id', '1'),
+          ),
+        )
+        const body = yield* response.text
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    // Should not contain event 1
+    expect(result.body).not.toContain('"seq":1')
+    // Should contain events 2 and 3
+    expect(result.body).toContain('id: 2')
+    expect(result.body).toContain('id: 3')
+  })
+
+  test('returns 404 for unknown sandbox', async () => {
+    const env = createTestEnv()
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get('/v1/sandboxes/sb_0000000000000000000000/stream'),
+        )
+        const body = yield* response.json
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(404)
+  })
+
+  test('returns 400 for invalid sandbox ID', async () => {
+    const env = createTestEnv()
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get('/v1/sandboxes/invalid-id/stream'),
+        )
+        const body = yield* response.json
+        return { status: response.status, body }
+      }),
+    )
+
+    expect(result.status).toBe(400)
   })
 })

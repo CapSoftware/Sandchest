@@ -65,9 +65,10 @@ export interface RedisApi {
     ttlSeconds: number,
   ) => Effect.Effect<void, never, never>
 
-  /** Get all replay events for a sandbox. */
+  /** Get replay events for a sandbox after a given sequence number. */
   readonly getReplayEvents: (
     sandboxId: string,
+    afterSeq: number,
   ) => Effect.Effect<BufferedEvent[], never, never>
 
   /** Add paths to the artifact registration set for a sandbox. Returns the number of new paths added. */

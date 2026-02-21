@@ -117,8 +117,11 @@ export function createInMemoryRedisApi(): RedisApi {
         replayEvents.set(sandboxId, events)
       }),
 
-    getReplayEvents: (sandboxId) =>
-      Effect.sync(() => replayEvents.get(sandboxId) ?? []),
+    getReplayEvents: (sandboxId, afterSeq) =>
+      Effect.sync(() => {
+        const events = replayEvents.get(sandboxId) ?? []
+        return events.filter((e) => e.seq > afterSeq)
+      }),
 
     addArtifactPaths: (sandboxId, paths) =>
       Effect.sync(() => {

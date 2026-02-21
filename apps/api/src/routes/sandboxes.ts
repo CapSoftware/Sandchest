@@ -27,6 +27,7 @@ import type {
   ReplayForkTreeNode,
   ReplayExec,
   ReplaySession,
+  ReplayEvent,
 } from '@sandchest/contract'
 import {
   ForkDepthExceededError,
@@ -865,6 +866,52 @@ const getPublicReplay = Effect.gen(function* () {
   return HttpServerResponse.unsafeJson(response)
 })
 
+// -- Stream sandbox events (SSE) ---------------------------------------------
+
+const streamSandbox = Effect.gen(function* () {
+  const auth = yield* AuthContext
+  const sandboxRepo = yield* SandboxRepo
+  const redis = yield* RedisService
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const params = yield* HttpRouter.params
+
+  const id = params.id
+  if (!id) {
+    return yield* Effect.fail(new ValidationError({ message: 'Missing sandbox ID' }))
+  }
+
+  let idBytes: Uint8Array
+  try {
+    idBytes = idToBytes(id)
+  } catch {
+    return yield* Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${id}` }))
+  }
+
+  const row = yield* sandboxRepo.findById(idBytes, auth.orgId)
+  if (!row) {
+    return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
+  }
+
+  // Parse Last-Event-ID header for reconnection
+  const lastEventIdHeader = request.headers['last-event-id']
+  const afterSeq = lastEventIdHeader ? parseInt(lastEventIdHeader, 10) : 0
+
+  // Get buffered replay events from Redis
+  const events = yield* redis.getReplayEvents(id, isNaN(afterSeq) ? 0 : afterSeq)
+
+  // Format as SSE
+  let sseBody = ''
+  for (const event of events) {
+    const data = event.data as ReplayEvent
+    sseBody += `id: ${data.seq}\ndata: ${JSON.stringify(data)}\n\n`
+  }
+
+  return HttpServerResponse.text(sseBody, {
+    contentType: 'text/event-stream',
+    headers: { 'cache-control': 'no-cache' },
+  })
+})
+
 // -- Router ------------------------------------------------------------------
 
 export const SandboxRouter = HttpRouter.empty.pipe(
@@ -876,6 +923,7 @@ export const SandboxRouter = HttpRouter.empty.pipe(
   HttpRouter.post('/v1/sandboxes/:id/stop', stopSandbox),
   HttpRouter.del('/v1/sandboxes/:id', deleteSandbox),
   HttpRouter.get('/v1/sandboxes/:id/replay', getReplay),
+  HttpRouter.get('/v1/sandboxes/:id/stream', streamSandbox),
   HttpRouter.patch('/v1/sandboxes/:id/replay', setReplayVisibility),
   HttpRouter.get('/v1/public/replay/:id', getPublicReplay),
 )

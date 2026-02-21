@@ -93,11 +93,12 @@ export function createIoRedisApi(client: Redis): RedisApi {
         await client.expire(key, ttlSeconds)
       }),
 
-    getReplayEvents: (sandboxId) =>
+    getReplayEvents: (sandboxId, afterSeq) =>
       Effect.promise(async () => {
         const key = replayEventsKey(sandboxId)
         const raw = await client.lrange(key, 0, -1)
-        return raw.map((s: string) => JSON.parse(s) as BufferedEvent)
+        const events: BufferedEvent[] = raw.map((s: string) => JSON.parse(s) as BufferedEvent)
+        return events.filter((e) => e.seq > afterSeq)
       }),
 
     addArtifactPaths: (sandboxId, paths) =>

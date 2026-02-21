@@ -98,7 +98,7 @@ describe('EventRecorder', () => {
       }),
     )
 
-    const events = await run(redis.getReplayEvents(TEST_SANDBOX))
+    const events = await run(redis.getReplayEvents(TEST_SANDBOX, 0))
     expect(events.length).toBe(1)
     const stored = events[0].data as ReplayEvent
     expect(stored.type).toBe('sandbox.created')
@@ -262,7 +262,7 @@ describe('EventRecorder', () => {
       }),
     )
 
-    const events = await run(redis.getReplayEvents(TEST_SANDBOX))
+    const events = await run(redis.getReplayEvents(TEST_SANDBOX, 0))
     expect(events.length).toBe(1)
     const stored = events[0].data as ReplayEvent
     expect(stored.type).toBe('exec.output')
