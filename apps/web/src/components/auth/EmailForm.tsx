@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { authClient } from '@/lib/auth-client'
 import { isValidEmail } from '@/lib/validation'
+import { useSendOtp } from '@/hooks/use-send-otp'
 import ErrorMessage from '@/components/ui/ErrorMessage'
 
 interface EmailFormProps {
@@ -26,40 +26,32 @@ export default function EmailForm({
   altHref,
 }: EmailFormProps) {
   const [email, setEmail] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [validationError, setValidationError] = useState('')
+  const sendOtp = useSendOtp()
 
-  const otpType = type === 'sign-up' ? 'email-verification' as const : type
+  const otpType = type === 'sign-up' ? ('email-verification' as const) : type
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setError('')
 
     const trimmed = email.trim()
     if (!isValidEmail(trimmed)) {
-      setError('Enter a valid email address')
+      setValidationError('Enter a valid email address')
       return
     }
+    setValidationError('')
 
-    setLoading(true)
-    try {
-      const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
-        email: trimmed,
-        type: otpType,
-      })
-
-      if (authError) {
-        setError(authError.message ?? 'Failed to send code')
-        setLoading(false)
-        return
-      }
-
-      window.location.href = `/verify?email=${encodeURIComponent(trimmed)}&type=${type}`
-    } catch {
-      setError('Something went wrong. Try again.')
-      setLoading(false)
-    }
+    sendOtp.mutate(
+      { email: trimmed, type: otpType },
+      {
+        onSuccess() {
+          window.location.href = `/verify?email=${encodeURIComponent(trimmed)}&type=${type}`
+        },
+      },
+    )
   }
+
+  const error = validationError || (sendOtp.error?.message ?? '')
 
   return (
     <div className="auth-form-wrapper">
@@ -81,16 +73,17 @@ export default function EmailForm({
           value={email}
           onChange={(e) => {
             setEmail(e.target.value)
-            if (error) setError('')
+            if (validationError) setValidationError('')
+            if (sendOtp.error) sendOtp.reset()
           }}
           className="auth-input"
-          disabled={loading}
+          disabled={sendOtp.isPending}
         />
 
         {error && <ErrorMessage message={error} className="auth-error" role="alert" />}
 
-        <button type="submit" className="auth-button" disabled={loading || !email.trim()}>
-          {loading ? 'Sending...' : buttonText}
+        <button type="submit" className="auth-button" disabled={sendOtp.isPending || !email.trim()}>
+          {sendOtp.isPending ? 'Sending...' : buttonText}
         </button>
       </form>
 

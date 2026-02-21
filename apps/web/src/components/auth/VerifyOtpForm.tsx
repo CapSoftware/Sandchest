@@ -1,25 +1,29 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { authClient } from '@/lib/auth-client'
+import { useSearchParams } from 'next/navigation'
+import { useVerifyOtp } from '@/hooks/use-verify-otp'
+import { useSendOtp } from '@/hooks/use-send-otp'
 import ErrorMessage from '@/components/ui/ErrorMessage'
 
 const OTP_LENGTH = 6
 
 export default function VerifyOtpForm() {
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''))
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [resent, setResent] = useState(false)
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
-  const params = new URLSearchParams(window.location.search)
-  const email = params.get('email') ?? ''
-  const type = params.get('type') === 'sign-up' ? 'sign-up' as const : 'sign-in' as const
-  const otpType = type === 'sign-up' ? 'email-verification' as const : type
+  const searchParams = useSearchParams()
+  const email = searchParams.get('email') ?? ''
+  const type = searchParams.get('type') === 'sign-up' ? ('sign-up' as const) : ('sign-in' as const)
+  const otpType = type === 'sign-up' ? ('email-verification' as const) : type
+
+  const verifyOtp = useVerifyOtp()
+  const resendOtp = useSendOtp()
 
   const otp = digits.join('')
   const isComplete = otp.length === OTP_LENGTH && /^\d+$/.test(otp)
+  const loading = verifyOtp.isPending || resendOtp.isPending
+  const error = verifyOtp.error?.message || resendOtp.error?.message || ''
 
   useEffect(() => {
     if (!email) {
@@ -29,13 +33,29 @@ export default function VerifyOtpForm() {
     inputRefs.current[0]?.focus()
   }, [email])
 
+  function verify(code: string) {
+    verifyOtp.mutate(
+      { email, otp: code },
+      {
+        onSuccess() {
+          window.location.href = '/dashboard'
+        },
+        onError() {
+          setDigits(Array(OTP_LENGTH).fill(''))
+          inputRefs.current[0]?.focus()
+        },
+      },
+    )
+  }
+
   function handleChange(index: number, value: string) {
     if (!/^\d*$/.test(value)) return
 
     const next = [...digits]
     next[index] = value.slice(-1)
     setDigits(next)
-    if (error) setError('')
+    if (verifyOtp.error) verifyOtp.reset()
+    if (resendOtp.error) resendOtp.reset()
 
     if (value && index < OTP_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus()
@@ -71,55 +91,19 @@ export default function VerifyOtpForm() {
     }
   }
 
-  async function verify(code: string) {
-    setLoading(true)
-    setError('')
-
-    try {
-      const { error: authError } = await authClient.emailOtp.verifyEmail({
-        email,
-        otp: code,
-      })
-
-      if (authError) {
-        setError(authError.message ?? 'Invalid code')
-        setLoading(false)
-        setDigits(Array(OTP_LENGTH).fill(''))
-        inputRefs.current[0]?.focus()
-        return
-      }
-
-      window.location.href = '/'
-    } catch {
-      setError('Something went wrong. Try again.')
-      setLoading(false)
-    }
+  function handleResend() {
+    resendOtp.mutate(
+      { email, type: otpType },
+      {
+        onSuccess() {
+          setDigits(Array(OTP_LENGTH).fill(''))
+          inputRefs.current[0]?.focus()
+        },
+      },
+    )
   }
 
-  async function handleResend() {
-    setResent(false)
-    setError('')
-
-    try {
-      const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
-        email,
-        type: otpType,
-      })
-
-      if (authError) {
-        setError(authError.message ?? 'Failed to resend code')
-        return
-      }
-
-      setResent(true)
-      setDigits(Array(OTP_LENGTH).fill(''))
-      inputRefs.current[0]?.focus()
-    } catch {
-      setError('Failed to resend code')
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (isComplete) {
       verify(otp)
@@ -142,7 +126,9 @@ export default function VerifyOtpForm() {
           {digits.map((digit, i) => (
             <input
               key={i}
-              ref={(el) => { inputRefs.current[i] = el }}
+              ref={(el) => {
+                inputRefs.current[i] = el
+              }}
               type="text"
               inputMode="numeric"
               maxLength={1}
@@ -158,10 +144,10 @@ export default function VerifyOtpForm() {
         </div>
 
         {error && <ErrorMessage message={error} className="auth-error" role="alert" />}
-        {resent && <p className="auth-success" role="status">Code resent</p>}
+        {resendOtp.isSuccess && <p className="auth-success" role="status">Code resent</p>}
 
         <button type="submit" className="auth-button" disabled={loading || !isComplete}>
-          {loading ? 'Verifying...' : 'Verify'}
+          {verifyOtp.isPending ? 'Verifying...' : 'Verify'}
         </button>
       </form>
 

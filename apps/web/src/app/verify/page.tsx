@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import AuthLayout from '@/components/AuthLayout'
 import VerifyOtpForm from '@/components/auth/VerifyOtpForm'
 
@@ -9,7 +10,9 @@ export const metadata: Metadata = {
 export default function VerifyPage() {
   return (
     <AuthLayout>
-      <VerifyOtpForm />
+      <Suspense>
+        <VerifyOtpForm />
+      </Suspense>
     </AuthLayout>
   )
 }
