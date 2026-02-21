@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Providers from '@/components/Providers'
 import '@/styles/global.css'
 
 export const metadata: Metadata = {
@@ -45,7 +46,9 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   )
 }
