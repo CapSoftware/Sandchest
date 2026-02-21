@@ -19,6 +19,11 @@ export function createInMemoryObjectStorage(): ObjectStorageApi {
       Effect.sync(() =>
         `https://s3.example.com/${key}?expires=${expiresInSeconds}`,
       ),
+
+    deleteObject: (key) =>
+      Effect.sync(() => {
+        store.delete(key)
+      }),
   }
 }
 

@@ -26,6 +26,8 @@ export type FailureReason =
   | 'sandbox_stopped'
   | 'sandbox_deleted'
   | 'ttl_exceeded'
+  | 'idle_timeout'
+  | 'queue_timeout'
 
 // ---------------------------------------------------------------------------
 // Resource types

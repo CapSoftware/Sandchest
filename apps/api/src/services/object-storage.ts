@@ -18,6 +18,11 @@ export interface ObjectStorageApi {
     key: string,
     expiresInSeconds: number,
   ) => Effect.Effect<string, never, never>
+
+  /** Delete an object from a bucket. */
+  readonly deleteObject: (
+    key: string,
+  ) => Effect.Effect<void, never, never>
 }
 
 export class ObjectStorage extends Context.Tag('ObjectStorage')<ObjectStorage, ObjectStorageApi>() {}

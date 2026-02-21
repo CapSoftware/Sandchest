@@ -120,6 +120,24 @@ export function createIoRedisApi(client: Redis): RedisApi {
         return client.scard(key)
       }),
 
+    acquireLeaderLock: (workerName, instanceId, ttlMs) =>
+      Effect.promise(async () => {
+        const key = `worker:${workerName}:leader`
+        const result = await client.set(key, instanceId, 'PX', ttlMs, 'NX')
+        return result === 'OK'
+      }),
+
+    registerNodeHeartbeat: (nodeId, ttlSeconds) =>
+      Effect.promise(async () => {
+        await client.set(`node_heartbeat:${nodeId}`, '1', 'EX', ttlSeconds)
+      }),
+
+    hasNodeHeartbeat: (nodeId) =>
+      Effect.promise(async () => {
+        const result = await client.exists(`node_heartbeat:${nodeId}`)
+        return result === 1
+      }),
+
     ping: () =>
       Effect.promise(async () => {
         try {

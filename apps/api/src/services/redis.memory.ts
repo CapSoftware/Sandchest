@@ -10,6 +10,10 @@ interface RateEntry {
   timestamps: number[]
 }
 
+interface TtlEntry {
+  expiresAt: number
+}
+
 /** In-memory Redis implementation for testing. */
 export function createInMemoryRedisApi(): RedisApi {
   const slots = new Map<string, SlotEntry>()
@@ -17,6 +21,8 @@ export function createInMemoryRedisApi(): RedisApi {
   const execEvents = new Map<string, BufferedEvent[]>()
   const replayEvents = new Map<string, BufferedEvent[]>()
   const artifactPaths = new Map<string, Set<string>>()
+  const leaderLocks = new Map<string, { instanceId: string; expiresAt: number }>()
+  const nodeHeartbeats = new Map<string, TtlEntry>()
 
   function isExpired(entry: SlotEntry): boolean {
     return Date.now() >= entry.expiresAt
@@ -143,6 +149,31 @@ export function createInMemoryRedisApi(): RedisApi {
       Effect.sync(() => {
         const key = `artifact_paths:${sandboxId}`
         return artifactPaths.get(key)?.size ?? 0
+      }),
+
+    acquireLeaderLock: (workerName, instanceId, ttlMs) =>
+      Effect.sync(() => {
+        const key = `worker:${workerName}:leader`
+        const now = Date.now()
+        const existing = leaderLocks.get(key)
+        if (existing && existing.expiresAt > now) {
+          return existing.instanceId === instanceId
+        }
+        leaderLocks.set(key, { instanceId, expiresAt: now + ttlMs })
+        return true
+      }),
+
+    registerNodeHeartbeat: (nodeId, ttlSeconds) =>
+      Effect.sync(() => {
+        nodeHeartbeats.set(`node_heartbeat:${nodeId}`, {
+          expiresAt: Date.now() + ttlSeconds * 1000,
+        })
+      }),
+
+    hasNodeHeartbeat: (nodeId) =>
+      Effect.sync(() => {
+        const entry = nodeHeartbeats.get(`node_heartbeat:${nodeId}`)
+        return entry !== undefined && entry.expiresAt > Date.now()
       }),
 
     ping: () => Effect.succeed(true),

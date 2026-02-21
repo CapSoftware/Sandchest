@@ -49,6 +49,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         const row: SandboxRow = {
           id: params.id,
           orgId: params.orgId,
+          nodeId: null,
           imageId: params.imageId,
           profileId: params.profileId,
           profileName: params.profileName,
@@ -59,6 +60,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           forkCount: 0,
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
+          lastActivityAt: null,
           createdAt: now,
           updatedAt: now,
           startedAt: null,
@@ -149,6 +151,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         const row: SandboxRow = {
           id: params.id,
           orgId: params.orgId,
+          nodeId: params.source.nodeId,
           imageId: params.source.imageId,
           profileId: params.source.profileId,
           profileName: params.source.profileName,
@@ -159,6 +162,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           forkCount: 0,
           ttlSeconds: params.ttlSeconds,
           failureReason: null,
+          lastActivityAt: now,
           createdAt: now,
           updatedAt: now,
           startedAt: now,
@@ -210,6 +214,51 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         }
 
         return result
+      }),
+
+    findExpiredTtl: () =>
+      Effect.sync(() => {
+        const now = Date.now()
+        return Array.from(store.values()).filter((r) => {
+          if (r.status !== 'running' || !r.startedAt) return false
+          return r.startedAt.getTime() + r.ttlSeconds * 1000 < now
+        })
+      }),
+
+    findIdleSince: (cutoff) =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter((r) => {
+          if (r.status !== 'running') return false
+          const activity = r.lastActivityAt ?? r.startedAt ?? r.createdAt
+          return activity.getTime() < cutoff.getTime()
+        }),
+      ),
+
+    findQueuedBefore: (cutoff) =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter(
+          (r) => r.status === 'queued' && r.createdAt.getTime() < cutoff.getTime(),
+        ),
+      ),
+
+    getActiveNodeIds: () =>
+      Effect.sync(() => {
+        const nodeIds = new Map<string, Uint8Array>()
+        for (const row of store.values()) {
+          if (row.status === 'running' && row.nodeId) {
+            nodeIds.set(base62Encode(row.nodeId), row.nodeId)
+          }
+        }
+        return Array.from(nodeIds.values())
+      }),
+
+    findRunningOnNodes: (nodeIds) =>
+      Effect.sync(() => {
+        if (nodeIds.length === 0) return []
+        return Array.from(store.values()).filter((r) => {
+          if (r.status !== 'running' || !r.nodeId) return false
+          return nodeIds.some((nid) => bytesEqual(r.nodeId!, nid))
+        })
       }),
   }
 }

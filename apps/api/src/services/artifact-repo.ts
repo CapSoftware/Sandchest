@@ -52,6 +52,16 @@ export interface ArtifactRepoApi {
     sandboxId: Uint8Array,
     orgId: string,
   ) => Effect.Effect<number, never, never>
+
+  /** Find artifacts past their retention date. */
+  readonly findExpiredRetention: (
+    before: Date,
+  ) => Effect.Effect<ArtifactRow[], never, never>
+
+  /** Delete artifacts by IDs. Returns count of deleted rows. */
+  readonly deleteByIds: (
+    ids: Uint8Array[],
+  ) => Effect.Effect<number, never, never>
 }
 
 export class ArtifactRepo extends Context.Tag('ArtifactRepo')<ArtifactRepo, ArtifactRepoApi>() {}

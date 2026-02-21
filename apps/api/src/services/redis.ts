@@ -86,6 +86,24 @@ export interface RedisApi {
     sandboxId: string,
   ) => Effect.Effect<number, never, never>
 
+  /** Acquire a worker leader lock. Returns true if this instance became the leader. */
+  readonly acquireLeaderLock: (
+    workerName: string,
+    instanceId: string,
+    ttlMs: number,
+  ) => Effect.Effect<boolean, never, never>
+
+  /** Register a node heartbeat with a TTL. */
+  readonly registerNodeHeartbeat: (
+    nodeId: string,
+    ttlSeconds: number,
+  ) => Effect.Effect<void, never, never>
+
+  /** Check if a node has an active heartbeat. */
+  readonly hasNodeHeartbeat: (
+    nodeId: string,
+  ) => Effect.Effect<boolean, never, never>
+
   /** Ping to check connectivity. */
   readonly ping: () => Effect.Effect<boolean, never, never>
 }

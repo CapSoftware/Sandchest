@@ -83,6 +83,23 @@ export function createInMemoryArtifactRepo(): ArtifactRepoApi {
         }
         return n
       }),
+
+    findExpiredRetention: (before) =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter(
+          (r) => r.retentionUntil !== null && r.retentionUntil.getTime() < before.getTime(),
+        ),
+      ),
+
+    deleteByIds: (ids) =>
+      Effect.sync(() => {
+        let deleted = 0
+        for (const id of ids) {
+          const key = keyFor(id)
+          if (store.delete(key)) deleted++
+        }
+        return deleted
+      }),
   }
 }
 

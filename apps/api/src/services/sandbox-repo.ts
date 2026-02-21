@@ -10,6 +10,7 @@ import type {
 export interface SandboxRow {
   readonly id: Uint8Array
   readonly orgId: string
+  readonly nodeId: Uint8Array | null
   readonly imageId: Uint8Array
   readonly profileId: Uint8Array
   readonly profileName: ProfileName
@@ -20,6 +21,7 @@ export interface SandboxRow {
   readonly forkCount: number
   readonly ttlSeconds: number
   readonly failureReason: FailureReason | null
+  readonly lastActivityAt: Date | null
   readonly createdAt: Date
   readonly updatedAt: Date
   readonly startedAt: Date | null
@@ -98,6 +100,27 @@ export interface SandboxRepoApi {
   readonly getForkTree: (
     id: Uint8Array,
     orgId: string,
+  ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Find running sandboxes that have exceeded their TTL. */
+  readonly findExpiredTtl: () => Effect.Effect<SandboxRow[], never, never>
+
+  /** Find running sandboxes with lastActivityAt before the given cutoff. */
+  readonly findIdleSince: (
+    cutoff: Date,
+  ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Find queued sandboxes created before the given cutoff. */
+  readonly findQueuedBefore: (
+    cutoff: Date,
+  ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Get distinct nodeIds from running sandboxes. */
+  readonly getActiveNodeIds: () => Effect.Effect<Uint8Array[], never, never>
+
+  /** Find running sandboxes assigned to any of the given nodeIds. */
+  readonly findRunningOnNodes: (
+    nodeIds: Uint8Array[],
   ) => Effect.Effect<SandboxRow[], never, never>
 }
 
