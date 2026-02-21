@@ -136,6 +136,13 @@ export interface SandboxRepoApi {
     nodeIds: Uint8Array[],
   ) => Effect.Effect<SandboxRow[], never, never>
 
+  /** Assign a sandbox to a node. Sets nodeId, status to running, and startedAt. */
+  readonly assignNode: (
+    id: Uint8Array,
+    orgId: string,
+    nodeId: Uint8Array,
+  ) => Effect.Effect<SandboxRow | null, never, never>
+
   /** Count sandboxes in active states (queued, provisioning, running) for an org. */
   readonly countActive: (
     orgId: string,

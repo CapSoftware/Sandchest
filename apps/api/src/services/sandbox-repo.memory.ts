@@ -284,6 +284,24 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         })
       }),
 
+    assignNode: (id, orgId, nodeId) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        if (!row || row.orgId !== orgId) return null
+        const now = new Date()
+        const updated: SandboxRow = {
+          ...row,
+          nodeId,
+          status: 'running',
+          startedAt: now,
+          lastActivityAt: now,
+          updatedAt: now,
+        }
+        store.set(key, updated)
+        return updated
+      }),
+
     countActive: (orgId) =>
       Effect.sync(() => {
         const active: SandboxStatus[] = ['queued', 'provisioning', 'running']

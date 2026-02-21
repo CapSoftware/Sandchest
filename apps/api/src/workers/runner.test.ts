@@ -18,7 +18,7 @@ import { queueTimeoutWorker } from './queue-timeout.js'
 import { idempotencyCleanupWorker } from './idempotency-cleanup.js'
 import { artifactRetentionWorker } from './artifact-retention.js'
 import { orgHardDeleteWorker } from './org-hard-delete.js'
-import { generateUUIDv7 } from '@sandchest/contract'
+import { generateUUIDv7, base62Encode } from '@sandchest/contract'
 import type { WorkerDeps } from './index.js'
 
 let redis: RedisApi
@@ -262,6 +262,130 @@ describe('orphan-reconciliation', () => {
     // nodeId is null → getActiveNodeIds returns []
     const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
     expect(count).toBe(0)
+  })
+
+  test('returns 0 when node has active heartbeat', async () => {
+    const nodeId = generateUUIDv7()
+    const sandboxId = generateUUIDv7()
+
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sandboxId,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.assignNode(sandboxId, 'org_test', nodeId))
+
+    // Register heartbeat for this node
+    const nodeIdStr = base62Encode(nodeId)
+    await Effect.runPromise(redis.registerNodeHeartbeat(nodeIdStr, 60))
+
+    const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
+    expect(count).toBe(0)
+
+    // Sandbox should still be running
+    const sandbox = await Effect.runPromise(sandboxRepo.findById(sandboxId, 'org_test'))
+    expect(sandbox?.status).toBe('running')
+  })
+
+  test('marks sandboxes as failed when node heartbeat is missing', async () => {
+    const nodeId = generateUUIDv7()
+    const sandboxId = generateUUIDv7()
+
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sandboxId,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.assignNode(sandboxId, 'org_test', nodeId))
+
+    // No heartbeat registered → node is considered offline
+    const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const sandbox = await Effect.runPromise(sandboxRepo.findById(sandboxId, 'org_test'))
+    expect(sandbox?.status).toBe('failed')
+    expect(sandbox?.failureReason).toBe('node_lost')
+    expect(sandbox?.endedAt).toBeDefined()
+  })
+
+  test('marks multiple sandboxes on same offline node', async () => {
+    const nodeId = generateUUIDv7()
+    const sandbox1 = generateUUIDv7()
+    const sandbox2 = generateUUIDv7()
+
+    for (const id of [sandbox1, sandbox2]) {
+      await Effect.runPromise(
+        sandboxRepo.create({
+          id,
+          orgId: 'org_test',
+          imageId: SEED_IMAGE_ID,
+          profileId: SEED_PROFILE_ID,
+          profileName: 'small',
+          env: null,
+          ttlSeconds: 3600,
+          imageRef: 'sandchest://ubuntu-22.04',
+        }),
+      )
+      await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', nodeId))
+    }
+
+    const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
+    expect(count).toBe(2)
+
+    const s1 = await Effect.runPromise(sandboxRepo.findById(sandbox1, 'org_test'))
+    const s2 = await Effect.runPromise(sandboxRepo.findById(sandbox2, 'org_test'))
+    expect(s1?.status).toBe('failed')
+    expect(s2?.status).toBe('failed')
+  })
+
+  test('only marks sandboxes on offline nodes, not online ones', async () => {
+    const onlineNodeId = generateUUIDv7()
+    const offlineNodeId = generateUUIDv7()
+    const onlineSandbox = generateUUIDv7()
+    const offlineSandbox = generateUUIDv7()
+
+    // Create sandboxes on two different nodes
+    for (const [id, nodeId] of [[onlineSandbox, onlineNodeId], [offlineSandbox, offlineNodeId]] as const) {
+      await Effect.runPromise(
+        sandboxRepo.create({
+          id,
+          orgId: 'org_test',
+          imageId: SEED_IMAGE_ID,
+          profileId: SEED_PROFILE_ID,
+          profileName: 'small',
+          env: null,
+          ttlSeconds: 3600,
+          imageRef: 'sandchest://ubuntu-22.04',
+        }),
+      )
+      await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', nodeId))
+    }
+
+    // Only register heartbeat for the online node
+    await Effect.runPromise(redis.registerNodeHeartbeat(base62Encode(onlineNodeId), 60))
+
+    const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const online = await Effect.runPromise(sandboxRepo.findById(onlineSandbox, 'org_test'))
+    const offline = await Effect.runPromise(sandboxRepo.findById(offlineSandbox, 'org_test'))
+    expect(online?.status).toBe('running')
+    expect(offline?.status).toBe('failed')
+    expect(offline?.failureReason).toBe('node_lost')
   })
 })
 

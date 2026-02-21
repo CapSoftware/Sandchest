@@ -11,6 +11,7 @@ import { ExecRouter } from './routes/execs.js'
 import { SessionRouter } from './routes/sessions.js'
 import { FileRouter } from './routes/files.js'
 import { ArtifactRouter } from './routes/artifacts.js'
+import { NodeRouter } from './routes/nodes.js'
 
 const betterAuthApp = HttpApp.fromWebHandler((request: Request) => auth.handler(request))
 
@@ -21,6 +22,7 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(SessionRouter),
   HttpRouter.concat(FileRouter),
   HttpRouter.concat(ArtifactRouter),
+  HttpRouter.concat(NodeRouter),
   HttpRouter.mountApp('/api/auth', betterAuthApp, { includePrefix: true }),
   HttpRouter.catchAll((error) => Effect.succeed(formatApiError(error))),
 )

@@ -20,13 +20,13 @@ export const withRequestId = HttpMiddleware.make((app) =>
 
 /**
  * Validates API key or session cookie and provides AuthContext.
- * Skips auth for /health, /healthz, /readyz, and /api/auth/* routes.
+ * Skips auth for /health, /healthz, /readyz, /api/auth/*, /v1/public/*, and /v1/internal/* routes.
  */
 export const withAuth = HttpMiddleware.make((app) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
 
-    if (request.url.startsWith('/health') || request.url.startsWith('/readyz') || request.url.startsWith('/api/auth') || request.url.startsWith('/v1/public/')) {
+    if (request.url.startsWith('/health') || request.url.startsWith('/readyz') || request.url.startsWith('/api/auth') || request.url.startsWith('/v1/public/') || request.url.startsWith('/v1/internal/')) {
       return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '' })
     }
 
