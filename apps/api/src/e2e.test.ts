@@ -16,6 +16,7 @@ import { createInMemoryNodeClient } from './services/node-client.memory.js'
 import { createInMemoryRedisApi } from './services/redis.memory.js'
 import { ArtifactRepo } from './services/artifact-repo.js'
 import { createInMemoryArtifactRepo } from './services/artifact-repo.memory.js'
+import { QuotaMemory } from './services/quota.memory.js'
 import { idToBytes } from '@sandchest/contract'
 
 const TEST_ORG = 'org_test_123'
@@ -37,6 +38,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(NodeClient, nodeClient)),
     Layer.provide(Layer.succeed(RedisService, redis)),
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
+    Layer.provide(QuotaMemory),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
     ),

@@ -24,6 +24,7 @@ import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
 import { NodeClient } from '../services/node-client.js'
 import { RedisService } from '../services/redis.js'
+import { QuotaService } from '../services/quota.js'
 
 const VALID_STATUSES: ExecStatus[] = ['queued', 'running', 'done', 'failed', 'timed_out']
 const DEFAULT_TIMEOUT = 300
@@ -73,6 +74,7 @@ const execCommand = Effect.gen(function* () {
   const execRepo = yield* ExecRepo
   const nodeClient = yield* NodeClient
   const redis = yield* RedisService
+  const quotaService = yield* QuotaService
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -111,10 +113,13 @@ const execCommand = Effect.gen(function* () {
 
   const wait = body.wait !== false
   const timeoutSeconds = body.timeout_seconds ?? DEFAULT_TIMEOUT
+  const quota = yield* quotaService.getOrgQuota(auth.orgId)
 
-  if (timeoutSeconds < 1 || timeoutSeconds > 3600) {
+  if (timeoutSeconds < 1 || timeoutSeconds > quota.maxExecTimeoutSeconds) {
     return yield* Effect.fail(
-      new ValidationError({ message: 'timeout_seconds must be between 1 and 3600' }),
+      new ValidationError({
+        message: `timeout_seconds must be between 1 and ${quota.maxExecTimeoutSeconds}`,
+      }),
     )
   }
 

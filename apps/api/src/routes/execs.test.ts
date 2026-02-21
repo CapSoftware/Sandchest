@@ -16,6 +16,8 @@ import { createInMemoryNodeClient } from '../services/node-client.memory.js'
 import { createInMemoryRedisApi } from '../services/redis.memory.js'
 import { ArtifactRepo } from '../services/artifact-repo.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
+import { QuotaService } from '../services/quota.js'
+import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { idToBytes } from '@sandchest/contract'
 
 const TEST_ORG = 'org_test_123'
@@ -28,6 +30,7 @@ function createTestEnv() {
   const nodeClient = createInMemoryNodeClient()
   const redis = createInMemoryRedisApi()
   const artifactRepo = createInMemoryArtifactRepo()
+  const quotaApi = createInMemoryQuotaApi()
 
   const TestLayer = AppLive.pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -37,6 +40,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(NodeClient, nodeClient)),
     Layer.provide(Layer.succeed(RedisService, redis)),
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
+    Layer.provide(Layer.succeed(QuotaService, quotaApi)),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
     ),
@@ -46,7 +50,7 @@ function createTestEnv() {
     return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
   }
 
-  return { runTest, sandboxRepo }
+  return { runTest, sandboxRepo, quotaApi }
 }
 
 /** Helper: create a sandbox via HTTP and transition it to running. */
@@ -718,5 +722,61 @@ describe('Exec status transitions', () => {
     expect(result.exit_code).toBeNull()
     expect(result.started_at).toBeNull()
     expect(result.ended_at).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Quota enforcement — exec timeout
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/sandboxes/:id/exec — quota enforcement', () => {
+  test('rejects exec when timeout exceeds org maxExecTimeoutSeconds', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxExecTimeoutSeconds: 60 })
+    const sandboxId = await createRunningSandbox(env)
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/exec`).pipe(
+            HttpClientRequest.bodyUnsafeJson({
+              cmd: ['make', 'build'],
+              wait: false,
+              timeout_seconds: 61,
+            }),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(400)
+    expect(result.body.error).toBe('validation_error')
+    expect(result.body.message).toContain('60')
+  })
+
+  test('allows exec when timeout is within org maxExecTimeoutSeconds', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxExecTimeoutSeconds: 60 })
+    const sandboxId = await createRunningSandbox(env)
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/exec`).pipe(
+            HttpClientRequest.bodyUnsafeJson({
+              cmd: ['echo', 'hello'],
+              timeout_seconds: 60,
+            }),
+          ),
+        )
+        return { status: response.status }
+      }),
+    )
+
+    expect(result.status).toBe(200)
   })
 })

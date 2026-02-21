@@ -283,6 +283,14 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           return nodeIds.some((nid) => bytesEqual(r.nodeId!, nid))
         })
       }),
+
+    countActive: (orgId) =>
+      Effect.sync(() => {
+        const active: SandboxStatus[] = ['queued', 'provisioning', 'running']
+        return Array.from(store.values()).filter(
+          (r) => r.orgId === orgId && active.includes(r.status),
+        ).length
+      }),
   }
 }
 

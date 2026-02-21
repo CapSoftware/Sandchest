@@ -18,6 +18,8 @@ import { createInMemoryNodeClient } from '../services/node-client.memory.js'
 import { createInMemoryRedisApi } from '../services/redis.memory.js'
 import { ArtifactRepo } from '../services/artifact-repo.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
+import { QuotaService } from '../services/quota.js'
+import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { idToBytes } from '@sandchest/contract'
 import type { ReplayBundle } from '@sandchest/contract'
 
@@ -32,6 +34,7 @@ function createTestEnv() {
   const nodeClient = createInMemoryNodeClient()
   const redis = createInMemoryRedisApi()
   const artifactRepo = createInMemoryArtifactRepo()
+  const quotaApi = createInMemoryQuotaApi()
 
   const TestLayer = AppLive.pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -42,6 +45,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(NodeClient, nodeClient)),
     Layer.provide(Layer.succeed(RedisService, redis)),
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
+    Layer.provide(Layer.succeed(QuotaService, quotaApi)),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
     ),
@@ -51,7 +55,7 @@ function createTestEnv() {
     return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
   }
 
-  return { runTest, sandboxRepo, execRepo, sessionRepo }
+  return { runTest, sandboxRepo, execRepo, sessionRepo, quotaApi }
 }
 
 function createRunningSandbox(
@@ -369,5 +373,223 @@ describe('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
     )
 
     expect(result.status).toBe('in_progress')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Quota enforcement — create sandbox
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/sandboxes — quota enforcement', () => {
+  test('rejects creation when TTL exceeds org maxTtlSeconds', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxTtlSeconds: 600 })
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({ ttl_seconds: 601 }),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(400)
+    expect(result.body.error).toBe('validation_error')
+    expect(result.body.message).toContain('600')
+  })
+
+  test('allows creation when TTL is within org maxTtlSeconds', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxTtlSeconds: 600 })
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({ ttl_seconds: 600 }),
+          ),
+        )
+        return { status: response.status }
+      }),
+    )
+
+    expect(result.status).toBe(201)
+  })
+
+  test('rejects creation when concurrent sandbox limit is reached', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxConcurrentSandboxes: 2 })
+
+    // Create 2 sandboxes (they start as queued, which counts as active)
+    await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+      }),
+    )
+
+    // Third should fail
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(429)
+    expect(result.body.error).toBe('quota_exceeded')
+    expect(result.body.message).toContain('2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Quota enforcement — fork sandbox
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/sandboxes/:id/fork — quota enforcement', () => {
+  test('rejects fork when depth exceeds org maxForkDepth', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxForkDepth: 1 })
+
+    const parentId = await createRunningSandbox(env)
+
+    // Fork once (depth becomes 1, which equals maxForkDepth)
+    const forkId = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parentId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = (yield* response.json) as { sandbox_id: string }
+        return body.sandbox_id
+      }),
+    )
+
+    // Fork from the fork (depth would become 2, exceeds maxForkDepth=1)
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${forkId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(422)
+    expect(result.body.error).toBe('fork_depth_exceeded')
+  })
+
+  test('rejects fork when per-sandbox fork count exceeds org maxForksPerSandbox', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxForksPerSandbox: 1 })
+
+    const parentId = await createRunningSandbox(env)
+
+    // Fork once (uses up the limit)
+    await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parentId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+      }),
+    )
+
+    // Second fork should fail
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parentId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(422)
+    expect(result.body.error).toBe('fork_limit_exceeded')
+  })
+
+  test('rejects fork when concurrent sandbox limit is reached', async () => {
+    const env = createTestEnv()
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxConcurrentSandboxes: 1 })
+
+    const parentId = await createRunningSandbox(env)
+
+    // The parent itself is already 1 active sandbox, so fork should fail
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parentId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(429)
+    expect(result.body.error).toBe('quota_exceeded')
+  })
+
+  test('rejects fork when TTL exceeds org maxTtlSeconds', async () => {
+    const env = createTestEnv()
+
+    // Create sandbox before restricting TTL quota
+    const parentId = await createRunningSandbox(env)
+
+    // Now restrict TTL for the fork request
+    env.quotaApi.setOrgQuota(TEST_ORG, { maxTtlSeconds: 300 })
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parentId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({ ttl_seconds: 301 }),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(400)
+    expect(result.body.error).toBe('validation_error')
+    expect(result.body.message).toContain('300')
   })
 })

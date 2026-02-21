@@ -3,15 +3,10 @@ import { Effect } from 'effect'
 import { AuthContext } from '../context.js'
 import { RateLimitedError } from '../errors.js'
 import { RedisService, type RateLimitResult } from '../services/redis.js'
+import { QuotaService, type OrgQuota } from '../services/quota.js'
 
 /** Rate limit categories mapped to request paths. */
 type RateLimitCategory = 'sandbox_create' | 'exec' | 'read'
-
-const CATEGORY_LIMITS: Record<RateLimitCategory, number> = {
-  sandbox_create: 30,
-  exec: 120,
-  read: 600,
-}
 
 const WINDOW_SECONDS = 60
 
@@ -22,8 +17,20 @@ function categorize(method: string, url: string): RateLimitCategory | null {
   return null
 }
 
+function limitForCategory(quota: OrgQuota, category: RateLimitCategory): number {
+  switch (category) {
+    case 'sandbox_create':
+      return quota.rateSandboxCreatePerMin
+    case 'exec':
+      return quota.rateExecPerMin
+    case 'read':
+      return quota.rateReadPerMin
+  }
+}
+
 /**
  * Redis-backed rate limiting middleware.
+ * Reads per-org limits from QuotaService.
  * Skips auth/health routes. Adds X-RateLimit-* headers.
  */
 export const withRateLimit = HttpMiddleware.make((app) =>
@@ -47,7 +54,10 @@ export const withRateLimit = HttpMiddleware.make((app) =>
     }
 
     const redis = yield* RedisService
-    const limit = CATEGORY_LIMITS[category]
+    const quotaService = yield* QuotaService
+    const quota = yield* quotaService.getOrgQuota(auth.orgId)
+    const limit = limitForCategory(quota, category)
+
     const result = yield* redis
       .checkRateLimit(auth.orgId, category, limit, WINDOW_SECONDS)
       .pipe(

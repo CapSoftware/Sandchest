@@ -12,6 +12,7 @@ import { SessionRepoMemory } from './services/session-repo.memory.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
 import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { RedisMemory } from './services/redis.memory.js'
+import { QuotaMemory } from './services/quota.memory.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -29,6 +30,7 @@ const TestLayer = AppLive.pipe(
   Layer.provide(NodeClientMemory),
   Layer.provide(ArtifactRepoMemory),
   Layer.provide(RedisMemory),
+  Layer.provide(QuotaMemory),
   Layer.provide(TestAuthLayer),
 )
 

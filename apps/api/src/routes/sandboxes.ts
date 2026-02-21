@@ -32,6 +32,7 @@ import {
   ForkDepthExceededError,
   ForkLimitExceededError,
   NotFoundError,
+  QuotaExceededError,
   SandboxNotRunningError,
   ValidationError,
 } from '../errors.js'
@@ -43,6 +44,7 @@ import { ObjectStorage } from '../services/object-storage.js'
 import { NodeClient } from '../services/node-client.js'
 import { ArtifactRepo } from '../services/artifact-repo.js'
 import { RedisService } from '../services/redis.js'
+import { QuotaService } from '../services/quota.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
 const VALID_PROFILES: ProfileName[] = ['small', 'medium', 'large']
@@ -108,6 +110,7 @@ function rowToSummary(row: SandboxRow): SandboxSummary {
 const createSandbox = Effect.gen(function* () {
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
+  const quotaService = yield* QuotaService
   const request = yield* HttpServerRequest.HttpServerRequest
 
   const raw = yield* request.json.pipe(Effect.orElseSucceed(() => ({})))
@@ -126,10 +129,22 @@ const createSandbox = Effect.gen(function* () {
     )
   }
 
-  if (ttlSeconds < 1 || ttlSeconds > 86400) {
+  const quota = yield* quotaService.getOrgQuota(auth.orgId)
+
+  if (ttlSeconds < 1 || ttlSeconds > quota.maxTtlSeconds) {
     return yield* Effect.fail(
       new ValidationError({
-        message: 'ttl_seconds must be between 1 and 86400',
+        message: `ttl_seconds must be between 1 and ${quota.maxTtlSeconds}`,
+      }),
+    )
+  }
+
+  // Enforce concurrent sandbox limit
+  const activeCount = yield* repo.countActive(auth.orgId)
+  if (activeCount >= quota.maxConcurrentSandboxes) {
+    return yield* Effect.fail(
+      new QuotaExceededError({
+        message: `Concurrent sandbox limit reached (max: ${quota.maxConcurrentSandboxes})`,
       }),
     )
   }
@@ -377,13 +392,12 @@ const deleteSandbox = Effect.gen(function* () {
 
 // -- Fork sandbox ------------------------------------------------------------
 
-const MAX_FORK_DEPTH = 5
-const MAX_FORKS_PER_SANDBOX = 10
 const DEFAULT_FORK_TTL = 3600
 
 const forkSandbox = Effect.gen(function* () {
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
+  const quotaService = yield* QuotaService
   const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
@@ -413,18 +427,30 @@ const forkSandbox = Effect.gen(function* () {
     )
   }
 
-  if (source.forkDepth + 1 > MAX_FORK_DEPTH) {
+  const quota = yield* quotaService.getOrgQuota(auth.orgId)
+
+  if (source.forkDepth + 1 > quota.maxForkDepth) {
     return yield* Effect.fail(
       new ForkDepthExceededError({
-        message: `Fork depth limit exceeded (max: ${MAX_FORK_DEPTH})`,
+        message: `Fork depth limit exceeded (max: ${quota.maxForkDepth})`,
       }),
     )
   }
 
-  if (source.forkCount >= MAX_FORKS_PER_SANDBOX) {
+  if (source.forkCount >= quota.maxForksPerSandbox) {
     return yield* Effect.fail(
       new ForkLimitExceededError({
-        message: `Fork limit exceeded for sandbox ${id} (max: ${MAX_FORKS_PER_SANDBOX})`,
+        message: `Fork limit exceeded for sandbox ${id} (max: ${quota.maxForksPerSandbox})`,
+      }),
+    )
+  }
+
+  // Enforce concurrent sandbox limit for fork creation
+  const activeCount = yield* repo.countActive(auth.orgId)
+  if (activeCount >= quota.maxConcurrentSandboxes) {
+    return yield* Effect.fail(
+      new QuotaExceededError({
+        message: `Concurrent sandbox limit reached (max: ${quota.maxConcurrentSandboxes})`,
       }),
     )
   }
@@ -435,9 +461,9 @@ const forkSandbox = Effect.gen(function* () {
 
   const ttlSeconds = body.ttl_seconds ?? DEFAULT_FORK_TTL
 
-  if (ttlSeconds < 1 || ttlSeconds > 86400) {
+  if (ttlSeconds < 1 || ttlSeconds > quota.maxTtlSeconds) {
     return yield* Effect.fail(
-      new ValidationError({ message: 'ttl_seconds must be between 1 and 86400' }),
+      new ValidationError({ message: `ttl_seconds must be between 1 and ${quota.maxTtlSeconds}` }),
     )
   }
 

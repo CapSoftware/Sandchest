@@ -15,6 +15,7 @@ import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
 import { IdempotencyRepoMemory } from './workers/idempotency-cleanup.memory.js'
+import { QuotaMemory } from './services/quota.memory.js'
 import { startAllWorkers } from './workers/index.js'
 import { JsonLoggerLive } from './logger.js'
 
@@ -41,6 +42,7 @@ const ServerLive = Layer.mergeAll(AppLive, WorkersLive).pipe(
   Layer.provide(NodeClientMemory),
   Layer.provide(ArtifactRepoMemory),
   Layer.provide(IdempotencyRepoMemory),
+  Layer.provide(QuotaMemory),
   Layer.provide(RedisLive),
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT })),
   Layer.provide(JsonLoggerLive),

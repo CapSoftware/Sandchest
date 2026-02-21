@@ -135,6 +135,11 @@ export interface SandboxRepoApi {
   readonly findRunningOnNodes: (
     nodeIds: Uint8Array[],
   ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Count sandboxes in active states (queued, provisioning, running) for an org. */
+  readonly countActive: (
+    orgId: string,
+  ) => Effect.Effect<number, never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}

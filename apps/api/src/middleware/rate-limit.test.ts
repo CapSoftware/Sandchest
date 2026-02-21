@@ -6,6 +6,8 @@ import { withRateLimit } from './rate-limit.js'
 import { AuthContext } from '../context.js'
 import { RedisMemory } from '../services/redis.memory.js'
 import { RedisService, type RedisApi } from '../services/redis.js'
+import { QuotaService } from '../services/quota.js'
+import { QuotaMemory, createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { withRequestId } from '../middleware.js'
 
 const TEST_ORG = 'org_ratelimit_test'
@@ -34,6 +36,7 @@ const AppLive = TestRouter.pipe(withRateLimit, withRequestId, HttpServer.serve()
 const TestLayer = AppLive.pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(RedisMemory),
+  Layer.provide(QuotaMemory),
   Layer.provide(TestAuthLayer),
 )
 
@@ -164,6 +167,7 @@ describe('rate limit middleware', () => {
     const BrokenTestLayer = AppLive.pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),
       Layer.provide(BrokenRedisLayer),
+      Layer.provide(QuotaMemory),
       Layer.provide(TestAuthLayer),
     )
 
@@ -180,5 +184,33 @@ describe('rate limit middleware', () => {
     expect(result.status).toBe(200)
     // Rate limit headers are still set with defaults
     expect(result.limit).toBe('600')
+  })
+
+  test('uses per-org quota for rate limit values', async () => {
+    const quotaApi = createInMemoryQuotaApi()
+    quotaApi.setOrgQuota(TEST_ORG, { rateSandboxCreatePerMin: 5 })
+
+    const CustomQuotaLayer = AppLive.pipe(
+      Layer.provideMerge(NodeHttpServer.layerTest),
+      Layer.provide(RedisMemory),
+      Layer.provide(Layer.succeed(QuotaService, quotaApi)),
+      Layer.provide(TestAuthLayer),
+    )
+
+    const result = await Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const response = yield* client.execute(
+        HttpClientRequest.post('/v1/sandboxes').pipe(
+          HttpClientRequest.bodyUnsafeJson({}),
+        ),
+      )
+      return {
+        status: response.status,
+        limit: response.headers['x-ratelimit-limit'],
+      }
+    }).pipe(Effect.provide(CustomQuotaLayer), Effect.scoped, Effect.runPromise)
+
+    expect(result.status).toBe(201)
+    expect(result.limit).toBe('5')
   })
 })
