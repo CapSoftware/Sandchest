@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { withRateLimit } from './rate-limit.js'
 import { AuthContext } from '../context.js'
 import { RedisMemory } from '../services/redis.memory.js'
+import { RedisService, type RedisApi } from '../services/redis.js'
 import { withRequestId } from '../middleware.js'
 
 const TEST_ORG = 'org_ratelimit_test'
@@ -135,5 +136,49 @@ describe('rate limit middleware', () => {
     )
 
     expect(result.remaining1).toBeGreaterThan(result.remaining2)
+  })
+
+  test('fails open when Redis is unavailable', async () => {
+    // Create a Redis implementation where checkRateLimit always throws
+    const brokenRedis: RedisApi = {
+      acquireSlotLease: () => Effect.succeed(false),
+      releaseSlotLease: () => Effect.void,
+      renewSlotLease: () => Effect.succeed(false),
+      checkRateLimit: () =>
+        Effect.promise(() => Promise.reject(new Error('Redis connection refused'))),
+      pushExecEvent: () => Effect.void,
+      getExecEvents: () => Effect.succeed([]),
+      pushReplayEvent: () => Effect.void,
+      getReplayEvents: () => Effect.succeed([]),
+      addArtifactPaths: () => Effect.succeed(0),
+      getArtifactPaths: () => Effect.succeed([]),
+      countArtifactPaths: () => Effect.succeed(0),
+      acquireLeaderLock: () => Effect.succeed(false),
+      registerNodeHeartbeat: () => Effect.void,
+      hasNodeHeartbeat: () => Effect.succeed(false),
+      ping: () => Effect.succeed(false),
+    }
+
+    const BrokenRedisLayer = Layer.succeed(RedisService, brokenRedis)
+
+    const BrokenTestLayer = AppLive.pipe(
+      Layer.provideMerge(NodeHttpServer.layerTest),
+      Layer.provide(BrokenRedisLayer),
+      Layer.provide(TestAuthLayer),
+    )
+
+    const result = await Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const response = yield* client.execute(HttpClientRequest.get('/v1/sandboxes'))
+      return {
+        status: response.status,
+        limit: response.headers['x-ratelimit-limit'],
+      }
+    }).pipe(Effect.provide(BrokenTestLayer), Effect.scoped, Effect.runPromise)
+
+    // Request should succeed (fail open) despite Redis being down
+    expect(result.status).toBe(200)
+    // Rate limit headers are still set with defaults
+    expect(result.limit).toBe('600')
   })
 })

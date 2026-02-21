@@ -62,6 +62,13 @@ function replayUrl(sandboxId: string): string {
   return `${REPLAY_BASE_URL}/${sandboxId}`
 }
 
+/** Tag a response with a header warning that the included replay URL is publicly accessible. */
+function withReplayWarning(
+  response: HttpServerResponse.HttpServerResponse,
+): HttpServerResponse.HttpServerResponse {
+  return response.pipe(HttpServerResponse.setHeader('x-replay-access', 'public'))
+}
+
 function rowToGetResponse(row: SandboxRow): GetSandboxResponse {
   const sandboxId = bytesToId(SANDBOX_PREFIX, row.id)
   return {
@@ -160,7 +167,7 @@ const createSandbox = Effect.gen(function* () {
     created_at: row.createdAt.toISOString(),
   }
 
-  return HttpServerResponse.unsafeJson(response, { status: 201 })
+  return withReplayWarning(HttpServerResponse.unsafeJson(response, { status: 201 }))
 })
 
 // -- List sandboxes ----------------------------------------------------------
@@ -203,7 +210,7 @@ const listSandboxes = Effect.gen(function* () {
     next_cursor: result.nextCursor,
   }
 
-  return HttpServerResponse.unsafeJson(response)
+  return withReplayWarning(HttpServerResponse.unsafeJson(response))
 })
 
 // -- Get sandbox -------------------------------------------------------------
@@ -230,7 +237,7 @@ const getSandbox = Effect.gen(function* () {
     return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
   }
 
-  return HttpServerResponse.unsafeJson(rowToGetResponse(row))
+  return withReplayWarning(HttpServerResponse.unsafeJson(rowToGetResponse(row)))
 })
 
 // -- Stop sandbox ------------------------------------------------------------
@@ -466,7 +473,7 @@ const forkSandbox = Effect.gen(function* () {
     created_at: forkRow.createdAt.toISOString(),
   }
 
-  return HttpServerResponse.unsafeJson(response, { status: 201 })
+  return withReplayWarning(HttpServerResponse.unsafeJson(response, { status: 201 }))
 })
 
 // -- Get fork tree -----------------------------------------------------------
@@ -690,7 +697,7 @@ const getReplay = Effect.gen(function* () {
     events_url: eventsUrl,
   }
 
-  return HttpServerResponse.unsafeJson(response)
+  return withReplayWarning(HttpServerResponse.unsafeJson(response))
 })
 
 // -- Router ------------------------------------------------------------------

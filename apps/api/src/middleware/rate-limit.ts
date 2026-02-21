@@ -2,7 +2,7 @@ import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/p
 import { Effect } from 'effect'
 import { AuthContext } from '../context.js'
 import { RateLimitedError } from '../errors.js'
-import { RedisService } from '../services/redis.js'
+import { RedisService, type RateLimitResult } from '../services/redis.js'
 
 /** Rate limit categories mapped to request paths. */
 type RateLimitCategory = 'sandbox_create' | 'exec' | 'read'
@@ -48,7 +48,21 @@ export const withRateLimit = HttpMiddleware.make((app) =>
 
     const redis = yield* RedisService
     const limit = CATEGORY_LIMITS[category]
-    const result = yield* redis.checkRateLimit(auth.orgId, category, limit, WINDOW_SECONDS)
+    const result = yield* redis
+      .checkRateLimit(auth.orgId, category, limit, WINDOW_SECONDS)
+      .pipe(
+        Effect.catchAllDefect(() =>
+          Effect.logWarning('Redis unavailable for rate limiting, failing open').pipe(
+            Effect.map(
+              (): RateLimitResult => ({
+                allowed: true,
+                remaining: limit,
+                resetAt: Date.now() + WINDOW_SECONDS * 1000,
+              }),
+            ),
+          ),
+        ),
+      )
 
     if (!result.allowed) {
       const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000)
