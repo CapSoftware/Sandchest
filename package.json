@@ -15,6 +15,7 @@
     "db:generate": "bun run --filter @sandchest/db db:generate",
     "db:push": "bun run --filter @sandchest/db db:push",
     "db:migrate": "bun run --filter @sandchest/db db:migrate",
+    "db:migrate:run": "bun run --filter @sandchest/db db:migrate:run",
     "db:studio": "bun run --filter @sandchest/db db:studio"
   },
   "devDependencies": {
