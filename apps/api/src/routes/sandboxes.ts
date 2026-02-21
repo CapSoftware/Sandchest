@@ -5,6 +5,8 @@ import {
   idToBytes,
   bytesToId,
   SANDBOX_PREFIX,
+  EXEC_PREFIX,
+  SESSION_PREFIX,
 } from '@sandchest/contract'
 import type {
   CreateSandboxRequest,
@@ -19,17 +21,23 @@ import type {
   ProfileName,
   SandboxStatus,
   SandboxSummary,
+  ReplayBundle,
+  ReplayForkTreeNode,
+  ReplayExec,
+  ReplaySession,
 } from '@sandchest/contract'
 import {
   ForkDepthExceededError,
   ForkLimitExceededError,
   NotFoundError,
-  NotImplementedError,
   SandboxNotRunningError,
   ValidationError,
 } from '../errors.js'
 import { AuthContext } from '../context.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
+import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
+import { SessionRepo } from '../services/session-repo.js'
+import { ObjectStorage } from '../services/object-storage.js'
 import { NodeClient } from '../services/node-client.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
@@ -82,9 +90,6 @@ function rowToSummary(row: SandboxRow): SandboxSummary {
     replay_url: replayUrl(sandboxId),
   }
 }
-
-const stub = (name: string) =>
-  Effect.fail(new NotImplementedError({ message: `${name} not yet implemented` }))
 
 // -- Create sandbox ----------------------------------------------------------
 
@@ -488,6 +493,165 @@ const getForkTree = Effect.gen(function* () {
   return HttpServerResponse.unsafeJson(response)
 })
 
+// -- Get replay --------------------------------------------------------------
+
+const EVENTS_PRESIGN_TTL_SECONDS = 86400
+
+function execRowToReplayExec(row: ExecRow): ReplayExec {
+  let cmd: string | string[]
+  if (row.cmdFormat === 'array') {
+    try {
+      cmd = JSON.parse(row.cmd) as string[]
+    } catch {
+      cmd = row.cmd
+    }
+  } else {
+    cmd = row.cmd
+  }
+
+  return {
+    exec_id: bytesToId(EXEC_PREFIX, row.id),
+    session_id: row.sessionId ? bytesToId(SESSION_PREFIX, row.sessionId) : null,
+    cmd,
+    cwd: row.cwd ?? '/root',
+    exit_code: row.exitCode,
+    duration_ms: row.durationMs,
+    started_at: row.startedAt?.toISOString() ?? row.createdAt.toISOString(),
+    ended_at: row.endedAt?.toISOString() ?? null,
+    resource_usage:
+      row.cpuMs != null && row.peakMemoryBytes != null
+        ? { cpu_ms: row.cpuMs, peak_memory_bytes: row.peakMemoryBytes }
+        : null,
+    output_ref: row.logRef ?? '',
+  }
+}
+
+function buildReplayForkTree(
+  rootId: Uint8Array,
+  treeRows: SandboxRow[],
+): ReplayForkTreeNode {
+  const childrenMap = new Map<string, SandboxRow[]>()
+
+  for (const r of treeRows) {
+    if (r.forkedFrom) {
+      const parentKey = bytesToId(SANDBOX_PREFIX, r.forkedFrom)
+      const children = childrenMap.get(parentKey) ?? []
+      children.push(r)
+      childrenMap.set(parentKey, children)
+    }
+  }
+
+  function build(row: SandboxRow): ReplayForkTreeNode {
+    const sid = bytesToId(SANDBOX_PREFIX, row.id)
+    const children = childrenMap.get(sid) ?? []
+    return {
+      sandbox_id: sid,
+      forked_at: row.forkedFrom ? row.createdAt.toISOString() : undefined,
+      children: children.map(build),
+    }
+  }
+
+  const root = treeRows.find((r) => bytesEqual(r.id, rootId))
+  if (!root) {
+    return { sandbox_id: bytesToId(SANDBOX_PREFIX, rootId), children: [] }
+  }
+  return build(root)
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+const getReplay = Effect.gen(function* () {
+  const auth = yield* AuthContext
+  const sandboxRepo = yield* SandboxRepo
+  const execRepo = yield* ExecRepo
+  const sessionRepo = yield* SessionRepo
+  const objectStorage = yield* ObjectStorage
+  const params = yield* HttpRouter.params
+
+  const id = params.id
+  if (!id) {
+    return yield* Effect.fail(new ValidationError({ message: 'Missing sandbox ID' }))
+  }
+
+  let idBytes: Uint8Array
+  try {
+    idBytes = idToBytes(id)
+  } catch {
+    return yield* Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${id}` }))
+  }
+
+  const row = yield* sandboxRepo.findById(idBytes, auth.orgId)
+  if (!row) {
+    return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
+  }
+
+  // Fetch fork tree
+  const treeRows = yield* sandboxRepo.getForkTree(idBytes, auth.orgId)
+
+  // Find the root of the fork tree
+  let rootRow = row
+  for (const r of treeRows) {
+    if (!r.forkedFrom) {
+      rootRow = r
+      break
+    }
+  }
+
+  const forkTree = buildReplayForkTree(rootRow.id, treeRows)
+
+  // Fetch execs
+  const execResult = yield* execRepo.list(idBytes, auth.orgId, {})
+  const replayExecs: ReplayExec[] = execResult.rows.map(execRowToReplayExec)
+
+  // Fetch sessions
+  const sessionRows = yield* sessionRepo.list(idBytes, auth.orgId)
+  const replaySessions: ReplaySession[] = sessionRows.map((s) => ({
+    session_id: bytesToId(SESSION_PREFIX, s.id),
+    shell: s.shell,
+    created_at: s.createdAt.toISOString(),
+    destroyed_at: s.destroyedAt?.toISOString() ?? null,
+  }))
+
+  // Generate presigned events URL
+  const eventsKey = `${auth.orgId}/${id}/events.jsonl`
+  const eventsUrl = yield* objectStorage.getPresignedUrl(eventsKey, EVENTS_PRESIGN_TTL_SECONDS)
+
+  // Determine replay status
+  const isRunning = row.status === 'running' || row.status === 'queued' || row.status === 'provisioning'
+  const status = isRunning ? 'in_progress' : 'complete'
+
+  // Calculate total duration
+  const totalDurationMs =
+    row.endedAt && row.createdAt
+      ? row.endedAt.getTime() - row.createdAt.getTime()
+      : null
+
+  const response: ReplayBundle = {
+    version: 1,
+    sandbox_id: id,
+    status,
+    image: row.imageRef,
+    profile: row.profileName,
+    forked_from: row.forkedFrom ? bytesToId(SANDBOX_PREFIX, row.forkedFrom) : null,
+    fork_tree: forkTree,
+    started_at: row.createdAt.toISOString(),
+    ended_at: row.endedAt?.toISOString() ?? null,
+    total_duration_ms: totalDurationMs,
+    sessions: replaySessions,
+    execs: replayExecs,
+    artifacts: [],
+    events_url: eventsUrl,
+  }
+
+  return HttpServerResponse.unsafeJson(response)
+})
+
 // -- Router ------------------------------------------------------------------
 
 export const SandboxRouter = HttpRouter.empty.pipe(
@@ -498,5 +662,5 @@ export const SandboxRouter = HttpRouter.empty.pipe(
   HttpRouter.get('/v1/sandboxes/:id/forks', getForkTree),
   HttpRouter.post('/v1/sandboxes/:id/stop', stopSandbox),
   HttpRouter.del('/v1/sandboxes/:id', deleteSandbox),
-  HttpRouter.get('/v1/sandboxes/:id/replay', stub('Get replay')),
+  HttpRouter.get('/v1/sandboxes/:id/replay', getReplay),
 )
