@@ -81,5 +81,15 @@ export {
   PROJECT_PREFIX,
 } from './id.js'
 
+export type { ImageRef, Toolchain } from './image.js'
+export {
+  parseImageRef,
+  buildImageUri,
+  isKnownToolchain,
+  DEFAULT_TOOLCHAIN,
+  IMAGE_URI_SCHEME,
+  TOOLCHAINS,
+} from './image.js'
+
 export * as agentRpc from './generated/sandchest/agent/v1/agent.js'
 export * as nodeRpc from './generated/sandchest/node/v1/node.js'
