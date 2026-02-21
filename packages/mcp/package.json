@@ -2,6 +2,9 @@
   "name": "@sandchest/mcp",
   "version": "0.0.1",
   "type": "module",
+  "bin": {
+    "sandchest-mcp": "./dist/index.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -14,6 +17,11 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "echo 'no tests yet'"
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@sandchest/sdk": "workspace:*",
+    "zod": "^4.3.6"
   }
 }
