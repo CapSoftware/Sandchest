@@ -1,140 +1,58 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { authClient } from '@/lib/auth-client'
+import { useState } from 'react'
+import {
+  useOrgSettings,
+  useUpdateOrgName,
+  useInviteMember,
+  useRemoveMember,
+} from '@/hooks/use-org-settings'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
 
-interface OrgData {
-  id: string
-  name: string
-  slug: string
-  createdAt: Date
-}
-
-interface OrgMember {
-  id: string
-  userId: string
-  role: string
-  user: {
-    name: string
-    email: string
-  }
-}
-
 export default function OrgSettings() {
-  const [org, setOrg] = useState<OrgData | null>(null)
-  const [members, setMembers] = useState<OrgMember[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [orgName, setOrgName] = useState('')
-  const [updating, setUpdating] = useState(false)
-  const [updateSuccess, setUpdateSuccess] = useState(false)
+  const { data, isLoading, error } = useOrgSettings()
+  const updateName = useUpdateOrgName()
+  const invite = useInviteMember()
+  const removeMember = useRemoveMember()
 
-  // Invite state
+  const [orgName, setOrgName] = useState('')
+  const [nameInitialized, setNameInitialized] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member')
-  const [inviting, setInviting] = useState(false)
+  const [updateSuccess, setUpdateSuccess] = useState(false)
 
-  useEffect(() => {
-    loadOrg()
-  }, [])
-
-  async function loadOrg() {
-    setError('')
-    try {
-      const { data: orgData, error: orgError } = await authClient.organization.getFullOrganization()
-
-      if (orgError) {
-        setError(orgError.message ?? 'Failed to load organization')
-        setLoading(false)
-        return
-      }
-
-      if (orgData) {
-        setOrg(orgData as unknown as OrgData)
-        setOrgName((orgData as unknown as OrgData).name)
-        setMembers((orgData as unknown as { members: OrgMember[] }).members ?? [])
-      }
-    } catch {
-      setError('Failed to load organization')
-    } finally {
-      setLoading(false)
-    }
+  // Sync org name to local state once data loads
+  if (data && !nameInitialized) {
+    setOrgName(data.org.name)
+    setNameInitialized(true)
   }
 
-  async function handleUpdateName(e: React.FormEvent<HTMLFormElement>) {
+  const org = data?.org
+  const members = data?.members ?? []
+  const mutationError = updateName.error ?? invite.error ?? removeMember.error
+
+  function handleUpdateName(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!org) return
-    setUpdating(true)
-    setError('')
     setUpdateSuccess(false)
-
-    try {
-      const { error: updateError } = await authClient.organization.update({
-        data: { name: orgName.trim() },
-      })
-
-      if (updateError) {
-        setError(updateError.message ?? 'Failed to update organization')
-        setUpdating(false)
-        return
-      }
-
-      setUpdateSuccess(true)
-      setTimeout(() => setUpdateSuccess(false), 3000)
-    } catch {
-      setError('Failed to update organization')
-    } finally {
-      setUpdating(false)
-    }
+    updateName.mutate(orgName.trim(), {
+      onSuccess: () => {
+        setUpdateSuccess(true)
+        setTimeout(() => setUpdateSuccess(false), 3000)
+      },
+    })
   }
 
-  async function handleInvite(e: React.FormEvent<HTMLFormElement>) {
+  function handleInvite(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setInviting(true)
-    setError('')
-
-    try {
-      const { error: inviteError } = await authClient.organization.inviteMember({
-        email: inviteEmail.trim(),
-        role: inviteRole,
-      })
-
-      if (inviteError) {
-        setError(inviteError.message ?? 'Failed to send invite')
-        setInviting(false)
-        return
-      }
-
-      setInviteEmail('')
-      await loadOrg()
-    } catch {
-      setError('Failed to send invite')
-    } finally {
-      setInviting(false)
-    }
+    invite.mutate(
+      { email: inviteEmail.trim(), role: inviteRole },
+      { onSuccess: () => setInviteEmail('') },
+    )
   }
 
-  async function handleRemoveMember(memberId: string) {
-    setError('')
-    try {
-      const { error: removeError } = await authClient.organization.removeMember({
-        memberIdOrEmail: memberId,
-      })
-
-      if (removeError) {
-        setError(removeError.message ?? 'Failed to remove member')
-        return
-      }
-
-      setMembers((prev) => prev.filter((m) => m.id !== memberId))
-    } catch {
-      setError('Failed to remove member')
-    }
-  }
-
-  if (loading) {
+  if (isLoading) {
     return <EmptyState message="Loading organization settings..." />
   }
 
@@ -144,6 +62,13 @@ export default function OrgSettings() {
         <div className="dash-page-header">
           <h1 className="dash-page-title">Settings</h1>
         </div>
+        {error && (
+          <ErrorMessage
+            message={
+              error instanceof Error ? error.message : 'Failed to load organization'
+            }
+          />
+        )}
         <EmptyState message="No organization found. You may need to create or join one." />
       </div>
     )
@@ -155,7 +80,20 @@ export default function OrgSettings() {
         <h1 className="dash-page-title">Settings</h1>
       </div>
 
-      {error && <ErrorMessage message={error} />}
+      {error && (
+        <ErrorMessage
+          message={
+            error instanceof Error ? error.message : 'Failed to load organization'
+          }
+        />
+      )}
+      {mutationError && (
+        <ErrorMessage
+          message={
+            mutationError instanceof Error ? mutationError.message : 'Operation failed'
+          }
+        />
+      )}
 
       {/* Org name */}
       <section className="dash-section">
@@ -169,7 +107,7 @@ export default function OrgSettings() {
               value={orgName}
               onChange={(e) => setOrgName(e.target.value)}
               className="dash-input"
-              disabled={updating}
+              disabled={updateName.isPending}
             />
           </div>
           <div className="dash-field">
@@ -185,9 +123,9 @@ export default function OrgSettings() {
           <button
             type="submit"
             className="dash-primary-btn"
-            disabled={updating || orgName.trim() === org.name}
+            disabled={updateName.isPending || orgName.trim() === org.name}
           >
-            {updating ? 'Saving...' : updateSuccess ? 'Saved' : 'Save'}
+            {updateName.isPending ? 'Saving...' : updateSuccess ? 'Saved' : 'Save'}
           </button>
         </form>
       </section>
@@ -217,9 +155,16 @@ export default function OrgSettings() {
                       {m.role !== 'owner' && (
                         <button
                           className="dash-action-btn danger"
-                          onClick={() => handleRemoveMember(m.id)}
+                          onClick={() => removeMember.mutate(m.id)}
+                          disabled={
+                            removeMember.isPending &&
+                            removeMember.variables === m.id
+                          }
                         >
-                          Remove
+                          {removeMember.isPending &&
+                          removeMember.variables === m.id
+                            ? 'Removing...'
+                            : 'Remove'}
                         </button>
                       )}
                     </td>
@@ -237,13 +182,13 @@ export default function OrgSettings() {
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             className="dash-input"
-            disabled={inviting}
+            disabled={invite.isPending}
           />
           <select
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value as 'member' | 'admin')}
             className="dash-select"
-            disabled={inviting}
+            disabled={invite.isPending}
           >
             <option value="member">Member</option>
             <option value="admin">Admin</option>
@@ -251,9 +196,9 @@ export default function OrgSettings() {
           <button
             type="submit"
             className="dash-primary-btn"
-            disabled={inviting || !inviteEmail.trim()}
+            disabled={invite.isPending || !inviteEmail.trim()}
           >
-            {inviting ? 'Inviting...' : 'Invite'}
+            {invite.isPending ? 'Inviting...' : 'Invite'}
           </button>
         </form>
       </section>

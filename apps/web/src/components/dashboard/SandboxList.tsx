@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { apiFetch } from '@/lib/api'
+import { useState } from 'react'
+import { useSandboxes, useStopSandbox } from '@/hooks/use-sandboxes'
 import { formatRelativeTime } from '@/lib/format'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
-import type { SandboxSummary, ListSandboxesResponse, SandboxStatus } from '@sandchest/contract'
+import type { SandboxStatus } from '@sandchest/contract'
 
 const FILTER_OPTIONS: Array<{ label: string; value: SandboxStatus | '' }> = [
   { label: 'All', value: '' },
@@ -17,64 +17,18 @@ const FILTER_OPTIONS: Array<{ label: string; value: SandboxStatus | '' }> = [
 ]
 
 export default function SandboxList() {
-  const [sandboxes, setSandboxes] = useState<SandboxSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState<SandboxStatus | ''>('')
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [stopping, setStopping] = useState<Set<string>>(new Set())
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useSandboxes(statusFilter)
+  const stopSandbox = useStopSandbox()
 
-  const fetchSandboxes = useCallback(async (cursor?: string) => {
-    setError('')
-    try {
-      const params = new URLSearchParams()
-      if (statusFilter) params.set('status', statusFilter)
-      if (cursor) params.set('cursor', cursor)
-      params.set('limit', '20')
-
-      const query = params.toString()
-      const data = await apiFetch<ListSandboxesResponse>(
-        `/v1/sandboxes${query ? `?${query}` : ''}`,
-      )
-
-      if (cursor) {
-        setSandboxes((prev) => [...prev, ...data.sandboxes])
-      } else {
-        setSandboxes(data.sandboxes)
-      }
-      setNextCursor(data.next_cursor)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sandboxes')
-    } finally {
-      setLoading(false)
-    }
-  }, [statusFilter])
-
-  useEffect(() => {
-    setLoading(true)
-    setSandboxes([])
-    fetchSandboxes()
-  }, [fetchSandboxes])
-
-  async function handleStop(sandboxId: string) {
-    setStopping((prev) => new Set(prev).add(sandboxId))
-    try {
-      await apiFetch(`/v1/sandboxes/${sandboxId}/stop`, { method: 'POST' })
-      setSandboxes((prev) =>
-        prev.map((s) =>
-          s.sandbox_id === sandboxId ? { ...s, status: 'stopping' as const } : s,
-        ),
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop sandbox')
-    } finally {
-      setStopping((prev) => {
-        const next = new Set(prev)
-        next.delete(sandboxId)
-        return next
-      })
-    }
-  }
+  const sandboxes = data?.pages.flatMap((page) => page.sandboxes) ?? []
 
   return (
     <div>
@@ -94,13 +48,30 @@ export default function SandboxList() {
         ))}
       </div>
 
-      {error && <ErrorMessage message={error} />}
+      {error && (
+        <ErrorMessage
+          message={error instanceof Error ? error.message : 'Failed to load sandboxes'}
+        />
+      )}
+      {stopSandbox.error && (
+        <ErrorMessage
+          message={
+            stopSandbox.error instanceof Error
+              ? stopSandbox.error.message
+              : 'Failed to stop sandbox'
+          }
+        />
+      )}
 
-      {loading ? (
+      {isLoading ? (
         <EmptyState message="Loading sandboxes..." />
       ) : sandboxes.length === 0 ? (
         <EmptyState
-          message={statusFilter ? `No ${statusFilter} sandboxes found.` : 'No sandboxes yet. Create one using the SDK or CLI.'}
+          message={
+            statusFilter
+              ? `No ${statusFilter} sandboxes found.`
+              : 'No sandboxes yet. Create one using the SDK or CLI.'
+          }
         />
       ) : (
         <>
@@ -134,15 +105,23 @@ export default function SandboxList() {
                     </td>
                     <td className="dash-text-weak">{sb.image}</td>
                     <td className="dash-text-weak">{sb.profile}</td>
-                    <td className="dash-text-weak">{formatRelativeTime(sb.created_at)}</td>
+                    <td className="dash-text-weak">
+                      {formatRelativeTime(sb.created_at)}
+                    </td>
                     <td>
                       {(sb.status === 'running' || sb.status === 'queued') && (
                         <button
                           className="dash-action-btn danger"
-                          onClick={() => handleStop(sb.sandbox_id)}
-                          disabled={stopping.has(sb.sandbox_id)}
+                          onClick={() => stopSandbox.mutate(sb.sandbox_id)}
+                          disabled={
+                            stopSandbox.isPending &&
+                            stopSandbox.variables === sb.sandbox_id
+                          }
                         >
-                          {stopping.has(sb.sandbox_id) ? 'Stopping...' : 'Stop'}
+                          {stopSandbox.isPending &&
+                          stopSandbox.variables === sb.sandbox_id
+                            ? 'Stopping...'
+                            : 'Stop'}
                         </button>
                       )}
                     </td>
@@ -152,12 +131,13 @@ export default function SandboxList() {
             </table>
           </div>
 
-          {nextCursor && (
+          {hasNextPage && (
             <button
               className="dash-load-more"
-              onClick={() => fetchSandboxes(nextCursor)}
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
             >
-              Load more
+              {isFetchingNextPage ? 'Loading...' : 'Load more'}
             </button>
           )}
         </>

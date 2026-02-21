@@ -1,97 +1,34 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { authClient } from '@/lib/auth-client'
+import { useState } from 'react'
+import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/use-api-keys'
 import { formatShortDate } from '@/lib/format'
 import CopyButton from '@/components/ui/CopyButton'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
 
-interface ApiKey {
-  id: string
-  name: string | null
-  start: string | null
-  createdAt: Date
-}
-
 export default function ApiKeyManager() {
-  const [keys, setKeys] = useState<ApiKey[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [creating, setCreating] = useState(false)
+  const { data: keys, isLoading, error } = useApiKeys()
+  const createKey = useCreateApiKey()
+  const revokeKey = useRevokeApiKey()
+
   const [newKeyName, setNewKeyName] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
-  const [revoking, setRevoking] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    loadKeys()
-  }, [])
-
-  async function loadKeys() {
-    setError('')
-    try {
-      const { data, error: authError } = await authClient.apiKey.list()
-      if (authError) {
-        setError(authError.message ?? 'Failed to load API keys')
-        return
-      }
-      setKeys(data ?? [])
-    } catch {
-      setError('Failed to load API keys')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
+  function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setError('')
-    setCreating(true)
-
-    try {
-      const { data, error: authError } = await authClient.apiKey.create({
-        name: newKeyName.trim() || undefined,
-      })
-
-      if (authError) {
-        setError(authError.message ?? 'Failed to create API key')
-        setCreating(false)
-        return
-      }
-
-      if (data?.key) {
-        setNewKeyValue(data.key)
-      }
-
-      setNewKeyName('')
-      await loadKeys()
-    } catch {
-      setError('Failed to create API key')
-    } finally {
-      setCreating(false)
-    }
+    createKey.mutate(newKeyName.trim() || undefined, {
+      onSuccess: (data) => {
+        if (data?.key) {
+          setNewKeyValue(data.key)
+        }
+        setNewKeyName('')
+      },
+    })
   }
 
-  async function handleRevoke(keyId: string) {
-    setRevoking((prev) => new Set(prev).add(keyId))
-    try {
-      const { error: authError } = await authClient.apiKey.delete({ keyId })
-      if (authError) {
-        setError(authError.message ?? 'Failed to revoke API key')
-        return
-      }
-      setKeys((prev) => prev.filter((k) => k.id !== keyId))
-    } catch {
-      setError('Failed to revoke API key')
-    } finally {
-      setRevoking((prev) => {
-        const next = new Set(prev)
-        next.delete(keyId)
-        return next
-      })
-    }
-  }
+  const mutationError = createKey.error ?? revokeKey.error
 
   return (
     <div>
@@ -102,13 +39,27 @@ export default function ApiKeyManager() {
           onClick={() => {
             setShowCreate(!showCreate)
             setNewKeyValue(null)
+            createKey.reset()
           }}
         >
           {showCreate ? 'Cancel' : 'Create key'}
         </button>
       </div>
 
-      {error && <ErrorMessage message={error} />}
+      {error && (
+        <ErrorMessage
+          message={error instanceof Error ? error.message : 'Failed to load API keys'}
+        />
+      )}
+      {mutationError && (
+        <ErrorMessage
+          message={
+            mutationError instanceof Error
+              ? mutationError.message
+              : 'Operation failed'
+          }
+        />
+      )}
 
       {newKeyValue && (
         <div className="dash-key-reveal">
@@ -143,18 +94,22 @@ export default function ApiKeyManager() {
             value={newKeyName}
             onChange={(e) => setNewKeyName(e.target.value)}
             className="dash-input"
-            disabled={creating}
+            disabled={createKey.isPending}
             autoFocus
           />
-          <button type="submit" className="dash-primary-btn" disabled={creating}>
-            {creating ? 'Creating...' : 'Create'}
+          <button
+            type="submit"
+            className="dash-primary-btn"
+            disabled={createKey.isPending}
+          >
+            {createKey.isPending ? 'Creating...' : 'Create'}
           </button>
         </form>
       )}
 
-      {loading ? (
+      {isLoading ? (
         <EmptyState message="Loading API keys..." />
-      ) : keys.length === 0 ? (
+      ) : !keys || keys.length === 0 ? (
         <EmptyState message="No API keys yet. Create one to authenticate SDK and CLI requests." />
       ) : (
         <div className="dash-table-wrap">
@@ -180,10 +135,14 @@ export default function ApiKeyManager() {
                   <td>
                     <button
                       className="dash-action-btn danger"
-                      onClick={() => handleRevoke(key.id)}
-                      disabled={revoking.has(key.id)}
+                      onClick={() => revokeKey.mutate(key.id)}
+                      disabled={
+                        revokeKey.isPending && revokeKey.variables === key.id
+                      }
                     >
-                      {revoking.has(key.id) ? 'Revoking...' : 'Revoke'}
+                      {revokeKey.isPending && revokeKey.variables === key.id
+                        ? 'Revoking...'
+                        : 'Revoke'}
                     </button>
                   </td>
                 </tr>

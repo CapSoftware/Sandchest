@@ -194,14 +194,9 @@ describe('react-doctor: accessibility baseline', () => {
             missingAlertRole++
           }
         }
-        // Baseline: dashboard components use "dash-error" class without role="alert"
-        // Auth components correctly use role="alert". Tracked in REACT-AUDIT.md.
-        const fileName = relative(COMPONENTS_DIR, file)
-        if (['dashboard/ApiKeyManager.tsx', 'dashboard/OrgSettings.tsx', 'dashboard/SandboxList.tsx'].includes(fileName)) {
-          expect(missingAlertRole).toBe(1) // each has one error display missing role
-        } else {
-          expect(missingAlertRole).toBe(0)
-        }
+        // All components should have 0 missing alert roles.
+        // Dashboard components delegate to ErrorMessage with multi-line JSX.
+        expect(missingAlertRole).toBe(0)
       })
     }
   })
