@@ -139,6 +139,12 @@ export function createIoRedisApi(client: Redis): RedisApi {
         return result === 1
       }),
 
+    markTtlWarned: (sandboxId, ttlSeconds) =>
+      Effect.promise(async () => {
+        const result = await client.set(`ttl_warned:${sandboxId}`, '1', 'EX', ttlSeconds, 'NX')
+        return result === 'OK'
+      }),
+
     ping: () =>
       Effect.promise(async () => {
         try {

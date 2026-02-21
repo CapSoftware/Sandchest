@@ -71,6 +71,7 @@ export type ReplayEventType =
   | 'sandbox.stopping'
   | 'sandbox.stopped'
   | 'sandbox.failed'
+  | 'sandbox.ttl_warning'
   | 'exec.started'
   | 'exec.output'
   | 'exec.completed'

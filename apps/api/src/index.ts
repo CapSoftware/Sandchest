@@ -15,6 +15,7 @@ import { NodeClientMemory } from './services/node-client.memory.js'
 import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
+import { EventRecorderLive } from './services/event-recorder.live.js'
 import { IdempotencyRepoMemory } from './workers/idempotency-cleanup.memory.js'
 import { QuotaMemory } from './services/quota.memory.js'
 import { UsageMemory } from './services/usage.memory.js'
@@ -82,6 +83,7 @@ const GracefulShutdownLive = Layer.scopedDiscard(
 
 const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pipe(
   Layer.provide(ShutdownControllerLive),
+  Layer.provide(EventRecorderLive),
   Layer.provide(SandboxRepoMemory),
   Layer.provide(ExecRepoMemory),
   Layer.provide(SessionRepoMemory),

@@ -4,14 +4,17 @@ import { createInMemoryRedisApi } from '../services/redis.memory.js'
 import { createInMemorySandboxRepo } from '../services/sandbox-repo.memory.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
 import { createInMemoryObjectStorage } from '../services/object-storage.memory.js'
+import { createLiveEventRecorder } from '../services/event-recorder.live.js'
 import { RedisService, type RedisApi } from '../services/redis.js'
 import { SandboxRepo, type SandboxRepoApi } from '../services/sandbox-repo.js'
 import { ArtifactRepo, type ArtifactRepoApi } from '../services/artifact-repo.js'
 import { ObjectStorage, type ObjectStorageApi } from '../services/object-storage.js'
+import { EventRecorder, type EventRecorderApi } from '../services/event-recorder.js'
 import { IdempotencyRepo, type IdempotencyRepoApi } from './idempotency-cleanup.js'
 import { createTestableIdempotencyRepo } from './idempotency-cleanup.memory.js'
 import { runWorkerTick, type WorkerConfig } from './runner.js'
 import { ttlEnforcementWorker } from './ttl-enforcement.js'
+import { ttlWarningWorker } from './ttl-warning.js'
 import { idleShutdownWorker } from './idle-shutdown.js'
 import { orphanReconciliationWorker } from './orphan-reconciliation.js'
 import { queueTimeoutWorker } from './queue-timeout.js'
@@ -28,6 +31,7 @@ let redis: RedisApi
 let sandboxRepo: SandboxRepoApi
 let artifactRepo: ArtifactRepoApi
 let objectStorage: ObjectStorageApi
+let eventRecorder: EventRecorderApi
 let idempotencyApi: IdempotencyRepoApi
 let idempotencyStore: Map<string, { createdAt: Date }>
 let quotaApi: QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, unknown>) => void }
@@ -45,6 +49,7 @@ beforeEach(() => {
   sandboxRepo = createInMemorySandboxRepo()
   artifactRepo = createInMemoryArtifactRepo()
   objectStorage = createInMemoryObjectStorage()
+  eventRecorder = createLiveEventRecorder(objectStorage, redis)
   const testable = createTestableIdempotencyRepo()
   idempotencyApi = testable.api
   idempotencyStore = testable.store
@@ -55,6 +60,7 @@ beforeEach(() => {
     Layer.succeed(SandboxRepo, sandboxRepo),
     Layer.succeed(ArtifactRepo, artifactRepo),
     Layer.succeed(ObjectStorage, objectStorage),
+    Layer.succeed(EventRecorder, eventRecorder),
     Layer.succeed(IdempotencyRepo, idempotencyApi),
     Layer.succeed(QuotaService, quotaApi),
   )
@@ -744,5 +750,118 @@ describe('replay-retention', () => {
     expect(shortRow!.replayExpiresAt!.getTime()).toBe(PURGED_SENTINEL.getTime())
     // org_long: endedAt + 30 days = 28 days from now (not expired)
     expect(longRow!.replayExpiresAt!.getTime()).toBeGreaterThan(Date.now())
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TTL warning worker
+// ---------------------------------------------------------------------------
+
+describe('ttl-warning', () => {
+  async function createRunningSandbox(orgId: string, ttlSeconds: number, startedSecondsAgo: number) {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    // assignNode sets status to 'running' and startedAt
+    const nodeId = generateUUIDv7()
+    await Effect.runPromise(redis.registerNodeHeartbeat(base62Encode(nodeId), 300))
+    await Effect.runPromise(sandboxRepo.assignNode(id, orgId, nodeId))
+
+    // Backdate startedAt to simulate time passing
+    const row = await Effect.runPromise(sandboxRepo.findById(id, orgId))
+    if (row) {
+      const backdatedStart = new Date(Date.now() - startedSecondsAgo * 1000)
+      // Use updateStatus to persist the sandbox, then manually adjust startedAt
+      // The memory repo stores mutable objects, so we can rely on the reference
+      ;(row as { startedAt: Date }).startedAt = backdatedStart
+    }
+
+    return id
+  }
+
+  test('returns 0 when no sandboxes exist', async () => {
+    const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('does not warn sandboxes far from TTL expiry', async () => {
+    // TTL 3600s, started 100s ago → 3500s remaining (well above 60s threshold)
+    await createRunningSandbox('org_test', 3600, 100)
+
+    const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('warns sandbox near TTL expiry', async () => {
+    // TTL 100s, started 70s ago → 30s remaining (within 60s threshold)
+    const id = await createRunningSandbox('org_test', 100, 70)
+    const sandboxId = bytesToId(SANDBOX_PREFIX, id)
+
+    const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    // Verify event was recorded
+    const events = await Effect.runPromise(eventRecorder.getEvents({ sandboxId, orgId: 'org_test' }))
+    const warning = events.find((e) => e.type === 'sandbox.ttl_warning')
+    expect(warning).toBeDefined()
+    expect(warning!.data.seconds_remaining).toBeNumber()
+    expect(warning!.data.seconds_remaining as number).toBeLessThanOrEqual(60)
+  })
+
+  test('does not warn the same sandbox twice', async () => {
+    // TTL 100s, started 70s ago → 30s remaining
+    await createRunningSandbox('org_test', 100, 70)
+
+    const count1 = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count1).toBe(1)
+
+    const count2 = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count2).toBe(0)
+  })
+
+  test('does not warn already-expired sandboxes', async () => {
+    // TTL 100s, started 110s ago → already expired (handled by ttl-enforcement)
+    await createRunningSandbox('org_test', 100, 110)
+
+    const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('does not warn non-running sandboxes', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 0,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    // Leave as 'queued'
+    const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('warns multiple sandboxes near expiry', async () => {
+    // Both within warning threshold
+    await createRunningSandbox('org_test', 100, 50)
+    await createRunningSandbox('org_test', 200, 160)
+
+    const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
+    expect(count).toBe(2)
   })
 })

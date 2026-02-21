@@ -119,6 +119,11 @@ export interface SandboxRepoApi {
   /** Find running sandboxes that have exceeded their TTL. */
   readonly findExpiredTtl: () => Effect.Effect<SandboxRow[], never, never>
 
+  /** Find running sandboxes within the warning threshold of TTL expiry (not yet expired). */
+  readonly findNearTtlExpiry: (
+    warningThresholdSeconds: number,
+  ) => Effect.Effect<SandboxRow[], never, never>
+
   /** Find running sandboxes with lastActivityAt before the given cutoff. */
   readonly findIdleSince: (
     cutoff: Date,

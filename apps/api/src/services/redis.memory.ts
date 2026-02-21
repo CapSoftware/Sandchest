@@ -23,6 +23,7 @@ export function createInMemoryRedisApi(): RedisApi {
   const artifactPaths = new Map<string, Set<string>>()
   const leaderLocks = new Map<string, { instanceId: string; expiresAt: number }>()
   const nodeHeartbeats = new Map<string, TtlEntry>()
+  const ttlWarned = new Map<string, TtlEntry>()
 
   function isExpired(entry: SlotEntry): boolean {
     return Date.now() >= entry.expiresAt
@@ -177,6 +178,16 @@ export function createInMemoryRedisApi(): RedisApi {
       Effect.sync(() => {
         const entry = nodeHeartbeats.get(`node_heartbeat:${nodeId}`)
         return entry !== undefined && entry.expiresAt > Date.now()
+      }),
+
+    markTtlWarned: (sandboxId, ttlSeconds) =>
+      Effect.sync(() => {
+        const key = `ttl_warned:${sandboxId}`
+        const now = Date.now()
+        const existing = ttlWarned.get(key)
+        if (existing && existing.expiresAt > now) return false
+        ttlWarned.set(key, { expiresAt: now + ttlSeconds * 1000 })
+        return true
       }),
 
     ping: () => Effect.succeed(true),

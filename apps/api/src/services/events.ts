@@ -39,6 +39,10 @@ export function sandboxForked(params: { fork_sandbox_id: string }): EventPayload
   return { type: 'sandbox.forked', data: { fork_sandbox_id: params.fork_sandbox_id } }
 }
 
+export function sandboxTtlWarning(params: { seconds_remaining: number }): EventPayload {
+  return { type: 'sandbox.ttl_warning', data: { seconds_remaining: params.seconds_remaining } }
+}
+
 export function sandboxStopping(params: { reason: string }): EventPayload {
   return { type: 'sandbox.stopping', data: { reason: params.reason } }
 }

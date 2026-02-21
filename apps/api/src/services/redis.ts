@@ -105,6 +105,12 @@ export interface RedisApi {
     nodeId: string,
   ) => Effect.Effect<boolean, never, never>
 
+  /** Atomically mark a sandbox as TTL-warned. Returns true if newly marked. */
+  readonly markTtlWarned: (
+    sandboxId: string,
+    ttlSeconds: number,
+  ) => Effect.Effect<boolean, never, never>
+
   /** Ping to check connectivity. */
   readonly ping: () => Effect.Effect<boolean, never, never>
 }

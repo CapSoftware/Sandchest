@@ -4,9 +4,11 @@ import type { SandboxRepo } from '../services/sandbox-repo.js'
 import type { ArtifactRepo } from '../services/artifact-repo.js'
 import type { ObjectStorage } from '../services/object-storage.js'
 import type { QuotaService } from '../services/quota.js'
+import type { EventRecorder } from '../services/event-recorder.js'
 import type { IdempotencyRepo } from './idempotency-cleanup.js'
 import { startWorkers, type WorkerConfig } from './runner.js'
 import { ttlEnforcementWorker } from './ttl-enforcement.js'
+import { ttlWarningWorker } from './ttl-warning.js'
 import { idleShutdownWorker } from './idle-shutdown.js'
 import { orphanReconciliationWorker } from './orphan-reconciliation.js'
 import { queueTimeoutWorker } from './queue-timeout.js'
@@ -21,10 +23,12 @@ export type WorkerDeps =
   | ArtifactRepo
   | ObjectStorage
   | QuotaService
+  | EventRecorder
   | IdempotencyRepo
 
 const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [
   ttlEnforcementWorker,
+  ttlWarningWorker,
   idleShutdownWorker,
   orphanReconciliationWorker,
   queueTimeoutWorker,

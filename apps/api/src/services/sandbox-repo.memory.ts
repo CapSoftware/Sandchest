@@ -250,6 +250,17 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         })
       }),
 
+    findNearTtlExpiry: (warningThresholdSeconds) =>
+      Effect.sync(() => {
+        const now = Date.now()
+        return Array.from(store.values()).filter((r) => {
+          if (r.status !== 'running' || !r.startedAt) return false
+          const expiresAt = r.startedAt.getTime() + r.ttlSeconds * 1000
+          const warningAt = expiresAt - warningThresholdSeconds * 1000
+          return warningAt <= now && expiresAt > now
+        })
+      }),
+
     findIdleSince: (cutoff) =>
       Effect.sync(() =>
         Array.from(store.values()).filter((r) => {
