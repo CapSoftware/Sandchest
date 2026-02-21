@@ -6,7 +6,7 @@ Sandchest is a Linux-only sandbox platform for AI agent code execution. Every sa
 
 **Polyglot monorepo:**
 - `apps/api` — Control plane HTTP API (EffectTS on Node.js)
-- `apps/web` — Replay page (Astro)
+- `apps/web` — Dashboard + replay page (Next.js App Router)
 - `packages/sdk-ts` — TypeScript SDK (`@sandchest/sdk`)
 - `packages/mcp` — MCP server (`@sandchest/mcp`)
 - `packages/cli` — CLI tool (`@sandchest/cli`)
@@ -126,7 +126,7 @@ EffectTS is used in `apps/api` — use `Effect.fail` with typed error types, not
 
 ## React / Frontend Code
 
-The `apps/web` replay page uses Astro (with React islands where interactive). Follow these rules strictly when writing any React component.
+`apps/web` uses Next.js 15 App Router with React 19. Follow these rules strictly when writing any React component.
 
 ### You Might Not Need an Effect
 
@@ -342,10 +342,8 @@ One commit per task. Stage specific files — never `git add -A` blindly.
 DATABASE_URL=          # PlanetScale connection string
 REDIS_URL=             # Redis connection string
 SANDCHEST_API_KEY=     # Used by SDK (defaults to this env var)
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
+RESEND_API_KEY=        # Resend API key for email OTP
+RESEND_FROM_EMAIL=     # Optional sender address (defaults to Sandchest <noreply@sandchest.com>)
 ```
 
 Never commit `.env` files. Never hardcode credentials.

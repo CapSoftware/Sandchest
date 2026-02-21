@@ -119,7 +119,7 @@ export default function ApiKeyManager() {
                 <th>Name</th>
                 <th>Key</th>
                 <th>Created</th>
-                <th></th>
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

@@ -158,13 +158,7 @@ describe('react-doctor: accessibility baseline', () => {
             findings.push(inputTag.slice(0, 80))
           }
         }
-        // Baseline: OrgSettings invite input missing label (tracked in REACT-AUDIT.md)
-        const fileName = relative(COMPONENTS_DIR, file)
-        if (fileName === 'dashboard/OrgSettings.tsx') {
-          expect(findings.length).toBe(1) // invite email input
-        } else {
-          expect(findings).toEqual([])
-        }
+        expect(findings).toEqual([])
       })
     }
   })
@@ -254,8 +248,8 @@ describe('react-doctor: score summary', () => {
     const scores = {
       hookHygiene: 9,
       stateManagement: 8,
-      performance: 7,
-      accessibility: 6,
+      performance: 8,
+      accessibility: 8,
       typescriptStrictness: 8,
       testCoverage: 6,
       errorHandling: 9,
@@ -264,6 +258,6 @@ describe('react-doctor: score summary', () => {
       bundleEfficiency: 8,
     }
     const total = Object.values(scores).reduce((a, b) => a + b, 0)
-    expect(total).toBe(78)
+    expect(total).toBe(81)
   })
 })

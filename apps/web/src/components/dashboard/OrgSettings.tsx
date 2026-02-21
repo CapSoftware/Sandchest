@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   useOrgSettings,
   useUpdateOrgName,
@@ -21,6 +21,13 @@ export default function OrgSettings() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member')
   const [updateSuccess, setUpdateSuccess] = useState(false)
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    }
+  }, [])
 
   // Sync org name to local state once data loads
   if (data && !nameInitialized) {
@@ -39,7 +46,8 @@ export default function OrgSettings() {
     updateName.mutate(orgName.trim(), {
       onSuccess: () => {
         setUpdateSuccess(true)
-        setTimeout(() => setUpdateSuccess(false), 3000)
+        if (successTimerRef.current) clearTimeout(successTimerRef.current)
+        successTimerRef.current = setTimeout(() => setUpdateSuccess(false), 3000)
       },
     })
   }
@@ -142,7 +150,7 @@ export default function OrgSettings() {
                   <th>Email</th>
                   <th>Name</th>
                   <th>Role</th>
-                  <th></th>
+                  <th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -183,6 +191,7 @@ export default function OrgSettings() {
             onChange={(e) => setInviteEmail(e.target.value)}
             className="dash-input"
             disabled={invite.isPending}
+            aria-label="Invite email address"
           />
           <select
             value={inviteRole}

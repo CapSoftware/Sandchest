@@ -30,8 +30,13 @@ describe('OrgSettings component', () => {
     expect(src).toContain('useRemoveMember')
   })
 
-  test('does not use useEffect for data fetching', () => {
-    expect(src).not.toMatch(/useEffect/)
+  test('useEffect is only used for cleanup, not data fetching', () => {
+    // Effects should only be for cleanup (timers, subscriptions), not data fetching
+    const effectBlocks = src.match(/useEffect\(\s*\(\)\s*=>\s*\{[^}]*\}/g) ?? []
+    for (const block of effectBlocks) {
+      expect(block).not.toMatch(/fetch\(/)
+      expect(block).not.toMatch(/authClient/)
+    }
   })
 
   test('does not import authClient directly', () => {

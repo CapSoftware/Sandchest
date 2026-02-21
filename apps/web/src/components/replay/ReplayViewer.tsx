@@ -67,6 +67,7 @@ function ExecCard({ exec }: { exec: ReplayExec }) {
         type="button"
         className="replay-exec-header"
         onClick={handleExpand}
+        aria-expanded={expanded}
       >
         <span className="replay-exec-chevron">{expanded ? '\u25be' : '\u25b8'}</span>
         <code className="replay-exec-cmd">{formatCmd(exec.cmd)}</code>
@@ -168,7 +169,7 @@ export default function ReplayViewer({ sandboxId }: ReplayViewerProps) {
     return (
       <div className="replay-container">
         <div className="replay-error-state">
-          <div className="replay-error-icon">&#128274;</div>
+          <div className="replay-error-icon" role="img" aria-label="Private">&#128274;</div>
           <h2 className="replay-error-title">
             {isPrivateOrNotFound ? 'This replay is private or does not exist.' : message}
           </h2>
