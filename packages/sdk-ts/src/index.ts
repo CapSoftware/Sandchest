@@ -1,6 +1,7 @@
 export { Sandchest } from './client.js'
 export { Sandbox } from './sandbox.js'
 export { Session } from './session.js'
+export { ExecStream } from './stream.js'
 export {
   SandchestError,
   NotFoundError,
@@ -27,3 +28,4 @@ export type {
   ArtifactOperations,
   SessionManager,
 } from './types.js'
+export type { ExecStreamEvent } from '@sandchest/contract'

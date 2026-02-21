@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { Sandbox } from './sandbox.js'
 import { Session } from './session.js'
+import { ExecStream } from './stream.js'
 import { HttpClient } from './http.js'
 import { TimeoutError } from './errors.js'
 
@@ -120,7 +121,7 @@ describe('Sandbox', () => {
   })
 
   describe('exec (streaming)', () => {
-    test('returns async iterable of SSE events', async () => {
+    test('returns ExecStream that yields SSE events', async () => {
       let callCount = 0
       globalThis.fetch = mock(async () => {
         callCount++
@@ -135,8 +136,13 @@ describe('Sandbox', () => {
       }) as unknown as typeof fetch
 
       const sandbox = new Sandbox('sb_x', 'running', 'https://replay.sandchest.com/sb_x', createMockHttp())
+      const stream = await sandbox.exec('echo hello', { stream: true })
+
+      expect(stream).toBeInstanceOf(ExecStream)
+      expect(stream.execId).toBe('ex_s1')
+
       const events = []
-      for await (const event of sandbox.exec('echo hello', { stream: true })) {
+      for await (const event of stream) {
         events.push(event)
       }
 
@@ -144,6 +150,31 @@ describe('Sandbox', () => {
       expect(events[0]).toEqual({ seq: 1, t: 'stdout', data: 'hello\n' })
       expect(events[1]).toEqual({ seq: 2, t: 'stderr', data: 'warn\n' })
       expect(events[2]!.t).toBe('exit')
+    })
+
+    test('ExecStream.collect() returns aggregated result', async () => {
+      let callCount = 0
+      globalThis.fetch = mock(async () => {
+        callCount++
+        if (callCount === 1) {
+          return jsonResponse({ exec_id: 'ex_c1', status: 'queued' }, 202)
+        }
+        return sseResponse([
+          { data: '{"seq":1,"t":"stdout","data":"out\\n"}' },
+          { data: '{"seq":2,"t":"stderr","data":"err\\n"}' },
+          { data: '{"seq":3,"t":"exit","code":0,"duration_ms":30,"resource_usage":{"cpu_ms":5,"peak_memory_bytes":512}}' },
+        ])
+      }) as unknown as typeof fetch
+
+      const sandbox = new Sandbox('sb_x', 'running', 'https://replay.sandchest.com/sb_x', createMockHttp())
+      const stream = await sandbox.exec('echo hello', { stream: true })
+      const result = await stream.collect()
+
+      expect(result.execId).toBe('ex_c1')
+      expect(result.stdout).toBe('out\n')
+      expect(result.stderr).toBe('err\n')
+      expect(result.exitCode).toBe(0)
+      expect(result.durationMs).toBe(30)
     })
   })
 
@@ -356,7 +387,7 @@ describe('Sandbox', () => {
   })
 
   describe('Symbol.asyncDispose', () => {
-    test('calls stop()', async () => {
+    test('calls stop() when status is running', async () => {
       globalThis.fetch = mock(async () =>
         jsonResponse({ sandbox_id: 'sb_x', status: 'stopping' }, 202),
       ) as unknown as typeof fetch
@@ -364,6 +395,33 @@ describe('Sandbox', () => {
       const sandbox = new Sandbox('sb_x', 'running', 'https://replay.sandchest.com/sb_x', createMockHttp())
       await sandbox[Symbol.asyncDispose]()
       expect(sandbox.status).toBe('stopping')
+    })
+
+    test('skips stop() when status is stopped', async () => {
+      let fetchCalled = false
+      globalThis.fetch = mock(async () => {
+        fetchCalled = true
+        return jsonResponse({ sandbox_id: 'sb_x', status: 'stopped' })
+      }) as unknown as typeof fetch
+
+      const sandbox = new Sandbox('sb_x', 'stopped', 'https://replay.sandchest.com/sb_x', createMockHttp())
+      await sandbox[Symbol.asyncDispose]()
+
+      expect(fetchCalled).toBe(false)
+      expect(sandbox.status).toBe('stopped')
+    })
+
+    test('skips stop() when status is deleted', async () => {
+      let fetchCalled = false
+      globalThis.fetch = mock(async () => {
+        fetchCalled = true
+        return jsonResponse({ sandbox_id: 'sb_x', status: 'deleted' })
+      }) as unknown as typeof fetch
+
+      const sandbox = new Sandbox('sb_x', 'deleted', 'https://replay.sandchest.com/sb_x', createMockHttp())
+      await sandbox[Symbol.asyncDispose]()
+
+      expect(fetchCalled).toBe(false)
     })
   })
 

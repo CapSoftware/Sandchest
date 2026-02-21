@@ -28,40 +28,10 @@ import type {
 } from './types.js'
 import { Session } from './session.js'
 import { TimeoutError } from './errors.js'
+import { parseSSE, ExecStream } from './stream.js'
 
 const WAIT_READY_DEFAULT_TIMEOUT = 120_000
 const WAIT_READY_POLL_INTERVAL = 1_000
-
-/** Parse SSE events from a streaming Response. */
-async function* parseSSE<T>(response: Response): AsyncGenerator<T> {
-  const reader = response.body!.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop()!
-
-      for (const part of parts) {
-        for (const line of part.split('\n')) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data) {
-              yield JSON.parse(data) as T
-            }
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
-}
 
 /**
  * A Sandchest sandbox — an isolated Firecracker microVM.
@@ -169,12 +139,12 @@ export class Sandbox {
 
   /** Execute a command (blocking, returns result). */
   exec(cmd: string | string[], options?: ExecOptions): Promise<ExecResult>
-  /** Execute a command (streaming, returns async iterable of events). */
-  exec(cmd: string | string[], options: StreamExecOptions): AsyncIterable<ExecStreamEvent>
+  /** Execute a command (streaming, returns ExecStream). */
+  exec(cmd: string | string[], options: StreamExecOptions): Promise<ExecStream>
   exec(
     cmd: string | string[],
     options?: ExecOptions | StreamExecOptions,
-  ): Promise<ExecResult> | AsyncIterable<ExecStreamEvent> {
+  ): Promise<ExecResult> | Promise<ExecStream> {
     if (options && 'stream' in options && options.stream === true) {
       return this._execStream(cmd, options)
     }
@@ -251,9 +221,11 @@ export class Sandbox {
     }
   }
 
-  /** Auto-cleanup via Explicit Resource Management. Calls stop(). */
+  /** Auto-cleanup via Explicit Resource Management. Calls stop() if running. */
   async [Symbol.asyncDispose](): Promise<void> {
-    await this.stop()
+    if (this.status === 'running') {
+      await this.stop()
+    }
   }
 
   private async _execBlocking(
@@ -332,10 +304,10 @@ export class Sandbox {
     return { execId: asyncRes.exec_id, exitCode, stdout, stderr, durationMs }
   }
 
-  private async *_execStream(
+  private async _execStream(
     cmd: string | string[],
     options: StreamExecOptions,
-  ): AsyncIterable<ExecStreamEvent> {
+  ): Promise<ExecStream> {
     const asyncRes = await this._http.request<ExecAsyncResponse>({
       method: 'POST',
       path: `/v1/sandboxes/${this.id}/exec`,
@@ -354,6 +326,6 @@ export class Sandbox {
       headers: { Accept: 'text/event-stream' },
     })
 
-    yield* parseSSE<ExecStreamEvent>(response)
+    return new ExecStream(asyncRes.exec_id, parseSSE<ExecStreamEvent>(response))
   }
 }
