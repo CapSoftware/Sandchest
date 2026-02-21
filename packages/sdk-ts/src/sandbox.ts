@@ -1,4 +1,19 @@
-import type { SandboxStatus, ExecStreamEvent, Artifact, FileEntry } from '@sandchest/contract'
+import type {
+  SandboxStatus,
+  ExecStreamEvent,
+  Artifact,
+  FileEntry,
+  ExecSyncResponse,
+  ExecAsyncResponse,
+  ForkSandboxResponse,
+  GetForkTreeResponse,
+  GetSandboxResponse,
+  StopSandboxResponse,
+  ListFilesResponse,
+  RegisterArtifactsResponse,
+  ListArtifactsResponse,
+  CreateSessionResponse,
+} from '@sandchest/contract'
 import type { HttpClient } from './http.js'
 import type {
   ExecOptions,
@@ -11,7 +26,42 @@ import type {
   SessionManager,
   CreateSessionOptions,
 } from './types.js'
-import type { Session } from './session.js'
+import { Session } from './session.js'
+import { TimeoutError } from './errors.js'
+
+const WAIT_READY_DEFAULT_TIMEOUT = 120_000
+const WAIT_READY_POLL_INTERVAL = 1_000
+
+/** Parse SSE events from a streaming Response. */
+async function* parseSSE<T>(response: Response): AsyncGenerator<T> {
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop()!
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            if (data) {
+              yield JSON.parse(data) as T
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
 
 /**
  * A Sandchest sandbox — an isolated Firecracker microVM.
@@ -41,35 +91,78 @@ export class Sandbox {
     this._http = http
 
     this.fs = {
-      upload: (_path: string, _content: Uint8Array): Promise<void> => {
-        throw new Error('Not implemented: Sandbox.fs.upload')
+      upload: async (path: string, content: Uint8Array): Promise<void> => {
+        await this._http.requestRaw({
+          method: 'PUT',
+          path: `/v1/sandboxes/${this.id}/files`,
+          query: { path },
+          body: content,
+          headers: { 'Content-Type': 'application/octet-stream' },
+        })
       },
-      uploadDir: (_path: string, _tarball: Uint8Array): Promise<void> => {
-        throw new Error('Not implemented: Sandbox.fs.uploadDir')
+      uploadDir: async (path: string, tarball: Uint8Array): Promise<void> => {
+        await this._http.requestRaw({
+          method: 'PUT',
+          path: `/v1/sandboxes/${this.id}/files`,
+          query: { path, batch: true },
+          body: tarball,
+          headers: { 'Content-Type': 'application/octet-stream' },
+        })
       },
-      download: (_path: string): Promise<Uint8Array> => {
-        throw new Error('Not implemented: Sandbox.fs.download')
+      download: async (path: string): Promise<Uint8Array> => {
+        const res = await this._http.requestRaw({
+          method: 'GET',
+          path: `/v1/sandboxes/${this.id}/files`,
+          query: { path },
+        })
+        return new Uint8Array(await res.arrayBuffer())
       },
-      ls: (_path: string): Promise<FileEntry[]> => {
-        throw new Error('Not implemented: Sandbox.fs.ls')
+      ls: async (path: string): Promise<FileEntry[]> => {
+        const res = await this._http.request<ListFilesResponse>({
+          method: 'GET',
+          path: `/v1/sandboxes/${this.id}/files`,
+          query: { path, list: true },
+        })
+        return res.files
       },
-      rm: (_path: string): Promise<void> => {
-        throw new Error('Not implemented: Sandbox.fs.rm')
+      rm: async (path: string): Promise<void> => {
+        await this._http.request<{ ok: true }>({
+          method: 'DELETE',
+          path: `/v1/sandboxes/${this.id}/files`,
+          query: { path },
+        })
       },
     }
 
     this.artifacts = {
-      register: (_paths: string[]): Promise<{ registered: number; total: number }> => {
-        throw new Error('Not implemented: Sandbox.artifacts.register')
+      register: async (paths: string[]): Promise<{ registered: number; total: number }> => {
+        const res = await this._http.request<RegisterArtifactsResponse>({
+          method: 'POST',
+          path: `/v1/sandboxes/${this.id}/artifacts`,
+          body: { paths },
+        })
+        return { registered: res.registered, total: res.total }
       },
-      list: (): Promise<Artifact[]> => {
-        throw new Error('Not implemented: Sandbox.artifacts.list')
+      list: async (): Promise<Artifact[]> => {
+        const res = await this._http.request<ListArtifactsResponse>({
+          method: 'GET',
+          path: `/v1/sandboxes/${this.id}/artifacts`,
+        })
+        return res.artifacts
       },
     }
 
     this.session = {
-      create: (_options?: CreateSessionOptions): Promise<Session> => {
-        throw new Error('Not implemented: Sandbox.session.create')
+      create: async (options?: CreateSessionOptions): Promise<Session> => {
+        const res = await this._http.request<CreateSessionResponse>({
+          method: 'POST',
+          path: `/v1/sandboxes/${this.id}/sessions`,
+          body: {
+            shell: options?.shell,
+            env: options?.env,
+          },
+        })
+        return new Session(res.session_id, this.id, this._http)
       },
     }
   }
@@ -79,39 +172,188 @@ export class Sandbox {
   /** Execute a command (streaming, returns async iterable of events). */
   exec(cmd: string | string[], options: StreamExecOptions): AsyncIterable<ExecStreamEvent>
   exec(
-    _cmd: string | string[],
-    _options?: ExecOptions | StreamExecOptions,
+    cmd: string | string[],
+    options?: ExecOptions | StreamExecOptions,
   ): Promise<ExecResult> | AsyncIterable<ExecStreamEvent> {
-    throw new Error('Not implemented: Sandbox.exec')
+    if (options && 'stream' in options && options.stream === true) {
+      return this._execStream(cmd, options)
+    }
+    return this._execBlocking(cmd, options as ExecOptions | undefined)
   }
 
   /** Fork this sandbox's entire state into a new sandbox. */
-  async fork(_options?: ForkOptions): Promise<Sandbox> {
-    throw new Error('Not implemented: Sandbox.fork')
+  async fork(options?: ForkOptions): Promise<Sandbox> {
+    const res = await this._http.request<ForkSandboxResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this.id}/fork`,
+      body: {
+        env: options?.env,
+        ttl_seconds: options?.ttlSeconds,
+      },
+    })
+    return new Sandbox(res.sandbox_id, res.status, res.replay_url, this._http)
   }
 
   /** Get the fork tree rooted at this sandbox. */
   async forks(): Promise<ForkTree> {
-    throw new Error('Not implemented: Sandbox.forks')
+    const res = await this._http.request<GetForkTreeResponse>({
+      method: 'GET',
+      path: `/v1/sandboxes/${this.id}/forks`,
+    })
+    return { root: res.root, tree: res.tree }
   }
 
   /** Gracefully stop this sandbox (collects artifacts). */
   async stop(): Promise<void> {
-    throw new Error('Not implemented: Sandbox.stop')
+    const res = await this._http.request<StopSandboxResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this.id}/stop`,
+    })
+    this.status = res.status
   }
 
   /** Hard stop and clean up this sandbox. */
   async destroy(): Promise<void> {
-    throw new Error('Not implemented: Sandbox.destroy')
+    await this._http.request<{ sandbox_id: string; status: 'deleted' }>({
+      method: 'DELETE',
+      path: `/v1/sandboxes/${this.id}`,
+    })
+    this.status = 'deleted'
   }
 
   /** Wait for this sandbox to reach 'running' status. */
-  async waitReady(_options?: { timeout?: number | undefined }): Promise<void> {
-    throw new Error('Not implemented: Sandbox.waitReady')
+  async waitReady(options?: { timeout?: number | undefined }): Promise<void> {
+    const timeout = options?.timeout ?? WAIT_READY_DEFAULT_TIMEOUT
+    const start = Date.now()
+
+    while (true) {
+      const res = await this._http.request<GetSandboxResponse>({
+        method: 'GET',
+        path: `/v1/sandboxes/${this.id}`,
+      })
+
+      this.status = res.status
+
+      if (res.status === 'running') return
+
+      if (res.status === 'failed' || res.status === 'deleted' || res.status === 'stopped') {
+        throw new Error(`Sandbox ${this.id} reached terminal state: ${res.status}`)
+      }
+
+      if (Date.now() - start >= timeout) {
+        throw new TimeoutError({
+          message: `Sandbox ${this.id} did not become ready within ${timeout}ms`,
+          timeoutMs: timeout,
+        })
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, WAIT_READY_POLL_INTERVAL))
+    }
   }
 
   /** Auto-cleanup via Explicit Resource Management. Calls stop(). */
   async [Symbol.asyncDispose](): Promise<void> {
     await this.stop()
+  }
+
+  private async _execBlocking(
+    cmd: string | string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
+    if (options?.onStdout || options?.onStderr) {
+      return this._execWithCallbacks(cmd, options)
+    }
+
+    const res = await this._http.request<ExecSyncResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this.id}/exec`,
+      body: {
+        cmd,
+        cwd: options?.cwd,
+        env: options?.env,
+        timeout_seconds: options?.timeout,
+        wait: true,
+      },
+    })
+
+    return {
+      execId: res.exec_id,
+      exitCode: res.exit_code,
+      stdout: res.stdout,
+      stderr: res.stderr,
+      durationMs: res.duration_ms,
+    }
+  }
+
+  private async _execWithCallbacks(
+    cmd: string | string[],
+    options: ExecOptions,
+  ): Promise<ExecResult> {
+    const asyncRes = await this._http.request<ExecAsyncResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this.id}/exec`,
+      body: {
+        cmd,
+        cwd: options.cwd,
+        env: options.env,
+        timeout_seconds: options.timeout,
+        wait: false,
+      },
+    })
+
+    const response = await this._http.requestRaw({
+      method: 'GET',
+      path: `/v1/sandboxes/${this.id}/exec/${asyncRes.exec_id}/stream`,
+      headers: { Accept: 'text/event-stream' },
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let exitCode = 0
+    let durationMs = 0
+
+    for await (const event of parseSSE<ExecStreamEvent>(response)) {
+      switch (event.t) {
+        case 'stdout':
+          stdout += event.data
+          options.onStdout?.(event.data)
+          break
+        case 'stderr':
+          stderr += event.data
+          options.onStderr?.(event.data)
+          break
+        case 'exit':
+          exitCode = event.code
+          durationMs = event.duration_ms
+          break
+      }
+    }
+
+    return { execId: asyncRes.exec_id, exitCode, stdout, stderr, durationMs }
+  }
+
+  private async *_execStream(
+    cmd: string | string[],
+    options: StreamExecOptions,
+  ): AsyncIterable<ExecStreamEvent> {
+    const asyncRes = await this._http.request<ExecAsyncResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this.id}/exec`,
+      body: {
+        cmd,
+        cwd: options.cwd,
+        env: options.env,
+        timeout_seconds: options.timeout,
+        wait: false,
+      },
+    })
+
+    const response = await this._http.requestRaw({
+      method: 'GET',
+      path: `/v1/sandboxes/${this.id}/exec/${asyncRes.exec_id}/stream`,
+      headers: { Accept: 'text/event-stream' },
+    })
+
+    yield* parseSSE<ExecStreamEvent>(response)
   }
 }

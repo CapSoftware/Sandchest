@@ -34,6 +34,15 @@ export interface RequestOptions {
   idempotencyKey?: string | undefined
 }
 
+export interface RawRequestOptions {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+  path: string
+  query?: Record<string, string | number | boolean | undefined>
+  body?: Uint8Array | string
+  headers?: Record<string, string>
+  timeout?: number | undefined
+}
+
 /** Generate a random idempotency key for mutation requests. */
 function generateIdempotencyKey(): string {
   const bytes = new Uint8Array(16)
@@ -165,6 +174,43 @@ export class HttpClient {
     }
 
     throw this.wrapRawError(lastError, timeoutMs)
+  }
+
+  /** Make a raw HTTP request, returning the Response object directly. */
+  async requestRaw(options: RawRequestOptions): Promise<Response> {
+    const url = this.buildUrl(options.path, options.query)
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+      ...options.headers,
+    }
+
+    const timeoutMs = options.timeout ?? this.timeout
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await fetch(url, {
+        method: options.method,
+        headers,
+        body: options.body,
+        signal: controller.signal,
+      })
+
+      clearTimeout(timer)
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as ApiErrorBody | null
+        const requestId = errorBody?.request_id ?? response.headers.get('x-request-id') ?? ''
+        const message = errorBody?.message ?? `HTTP ${response.status}`
+        throw this.parseErrorResponse(response.status, message, requestId, errorBody)
+      }
+
+      return response
+    } catch (error) {
+      clearTimeout(timer)
+      if (error instanceof SandchestError) throw error
+      throw this.wrapRawError(error, timeoutMs)
+    }
   }
 
   /** Wrap non-SDK errors into typed TimeoutError or ConnectionError. */

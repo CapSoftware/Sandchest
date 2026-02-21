@@ -1,3 +1,4 @@
+import type { SessionExecResponse } from '@sandchest/contract'
 import type { HttpClient } from './http.js'
 import type { ExecResult, SessionExecOptions } from './types.js'
 
@@ -20,12 +21,31 @@ export class Session {
   }
 
   /** Execute a command in this session. State persists between calls. */
-  async exec(_cmd: string, _options?: SessionExecOptions): Promise<ExecResult> {
-    throw new Error('Not implemented: Session.exec')
+  async exec(cmd: string, options?: SessionExecOptions): Promise<ExecResult> {
+    const res = await this._http.request<SessionExecResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this._sandboxId}/sessions/${this.id}/exec`,
+      body: {
+        cmd,
+        timeout_seconds: options?.timeout,
+        wait: true,
+      },
+    })
+
+    return {
+      execId: res.exec_id,
+      exitCode: res.exit_code,
+      stdout: res.stdout,
+      stderr: res.stderr,
+      durationMs: res.duration_ms,
+    }
   }
 
   /** Destroy this session. */
   async destroy(): Promise<void> {
-    throw new Error('Not implemented: Session.destroy')
+    await this._http.request<{ ok: true }>({
+      method: 'DELETE',
+      path: `/v1/sandboxes/${this._sandboxId}/sessions/${this.id}`,
+    })
   }
 }
