@@ -308,7 +308,7 @@ describe('updateStatus', () => {
 describe('createFork', () => {
   test('creates a fork with correct parent reference', async () => {
     const parent = makeSandbox()
-    const parentRow = await run(repo.create(parent))
+    await run(repo.create(parent))
     await run(repo.updateStatus(parent.id, ORG_A, 'running'))
 
     const forkId = generateUUIDv7()

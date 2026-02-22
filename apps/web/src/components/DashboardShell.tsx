@@ -38,7 +38,6 @@ function OrgSwitcher() {
   const [newOrgName, setNewOrgName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   const activeOrgId = session?.session.activeOrganizationId
   const activeOrg = orgs?.find((o: Org) => o.id === activeOrgId)
@@ -57,12 +56,6 @@ function OrgSwitcher() {
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [open])
-
-  useEffect(() => {
-    if (creating && inputRef.current) {
-      inputRef.current.focus()
-    }
-  }, [creating])
 
   function currentPageSuffix(): string {
     const segments = pathname.split('/')
@@ -154,7 +147,7 @@ function OrgSwitcher() {
           {creating ? (
             <form className="org-switcher-create-form" onSubmit={handleCreate}>
               <input
-                ref={inputRef}
+                autoFocus
                 className="org-switcher-create-input"
                 type="text"
                 placeholder="Organization name"

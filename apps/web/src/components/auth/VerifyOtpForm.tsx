@@ -28,9 +28,7 @@ export default function VerifyOtpForm() {
   useEffect(() => {
     if (!email) {
       window.location.href = '/login'
-      return
     }
-    inputRefs.current[0]?.focus()
   }, [email])
 
   const redirectTo = type === 'sign-up' ? '/onboarding' : '/dashboard'
@@ -138,6 +136,7 @@ export default function VerifyOtpForm() {
               onChange={(e) => handleChange(i, e.target.value)}
               onKeyDown={(e) => handleKeyDown(i, e)}
               onPaste={i === 0 ? handlePaste : undefined}
+              autoFocus={i === 0}
               className="otp-digit"
               disabled={loading}
               aria-label={`Digit ${i + 1}`}
