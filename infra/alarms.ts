@@ -92,7 +92,7 @@ export function getAlbResponseTimeAlarm(stage: string): MetricAlarmConfig {
 
 export function getAlbUnhealthyHostAlarm(): MetricAlarmConfig {
   return {
-    description: "ALB has unhealthy targets",
+    description: "ALB unhealthy host count above zero",
     namespace: "AWS/ApplicationELB",
     metricName: "UnHealthyHostCount",
     statistic: "Maximum",

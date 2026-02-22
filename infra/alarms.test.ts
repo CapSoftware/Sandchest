@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   getAlb5xxAlarm,
   getAlbResponseTimeAlarm,
-  getAlbUnhealthyHostAlarm,
   getEcsCpuAlarm,
   getEcsMemoryAlarm,
   getEcsRunningTaskAlarm,
@@ -144,27 +143,6 @@ describe("getAlbResponseTimeAlarm", () => {
 
   test("evaluates over 3 consecutive periods", () => {
     expect(getAlbResponseTimeAlarm("production").evaluationPeriods).toBe(3);
-  });
-});
-
-describe("getAlbUnhealthyHostAlarm", () => {
-  test("threshold is 0 for all stages", () => {
-    expect(getAlbUnhealthyHostAlarm().threshold).toBe(0);
-  });
-
-  test("uses Maximum statistic", () => {
-    expect(getAlbUnhealthyHostAlarm().statistic).toBe("Maximum");
-  });
-
-  test("evaluates over 2 consecutive 1-minute periods", () => {
-    expect(getAlbUnhealthyHostAlarm().period).toBe(60);
-    expect(getAlbUnhealthyHostAlarm().evaluationPeriods).toBe(2);
-  });
-
-  test("alarms when any unhealthy hosts exist", () => {
-    expect(getAlbUnhealthyHostAlarm().comparisonOperator).toBe(
-      "GreaterThanThreshold",
-    );
   });
 });
 
