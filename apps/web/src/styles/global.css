@@ -1774,6 +1774,166 @@ a:hover {
   opacity: 0.3;
 }
 
+/* ── Create sandbox dialog ── */
+.csb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  animation: paywall-fade-in 0.15s ease;
+}
+
+.csb-dialog {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 16px;
+  padding: 24px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  animation: paywall-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.csb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.csb-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-strong);
+}
+
+.csb-full-width {
+  width: 100%;
+}
+
+.csb-env-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.csb-env-header .dash-label {
+  margin-bottom: 0;
+}
+
+.csb-add-env-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-weak);
+  background: none;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.csb-add-env-btn:hover:not(:disabled) {
+  color: var(--color-text-strong);
+  border-color: var(--color-border);
+}
+
+.csb-env-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.csb-env-key {
+  flex: 2;
+  min-width: 0;
+}
+
+.csb-env-value {
+  flex: 3;
+  min-width: 0;
+}
+
+.csb-remove-env-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-text-weak);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.csb-remove-env-btn:hover:not(:disabled) {
+  color: hsl(0, 70%, 60%);
+  border-color: hsl(0, 70%, 60%);
+}
+
+.csb-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.csb-actions .paywall-dismiss-btn {
+  flex: 1;
+}
+
+.csb-actions .dash-primary-btn {
+  flex: 1;
+}
+
+.csb-success {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.csb-success-label {
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.csb-success-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.csb-success-id {
+  font-size: 12px;
+  color: var(--color-accent);
+  word-break: break-all;
+  flex: 1;
+}
+
+.csb-replay-link {
+  font-size: 13px;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.csb-done-btn {
+  margin-top: 4px;
+}
+
 /* ── Paywall dialog ── */
 .paywall-overlay {
   position: fixed;

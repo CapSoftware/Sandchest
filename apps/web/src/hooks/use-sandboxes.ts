@@ -11,6 +11,8 @@ import type {
   SandboxSummary,
   ListSandboxesResponse,
   StopSandboxResponse,
+  CreateSandboxRequest,
+  CreateSandboxResponse,
 } from '@sandchest/contract'
 
 export const sandboxKeys = {
@@ -83,6 +85,22 @@ export function useStopSandbox() {
           queryClient.setQueryData(key, data)
         }
       }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: sandboxKeys.lists() })
+    },
+  })
+}
+
+export function useCreateSandbox() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (body: CreateSandboxRequest) => {
+      return apiFetch<CreateSandboxResponse>('/v1/sandboxes', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: sandboxKeys.lists() })

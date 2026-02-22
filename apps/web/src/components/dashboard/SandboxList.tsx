@@ -6,6 +6,7 @@ import { formatRelativeTime } from '@/lib/format'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
+import CreateSandboxDialog from './CreateSandboxDialog'
 import { SandboxTableSkeleton } from './skeletons'
 import type { SandboxStatus } from '@sandchest/contract'
 
@@ -19,6 +20,7 @@ const FILTER_OPTIONS: Array<{ label: string; value: SandboxStatus | '' }> = [
 
 export default function SandboxList() {
   const [statusFilter, setStatusFilter] = useState<SandboxStatus | ''>('')
+  const [showCreate, setShowCreate] = useState(false)
   const {
     data,
     isLoading,
@@ -35,7 +37,18 @@ export default function SandboxList() {
     <div>
       <div className="dash-page-header">
         <h1 className="dash-page-title">Sandboxes</h1>
+        <button
+          className="dash-primary-btn"
+          onClick={() => setShowCreate(true)}
+        >
+          Create sandbox
+        </button>
       </div>
+
+      <CreateSandboxDialog
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+      />
 
       <div className="dash-filters">
         {FILTER_OPTIONS.map((opt) => (

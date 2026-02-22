@@ -22,6 +22,21 @@ describe('SandboxList component', () => {
     expect(src).toMatch(/useStopSandbox\(\)/)
   })
 
+  test('renders Create sandbox button in page header', () => {
+    expect(src).toMatch(/Create sandbox/)
+    expect(src).toMatch(/dash-primary-btn/)
+  })
+
+  test('renders CreateSandboxDialog component', () => {
+    expect(src).toContain('CreateSandboxDialog')
+    expect(src).toMatch(/import.*CreateSandboxDialog/)
+  })
+
+  test('manages showCreate state for dialog visibility', () => {
+    expect(src).toMatch(/showCreate/)
+    expect(src).toMatch(/setShowCreate/)
+  })
+
   test('does not use useEffect for data fetching', () => {
     expect(src).not.toMatch(/useEffect/)
   })

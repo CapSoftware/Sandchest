@@ -55,6 +55,33 @@ describe('useSandboxes hook', () => {
   })
 })
 
+describe('useCreateSandbox hook', () => {
+  const src = readFileSync(HOOK_PATH, 'utf-8')
+
+  test('exports useCreateSandbox function', () => {
+    expect(src).toMatch(/export function useCreateSandbox/)
+  })
+
+  test('imports CreateSandboxRequest and CreateSandboxResponse types', () => {
+    expect(src).toContain('CreateSandboxRequest')
+    expect(src).toContain('CreateSandboxResponse')
+  })
+
+  test('POSTs to /v1/sandboxes endpoint', () => {
+    expect(src).toMatch(/['"]\/v1\/sandboxes['"]/)
+    expect(src).toMatch(/method:\s*['"]POST['"]/)
+  })
+
+  test('sends JSON body via JSON.stringify', () => {
+    expect(src).toMatch(/JSON\.stringify\(body\)/)
+  })
+
+  test('invalidates sandbox list queries on settled', () => {
+    expect(src).toMatch(/onSettled/)
+    expect(src).toMatch(/invalidateQueries/)
+  })
+})
+
 describe('useStopSandbox hook', () => {
   const src = readFileSync(HOOK_PATH, 'utf-8')
 
