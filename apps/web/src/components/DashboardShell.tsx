@@ -4,10 +4,10 @@ import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
-import { useSession } from '@/hooks/use-session'
-import { useOrgs, useSetActiveOrg } from '@/hooks/use-orgs'
+import { useDashboardSession } from '@/components/DashboardSessionProvider'
+import { useSetActiveOrg } from '@/hooks/use-orgs'
 import { useCreateOrg } from '@/hooks/use-create-org'
-import type { Org } from '@/hooks/use-orgs'
+import type { ServerOrg } from '@/lib/server-auth'
 
 function getActiveId(pathname: string): string {
   const segments = pathname.split('/')
@@ -27,8 +27,7 @@ function slugify(text: string): string {
 }
 
 function OrgSwitcher() {
-  const { data: session } = useSession()
-  const { data: orgs } = useOrgs()
+  const { orgs, activeOrg } = useDashboardSession()
   const setActiveOrg = useSetActiveOrg()
   const createOrg = useCreateOrg()
   const router = useRouter()
@@ -38,9 +37,6 @@ function OrgSwitcher() {
   const [newOrgName, setNewOrgName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
-
-  const activeOrgId = session?.session.activeOrganizationId
-  const activeOrg = orgs?.find((o: Org) => o.id === activeOrgId)
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -64,12 +60,12 @@ function OrgSwitcher() {
     return page ? `/${page}` : ''
   }
 
-  function handleSwitch(org: Org) {
+  function handleSwitch(org: ServerOrg) {
     setOpen(false)
     setCreating(false)
     setNewOrgName('')
     setCreateError(null)
-    if (org.id !== activeOrgId) {
+    if (org.id !== activeOrg.id) {
       setActiveOrg.mutate(org.id)
       router.push(`/dashboard/${org.slug}${currentPageSuffix()}`)
     }
@@ -101,7 +97,7 @@ function OrgSwitcher() {
     )
   }
 
-  const displayName = activeOrg?.name ?? 'Select org'
+  const displayName = activeOrg.name
 
   return (
     <div className="org-switcher" ref={ref}>
@@ -120,21 +116,21 @@ function OrgSwitcher() {
         </svg>
       </button>
 
-      {open && orgs && (
+      {open && (
         <div className="org-switcher-dropdown" role="listbox" aria-label="Switch organization">
-          {orgs.map((org: Org) => (
+          {orgs.map((org: ServerOrg) => (
             <button
               key={org.id}
-              className={`org-switcher-option${org.id === activeOrgId ? ' active' : ''}`}
+              className={`org-switcher-option${org.id === activeOrg.id ? ' active' : ''}`}
               role="option"
-              aria-selected={org.id === activeOrgId}
+              aria-selected={org.id === activeOrg.id}
               onClick={() => handleSwitch(org)}
             >
               <span className="org-switcher-avatar" aria-hidden="true">
                 {org.name.charAt(0).toUpperCase()}
               </span>
               <span className="org-switcher-option-name">{org.name}</span>
-              {org.id === activeOrgId && (
+              {org.id === activeOrg.id && (
                 <svg className="org-switcher-check" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M3 7L6 10L11 4" />
                 </svg>
@@ -201,14 +197,14 @@ function OrgSwitcher() {
 }
 
 function UserMenu() {
-  const { data: session } = useSession()
+  const { session } = useDashboardSession()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const user = session?.user
-  const displayName = user?.name || user?.email || ''
-  const displayEmail = user?.email || ''
+  const user = session.user
+  const displayName = user.name || user.email || ''
+  const displayEmail = user.email || ''
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -240,7 +236,7 @@ function UserMenu() {
         </span>
         <span className="user-menu-info">
           <span className="user-menu-name">{displayName}</span>
-          {user?.name && <span className="user-menu-email">{displayEmail}</span>}
+          {user.name && <span className="user-menu-email">{displayEmail}</span>}
         </span>
       </button>
 
@@ -267,63 +263,10 @@ function UserMenu() {
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const params = useParams<{ orgSlug: string }>()
   const pathname = usePathname()
-  const router = useRouter()
   const active = getActiveId(pathname)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const { data: session, isPending: sessionLoading } = useSession()
-  const { data: orgs, isPending: orgsLoading, error: orgsError } = useOrgs()
-  const setActiveOrg = useSetActiveOrg()
 
   const orgSlug = params.orgSlug
-  const activeOrgId = session?.session.activeOrganizationId
-  const urlOrg = orgs?.find((o: Org) => o.slug === orgSlug)
-
-  // Sync active org with URL slug (external system sync — valid useEffect)
-  // Must be called before any conditional returns to satisfy React hooks rules
-  useEffect(() => {
-    if (urlOrg && urlOrg.id !== activeOrgId && !setActiveOrg.isPending) {
-      setActiveOrg.mutate(urlOrg.id)
-    }
-  }, [urlOrg, activeOrgId, setActiveOrg])
-
-  // Show loading state while session or orgs are being fetched
-  if (sessionLoading || orgsLoading) {
-    return (
-      <div className="dash">
-        <div className="dash-main">
-          <div className="dash-empty">Loading...</div>
-        </div>
-      </div>
-    )
-  }
-
-  // Show error state if orgs failed to load
-  if (orgsError) {
-    return (
-      <div className="dash">
-        <div className="dash-main">
-          <div className="dash-empty">
-            <p>Failed to load organizations.</p>
-            <p className="dash-text-weak">
-              {orgsError instanceof Error ? orgsError.message : 'An unexpected error occurred.'}
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Redirect to onboarding if user has no organizations
-  if (!orgs || orgs.length === 0) {
-    router.replace('/onboarding')
-    return null
-  }
-
-  // Redirect to /dashboard if slug doesn't match any user org
-  if (!urlOrg) {
-    router.replace('/dashboard')
-    return null
-  }
 
   const navItems = [
     { href: `/dashboard/${orgSlug}`, label: 'Sandboxes', id: 'sandboxes' },

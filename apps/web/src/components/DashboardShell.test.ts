@@ -21,12 +21,11 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/usePathname\(\)/)
   })
 
-  test('uses useSession hook for session data', () => {
-    expect(src).toMatch(/import.*useSession.*from ['"]@\/hooks\/use-session['"]/)
+  test('uses useDashboardSession for session and org data', () => {
+    expect(src).toMatch(/import.*useDashboardSession.*from ['"]@\/components\/DashboardSessionProvider['"]/)
   })
 
-  test('uses useOrgs and useSetActiveOrg hooks', () => {
-    expect(src).toMatch(/import.*useOrgs.*from ['"]@\/hooks\/use-orgs['"]/)
+  test('uses useSetActiveOrg hook for mutations', () => {
     expect(src).toMatch(/import.*useSetActiveOrg.*from ['"]@\/hooks\/use-orgs['"]/)
   })
 
@@ -55,36 +54,11 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/dash-mobile-menu/)
   })
 
-  test('shows loading state while session or orgs are pending', () => {
-    expect(src).toMatch(/sessionLoading/)
-    expect(src).toMatch(/orgsLoading/)
-    expect(src).toMatch(/if \(sessionLoading \|\| orgsLoading\)/)
-    expect(src).toMatch(/Loading\.\.\./)
-  })
-
-  test('shows error state when orgs fail to load', () => {
-    expect(src).toMatch(/orgsError/)
-    expect(src).toMatch(/if \(orgsError\)/)
-    expect(src).toMatch(/Failed to load organizations/)
-  })
-
-  test('redirects to onboarding when user has no orgs', () => {
-    expect(src).toMatch(/orgs\.length === 0/)
-    expect(src).toMatch(/router\.replace\(['"]\/onboarding['"]\)/)
-  })
-
-  test('redirects to /dashboard when slug does not match any user org', () => {
-    expect(src).toMatch(/!urlOrg/)
-    expect(src).toMatch(/router\.replace\(['"]\/dashboard['"]\)/)
-  })
-
-  test('syncs active org with URL slug via useEffect before conditional returns', () => {
-    expect(src).toMatch(/urlOrg && urlOrg\.id !== activeOrgId/)
-    expect(src).toMatch(/setActiveOrg\.mutate\(urlOrg\.id\)/)
-    // useEffect must appear before any conditional return to satisfy hooks rules
-    const useEffectIndex = src.indexOf('useEffect(() => {', src.indexOf('export default function DashboardShell'))
-    const firstReturnIndex = src.indexOf('return (', src.indexOf('export default function DashboardShell'))
-    expect(useEffectIndex).toBeLessThan(firstReturnIndex)
+  test('does not fetch session or orgs client-side (server handles auth)', () => {
+    expect(src).not.toMatch(/useSession\(\)/)
+    expect(src).not.toMatch(/useOrgs\(\)/)
+    expect(src).not.toMatch(/sessionLoading/)
+    expect(src).not.toMatch(/orgsLoading/)
   })
 
   test('does not use console.log', () => {
