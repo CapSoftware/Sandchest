@@ -14,11 +14,8 @@ describe("isProduction", () => {
 });
 
 describe("getVpcNat", () => {
-  test("uses managed NAT gateway for production", () => {
-    expect(getVpcNat("production")).toBe("managed");
-  });
-
-  test("uses ec2 fck-nat for dev stages", () => {
+  test("uses ec2 fck-nat for all stages", () => {
+    expect(getVpcNat("production")).toBe("ec2");
     expect(getVpcNat("dev")).toBe("ec2");
     expect(getVpcNat("staging")).toBe("ec2");
     expect(getVpcNat("preview")).toBe("ec2");
@@ -36,8 +33,8 @@ describe("getVpcConfig", () => {
     expect(config.nat).toBe("ec2");
   });
 
-  test("uses managed nat for production stage", () => {
+  test("uses ec2 nat for production stage", () => {
     const config = getVpcConfig("production");
-    expect(config.nat).toBe("managed");
+    expect(config.nat).toBe("ec2");
   });
 });
