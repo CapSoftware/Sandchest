@@ -16,7 +16,10 @@ export function getNodeAmiSsmParameter(): string {
   return "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64";
 }
 
-export function getNodeEnvironment(stage: string): Record<string, string> {
+export function getNodeEnvironment(
+  stage: string,
+  bucketName: string,
+): Record<string, string> {
   return {
     RUST_LOG: isProduction(stage) ? "info" : "debug",
     SANDCHEST_DATA_DIR: "/var/sandchest",
@@ -26,6 +29,8 @@ export function getNodeEnvironment(stage: string): Record<string, string> {
     SANDCHEST_JAILER_BINARY: "/usr/bin/jailer",
     SANDCHEST_OUTBOUND_IFACE: "ens5",
     SANDCHEST_BANDWIDTH_MBPS: isProduction(stage) ? "200" : "100",
+    SANDCHEST_S3_BUCKET: bucketName,
+    SANDCHEST_S3_REGION: "us-east-1",
   };
 }
 
@@ -54,8 +59,8 @@ export function getNodeSystemdUnit(): string {
   ].join("\n");
 }
 
-export function getNodeUserData(stage: string): string {
-  const env = getNodeEnvironment(stage);
+export function getNodeUserData(stage: string, bucketName: string): string {
+  const env = getNodeEnvironment(stage, bucketName);
   const envFileLines = Object.entries(env)
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");

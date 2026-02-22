@@ -129,26 +129,46 @@ async fn upload_to_s3(config: &S3Config, key: &str, data: &[u8]) -> Result<(), S
     Ok(())
 }
 
-/// Build an AWS S3 client configured for the given S3-compatible endpoint.
+/// Build an AWS S3 client.
+///
+/// When static credentials are provided (for S3-compatible services like Scaleway),
+/// uses those directly with path-style addressing. Otherwise, uses the default
+/// credential chain (EC2 instance profile / IMDS) with virtual-hosted style.
 async fn build_s3_client(config: &S3Config) -> aws_sdk_s3::Client {
-    let creds = aws_credential_types::Credentials::new(
-        &config.access_key,
-        &config.secret_key,
-        None,
-        None,
-        "sandchest-node",
-    );
+    if config.has_static_credentials() {
+        let creds = aws_credential_types::Credentials::new(
+            config.access_key.as_deref().unwrap_or_default(),
+            config.secret_key.as_deref().unwrap_or_default(),
+            None,
+            None,
+            "sandchest-node",
+        );
 
-    let mut s3_config = aws_sdk_s3::config::Builder::new()
-        .region(aws_sdk_s3::config::Region::new(config.region.clone()))
-        .credentials_provider(creds)
-        .force_path_style(true);
+        let mut s3_config = aws_sdk_s3::config::Builder::new()
+            .region(aws_sdk_s3::config::Region::new(config.region.clone()))
+            .credentials_provider(creds)
+            .force_path_style(true);
 
-    if let Some(ref endpoint) = config.endpoint {
-        s3_config = s3_config.endpoint_url(endpoint);
+        if let Some(ref endpoint) = config.endpoint {
+            s3_config = s3_config.endpoint_url(endpoint);
+        }
+
+        aws_sdk_s3::Client::from_conf(s3_config.build())
+    } else {
+        let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_sdk_s3::config::Region::new(config.region.clone()))
+            .load()
+            .await;
+
+        let mut s3_config =
+            aws_sdk_s3::config::Builder::from(&aws_config);
+
+        if let Some(ref endpoint) = config.endpoint {
+            s3_config = s3_config.endpoint_url(endpoint).force_path_style(true);
+        }
+
+        aws_sdk_s3::Client::from_conf(s3_config.build())
     }
-
-    aws_sdk_s3::Client::from_conf(s3_config.build())
 }
 
 /// Compute the hex-encoded SHA256 hash of data.

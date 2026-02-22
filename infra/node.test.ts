@@ -42,55 +42,73 @@ describe("getNodeAmiSsmParameter", () => {
 
 describe("getNodeEnvironment", () => {
   test("sets RUST_LOG to info for production", () => {
-    expect(getNodeEnvironment("production").RUST_LOG).toBe("info");
+    expect(getNodeEnvironment("production", "test-bucket").RUST_LOG).toBe("info");
   });
 
   test("sets RUST_LOG to debug for non-production", () => {
-    expect(getNodeEnvironment("dev").RUST_LOG).toBe("debug");
-    expect(getNodeEnvironment("staging").RUST_LOG).toBe("debug");
+    expect(getNodeEnvironment("dev", "test-bucket").RUST_LOG).toBe("debug");
+    expect(getNodeEnvironment("staging", "test-bucket").RUST_LOG).toBe("debug");
   });
 
   test("sets SANDCHEST_DATA_DIR to /var/sandchest", () => {
-    expect(getNodeEnvironment("dev").SANDCHEST_DATA_DIR).toBe(
+    expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_DATA_DIR).toBe(
       "/var/sandchest",
     );
-    expect(getNodeEnvironment("production").SANDCHEST_DATA_DIR).toBe(
+    expect(getNodeEnvironment("production", "test-bucket").SANDCHEST_DATA_DIR).toBe(
       "/var/sandchest",
     );
   });
 
   test("sets SANDCHEST_NODE_GRPC_PORT to 50051", () => {
-    expect(getNodeEnvironment("dev").SANDCHEST_NODE_GRPC_PORT).toBe("50051");
-    expect(getNodeEnvironment("production").SANDCHEST_NODE_GRPC_PORT).toBe(
+    expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_NODE_GRPC_PORT).toBe("50051");
+    expect(getNodeEnvironment("production", "test-bucket").SANDCHEST_NODE_GRPC_PORT).toBe(
       "50051",
     );
   });
 
   test("enables jailer for production", () => {
-    expect(getNodeEnvironment("production").SANDCHEST_JAILER_ENABLED).toBe(
+    expect(getNodeEnvironment("production", "test-bucket").SANDCHEST_JAILER_ENABLED).toBe(
       "true",
     );
   });
 
   test("disables jailer for non-production", () => {
-    expect(getNodeEnvironment("dev").SANDCHEST_JAILER_ENABLED).toBe("false");
-    expect(getNodeEnvironment("staging").SANDCHEST_JAILER_ENABLED).toBe(
+    expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_JAILER_ENABLED).toBe("false");
+    expect(getNodeEnvironment("staging", "test-bucket").SANDCHEST_JAILER_ENABLED).toBe(
       "false",
     );
   });
 
   test("uses ens5 network interface", () => {
-    expect(getNodeEnvironment("dev").SANDCHEST_OUTBOUND_IFACE).toBe("ens5");
+    expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_OUTBOUND_IFACE).toBe("ens5");
   });
 
   test("sets bandwidth to 200 Mbps for production", () => {
-    expect(getNodeEnvironment("production").SANDCHEST_BANDWIDTH_MBPS).toBe(
+    expect(getNodeEnvironment("production", "test-bucket").SANDCHEST_BANDWIDTH_MBPS).toBe(
       "200",
     );
   });
 
   test("sets bandwidth to 100 Mbps for non-production", () => {
-    expect(getNodeEnvironment("dev").SANDCHEST_BANDWIDTH_MBPS).toBe("100");
+    expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_BANDWIDTH_MBPS).toBe("100");
+  });
+
+  test("sets SANDCHEST_S3_BUCKET to provided bucket name", () => {
+    expect(getNodeEnvironment("dev", "my-bucket").SANDCHEST_S3_BUCKET).toBe(
+      "my-bucket",
+    );
+    expect(
+      getNodeEnvironment("production", "prod-bucket").SANDCHEST_S3_BUCKET,
+    ).toBe("prod-bucket");
+  });
+
+  test("sets SANDCHEST_S3_REGION to us-east-1", () => {
+    expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_S3_REGION).toBe(
+      "us-east-1",
+    );
+    expect(
+      getNodeEnvironment("production", "test-bucket").SANDCHEST_S3_REGION,
+    ).toBe("us-east-1");
   });
 });
 
@@ -139,7 +157,7 @@ describe("getNodeSystemdUnit", () => {
 });
 
 describe("getNodeUserData", () => {
-  const userData = getNodeUserData("dev");
+  const userData = getNodeUserData("dev", "test-bucket");
 
   test("starts with bash shebang and strict mode", () => {
     expect(userData).toStartWith("#!/bin/bash\nset -euo pipefail");
@@ -182,14 +200,22 @@ describe("getNodeUserData", () => {
   });
 
   test("includes stage-specific environment values", () => {
-    const prodData = getNodeUserData("production");
+    const prodData = getNodeUserData("production", "test-bucket");
     expect(prodData).toContain("RUST_LOG=info");
     expect(prodData).toContain("SANDCHEST_JAILER_ENABLED=true");
     expect(prodData).toContain("SANDCHEST_BANDWIDTH_MBPS=200");
 
-    const devData = getNodeUserData("dev");
+    const devData = getNodeUserData("dev", "test-bucket");
     expect(devData).toContain("RUST_LOG=debug");
     expect(devData).toContain("SANDCHEST_JAILER_ENABLED=false");
     expect(devData).toContain("SANDCHEST_BANDWIDTH_MBPS=100");
+  });
+
+  test("includes S3 bucket configuration in env file", () => {
+    const userData = getNodeUserData("dev", "sandchest-artifacts-abc123");
+    expect(userData).toContain(
+      "SANDCHEST_S3_BUCKET=sandchest-artifacts-abc123",
+    );
+    expect(userData).toContain("SANDCHEST_S3_REGION=us-east-1");
   });
 });

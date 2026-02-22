@@ -142,13 +142,17 @@ impl VmConfig {
 }
 
 /// S3-compatible object storage configuration for artifact uploads.
+///
+/// When running on EC2 with an instance profile, `access_key` and `secret_key`
+/// can be omitted — the AWS SDK will use the default credential chain (IMDS).
+/// Explicit keys are only needed for S3-compatible endpoints (e.g. Scaleway).
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub bucket: String,
     pub region: String,
     pub endpoint: Option<String>,
-    pub access_key: String,
-    pub secret_key: String,
+    pub access_key: Option<String>,
+    pub secret_key: Option<String>,
 }
 
 impl S3Config {
@@ -159,13 +163,16 @@ impl S3Config {
         Some(Self {
             bucket,
             region: std::env::var("SANDCHEST_S3_REGION")
-                .unwrap_or_else(|_| "fr-par".to_string()),
+                .unwrap_or_else(|_| "us-east-1".to_string()),
             endpoint: std::env::var("SANDCHEST_S3_ENDPOINT").ok(),
-            access_key: std::env::var("SANDCHEST_S3_ACCESS_KEY")
-                .unwrap_or_default(),
-            secret_key: std::env::var("SANDCHEST_S3_SECRET_KEY")
-                .unwrap_or_default(),
+            access_key: std::env::var("SANDCHEST_S3_ACCESS_KEY").ok(),
+            secret_key: std::env::var("SANDCHEST_S3_SECRET_KEY").ok(),
         })
+    }
+
+    /// Returns true if explicit static credentials are configured.
+    pub fn has_static_credentials(&self) -> bool {
+        self.access_key.is_some() && self.secret_key.is_some()
     }
 }
 

@@ -153,7 +153,9 @@ export default $config({
         httpEndpoint: "enabled",
         httpTokens: "required",
       },
-      userData: getNodeUserData($app.stage),
+      userData: artifactBucket.name.apply((name) =>
+        getNodeUserData($app.stage, name),
+      ),
       tags: { Name: `sandchest-node-${$app.stage}` },
     });
 
