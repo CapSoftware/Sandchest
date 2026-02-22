@@ -1,4 +1,5 @@
 {
   "title": "CLI",
-  "pages": ["index", "commands"]
+  "defaultOpen": true,
+  "pages": ["commands"]
 }

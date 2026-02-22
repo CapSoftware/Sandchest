@@ -1,4 +1,5 @@
 {
   "title": "Guides",
+  "defaultOpen": true,
   "pages": ["sandbox-lifecycle", "forking-snapshots", "session-replay", "security-isolation"]
 }

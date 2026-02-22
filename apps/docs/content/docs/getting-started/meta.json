@@ -1,4 +1,5 @@
 {
   "title": "Getting Started",
-  "pages": ["index", "authentication", "first-sandbox"]
+  "defaultOpen": true,
+  "pages": ["authentication", "first-sandbox"]
 }

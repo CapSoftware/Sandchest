@@ -1,4 +1,5 @@
 {
   "title": "API Reference",
-  "pages": ["index", "errors", "rate-limits", "..."]
+  "defaultOpen": true,
+  "pages": ["errors", "rate-limits", "..."]
 }
