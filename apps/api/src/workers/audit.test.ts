@@ -36,8 +36,7 @@ describe('phase 9 gap audit', () => {
   test('deploy.yml has real deployment targets', () => {
     const src = readFileSync(resolve(ROOT, '.github/workflows/deploy.yml'), 'utf-8')
     expect(src).not.toContain('TODO')
-    expect(src).toContain('flyctl deploy')
-    expect(src).toContain('vercel deploy --prod')
+    expect(src).toContain('sst deploy')
   })
 
   test('Python SDK exists', () => {
