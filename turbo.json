@@ -14,7 +14,11 @@
     "test:e2e": {
       "dependsOn": ["build"]
     },
+    "//#db:up": {
+      "cache": false
+    },
     "dev": {
+      "dependsOn": ["//#db:up"],
       "cache": false,
       "persistent": true
     }
