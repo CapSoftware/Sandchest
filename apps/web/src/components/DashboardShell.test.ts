@@ -53,8 +53,21 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/dash-mobile-menu/)
   })
 
+  test('shows loading state while session or orgs are pending', () => {
+    expect(src).toMatch(/sessionLoading/)
+    expect(src).toMatch(/orgsLoading/)
+    expect(src).toMatch(/if \(sessionLoading \|\| orgsLoading\)/)
+    expect(src).toMatch(/Loading\.\.\./)
+  })
+
+  test('shows error state when orgs fail to load', () => {
+    expect(src).toMatch(/orgsError/)
+    expect(src).toMatch(/if \(orgsError\)/)
+    expect(src).toMatch(/Failed to load organizations/)
+  })
+
   test('redirects to onboarding when user has no orgs', () => {
-    expect(src).toMatch(/needsOnboarding/)
+    expect(src).toMatch(/orgs\.length === 0/)
     expect(src).toMatch(/router\.replace\(['"]\/onboarding['"]\)/)
   })
 
@@ -63,9 +76,13 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/router\.replace\(['"]\/dashboard['"]\)/)
   })
 
-  test('syncs active org with URL slug via useEffect', () => {
+  test('syncs active org with URL slug via useEffect before conditional returns', () => {
     expect(src).toMatch(/urlOrg && urlOrg\.id !== activeOrgId/)
     expect(src).toMatch(/setActiveOrg\.mutate\(urlOrg\.id\)/)
+    // useEffect must appear before any conditional return to satisfy hooks rules
+    const useEffectIndex = src.indexOf('useEffect(() => {', src.indexOf('export default function DashboardShell'))
+    const firstReturnIndex = src.indexOf('return (', src.indexOf('export default function DashboardShell'))
+    expect(useEffectIndex).toBeLessThan(firstReturnIndex)
   })
 
   test('does not use console.log', () => {

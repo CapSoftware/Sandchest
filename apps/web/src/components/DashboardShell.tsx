@@ -168,33 +168,60 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const router = useRouter()
   const active = getActiveId(pathname)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const { data: session } = useSession()
-  const { data: orgs, isPending: orgsLoading } = useOrgs()
+  const { data: session, isPending: sessionLoading } = useSession()
+  const { data: orgs, isPending: orgsLoading, error: orgsError } = useOrgs()
   const setActiveOrg = useSetActiveOrg()
 
   const orgSlug = params.orgSlug
   const activeOrgId = session?.session.activeOrganizationId
   const urlOrg = orgs?.find((o: Org) => o.slug === orgSlug)
 
-  // Redirect to onboarding if user has no organizations
-  const needsOnboarding = !orgsLoading && orgs && orgs.length === 0
-  if (needsOnboarding) {
-    router.replace('/onboarding')
-    return null
-  }
-
-  // Redirect to /dashboard if slug doesn't match any user org
-  if (!orgsLoading && orgs && orgs.length > 0 && !urlOrg) {
-    router.replace('/dashboard')
-    return null
-  }
-
   // Sync active org with URL slug (external system sync — valid useEffect)
+  // Must be called before any conditional returns to satisfy React hooks rules
   useEffect(() => {
     if (urlOrg && urlOrg.id !== activeOrgId && !setActiveOrg.isPending) {
       setActiveOrg.mutate(urlOrg.id)
     }
   }, [urlOrg, activeOrgId, setActiveOrg])
+
+  // Show loading state while session or orgs are being fetched
+  if (sessionLoading || orgsLoading) {
+    return (
+      <div className="dash">
+        <div className="dash-main">
+          <div className="dash-empty">Loading...</div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error state if orgs failed to load
+  if (orgsError) {
+    return (
+      <div className="dash">
+        <div className="dash-main">
+          <div className="dash-empty">
+            <p>Failed to load organizations.</p>
+            <p className="dash-text-weak">
+              {orgsError instanceof Error ? orgsError.message : 'An unexpected error occurred.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Redirect to onboarding if user has no organizations
+  if (!orgs || orgs.length === 0) {
+    router.replace('/onboarding')
+    return null
+  }
+
+  // Redirect to /dashboard if slug doesn't match any user org
+  if (!urlOrg) {
+    router.replace('/dashboard')
+    return null
+  }
 
   const navItems = [
     { href: `/dashboard/${orgSlug}`, label: 'Sandboxes', id: 'sandboxes' },
