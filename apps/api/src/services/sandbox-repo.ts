@@ -173,6 +173,12 @@ export interface SandboxRepoApi {
   readonly deleteByOrgId: (
     orgId: string,
   ) => Effect.Effect<number, never, never>
+
+  /** Update lastActivityAt to now for a running sandbox. */
+  readonly touchLastActivity: (
+    id: Uint8Array,
+    orgId: string,
+  ) => Effect.Effect<void, never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}

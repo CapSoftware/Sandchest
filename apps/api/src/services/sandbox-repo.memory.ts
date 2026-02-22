@@ -359,6 +359,15 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         }
         return deleted
       }),
+
+    touchLastActivity: (id, orgId) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        if (!row || row.orgId !== orgId || row.status !== 'running') return
+        const now = new Date()
+        store.set(key, { ...row, lastActivityAt: now, updatedAt: now })
+      }),
   }
 }
 

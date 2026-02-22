@@ -51,6 +51,9 @@ const uploadFile = Effect.gen(function* () {
     )
   }
 
+  // Touch last activity
+  yield* sandboxRepo.touchLastActivity(sandboxIdBytes, auth.orgId)
+
   const url = new URL(request.url, 'http://localhost')
   const path = url.searchParams.get('path')
   const batch = url.searchParams.get('batch') === 'true'
@@ -198,6 +201,9 @@ const deleteFile = Effect.gen(function* () {
       }),
     )
   }
+
+  // Touch last activity
+  yield* sandboxRepo.touchLastActivity(sandboxIdBytes, auth.orgId)
 
   const url = new URL(request.url, 'http://localhost')
   const path = url.searchParams.get('path')

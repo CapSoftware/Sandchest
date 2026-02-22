@@ -613,3 +613,69 @@ describe('findByIdPublic', () => {
     expect(publicResult).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// touchLastActivity
+// ---------------------------------------------------------------------------
+
+describe('touchLastActivity', () => {
+  test('updates lastActivityAt on a running sandbox', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.updateStatus(params.id, ORG_A, 'running'))
+
+    const before = await run(repo.findById(params.id, ORG_A))
+    expect(before!.lastActivityAt).toBeNull()
+
+    await run(repo.touchLastActivity(params.id, ORG_A))
+
+    const after = await run(repo.findById(params.id, ORG_A))
+    expect(after!.lastActivityAt).toBeInstanceOf(Date)
+    expect(after!.updatedAt.getTime()).toBeGreaterThanOrEqual(before!.updatedAt.getTime())
+  })
+
+  test('does not update non-running sandboxes', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    // status is 'queued'
+
+    await run(repo.touchLastActivity(params.id, ORG_A))
+
+    const row = await run(repo.findById(params.id, ORG_A))
+    expect(row!.lastActivityAt).toBeNull()
+  })
+
+  test('does not update when orgId does not match', async () => {
+    const params = makeSandbox(ORG_A)
+    await run(repo.create(params))
+    await run(repo.updateStatus(params.id, ORG_A, 'running'))
+
+    await run(repo.touchLastActivity(params.id, ORG_B))
+
+    const row = await run(repo.findById(params.id, ORG_A))
+    expect(row!.lastActivityAt).toBeNull()
+  })
+
+  test('does nothing for unknown sandbox', async () => {
+    // Should not throw
+    await run(repo.touchLastActivity(generateUUIDv7(), ORG_A))
+  })
+
+  test('successive touches update the timestamp', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.updateStatus(params.id, ORG_A, 'running'))
+
+    await run(repo.touchLastActivity(params.id, ORG_A))
+    const first = await run(repo.findById(params.id, ORG_A))
+
+    await new Promise((r) => setTimeout(r, 2))
+
+    await run(repo.touchLastActivity(params.id, ORG_A))
+    const second = await run(repo.findById(params.id, ORG_A))
+
+    expect(second!.lastActivityAt!.getTime()).toBeGreaterThanOrEqual(
+      first!.lastActivityAt!.getTime(),
+    )
+  })
+})

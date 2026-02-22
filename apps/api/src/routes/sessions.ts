@@ -98,6 +98,9 @@ const createSession = Effect.gen(function* () {
     )
   }
 
+  // Touch last activity
+  yield* sandboxRepo.touchLastActivity(sandboxIdBytes, auth.orgId)
+
   const raw = yield* request.json.pipe(Effect.orElseSucceed(() => ({})))
   const body = raw && typeof raw === 'object' ? (raw as CreateSessionRequest) : ({} as CreateSessionRequest)
 
@@ -178,6 +181,9 @@ const sessionExec = Effect.gen(function* () {
       }),
     )
   }
+
+  // Touch last activity
+  yield* sandboxRepo.touchLastActivity(sandboxIdBytes, auth.orgId)
 
   // Verify session exists
   const session = yield* sessionRepo.findById(sessionIdBytes, sandboxIdBytes, auth.orgId)
@@ -342,6 +348,9 @@ const sessionInput = Effect.gen(function* () {
       }),
     )
   }
+
+  // Touch last activity
+  yield* sandboxRepo.touchLastActivity(sandboxIdBytes, auth.orgId)
 
   // Verify session exists and is running
   const session = yield* sessionRepo.findById(sessionIdBytes, sandboxIdBytes, auth.orgId)

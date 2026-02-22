@@ -156,6 +156,9 @@ const execCommand = Effect.gen(function* () {
     )
   }
 
+  // Touch last activity
+  yield* sandboxRepo.touchLastActivity(sandboxIdBytes, auth.orgId)
+
   // Determine cmd format and serialization
   const isArray = Array.isArray(body.cmd)
   const cmdFormat = isArray ? ('array' as const) : ('shell' as const)

@@ -25,11 +25,11 @@ describe('phase 9 gap audit', () => {
     expect(src).toContain('last_activity_at')
   })
 
-  test('no API route updates lastActivityAt', () => {
-    const routes = ['sandboxes.ts', 'execs.ts', 'sessions.ts', 'files.ts', 'artifacts.ts']
-    for (const route of routes) {
+  test('activity routes call touchLastActivity', () => {
+    const activityRoutes = ['execs.ts', 'sessions.ts', 'files.ts']
+    for (const route of activityRoutes) {
       const src = readFileSync(resolve(ROOT, 'apps/api/src/routes', route), 'utf-8')
-      expect(src).not.toContain('lastActivityAt')
+      expect(src).toContain('touchLastActivity')
     }
   })
 

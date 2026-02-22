@@ -444,10 +444,143 @@ describe('idle-shutdown', () => {
         imageRef: 'sandchest://ubuntu-22.04',
       }),
     )
-    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'running'))
+    await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', generateUUIDv7()))
 
     const count = await run(runWorkerTick(idleShutdownWorker, 'inst-1'))
     expect(count).toBe(0)
+  })
+
+  test('shuts down sandboxes idle beyond 15 minutes', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', generateUUIDv7()))
+
+    // Backdate lastActivityAt to 16 minutes ago
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    ;(row as { lastActivityAt: Date }).lastActivityAt = new Date(Date.now() - 16 * 60 * 1000)
+
+    const count = await run(runWorkerTick(idleShutdownWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const updated = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(updated!.status).toBe('stopped')
+    expect(updated!.failureReason).toBe('idle_timeout')
+    expect(updated!.endedAt).toBeInstanceOf(Date)
+  })
+
+  test('touchLastActivity prevents idle shutdown', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', generateUUIDv7()))
+
+    // Backdate lastActivityAt to 16 minutes ago
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    ;(row as { lastActivityAt: Date }).lastActivityAt = new Date(Date.now() - 16 * 60 * 1000)
+
+    // Touch activity — brings it back to now
+    await Effect.runPromise(sandboxRepo.touchLastActivity(id, 'org_test'))
+
+    const count = await run(runWorkerTick(idleShutdownWorker, 'inst-1'))
+    expect(count).toBe(0)
+
+    const updated = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(updated!.status).toBe('running')
+  })
+
+  test('uses startedAt as fallback when lastActivityAt is null', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'running'))
+
+    // Backdate startedAt (no lastActivityAt set)
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(row!.lastActivityAt).toBeNull()
+
+    // Sandbox was just created, so startedAt is recent — should not be idle
+    const count = await run(runWorkerTick(idleShutdownWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('ignores non-running sandboxes', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    // Leave as 'queued'
+
+    const count = await run(runWorkerTick(idleShutdownWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('shuts down multiple idle sandboxes in one tick', async () => {
+    const ids = [generateUUIDv7(), generateUUIDv7()]
+    for (const id of ids) {
+      await Effect.runPromise(
+        sandboxRepo.create({
+          id,
+          orgId: 'org_test',
+          imageId: SEED_IMAGE_ID,
+          profileId: SEED_PROFILE_ID,
+          profileName: 'small',
+          env: null,
+          ttlSeconds: 3600,
+          imageRef: 'sandchest://ubuntu-22.04',
+        }),
+      )
+      await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', generateUUIDv7()))
+      const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+      ;(row as { lastActivityAt: Date }).lastActivityAt = new Date(Date.now() - 20 * 60 * 1000)
+    }
+
+    const count = await run(runWorkerTick(idleShutdownWorker, 'inst-1'))
+    expect(count).toBe(2)
+
+    for (const id of ids) {
+      const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+      expect(row!.status).toBe('stopped')
+    }
   })
 })
 
