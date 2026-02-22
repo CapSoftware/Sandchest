@@ -1599,6 +1599,99 @@ a:hover {
   }
 }
 
+/* ── Usage overview widget ── */
+.usage-overview {
+  margin-bottom: 32px;
+  padding: 16px;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.usage-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 16px;
+}
+
+.usage-overview-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-overview-stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.usage-overview-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-overview-stat-value.loading {
+  color: var(--color-text-weak);
+}
+
+.usage-overview-bars {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-weak);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.usage-overview-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-overview-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.usage-overview-bar-name {
+  color: var(--color-text);
+}
+
+.usage-overview-bar-value {
+  color: var(--color-text-weak);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-overview-bar-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-surface-hover);
+  overflow: hidden;
+}
+
+.usage-overview-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.usage-overview-bar-fill.warning {
+  background: hsl(0, 70%, 60%);
+}
+
+.usage-overview-bar-fill.unlimited {
+  width: 100%;
+  opacity: 0.3;
+}
+
 /* ── Billing page ── */
 .billing-plan-card {
   padding: 16px;

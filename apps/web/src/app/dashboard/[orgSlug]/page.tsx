@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import UsageOverview from '@/components/dashboard/UsageOverview'
 import SandboxList from '@/components/dashboard/SandboxList'
 
 export const metadata: Metadata = {
@@ -6,5 +7,10 @@ export const metadata: Metadata = {
 }
 
 export default function DashboardPage() {
-  return <SandboxList />
+  return (
+    <>
+      <UsageOverview />
+      <SandboxList />
+    </>
+  )
 }
