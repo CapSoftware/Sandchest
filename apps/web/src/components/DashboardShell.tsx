@@ -6,6 +6,7 @@ import { useParams, usePathname, useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { useSession } from '@/hooks/use-session'
 import { useOrgs, useSetActiveOrg } from '@/hooks/use-orgs'
+import { useCreateOrg } from '@/hooks/use-create-org'
 import type { Org } from '@/hooks/use-orgs'
 
 function getActiveId(pathname: string): string {
@@ -17,13 +18,26 @@ function getActiveId(pathname: string): string {
   return 'sandboxes'
 }
 
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
 function OrgSwitcher() {
   const { data: session } = useSession()
   const { data: orgs } = useOrgs()
   const setActiveOrg = useSetActiveOrg()
+  const createOrg = useCreateOrg()
   const router = useRouter()
+  const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newOrgName, setNewOrgName] = useState('')
+  const [createError, setCreateError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const activeOrgId = session?.session.activeOrganizationId
   const activeOrg = orgs?.find((o: Org) => o.id === activeOrgId)
@@ -32,6 +46,9 @@ function OrgSwitcher() {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false)
+        setCreating(false)
+        setNewOrgName('')
+        setCreateError(null)
       }
     }
     if (open) {
@@ -40,35 +57,73 @@ function OrgSwitcher() {
     }
   }, [open])
 
+  useEffect(() => {
+    if (creating && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [creating])
+
+  function currentPageSuffix(): string {
+    const segments = pathname.split('/')
+    // /dashboard/[orgSlug]/keys → segments[3] = 'keys'
+    const page = segments[3]
+    return page ? `/${page}` : ''
+  }
+
   function handleSwitch(org: Org) {
     setOpen(false)
+    setCreating(false)
+    setNewOrgName('')
+    setCreateError(null)
     if (org.id !== activeOrgId) {
       setActiveOrg.mutate(org.id)
-      router.push(`/dashboard/${org.slug}`)
+      router.push(`/dashboard/${org.slug}${currentPageSuffix()}`)
     }
   }
 
+  function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    const name = newOrgName.trim()
+    if (!name) return
+    const slug = slugify(name)
+    if (!slug) {
+      setCreateError('Invalid organization name')
+      return
+    }
+    setCreateError(null)
+    createOrg.mutate(
+      { name, slug },
+      {
+        onSuccess: (data) => {
+          setOpen(false)
+          setCreating(false)
+          setNewOrgName('')
+          router.push(`/dashboard/${data.slug}`)
+        },
+        onError: (err) => {
+          setCreateError(err instanceof Error ? err.message : 'Failed to create organization')
+        },
+      },
+    )
+  }
+
   const displayName = activeOrg?.name ?? 'Select org'
-  const hasMultipleOrgs = orgs && orgs.length > 1
 
   return (
     <div className="org-switcher" ref={ref}>
       <button
         className="org-switcher-trigger"
-        onClick={() => hasMultipleOrgs && setOpen((prev) => !prev)}
+        onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        disabled={!hasMultipleOrgs}
       >
         <span className="org-switcher-avatar" aria-hidden="true">
           {displayName.charAt(0).toUpperCase()}
         </span>
         <span className="org-switcher-name">{displayName}</span>
-        {hasMultipleOrgs && (
-          <svg className="org-switcher-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 4.5L6 7.5L9 4.5" />
-          </svg>
-        )}
+        <svg className="org-switcher-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 4.5L6 7.5L9 4.5" />
+        </svg>
       </button>
 
       {open && orgs && (
@@ -92,6 +147,59 @@ function OrgSwitcher() {
               )}
             </button>
           ))}
+
+          <div className="org-switcher-divider" />
+
+          {creating ? (
+            <form className="org-switcher-create-form" onSubmit={handleCreate}>
+              <input
+                ref={inputRef}
+                className="org-switcher-create-input"
+                type="text"
+                placeholder="Organization name"
+                aria-label="Organization name"
+                value={newOrgName}
+                onChange={(e) => setNewOrgName(e.target.value)}
+                disabled={createOrg.isPending}
+              />
+              {createError && (
+                <span className="org-switcher-create-error">{createError}</span>
+              )}
+              <div className="org-switcher-create-actions">
+                <button
+                  type="button"
+                  className="org-switcher-create-cancel"
+                  onClick={() => {
+                    setCreating(false)
+                    setNewOrgName('')
+                    setCreateError(null)
+                  }}
+                  disabled={createOrg.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="org-switcher-create-submit"
+                  disabled={createOrg.isPending || !newOrgName.trim()}
+                >
+                  {createOrg.isPending ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button
+              className="org-switcher-option org-switcher-create-trigger"
+              onClick={() => setCreating(true)}
+            >
+              <span className="org-switcher-create-icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M7 3v8M3 7h8" />
+                </svg>
+              </span>
+              <span className="org-switcher-option-name">Create organization</span>
+            </button>
+          )}
         </div>
       )}
     </div>

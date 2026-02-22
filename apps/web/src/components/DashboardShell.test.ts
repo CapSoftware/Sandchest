@@ -142,13 +142,62 @@ describe('OrgSwitcher', () => {
     expect(src).toMatch(/setActiveOrg\.mutate\(/)
   })
 
-  test('navigates to new org slug on switch', () => {
-    expect(src).toMatch(/router\.push\(`\/dashboard\/\$\{org\.slug\}`\)/)
+  test('always shows trigger (no disabled state)', () => {
+    // Trigger should not have a disabled condition — always clickable
+    expect(src).not.toMatch(/disabled={!hasMultipleOrgs}/)
   })
 
-  test('disables trigger when only one org', () => {
-    expect(src).toMatch(/hasMultipleOrgs/)
-    expect(src).toMatch(/disabled={!hasMultipleOrgs}/)
+  test('always shows chevron icon', () => {
+    expect(src).toMatch(/org-switcher-chevron/)
+    // Chevron should not be conditionally rendered
+    const orgSwitcherBlock = src.slice(
+      src.indexOf('function OrgSwitcher'),
+      src.indexOf('function UserMenu'),
+    )
+    expect(orgSwitcherBlock).not.toMatch(/hasMultipleOrgs &&[\s\S]*?org-switcher-chevron/)
+  })
+
+  test('preserves current page suffix when switching orgs', () => {
+    expect(src).toMatch(/currentPageSuffix/)
+    expect(src).toMatch(/router\.push\(`\/dashboard\/\$\{org\.slug\}\$\{currentPageSuffix\(\)\}`\)/)
+  })
+
+  test('has create organization option in dropdown', () => {
+    expect(src).toMatch(/org-switcher-create-trigger/)
+    expect(src).toMatch(/Create organization/)
+  })
+
+  test('imports useCreateOrg hook', () => {
+    expect(src).toMatch(/import.*useCreateOrg.*from ['"]@\/hooks\/use-create-org['"]/)
+  })
+
+  test('has inline create form with name input', () => {
+    expect(src).toMatch(/org-switcher-create-form/)
+    expect(src).toMatch(/org-switcher-create-input/)
+    expect(src).toMatch(/Organization name/)
+  })
+
+  test('has create form submit and cancel actions', () => {
+    expect(src).toMatch(/org-switcher-create-submit/)
+    expect(src).toMatch(/org-switcher-create-cancel/)
+  })
+
+  test('shows error state on create failure', () => {
+    expect(src).toMatch(/org-switcher-create-error/)
+    expect(src).toMatch(/createError/)
+  })
+
+  test('slugifies org name for create', () => {
+    expect(src).toMatch(/function slugify/)
+    expect(src).toMatch(/slugify\(name\)/)
+  })
+
+  test('navigates to new org after creation', () => {
+    expect(src).toMatch(/router\.push\(`\/dashboard\/\$\{data\.slug\}`\)/)
+  })
+
+  test('has divider between org list and create option', () => {
+    expect(src).toMatch(/org-switcher-divider/)
   })
 })
 
