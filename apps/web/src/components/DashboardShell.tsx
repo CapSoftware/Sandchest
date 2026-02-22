@@ -14,6 +14,7 @@ function getActiveId(pathname: string): string {
   // /dashboard/[orgSlug]/keys → segments[3] = 'keys'
   const page = segments[3]
   if (page === 'keys') return 'keys'
+  if (page === 'billing') return 'billing'
   if (page === 'settings') return 'settings'
   return 'sandboxes'
 }
@@ -334,6 +335,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const navItems = [
     { href: `/dashboard/${orgSlug}`, label: 'Sandboxes', id: 'sandboxes' },
     { href: `/dashboard/${orgSlug}/keys`, label: 'API Keys', id: 'keys' },
+    { href: `/dashboard/${orgSlug}/billing`, label: 'Billing', id: 'billing' },
     { href: `/dashboard/${orgSlug}/settings`, label: 'Settings', id: 'settings' },
   ] as const
 

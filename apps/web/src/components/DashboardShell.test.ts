@@ -33,12 +33,14 @@ describe('DashboardShell component', () => {
   test('builds nav items with org slug from URL params', () => {
     expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}`/)
     expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}\/keys`/)
+    expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}\/billing`/)
     expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}\/settings`/)
   })
 
   test('detects active nav from path segments', () => {
     expect(src).toMatch(/segments\[3\]/)
     expect(src).toMatch(/page === 'keys'/)
+    expect(src).toMatch(/page === 'billing'/)
     expect(src).toMatch(/page === 'settings'/)
   })
 
@@ -253,6 +255,7 @@ describe('getActiveId', () => {
     expect(getActiveIdBlock).toMatch(/segments\[3\]/)
     expect(getActiveIdBlock).toMatch(/return 'sandboxes'/)
     expect(getActiveIdBlock).toMatch(/return 'keys'/)
+    expect(getActiveIdBlock).toMatch(/return 'billing'/)
     expect(getActiveIdBlock).toMatch(/return 'settings'/)
   })
 })

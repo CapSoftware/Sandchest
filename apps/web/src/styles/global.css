@@ -1599,6 +1599,91 @@ a:hover {
   }
 }
 
+/* ── Billing page ── */
+.billing-plan-card {
+  padding: 16px;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.billing-plan-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.billing-plan-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-strong);
+}
+
+.billing-plan-status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--color-accent-weak);
+  color: var(--color-accent);
+}
+
+.billing-plan-empty {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--color-text-weak);
+}
+
+.billing-usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.billing-usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.billing-usage-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.billing-usage-name {
+  color: var(--color-text);
+}
+
+.billing-usage-value {
+  color: var(--color-text-weak);
+  font-variant-numeric: tabular-nums;
+}
+
+.billing-usage-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-surface-hover);
+  overflow: hidden;
+}
+
+.billing-usage-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.billing-usage-fill.warning {
+  background: hsl(0, 70%, 60%);
+}
+
+.billing-usage-fill.unlimited {
+  width: 100%;
+  opacity: 0.3;
+}
+
 /* ── Pricing table (Autumn overrides) ── */
 .pricing-table-wrapper {
   max-width: 960px;
