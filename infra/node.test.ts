@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   getNodeAmiSsmParameter,
+  getNodeCpuOptions,
   getNodeEnvironment,
   getNodeGrpcPort,
   getNodeInstanceType,
@@ -10,19 +11,34 @@ import {
 } from "./node";
 
 describe("getNodeInstanceType", () => {
-  test("uses i3.metal for production", () => {
-    expect(getNodeInstanceType("production")).toBe("i3.metal");
+  test("uses c8i.4xlarge for production", () => {
+    expect(getNodeInstanceType("production")).toBe("c8i.4xlarge");
   });
 
-  test("uses c5.metal for non-production stages", () => {
-    expect(getNodeInstanceType("dev")).toBe("c5.metal");
-    expect(getNodeInstanceType("staging")).toBe("c5.metal");
+  test("uses c8i.2xlarge for non-production stages", () => {
+    expect(getNodeInstanceType("dev")).toBe("c8i.2xlarge");
+    expect(getNodeInstanceType("staging")).toBe("c8i.2xlarge");
   });
 });
 
 describe("getNodeRootVolumeGb", () => {
-  test("returns 50 GB", () => {
-    expect(getNodeRootVolumeGb()).toBe(50);
+  test("returns 100 GB for production", () => {
+    expect(getNodeRootVolumeGb("production")).toBe(100);
+  });
+
+  test("returns 50 GB for non-production stages", () => {
+    expect(getNodeRootVolumeGb("dev")).toBe(50);
+    expect(getNodeRootVolumeGb("staging")).toBe(50);
+  });
+});
+
+describe("getNodeCpuOptions", () => {
+  test("enables nested virtualization", () => {
+    expect(getNodeCpuOptions().nestedVirtualization).toBe("enabled");
+  });
+
+  test("returns an object", () => {
+    expect(typeof getNodeCpuOptions()).toBe("object");
   });
 });
 
@@ -166,6 +182,12 @@ describe("getNodeUserData", () => {
   test("enables and starts SSM agent", () => {
     expect(userData).toContain("systemctl enable amazon-ssm-agent");
     expect(userData).toContain("systemctl start amazon-ssm-agent");
+  });
+
+  test("loads KVM modules and sets /dev/kvm permissions", () => {
+    expect(userData).toContain("modprobe kvm");
+    expect(userData).toContain("modprobe kvm_intel");
+    expect(userData).toContain("chmod 666 /dev/kvm");
   });
 
   test("creates sandchest system user", () => {

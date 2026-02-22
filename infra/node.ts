@@ -1,11 +1,25 @@
 import { isProduction } from "./vpc";
 
+// C8i instances support nested virtualization (AWS launched Feb 2026), exposing
+// /dev/kvm without requiring .metal instances. ~3% CPU overhead, 2-3x slower
+// microVM boot vs bare metal — acceptable at current scale. Fallback if deploy
+// fails: m5zn.metal while waiting for Pulumi provider update.
 export function getNodeInstanceType(stage: string): string {
-  return isProduction(stage) ? "i3.metal" : "c5.metal";
+  return isProduction(stage) ? "c8i.4xlarge" : "c8i.2xlarge";
 }
 
-export function getNodeRootVolumeGb(): number {
-  return 50;
+// C8i has no NVMe instance storage (unlike i3.metal), so prod needs a larger
+// root EBS volume to store VM images, snapshots, and sandbox working dirs.
+export function getNodeRootVolumeGb(stage: string): number {
+  return isProduction(stage) ? 100 : 50;
+}
+
+// Returns Record<string, unknown> because Pulumi AWS v6.66.2 InstanceCpuOptions
+// doesn't include the nestedVirtualization field yet. The underlying Terraform
+// provider may already support it — if not, `sst deploy` will fail at preview
+// with a clear error before any resources are created.
+export function getNodeCpuOptions(): Record<string, unknown> {
+  return { nestedVirtualization: "enabled" };
 }
 
 export function getNodeGrpcPort(): number {
@@ -73,6 +87,12 @@ export function getNodeUserData(stage: string, bucketName: string): string {
     "# SSM Agent is pre-installed on Amazon Linux 2023",
     "systemctl enable amazon-ssm-agent",
     "systemctl start amazon-ssm-agent",
+    "",
+    "# Enable KVM for nested virtualization (C8i instances)",
+    "# Idempotent — no-op if modules are already loaded (e.g. on .metal)",
+    "modprobe kvm",
+    "modprobe kvm_intel",
+    "chmod 666 /dev/kvm",
     "",
     "# Create sandchest system user",
     "useradd --system --shell /usr/sbin/nologin sandchest || true",
