@@ -11,6 +11,9 @@ target/
 # Turborepo
 .turbo/
 
+# SST
+.sst/
+
 # Environment
 .env
 .env.*
