@@ -101,11 +101,8 @@ const TEST_USER = 'test_user_smoke'
 // ---------------------------------------------------------------------------
 
 describe('infra: VPC config', () => {
-  test('production uses managed NAT', () => {
-    expect(getVpcNat('production')).toBe('managed')
-  })
-
-  test('dev uses EC2 NAT', () => {
+  test('all stages use EC2 NAT', () => {
+    expect(getVpcNat('production')).toBe('ec2')
     expect(getVpcNat('dev')).toBe('ec2')
     expect(getVpcNat('staging')).toBe('ec2')
   })
@@ -127,16 +124,16 @@ describe('infra: VPC config', () => {
 // ---------------------------------------------------------------------------
 
 describe('infra: Redis config', () => {
-  test('production uses r7g.large instances', () => {
-    expect(getRedisInstance('production')).toBe('r7g.large')
+  test('production uses t4g.small instances', () => {
+    expect(getRedisInstance('production')).toBe('t4g.small')
   })
 
   test('dev uses t4g.micro instances', () => {
     expect(getRedisInstance('dev')).toBe('t4g.micro')
   })
 
-  test('production has 2 nodes, dev has 1', () => {
-    expect(getRedisNodes('production')).toBe(2)
+  test('single node for all stages', () => {
+    expect(getRedisNodes('production')).toBe(1)
     expect(getRedisNodes('dev')).toBe(1)
   })
 
@@ -252,13 +249,14 @@ describe('infra: ECS cluster config', () => {
 // ---------------------------------------------------------------------------
 
 describe('infra: node daemon config', () => {
-  test('production uses i3.metal, dev uses c5.metal', () => {
-    expect(getNodeInstanceType('production')).toBe('i3.metal')
-    expect(getNodeInstanceType('dev')).toBe('c5.metal')
+  test('production uses c8i.4xlarge, dev uses c8i.2xlarge', () => {
+    expect(getNodeInstanceType('production')).toBe('c8i.4xlarge')
+    expect(getNodeInstanceType('dev')).toBe('c8i.2xlarge')
   })
 
-  test('root volume is 50 GB', () => {
-    expect(getNodeRootVolumeGb()).toBe(50)
+  test('root volume is 100 GB for production, 50 GB for dev', () => {
+    expect(getNodeRootVolumeGb('production')).toBe(100)
+    expect(getNodeRootVolumeGb('dev')).toBe(50)
   })
 
   test('gRPC port is 50051', () => {
