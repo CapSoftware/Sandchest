@@ -1,0 +1,59 @@
+name: Build Node Daemon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/sandchest-node/**
+      - packages/contract/proto/**
+      - Cargo.toml
+      - Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build sandchest-node
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Build release binary
+        run: cargo build --release --package sandchest-node
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandchest-node
+          path: target/release/sandchest-node
+          retention-days: 30
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload binary to S3
+        run: |
+          aws s3 cp target/release/sandchest-node \
+            "s3://${{ vars.ARTIFACT_BUCKET }}/binaries/sandchest-node/${{ github.sha }}/sandchest-node"
+          aws s3 cp target/release/sandchest-node \
+            "s3://${{ vars.ARTIFACT_BUCKET }}/binaries/sandchest-node/latest/sandchest-node"

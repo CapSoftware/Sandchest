@@ -4,17 +4,34 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      stage:
+        description: SST stage to deploy
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ inputs.stage || 'production' }}
   cancel-in-progress: false
+
+env:
+  SST_STAGE: ${{ inputs.stage || 'production' }}
 
 jobs:
   migrate:
     name: Run Database Migrations
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment: production
+    environment: ${{ inputs.stage || 'production' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,30 +46,19 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-  deploy-api:
-    name: Deploy API
+  deploy:
+    name: Deploy SST (${{ inputs.stage || 'production' }})
     needs: [migrate]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
+    timeout-minutes: 30
+    environment: ${{ inputs.stage || 'production' }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy API to Fly.io
-        run: flyctl deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile --remote-only
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-  deploy-web:
-    name: Deploy Web
-    needs: [migrate]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -60,13 +66,5 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Build web
-        run: bun run --filter @sandchest/web build
-
-      - name: Deploy to Vercel
-        run: npx vercel deploy --prod --token $VERCEL_TOKEN
-        working-directory: apps/web
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      - name: Deploy with SST
+        run: bunx sst deploy --stage $SST_STAGE
