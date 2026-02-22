@@ -22,6 +22,8 @@ import { QuotaService } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { BillingService } from '../services/billing.js'
 import { createInMemoryBillingApi } from '../services/billing.memory.js'
+import { AuditLog } from '../services/audit-log.js'
+import { createInMemoryAuditLog } from '../services/audit-log.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 import type { ReplayBundle } from '@sandchest/contract'
@@ -40,6 +42,7 @@ function createTestEnv() {
   const artifactRepo = createInMemoryArtifactRepo()
   const quotaApi = createInMemoryQuotaApi()
   const billingApi = createInMemoryBillingApi()
+  const auditLog = createInMemoryAuditLog()
 
   const TestLayer = AppLive.pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -52,6 +55,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
     Layer.provide(Layer.succeed(QuotaService, quotaApi)),
     Layer.provide(Layer.succeed(BillingService, billingApi)),
+    Layer.provide(Layer.succeed(AuditLog, auditLog)),
     Layer.provide(ShutdownControllerLive),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG, scopes: null }),

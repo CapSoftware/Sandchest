@@ -38,8 +38,8 @@ describe('phase 9 gap audit', () => {
     expect(src).toContain('TODO')
   })
 
-  test('no Python SDK exists', () => {
-    expect(existsSync(resolve(ROOT, 'packages/sdk-py'))).toBe(false)
+  test('Python SDK exists', () => {
+    expect(existsSync(resolve(ROOT, 'packages/sdk-py'))).toBe(true)
   })
 
   test('no GitHub Action exists', () => {
@@ -61,16 +61,12 @@ describe('phase 9 gap audit', () => {
     }
   })
 
-  test('no audit log table in DB schema', () => {
-    const schemas = ['sandboxes.ts', 'execs.ts', 'sandbox-sessions.ts', 'artifacts.ts', 'nodes.ts', 'images.ts', 'profiles.ts', 'org-quotas.ts', 'org-usage.ts', 'idempotency-keys.ts']
-    for (const schema of schemas) {
-      const path = resolve(ROOT, 'packages/db/src/schema', schema)
-      if (existsSync(path)) {
-        const src = readFileSync(path, 'utf-8')
-        expect(src).not.toContain('audit_log')
-      }
-    }
-    expect(existsSync(resolve(ROOT, 'packages/db/src/schema/audit-logs.ts'))).toBe(false)
+  test('audit log table exists in DB schema', () => {
+    expect(existsSync(resolve(ROOT, 'packages/db/src/schema/audit-logs.ts'))).toBe(true)
+    const src = readFileSync(resolve(ROOT, 'packages/db/src/schema/audit-logs.ts'), 'utf-8')
+    expect(src).toContain('audit_logs')
+    expect(src).toContain('org_id')
+    expect(src).toContain('action')
   })
 
   test('MCP has exactly 9 tools (5 missing)', () => {

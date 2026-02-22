@@ -27,6 +27,8 @@ import { createInMemoryRedisApi } from './services/redis.memory.js'
 import { createInMemoryArtifactRepo } from './services/artifact-repo.memory.js'
 import { createInMemoryQuotaApi } from './services/quota.memory.js'
 import { createInMemoryBillingApi } from './services/billing.memory.js'
+import { AuditLog } from './services/audit-log.js'
+import { createInMemoryAuditLog } from './services/audit-log.memory.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
@@ -97,6 +99,7 @@ beforeAll(async () => {
     Layer.succeed(RedisService, createInMemoryRedisApi()),
     Layer.succeed(QuotaService, quotaApi),
     Layer.succeed(BillingService, billingApi),
+    Layer.succeed(AuditLog, createInMemoryAuditLog()),
   )
 
   const FullLayer = TestApp.pipe(

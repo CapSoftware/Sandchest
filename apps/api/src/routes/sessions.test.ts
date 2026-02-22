@@ -18,6 +18,7 @@ import { ArtifactRepo } from '../services/artifact-repo.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
 import { QuotaMemory } from '../services/quota.memory.js'
 import { BillingMemory } from '../services/billing.memory.js'
+import { AuditLogMemory } from '../services/audit-log.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 
@@ -42,6 +43,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
     Layer.provide(QuotaMemory),
     Layer.provide(BillingMemory),
+    Layer.provide(AuditLogMemory),
     Layer.provide(ShutdownControllerLive),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG, scopes: null }),

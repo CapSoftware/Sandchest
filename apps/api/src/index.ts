@@ -18,6 +18,7 @@ import { RedisMemory } from './services/redis.memory.js'
 import { EventRecorderLive } from './services/event-recorder.live.js'
 import { IdempotencyRepoMemory } from './workers/idempotency-cleanup.memory.js'
 import { OrgRepoMemory } from './services/org-repo.memory.js'
+import { AuditLogMemory } from './services/audit-log.memory.js'
 import { QuotaMemory } from './services/quota.memory.js'
 import { UsageMemory } from './services/usage.memory.js'
 import { BillingLive } from './services/billing.live.js'
@@ -96,6 +97,7 @@ const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pi
   Layer.provide(OrgRepoMemory),
   Layer.provide(QuotaMemory),
   Layer.provide(UsageMemory),
+  Layer.provide(AuditLogMemory),
   Layer.provide(BillingLive),
   Layer.provide(RedisLive),
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT })),

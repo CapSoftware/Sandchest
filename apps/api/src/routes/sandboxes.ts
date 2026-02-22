@@ -50,6 +50,7 @@ import { QuotaService } from '../services/quota.js'
 import { BillingService } from '../services/billing.js'
 import { BillingLimitError } from '../errors.js'
 import { requireScope } from '../scopes.js'
+import { AuditLog } from '../services/audit-log.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
 const VALID_PROFILES: ProfileName[] = ['small', 'medium', 'large']
@@ -202,6 +203,16 @@ const createSandbox = Effect.gen(function* () {
 
   // Billing: track sandbox creation (fire-and-forget)
   yield* billing.track(auth.userId, 'sandboxes')
+
+  const auditLog = yield* AuditLog
+  yield* auditLog.append({
+    orgId: auth.orgId,
+    actorId: auth.userId,
+    action: 'sandbox.create',
+    resourceType: 'sandbox',
+    resourceId: sandboxId,
+    metadata: { image: imageStr, profile: profileName, ttl_seconds: ttlSeconds },
+  })
 
   return withReplayWarning(HttpServerResponse.unsafeJson(response, { status: 201 }))
 })
@@ -365,6 +376,15 @@ const stopSandbox = Effect.gen(function* () {
   // Collect artifacts before fully stopping (non-blocking)
   yield* collectArtifactsOnStop(id, idBytes, auth.orgId)
 
+  const auditLog = yield* AuditLog
+  yield* auditLog.append({
+    orgId: auth.orgId,
+    actorId: auth.userId,
+    action: 'sandbox.stop',
+    resourceType: 'sandbox',
+    resourceId: id,
+  })
+
   const response: StopSandboxResponse = {
     sandbox_id: id,
     status: updated?.status ?? 'stopping',
@@ -406,6 +426,15 @@ const deleteSandbox = Effect.gen(function* () {
   }
 
   const updated = yield* repo.softDelete(idBytes, auth.orgId)
+
+  const auditLog = yield* AuditLog
+  yield* auditLog.append({
+    orgId: auth.orgId,
+    actorId: auth.userId,
+    action: 'sandbox.delete',
+    resourceType: 'sandbox',
+    resourceId: id,
+  })
 
   return HttpServerResponse.unsafeJson(
     { sandbox_id: id, status: updated?.status ?? 'deleted' },
@@ -536,6 +565,16 @@ const forkSandbox = Effect.gen(function* () {
 
   // Billing: track fork as sandbox creation (fire-and-forget)
   yield* billing.track(auth.userId, 'sandboxes')
+
+  const auditLog = yield* AuditLog
+  yield* auditLog.append({
+    orgId: auth.orgId,
+    actorId: auth.userId,
+    action: 'sandbox.fork',
+    resourceType: 'sandbox',
+    resourceId: sandboxId,
+    metadata: { forked_from: id, ttl_seconds: ttlSeconds },
+  })
 
   return withReplayWarning(HttpServerResponse.unsafeJson(response, { status: 201 }))
 })
@@ -805,6 +844,16 @@ const setReplayVisibility = Effect.gen(function* () {
   if (!updated) {
     return yield* Effect.fail(new NotFoundError({ message: `Sandbox ${id} not found` }))
   }
+
+  const auditLog = yield* AuditLog
+  yield* auditLog.append({
+    orgId: auth.orgId,
+    actorId: auth.userId,
+    action: 'sandbox.replay_visibility',
+    resourceType: 'sandbox',
+    resourceId: id,
+    metadata: { public: updated.replayPublic },
+  })
 
   const response: SetReplayVisibilityResponse = {
     sandbox_id: id,
