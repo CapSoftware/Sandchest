@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..', '..', '..')
@@ -9,6 +9,10 @@ function readFile(path: string): string {
   return readFileSync(resolve(ROOT, path), 'utf-8')
 }
 
+// ---------------------------------------------------------------------------
+// Deploy workflow (SST)
+// ---------------------------------------------------------------------------
+
 describe('deploy.yml', () => {
   const workflow = readFile('.github/workflows/deploy.yml')
 
@@ -17,45 +21,39 @@ describe('deploy.yml', () => {
     expect(workflow).toContain('workflow_dispatch')
   })
 
-  test('has migrate job that runs before deploys', () => {
+  test('has migrate job that runs before deploy', () => {
     expect(workflow).toContain('migrate:')
     expect(workflow).toContain('Run database migrations')
     expect(workflow).toContain('bun run db:migrate:run')
     expect(workflow).toContain('DATABASE_URL')
   })
 
-  test('has deploy-api job using Fly.io', () => {
-    expect(workflow).toContain('deploy-api:')
+  test('has deploy job using SST', () => {
+    expect(workflow).toContain('deploy:')
     expect(workflow).toContain('needs: [migrate]')
-    expect(workflow).toContain('superfly/flyctl-actions/setup-flyctl')
-    expect(workflow).toContain('flyctl deploy')
-    expect(workflow).toContain('FLY_API_TOKEN')
+    expect(workflow).toContain('bunx sst deploy')
   })
 
-  test('deploy-api references correct Dockerfile and fly.toml paths', () => {
-    expect(workflow).toContain('--config apps/api/fly.toml')
-    expect(workflow).toContain('--dockerfile apps/api/Dockerfile')
+  test('deploy job assumes AWS role via OIDC', () => {
+    expect(workflow).toContain('aws-actions/configure-aws-credentials@v4')
+    expect(workflow).toContain('role-to-assume')
+    expect(workflow).toContain('AWS_ROLE_ARN')
   })
 
-  test('has deploy-web job using Vercel', () => {
-    expect(workflow).toContain('deploy-web:')
-    expect(workflow).toContain('vercel deploy --prod')
-    expect(workflow).toContain('VERCEL_TOKEN')
-    expect(workflow).toContain('VERCEL_ORG_ID')
-    expect(workflow).toContain('VERCEL_PROJECT_ID')
+  test('requests id-token permission for OIDC', () => {
+    expect(workflow).toContain('id-token: write')
+    expect(workflow).toContain('contents: read')
   })
 
-  test('both deploy jobs depend on migrate', () => {
-    const apiNeeds = workflow.match(/deploy-api:[\s\S]*?needs:\s*\[migrate\]/)
-    const webNeeds = workflow.match(/deploy-web:[\s\S]*?needs:\s*\[migrate\]/)
-    expect(apiNeeds).not.toBeNull()
-    expect(webNeeds).not.toBeNull()
+  test('supports stage selection via workflow_dispatch', () => {
+    expect(workflow).toContain('stage:')
+    expect(workflow).toContain('SST stage to deploy')
+    expect(workflow).toMatch(/options:\s*\n\s*- dev\s*\n\s*- staging\s*\n\s*- production/)
   })
 
-  test('all jobs use production environment', () => {
-    const envMatches = workflow.match(/environment:\s*production/g)
-    expect(envMatches).not.toBeNull()
-    expect(envMatches!.length).toBeGreaterThanOrEqual(3)
+  test('uses concurrency group to prevent parallel deploys', () => {
+    expect(workflow).toContain('concurrency:')
+    expect(workflow).toContain('cancel-in-progress: false')
   })
 
   test('has no TODO placeholders', () => {
@@ -63,6 +61,106 @@ describe('deploy.yml', () => {
     expect(workflow).not.toMatch(/echo\s+["']TODO/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Docker build workflow
+// ---------------------------------------------------------------------------
+
+describe('docker-build.yml', () => {
+  const workflow = readFile('.github/workflows/docker-build.yml')
+
+  test('triggers on API and dependency path changes', () => {
+    expect(workflow).toContain('apps/api/**')
+    expect(workflow).toContain('packages/contract/**')
+    expect(workflow).toContain('packages/db/**')
+  })
+
+  test('uses ECR for container registry', () => {
+    expect(workflow).toContain('amazon-ecr-login@v2')
+    expect(workflow).toContain('sandchest-api')
+  })
+
+  test('references correct Dockerfile path', () => {
+    expect(workflow).toContain('file: apps/api/Dockerfile')
+  })
+
+  test('tags images with SHA and latest', () => {
+    expect(workflow).toContain('github.sha')
+    expect(workflow).toContain('sandchest-api:latest')
+  })
+
+  test('uses GitHub Actions cache for buildx', () => {
+    expect(workflow).toContain('cache-from: type=gha')
+    expect(workflow).toContain('cache-to: type=gha,mode=max')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Rust build workflow
+// ---------------------------------------------------------------------------
+
+describe('rust-build.yml', () => {
+  const workflow = readFile('.github/workflows/rust-build.yml')
+
+  test('triggers on node daemon and proto changes', () => {
+    expect(workflow).toContain('crates/sandchest-node/**')
+    expect(workflow).toContain('packages/contract/proto/**')
+  })
+
+  test('builds release binary for sandchest-node', () => {
+    expect(workflow).toContain('cargo build --release --package sandchest-node')
+  })
+
+  test('installs protobuf compiler', () => {
+    expect(workflow).toContain('protobuf-compiler')
+  })
+
+  test('uploads binary artifact and pushes to S3', () => {
+    expect(workflow).toContain('upload-artifact@v4')
+    expect(workflow).toContain('retention-days: 30')
+    expect(workflow).toContain('aws s3 cp')
+    expect(workflow).toContain('binaries/sandchest-node')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CI workflow
+// ---------------------------------------------------------------------------
+
+describe('ci.yml', () => {
+  const workflow = readFile('.github/workflows/ci.yml')
+
+  test('runs on PR and push to main', () => {
+    expect(workflow).toContain('pull_request:')
+    expect(workflow).toContain('branches: [main]')
+  })
+
+  test('has typecheck and lint job', () => {
+    expect(workflow).toContain('typecheck-and-lint')
+    expect(workflow).toContain('bun run typecheck')
+    expect(workflow).toContain('bun run lint')
+  })
+
+  test('has TypeScript test job', () => {
+    expect(workflow).toContain('test-ts')
+    expect(workflow).toContain('bun run test')
+  })
+
+  test('has Rust check job with clippy', () => {
+    expect(workflow).toContain('check-rust')
+    expect(workflow).toContain('cargo check --workspace')
+    expect(workflow).toContain('cargo test --workspace')
+    expect(workflow).toContain('cargo clippy --workspace -- -D warnings')
+  })
+
+  test('cancels in-progress runs on same ref', () => {
+    expect(workflow).toContain('cancel-in-progress: true')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Dockerfile
+// ---------------------------------------------------------------------------
 
 describe('Dockerfile', () => {
   const dockerfile = readFileSync(resolve(API_DIR, 'Dockerfile'), 'utf-8')
@@ -108,28 +206,91 @@ describe('Dockerfile', () => {
   })
 })
 
-describe('fly.toml', () => {
-  const flytoml = readFileSync(resolve(API_DIR, 'fly.toml'), 'utf-8')
+// ---------------------------------------------------------------------------
+// SST config
+// ---------------------------------------------------------------------------
 
-  test('sets app name', () => {
-    expect(flytoml).toContain('app = "sandchest-api"')
+describe('sst.config.ts', () => {
+  const config = readFile('sst.config.ts')
+
+  test('exists and imports all infra modules', () => {
+    expect(config).toContain('infra/alarms')
+    expect(config).toContain('infra/app')
+    expect(config).toContain('infra/bucket')
+    expect(config).toContain('infra/cluster')
+    expect(config).toContain('infra/node')
+    expect(config).toContain('infra/oidc')
+    expect(config).toContain('infra/redis')
+    expect(config).toContain('infra/vpc')
   })
 
-  test('configures HTTP service on port 3001', () => {
-    expect(flytoml).toContain('internal_port = 3001')
-    expect(flytoml).toContain('force_https = true')
+  test('creates all core infrastructure resources', () => {
+    expect(config).toContain('sst.aws.Vpc')
+    expect(config).toContain('sst.aws.Redis')
+    expect(config).toContain('sst.aws.Bucket')
+    expect(config).toContain('sst.aws.Cluster')
+    expect(config).toContain('sst.Secret')
   })
 
-  test('has health check on /healthz', () => {
-    expect(flytoml).toContain('path = "/healthz"')
+  test('links secrets and resources to API service', () => {
+    expect(config).toContain('link: [')
+    expect(config).toContain('redis')
+    expect(config).toContain('artifactBucket')
+    expect(config).toContain('databaseUrl')
+    expect(config).toContain('betterAuthSecret')
+    expect(config).toContain('resendApiKey')
   })
 
-  test('configures auto-start and minimum machines', () => {
-    expect(flytoml).toContain('auto_start_machines = true')
-    expect(flytoml).toContain('min_machines_running = 1')
+  test('creates node daemon EC2 instance', () => {
+    expect(config).toContain('aws.ec2.Instance')
+    expect(config).toContain('NodeInstance')
   })
 
-  test('references correct Dockerfile', () => {
-    expect(flytoml).toContain('dockerfile = "Dockerfile"')
+  test('creates GitHub OIDC provider and deploy role', () => {
+    expect(config).toContain('aws.iam.OpenIdConnectProvider')
+    expect(config).toContain('GitHubOidc')
+    expect(config).toContain('DeployRole')
+  })
+
+  test('creates CloudWatch alarms', () => {
+    expect(config).toContain('EcsRunningTaskAlarm')
+    expect(config).toContain('EcsCpuAlarm')
+    expect(config).toContain('EcsMemoryAlarm')
+    expect(config).toContain('Alb5xxAlarm')
+    expect(config).toContain('AlbResponseTimeAlarm')
+    expect(config).toContain('RedisMemoryAlarm')
+    expect(config).toContain('RedisEvictionAlarm')
+    expect(config).toContain('NodeHeartbeatAlarm')
+  })
+
+  test('exports infrastructure outputs', () => {
+    expect(config).toContain('vpcId')
+    expect(config).toContain('redisHost')
+    expect(config).toContain('artifactBucketName')
+    expect(config).toContain('apiUrl')
+    expect(config).toContain('nodeInstanceId')
+    expect(config).toContain('deployRoleArn')
+    expect(config).toContain('alarmTopicArn')
+  })
+
+  test('grants node IAM roles for S3 and CloudWatch', () => {
+    expect(config).toContain('NodeS3Policy')
+    expect(config).toContain('NodeCloudWatchPolicy')
+    expect(config).toContain('s3:PutObject')
+    expect(config).toContain('s3:GetObject')
+    expect(config).toContain('cloudwatch:PutMetricData')
+  })
+
+  test('references Dockerfile in correct location', () => {
+    expect(config).toContain('dockerfile: "apps/api/Dockerfile"')
+  })
+
+  test('required files exist', () => {
+    expect(existsSync(resolve(ROOT, 'sst.config.ts'))).toBe(true)
+    expect(existsSync(resolve(ROOT, 'apps/api/Dockerfile'))).toBe(true)
+    expect(existsSync(resolve(ROOT, '.github/workflows/deploy.yml'))).toBe(true)
+    expect(existsSync(resolve(ROOT, '.github/workflows/docker-build.yml'))).toBe(true)
+    expect(existsSync(resolve(ROOT, '.github/workflows/rust-build.yml'))).toBe(true)
+    expect(existsSync(resolve(ROOT, '.github/workflows/ci.yml'))).toBe(true)
   })
 })
