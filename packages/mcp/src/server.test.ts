@@ -97,16 +97,21 @@ describe('MCP Server', () => {
     await cleanup()
   })
 
-  test('lists all 9 tools', async () => {
+  test('lists all 14 tools', async () => {
     const result = await client.listTools()
     const toolNames = result.tools.map((t) => t.name).sort()
     expect(toolNames).toEqual([
+      'sandbox_artifacts_list',
       'sandbox_create',
+      'sandbox_destroy',
       'sandbox_download',
       'sandbox_exec',
+      'sandbox_file_list',
       'sandbox_fork',
       'sandbox_list',
+      'sandbox_replay',
       'sandbox_session_create',
+      'sandbox_session_destroy',
       'sandbox_session_exec',
       'sandbox_stop',
       'sandbox_upload',
@@ -282,6 +287,130 @@ describe('MCP Server', () => {
       arguments: { status: 'running' },
     })
     expect(sandchest.list).toHaveBeenCalledWith({ status: 'running' })
+  })
+
+  test('sandbox_destroy calls destroy and returns sandbox_id', async () => {
+    const sb = mockSandbox()
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_destroy',
+      arguments: { sandbox_id: 'sb_test123' },
+    })
+    const data = parseToolResult(result as { content: unknown[] })
+    expect(data).toEqual({ ok: true, sandbox_id: 'sb_test123' })
+    expect(sb.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  test('sandbox_artifacts_list returns artifact details', async () => {
+    const sb = mockSandbox({
+      artifacts: {
+        register: mock(async () => ({ registered: 0, total: 0 })),
+        list: mock(async () => [
+          {
+            id: 'art_abc',
+            name: 'report.html',
+            mime: 'text/html',
+            bytes: 1024,
+            sha256: 'deadbeef',
+            download_url: 'https://storage.example.com/art_abc',
+            exec_id: 'ex_abc123',
+            created_at: '2025-01-01T00:00:00Z',
+          },
+        ]),
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_artifacts_list',
+      arguments: { sandbox_id: 'sb_test123' },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      artifacts: Array<{ id: string; name: string }>
+    }
+    expect(data.artifacts).toHaveLength(1)
+    expect(data.artifacts[0]).toEqual({
+      id: 'art_abc',
+      name: 'report.html',
+      mime: 'text/html',
+      bytes: 1024,
+      sha256: 'deadbeef',
+      download_url: 'https://storage.example.com/art_abc',
+      exec_id: 'ex_abc123',
+      created_at: '2025-01-01T00:00:00Z',
+    })
+  })
+
+  test('sandbox_file_list returns directory entries', async () => {
+    const sb = mockSandbox({
+      fs: {
+        upload: mock(async () => {}),
+        uploadDir: mock(async () => {}),
+        download: mock(async () => new Uint8Array()),
+        ls: mock(async () => [
+          { name: 'src', path: '/work/src', type: 'directory', size_bytes: null },
+          { name: 'package.json', path: '/work/package.json', type: 'file', size_bytes: 512 },
+        ]),
+        rm: mock(async () => {}),
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_file_list',
+      arguments: { sandbox_id: 'sb_test123', path: '/work' },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      entries: Array<{ name: string; type: string }>
+    }
+    expect(data.entries).toHaveLength(2)
+    expect(data.entries[0]).toEqual({
+      name: 'src',
+      path: '/work/src',
+      type: 'directory',
+      size_bytes: null,
+    })
+    expect(data.entries[1]).toEqual({
+      name: 'package.json',
+      path: '/work/package.json',
+      type: 'file',
+      size_bytes: 512,
+    })
+    expect(sb.fs.ls).toHaveBeenCalledWith('/work')
+  })
+
+  test('sandbox_session_destroy calls session.destroy', async () => {
+    const destroyMock = mock(async () => {})
+    const sb = mockSandbox()
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    // Intercept Session constructor — the tool creates a Session internally
+    const { Session } = await import('@sandchest/sdk')
+    const origProto = Session.prototype.destroy
+    Session.prototype.destroy = destroyMock
+
+    const result = await client.callTool({
+      name: 'sandbox_session_destroy',
+      arguments: { sandbox_id: 'sb_test123', session_id: 'sess_abc' },
+    })
+    const data = parseToolResult(result as { content: unknown[] })
+    expect(data).toEqual({ ok: true })
+    expect(destroyMock).toHaveBeenCalledTimes(1)
+
+    Session.prototype.destroy = origProto
+  })
+
+  test('sandbox_replay returns sandbox_id and replay_url', async () => {
+    const result = await client.callTool({
+      name: 'sandbox_replay',
+      arguments: { sandbox_id: 'sb_test123' },
+    })
+    const data = parseToolResult(result as { content: unknown[] })
+    expect(data).toEqual({
+      sandbox_id: 'sb_test123',
+      replay_url: 'https://sandchest.com/s/sb_test123',
+    })
   })
 
   test('tool error propagates as MCP error', async () => {

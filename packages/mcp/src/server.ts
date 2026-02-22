@@ -8,6 +8,14 @@ SANDBOX BASICS:
 - sandbox_create: Creates a fresh Linux environment (Firecracker microVM)
 - sandbox_exec: Runs a command and returns output
 - sandbox_session_create + sandbox_session_exec: For multi-step workflows where commands share state (cd, env vars persist between commands)
+- sandbox_session_destroy: Clean up sessions you no longer need
+- sandbox_stop: Gracefully stop a sandbox (collects artifacts, flushes logs)
+- sandbox_destroy: Permanently delete a sandbox (immediate, non-recoverable)
+
+FILES & ARTIFACTS:
+- sandbox_upload / sandbox_download: Transfer files to/from a sandbox
+- sandbox_file_list: Browse the sandbox filesystem (list directory contents)
+- sandbox_artifacts_list: List registered build outputs, test reports, etc. with download URLs
 
 FORKING (your most powerful tool):
 - sandbox_fork: Creates an instant copy of a sandbox's entire state
@@ -28,9 +36,9 @@ WORKFLOW PATTERN:
 6. If fork succeeds → continue in fork (or destroy original)
 
 REPLAY:
+- sandbox_replay: Get the permanent replay URL for any sandbox
 - Every sandbox has a replay URL showing everything that happened
-- Share replay URLs for debugging, code review, or documentation
-- The URL is always in the sandbox_create response`
+- Share replay URLs for debugging, code review, or documentation`
 
 export function createServer(sandchest: Sandchest): McpServer {
   const server = new McpServer(

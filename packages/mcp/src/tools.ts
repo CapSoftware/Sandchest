@@ -196,4 +196,84 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       })),
     })
   })
+
+  server.registerTool('sandbox_destroy', {
+    description:
+      'Permanently destroy a sandbox and all its data. Unlike sandbox_stop (graceful shutdown), this is an immediate hard delete. The sandbox cannot be recovered. The replay URL will still be accessible. Use this to clean up sandboxes you no longer need.',
+    inputSchema: {
+      sandbox_id: z.string().describe('The sandbox to destroy.'),
+    },
+  }, async (args) => {
+    const sb = await sandchest.get(args.sandbox_id)
+    await sb.destroy()
+    return jsonContent({ ok: true, sandbox_id: sb.id })
+  })
+
+  server.registerTool('sandbox_artifacts_list', {
+    description:
+      'List all registered artifacts for a sandbox. Artifacts are files explicitly marked for collection (e.g., build outputs, test reports, coverage data). They persist after the sandbox is stopped and include download URLs.',
+    inputSchema: {
+      sandbox_id: z.string().describe('The sandbox to list artifacts for.'),
+    },
+  }, async (args) => {
+    const sb = await sandchest.get(args.sandbox_id)
+    const artifacts = await sb.artifacts.list()
+    return jsonContent({
+      artifacts: artifacts.map((a) => ({
+        id: a.id,
+        name: a.name,
+        mime: a.mime,
+        bytes: a.bytes,
+        sha256: a.sha256,
+        download_url: a.download_url,
+        exec_id: a.exec_id,
+        created_at: a.created_at,
+      })),
+    })
+  })
+
+  server.registerTool('sandbox_file_list', {
+    description:
+      'List files and directories at a path inside a sandbox. Returns names, types (file/directory), and sizes. Use this to explore the sandbox filesystem before downloading or modifying files.',
+    inputSchema: {
+      sandbox_id: z.string().describe('The sandbox to list files in.'),
+      path: z.string().describe('Directory path to list (e.g., /root, /work).'),
+    },
+  }, async (args) => {
+    const sb = await sandchest.get(args.sandbox_id)
+    const entries = await sb.fs.ls(args.path)
+    return jsonContent({
+      entries: entries.map((e) => ({
+        name: e.name,
+        path: e.path,
+        type: e.type,
+        size_bytes: e.size_bytes,
+      })),
+    })
+  })
+
+  server.registerTool('sandbox_session_destroy', {
+    description:
+      'Destroy a persistent shell session. Use this to clean up sessions you no longer need. The sandbox itself is not affected.',
+    inputSchema: {
+      sandbox_id: z.string(),
+      session_id: z.string().describe('The session to destroy.'),
+    },
+  }, async (args) => {
+    const sb = await sandchest.get(args.sandbox_id)
+    const session = new Session(args.session_id, args.sandbox_id, sb._http)
+    await session.destroy()
+    return jsonContent({ ok: true })
+  })
+
+  server.registerTool('sandbox_replay', {
+    description:
+      'Get the replay URL for a sandbox. The replay URL is a permanent link showing everything that happened in the sandbox — every command, output, and file change. Share it for debugging, code review, or documentation. Works for both running and stopped sandboxes.',
+    inputSchema: {
+      sandbox_id: z.string().describe('The sandbox to get the replay URL for.'),
+    },
+  }, async (args) => {
+    const sb = await sandchest.get(args.sandbox_id)
+    return jsonContent({ sandbox_id: sb.id, replay_url: sb.replayUrl })
+  })
 }
