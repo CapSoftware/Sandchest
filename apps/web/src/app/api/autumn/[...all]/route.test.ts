@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach } from 'bun:test'
-import { identify } from './route'
+import { identify } from './identify'
 
 const originalFetch = globalThis.fetch
 
