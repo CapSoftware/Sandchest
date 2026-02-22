@@ -56,15 +56,15 @@ export default $config({
       health: getServiceHealthCheck(),
       public: { ports: [getServicePort()] },
       image: { dockerfile: "apps/api/Dockerfile", context: "." },
-      link: [redis, artifactBucket],
-      environment: {
-        ...getServiceEnvironment($app.stage),
-        REDIS_URL: $interpolate`redis://${redis.host}:${redis.port}`,
-        DATABASE_URL: databaseUrl.value,
-        BETTER_AUTH_SECRET: betterAuthSecret.value,
-        RESEND_API_KEY: resendApiKey.value,
-        AUTUMN_SECRET_KEY: autumnSecretKey.value,
-      },
+      link: [
+        redis,
+        artifactBucket,
+        databaseUrl,
+        betterAuthSecret,
+        resendApiKey,
+        autumnSecretKey,
+      ],
+      environment: getServiceEnvironment($app.stage),
     });
 
     // --- Node Daemon (Firecracker host) ---

@@ -1,9 +1,29 @@
 /**
  * Centralized environment configuration.
  *
- * All secrets are injected by SST via the ECS task environment.
- * During local development they come from the root .env file.
+ * On ECS, SST injects linked resources and secrets as SST_RESOURCE_<Name>
+ * environment variables (JSON-encoded). During local development, values
+ * come from the root .env file as plain environment variables.
+ *
+ * Resolution order per variable:
+ *   1. SST-linked resource/secret (SST_RESOURCE_*)
+ *   2. Plain environment variable (process.env.*)
+ *   3. Default value (for optional/config vars)
  */
+
+/**
+ * Read an SST-linked resource from the injected environment.
+ * SST sets SST_RESOURCE_<Name> as JSON for each linked resource/secret.
+ */
+export function sstResource<T>(name: string): T | undefined {
+  const raw = process.env[`SST_RESOURCE_${name}`]
+  if (!raw) return undefined
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return undefined
+  }
+}
 
 function required(name: string): string {
   const value = process.env[name]
@@ -17,22 +37,42 @@ function optional(name: string, fallback: string): string {
 
 /** Lazily load and validate all environment variables. */
 export function loadEnv() {
+  // SST-linked infrastructure resources
+  const redis = sstResource<{ host: string; port: number }>('Redis')
+  const bucket = sstResource<{ name: string }>('ArtifactBucket')
+
   return {
-    // Server
+    // Server config (always from plain env vars — set by SST environment block)
     PORT: Number(optional('PORT', '3001')),
     NODE_ENV: optional('NODE_ENV', 'development'),
     DRAIN_TIMEOUT_MS: Number(optional('DRAIN_TIMEOUT_MS', '30000')),
 
-    // Secrets (required — SST secrets)
-    DATABASE_URL: required('DATABASE_URL'),
-    BETTER_AUTH_SECRET: required('BETTER_AUTH_SECRET'),
-    RESEND_API_KEY: required('RESEND_API_KEY'),
+    // Required secrets: SST-linked first, then plain env var fallback
+    DATABASE_URL:
+      sstResource<{ value: string }>('DatabaseUrl')?.value
+      ?? required('DATABASE_URL'),
+    BETTER_AUTH_SECRET:
+      sstResource<{ value: string }>('BetterAuthSecret')?.value
+      ?? required('BETTER_AUTH_SECRET'),
+    RESEND_API_KEY:
+      sstResource<{ value: string }>('ResendApiKey')?.value
+      ?? required('RESEND_API_KEY'),
 
-    // Secrets (optional — graceful no-op fallback)
-    AUTUMN_SECRET_KEY: process.env.AUTUMN_SECRET_KEY as string | undefined,
-    REDIS_URL: process.env.REDIS_URL as string | undefined,
+    // Optional secrets: SST-linked first, then plain env var
+    AUTUMN_SECRET_KEY:
+      sstResource<{ value: string }>('AutumnSecretKey')?.value
+      ?? (process.env.AUTUMN_SECRET_KEY as string | undefined),
 
-    // Config (SST service environment)
+    // Redis: construct URL from SST-linked resource, or use plain env var
+    REDIS_URL: redis
+      ? `redis://${redis.host}:${redis.port}`
+      : (process.env.REDIS_URL as string | undefined),
+
+    // S3 bucket: SST-linked resource, or plain env var
+    ARTIFACT_BUCKET_NAME: bucket?.name
+      ?? (process.env.ARTIFACT_BUCKET_NAME as string | undefined),
+
+    // Config (always from plain env vars)
     BETTER_AUTH_BASE_URL: optional('BETTER_AUTH_BASE_URL', 'http://localhost:3001'),
     RESEND_FROM_EMAIL: optional('RESEND_FROM_EMAIL', 'Sandchest Auth <noreply@send.sandchest.com>'),
   }
