@@ -1,51 +1,58 @@
 /// <reference path="./.sst/platform/config.d.ts" />
 
-import {
-  getAlb5xxAlarm,
-  getAlbResponseTimeAlarm,
-  getEcsCpuAlarm,
-  getEcsMemoryAlarm,
-  getEcsRunningTaskAlarm,
-  getNodeHeartbeatAlarm,
-  getRedisEvictionAlarm,
-  getRedisMemoryAlarm,
-  getSnsTopicName,
-  NODE_HEARTBEAT_NAMESPACE,
-  type MetricAlarmConfig,
-} from "./infra/alarms";
 import { getAppConfig } from "./infra/app";
-import { getBucketConfig } from "./infra/bucket";
-import {
-  getServiceCpu,
-  getServiceEnvironment,
-  getServiceHealthCheck,
-  getServiceMemory,
-  getServicePort,
-  getServiceScaling,
-} from "./infra/cluster";
-import {
-  getNodeAmiSsmParameter,
-  getNodeGrpcPort,
-  getNodeInstanceType,
-  getNodeRootVolumeGb,
-  getNodeUserData,
-} from "./infra/node";
-import {
-  GITHUB_OIDC_AUDIENCE,
-  GITHUB_OIDC_PROVIDER_URL,
-  GITHUB_OIDC_THUMBPRINTS,
-  GITHUB_REPO,
-  getDeployRoleName,
-  getDeployRoleTrustPolicy,
-} from "./infra/oidc";
-import { getRedisConfig } from "./infra/redis";
-import { getVpcConfig } from "./infra/vpc";
 
 export default $config({
   app(input) {
     return getAppConfig(input.stage);
   },
   async run() {
+    const { getVpcConfig } = await import("./infra/vpc");
+    const { getRedisConfig } = await import("./infra/redis");
+    const { getBucketConfig } = await import("./infra/bucket");
+    const {
+      getServiceCpu,
+      getServiceDomain,
+      getServiceEnvironment,
+      getLoadBalancerHealthCheck,
+      getServiceMemory,
+      getServiceRules,
+      getServiceScaling,
+    } = await import("./infra/cluster");
+    const {
+      getNodeAmiSsmParameter,
+      getNodeCpuOptions,
+      getNodeGrpcPort,
+      getNodeInstanceType,
+      getNodeRootVolumeGb,
+      getNodeUserData,
+    } = await import("./infra/node");
+    const {
+      GITHUB_OIDC_AUDIENCE,
+      GITHUB_OIDC_PROVIDER_URL,
+      GITHUB_OIDC_THUMBPRINTS,
+      GITHUB_REPO,
+      getDeployRoleName,
+      getDeployRoleTrustPolicy,
+    } = await import("./infra/oidc");
+    const {
+      getAlb5xxAlarm,
+      getAlbResponseTimeAlarm,
+      getEcsCpuAlarm,
+      getEcsMemoryAlarm,
+      getEcsRunningTaskAlarm,
+      getNodeHeartbeatAlarm,
+      getRedisEvictionAlarm,
+      getRedisMemoryAlarm,
+      getSnsTopicName,
+      NODE_HEARTBEAT_NAMESPACE,
+    } = await import("./infra/alarms");
+    type MetricAlarmConfig = import("./infra/alarms").MetricAlarmConfig;
+
+    // Note: getAlbUnhealthyHostAlarm was removed — SST's Cluster component
+    // doesn't expose target group ARN, which is a required CloudWatch dimension
+    // for UnHealthyHostCount. The ECS running task alarm covers service health.
+
     const vpc = new sst.aws.Vpc("Vpc", getVpcConfig($app.stage));
     const redis = new sst.aws.Redis(
       "Redis",
@@ -66,8 +73,11 @@ export default $config({
       cpu: getServiceCpu($app.stage),
       memory: getServiceMemory($app.stage),
       scaling: getServiceScaling($app.stage),
-      health: getServiceHealthCheck(),
-      public: { ports: [getServicePort()] },
+      loadBalancer: {
+        domain: getServiceDomain($app.stage),
+        rules: [...getServiceRules()],
+        health: getLoadBalancerHealthCheck(),
+      },
       image: { dockerfile: "apps/api/Dockerfile", context: "." },
       link: [
         redis,
@@ -157,8 +167,10 @@ export default $config({
       subnetId: vpc.privateSubnets.apply((subs) => subs[0]),
       iamInstanceProfile: nodeProfile.name,
       vpcSecurityGroupIds: [nodeSg.id],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi v6.66.2 InstanceCpuOptions lacks nestedVirtualization field; remove cast once provider is updated
+      cpuOptions: getNodeCpuOptions() as any,
       rootBlockDevice: {
-        volumeSize: getNodeRootVolumeGb(),
+        volumeSize: getNodeRootVolumeGb($app.stage),
         volumeType: "gp3",
         encrypted: true,
       },
@@ -201,7 +213,8 @@ export default $config({
     function createAlarm(
       name: string,
       config: MetricAlarmConfig,
-      dimensions: Record<string, unknown>,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Output values
+      dimensions: Record<string, any>,
     ) {
       return new aws.cloudwatch.MetricAlarm(name, {
         alarmDescription: config.description,
