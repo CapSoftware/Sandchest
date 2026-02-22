@@ -49,6 +49,7 @@ import { RedisService } from '../services/redis.js'
 import { QuotaService } from '../services/quota.js'
 import { BillingService } from '../services/billing.js'
 import { BillingLimitError } from '../errors.js'
+import { requireScope } from '../scopes.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
 const VALID_PROFILES: ProfileName[] = ['small', 'medium', 'large']
@@ -112,6 +113,7 @@ function rowToSummary(row: SandboxRow): SandboxSummary {
 // -- Create sandbox ----------------------------------------------------------
 
 const createSandbox = Effect.gen(function* () {
+  yield* requireScope('sandbox:create')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
@@ -207,6 +209,7 @@ const createSandbox = Effect.gen(function* () {
 // -- List sandboxes ----------------------------------------------------------
 
 const listSandboxes = Effect.gen(function* () {
+  yield* requireScope('sandbox:read')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const request = yield* HttpServerRequest.HttpServerRequest
@@ -250,6 +253,7 @@ const listSandboxes = Effect.gen(function* () {
 // -- Get sandbox -------------------------------------------------------------
 
 const getSandbox = Effect.gen(function* () {
+  yield* requireScope('sandbox:read')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const params = yield* HttpRouter.params
@@ -313,6 +317,7 @@ const collectArtifactsOnStop = (
   )
 
 const stopSandbox = Effect.gen(function* () {
+  yield* requireScope('sandbox:write')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const params = yield* HttpRouter.params
@@ -371,6 +376,7 @@ const stopSandbox = Effect.gen(function* () {
 // -- Delete sandbox ----------------------------------------------------------
 
 const deleteSandbox = Effect.gen(function* () {
+  yield* requireScope('sandbox:write')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const params = yield* HttpRouter.params
@@ -411,6 +417,7 @@ const deleteSandbox = Effect.gen(function* () {
 const DEFAULT_FORK_TTL = 3600
 
 const forkSandbox = Effect.gen(function* () {
+  yield* requireScope('sandbox:create')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
@@ -536,6 +543,7 @@ const forkSandbox = Effect.gen(function* () {
 // -- Get fork tree -----------------------------------------------------------
 
 const getForkTree = Effect.gen(function* () {
+  yield* requireScope('sandbox:read')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const params = yield* HttpRouter.params
@@ -672,6 +680,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 const getReplay = Effect.gen(function* () {
+  yield* requireScope('sandbox:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const execRepo = yield* ExecRepo
@@ -764,6 +773,7 @@ const getReplay = Effect.gen(function* () {
 // -- Set replay visibility ---------------------------------------------------
 
 const setReplayVisibility = Effect.gen(function* () {
+  yield* requireScope('sandbox:write')
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const request = yield* HttpServerRequest.HttpServerRequest
@@ -895,6 +905,7 @@ const getPublicReplay = Effect.gen(function* () {
 // -- Stream sandbox events (SSE) ---------------------------------------------
 
 const streamSandbox = Effect.gen(function* () {
+  yield* requireScope('sandbox:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const redis = yield* RedisService

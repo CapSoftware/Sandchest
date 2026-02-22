@@ -17,6 +17,7 @@ import { ShutdownControllerLive } from '../shutdown.js'
 const TestAuthLayer = Layer.succeed(AuthContext, {
   userId: 'user_test',
   orgId: 'org_test',
+  scopes: null,
 })
 
 const TestLayer = AppLive.pipe(

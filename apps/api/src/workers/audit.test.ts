@@ -47,9 +47,18 @@ describe('phase 9 gap audit', () => {
     expect(existsSync(resolve(ROOT, 'action.yaml'))).toBe(false)
   })
 
-  test('auth middleware has no scope checking', () => {
+  test('auth middleware extracts scopes from API key metadata', () => {
     const src = readFileSync(resolve(ROOT, 'apps/api/src/middleware.ts'), 'utf-8')
-    expect(src).not.toContain('scope')
+    expect(src).toContain('scopes')
+    expect(src).toContain('parseScopes')
+  })
+
+  test('all route files use requireScope', () => {
+    const routeFiles = ['sandboxes.ts', 'execs.ts', 'sessions.ts', 'files.ts', 'artifacts.ts']
+    for (const route of routeFiles) {
+      const src = readFileSync(resolve(ROOT, 'apps/api/src/routes', route), 'utf-8')
+      expect(src).toContain('requireScope')
+    }
   })
 
   test('no audit log table in DB schema', () => {

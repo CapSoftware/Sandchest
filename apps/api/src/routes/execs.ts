@@ -20,6 +20,7 @@ import type {
 } from '@sandchest/contract'
 import { NotFoundError, SandboxNotRunningError, ValidationError, BillingLimitError } from '../errors.js'
 import { AuthContext } from '../context.js'
+import { requireScope } from '../scopes.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
 import { NodeClient } from '../services/node-client.js'
@@ -70,6 +71,7 @@ function rowToExec(row: ExecRow): Exec {
 // -- Execute command ----------------------------------------------------------
 
 const execCommand = Effect.gen(function* () {
+  yield* requireScope('exec:create')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const execRepo = yield* ExecRepo
@@ -287,6 +289,7 @@ const execCommand = Effect.gen(function* () {
 // -- Get exec ----------------------------------------------------------------
 
 const getExec = Effect.gen(function* () {
+  yield* requireScope('exec:read')
   const auth = yield* AuthContext
   const execRepo = yield* ExecRepo
   const params = yield* HttpRouter.params
@@ -332,6 +335,7 @@ const getExec = Effect.gen(function* () {
 // -- List execs --------------------------------------------------------------
 
 const listExecs = Effect.gen(function* () {
+  yield* requireScope('exec:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const execRepo = yield* ExecRepo
@@ -410,6 +414,7 @@ const listExecs = Effect.gen(function* () {
 // -- Stream exec output (SSE) ------------------------------------------------
 
 const streamExec = Effect.gen(function* () {
+  yield* requireScope('exec:read')
   const auth = yield* AuthContext
   const execRepo = yield* ExecRepo
   const redis = yield* RedisService

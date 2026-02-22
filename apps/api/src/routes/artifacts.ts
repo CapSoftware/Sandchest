@@ -13,6 +13,7 @@ import type {
 } from '@sandchest/contract'
 import { NotFoundError, ValidationError } from '../errors.js'
 import { AuthContext } from '../context.js'
+import { requireScope } from '../scopes.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ArtifactRepo } from '../services/artifact-repo.js'
 import { RedisService } from '../services/redis.js'
@@ -26,6 +27,7 @@ const DOWNLOAD_URL_TTL_SECONDS = 3600
 // -- Register artifact paths -------------------------------------------------
 
 const registerArtifacts = Effect.gen(function* () {
+  yield* requireScope('artifact:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const redis = yield* RedisService
@@ -120,6 +122,7 @@ function rowToArtifact(row: ArtifactRow, downloadUrl: string): Artifact {
 }
 
 const listArtifacts = Effect.gen(function* () {
+  yield* requireScope('artifact:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const artifactRepo = yield* ArtifactRepo

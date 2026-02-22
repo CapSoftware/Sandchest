@@ -17,6 +17,7 @@ const TEST_USER = 'user_ratelimit_test'
 const TestAuthLayer = Layer.succeed(AuthContext, {
   userId: TEST_USER,
   orgId: TEST_ORG,
+  scopes: null,
 })
 
 const TestRouter = HttpRouter.empty.pipe(

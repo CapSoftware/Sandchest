@@ -25,6 +25,7 @@ import {
   BillingLimitError,
 } from '../errors.js'
 import { AuthContext } from '../context.js'
+import { requireScope } from '../scopes.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { SessionRepo, type SessionRow } from '../services/session-repo.js'
 import { ExecRepo } from '../services/exec-repo.js'
@@ -75,6 +76,7 @@ function parseSessionId(idStr: string | undefined) {
 // -- Create session ----------------------------------------------------------
 
 const createSession = Effect.gen(function* () {
+  yield* requireScope('session:create')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
@@ -146,6 +148,7 @@ const createSession = Effect.gen(function* () {
 // -- Session exec ------------------------------------------------------------
 
 const sessionExec = Effect.gen(function* () {
+  yield* requireScope('session:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
@@ -324,6 +327,7 @@ const sessionExec = Effect.gen(function* () {
 // -- Session input -----------------------------------------------------------
 
 const sessionInput = Effect.gen(function* () {
+  yield* requireScope('session:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
@@ -384,6 +388,7 @@ const sessionInput = Effect.gen(function* () {
 // -- Session stream (SSE) ----------------------------------------------------
 
 const sessionStream = Effect.gen(function* () {
+  yield* requireScope('session:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
@@ -430,6 +435,7 @@ const sessionStream = Effect.gen(function* () {
 // -- List sessions -----------------------------------------------------------
 
 const listSessions = Effect.gen(function* () {
+  yield* requireScope('session:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
@@ -456,6 +462,7 @@ const listSessions = Effect.gen(function* () {
 // -- Destroy session ---------------------------------------------------------
 
 const destroySession = Effect.gen(function* () {
+  yield* requireScope('session:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo

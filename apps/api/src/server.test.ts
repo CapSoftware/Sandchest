@@ -22,6 +22,7 @@ const TEST_USER = 'user_test_456'
 const TestAuthLayer = Layer.succeed(AuthContext, {
   userId: TEST_USER,
   orgId: TEST_ORG,
+  scopes: null,
 })
 
 const TestLayer = AppLive.pipe(

@@ -8,6 +8,7 @@ import {
   ValidationError,
 } from '../errors.js'
 import { AuthContext } from '../context.js'
+import { requireScope } from '../scopes.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { NodeClient } from '../services/node-client.js'
 
@@ -29,6 +30,7 @@ function parseSandboxId(idStr: string | undefined) {
 // -- Upload file -------------------------------------------------------------
 
 const uploadFile = Effect.gen(function* () {
+  yield* requireScope('file:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const nodeClient = yield* NodeClient
@@ -91,6 +93,7 @@ const uploadFile = Effect.gen(function* () {
 // -- Download or list files --------------------------------------------------
 
 const downloadOrListFiles = Effect.gen(function* () {
+  yield* requireScope('file:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const nodeClient = yield* NodeClient
@@ -180,6 +183,7 @@ const downloadOrListFiles = Effect.gen(function* () {
 // -- Delete file -------------------------------------------------------------
 
 const deleteFile = Effect.gen(function* () {
+  yield* requireScope('file:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const nodeClient = yield* NodeClient

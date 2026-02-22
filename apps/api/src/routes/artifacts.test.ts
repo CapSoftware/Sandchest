@@ -52,7 +52,7 @@ function createTestEnv() {
     Layer.provide(BillingMemory),
     Layer.provide(ShutdownControllerLive),
     Layer.provide(
-      Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
+      Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG, scopes: null }),
     ),
   )
 

@@ -101,5 +101,8 @@ export {
 
 export { isValidEmail, isValidOtp } from './validation.js'
 
+export type { ApiKeyScope } from './scopes.js'
+export { API_KEY_SCOPES, ALL_SCOPES, isValidScope, parseScopes } from './scopes.js'
+
 export * as agentRpc from './generated/sandchest/agent/v1/agent.js'
 export * as nodeRpc from './generated/sandchest/node/v1/node.js'

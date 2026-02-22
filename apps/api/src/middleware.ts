@@ -1,5 +1,6 @@
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform'
 import { Effect } from 'effect'
+import { parseScopes } from '@sandchest/contract'
 import { UnauthorizedError } from './errors.js'
 import { AuthContext } from './context.js'
 import { auth } from './auth.js'
@@ -21,13 +22,16 @@ export const withRequestId = HttpMiddleware.make((app) =>
 /**
  * Validates API key or session cookie and provides AuthContext.
  * Skips auth for /health, /healthz, /readyz, /api/auth/*, /v1/public/*, and /v1/internal/* routes.
+ *
+ * API keys carry optional scopes via metadata.scopes. Keys without scopes
+ * are treated as full-access (backward compatible). Session auth always gets full access.
  */
 export const withAuth = HttpMiddleware.make((app) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
 
     if (request.url.startsWith('/health') || request.url.startsWith('/readyz') || request.url.startsWith('/api/auth') || request.url.startsWith('/v1/public/') || request.url.startsWith('/v1/internal/') || request.url === '/openapi.json' || request.url === '/docs') {
-      return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '' })
+      return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '', scopes: null })
     }
 
     const authHeader = request.headers['authorization']
@@ -42,10 +46,14 @@ export const withAuth = HttpMiddleware.make((app) =>
         return yield* Effect.fail(new UnauthorizedError({ message: 'Invalid API key' }))
       }
 
-      const metadata = (result as { metadata?: { orgId?: string } }).metadata
+      const metadata = (result as { metadata?: { orgId?: string; scopes?: string[] } }).metadata
+      const rawScopes = metadata?.scopes
+      const scopes = Array.isArray(rawScopes) ? parseScopes(rawScopes) : null
+
       return yield* Effect.provideService(app, AuthContext, {
         userId: (result as { userId?: string }).userId ?? '',
         orgId: metadata?.orgId ?? '',
+        scopes,
       })
     }
 
@@ -65,6 +73,7 @@ export const withAuth = HttpMiddleware.make((app) =>
       userId: sessionResult.session.userId,
       orgId:
         (sessionResult.session as { activeOrganizationId?: string }).activeOrganizationId ?? '',
+      scopes: null,
     })
   }),
 )

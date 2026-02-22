@@ -54,11 +54,12 @@ const withTestAuth = HttpMiddleware.make((app) =>
       request.url.startsWith('/v1/public/') ||
       request.url.startsWith('/v1/internal/')
     ) {
-      return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '' })
+      return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '', scopes: null })
     }
     return yield* Effect.provideService(app, AuthContext, {
       userId: TEST_USER,
       orgId: TEST_ORG,
+      scopes: null,
     })
   }),
 )
