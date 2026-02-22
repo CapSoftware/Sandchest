@@ -6,6 +6,7 @@ import { formatRelativeTime } from '@/lib/format'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
+import { SandboxTableSkeleton } from './skeletons'
 import type { SandboxStatus } from '@sandchest/contract'
 
 const FILTER_OPTIONS: Array<{ label: string; value: SandboxStatus | '' }> = [
@@ -64,7 +65,7 @@ export default function SandboxList() {
       )}
 
       {isLoading ? (
-        <EmptyState message="Loading sandboxes..." />
+        <SandboxTableSkeleton />
       ) : sandboxes.length === 0 ? (
         <EmptyState
           message={
