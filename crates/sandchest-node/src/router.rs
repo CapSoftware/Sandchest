@@ -425,6 +425,7 @@ mod tests {
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
+            s3: None,
         });
         let manager = Arc::new(SandboxManager::new(config));
         let router = Router::new(manager);
@@ -444,6 +445,7 @@ mod tests {
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
+            s3: None,
         });
         let manager = Arc::new(SandboxManager::new(config));
         let router = Router::new(manager);
@@ -463,6 +465,7 @@ mod tests {
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
+            s3: None,
         });
         let manager = Arc::new(SandboxManager::new(config));
         let router = Router::new(manager);

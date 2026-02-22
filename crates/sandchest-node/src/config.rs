@@ -141,6 +141,34 @@ impl VmConfig {
     }
 }
 
+/// S3-compatible object storage configuration for artifact uploads.
+#[derive(Debug, Clone)]
+pub struct S3Config {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: Option<String>,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
+impl S3Config {
+    /// Read S3 configuration from environment variables.
+    /// Returns `None` if the required `SANDCHEST_S3_BUCKET` is not set.
+    pub fn from_env() -> Option<Self> {
+        let bucket = std::env::var("SANDCHEST_S3_BUCKET").ok()?;
+        Some(Self {
+            bucket,
+            region: std::env::var("SANDCHEST_S3_REGION")
+                .unwrap_or_else(|_| "fr-par".to_string()),
+            endpoint: std::env::var("SANDCHEST_S3_ENDPOINT").ok(),
+            access_key: std::env::var("SANDCHEST_S3_ACCESS_KEY")
+                .unwrap_or_default(),
+            secret_key: std::env::var("SANDCHEST_S3_SECRET_KEY")
+                .unwrap_or_default(),
+        })
+    }
+}
+
 /// Node daemon configuration.
 pub struct NodeConfig {
     pub node_id: String,
@@ -149,6 +177,7 @@ pub struct NodeConfig {
     pub kernel_path: String,
     pub control_plane_url: Option<String>,
     pub jailer: JailerConfig,
+    pub s3: Option<S3Config>,
 }
 
 impl NodeConfig {
@@ -166,6 +195,7 @@ impl NodeConfig {
                 .unwrap_or_else(|_| "/var/sandchest/images/vmlinux-5.10".to_string()),
             control_plane_url: std::env::var("SANDCHEST_CONTROL_PLANE_URL").ok(),
             jailer: JailerConfig::from_env(&data_dir),
+            s3: S3Config::from_env(),
             data_dir,
         }
     }
@@ -409,6 +439,7 @@ mod tests {
             kernel_path: "/vmlinux".to_string(),
             control_plane_url: None,
             jailer: JailerConfig::disabled(),
+            s3: None,
         };
         assert_eq!(config.sandboxes_dir(), "/var/sandchest/sandboxes");
     }
@@ -422,6 +453,7 @@ mod tests {
             kernel_path: "/vmlinux".to_string(),
             control_plane_url: None,
             jailer: JailerConfig::disabled(),
+            s3: None,
         };
         assert_eq!(config.images_dir(), "/data/images");
     }
@@ -435,6 +467,7 @@ mod tests {
             kernel_path: "/vmlinux".to_string(),
             control_plane_url: None,
             jailer: JailerConfig::disabled(),
+            s3: None,
         };
         assert_eq!(config.snapshots_dir(), "/data/snapshots");
     }

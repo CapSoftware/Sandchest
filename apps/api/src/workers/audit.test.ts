@@ -5,10 +5,11 @@ import { resolve } from 'path'
 const ROOT = resolve(import.meta.dir, '../../../..')
 
 describe('phase 9 gap audit', () => {
-  test('collect_artifacts returns unimplemented in node daemon', () => {
+  test('collect_artifacts is implemented in node daemon', () => {
     const src = readFileSync(resolve(ROOT, 'crates/sandchest-node/src/main.rs'), 'utf-8')
-    expect(src).toContain('Status::unimplemented')
     expect(src).toContain('collect_artifacts')
+    expect(src).toContain('artifacts::collect')
+    expect(src).not.toContain('Status::unimplemented')
   })
 
   test('org-hard-delete worker is a stub', () => {

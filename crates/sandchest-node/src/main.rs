@@ -1,4 +1,5 @@
 pub mod agent_client;
+pub mod artifacts;
 pub mod config;
 pub mod disk;
 pub mod events;
@@ -31,14 +32,16 @@ use crate::sandbox::SandboxManager;
 pub struct NodeService {
     sandbox_manager: Arc<SandboxManager>,
     router: Arc<Router>,
+    node_config: Arc<NodeConfig>,
 }
 
 impl NodeService {
-    pub fn new(sandbox_manager: Arc<SandboxManager>) -> Self {
+    pub fn new(sandbox_manager: Arc<SandboxManager>, node_config: Arc<NodeConfig>) -> Self {
         let router = Arc::new(Router::new(Arc::clone(&sandbox_manager)));
         Self {
             sandbox_manager,
             router,
+            node_config,
         }
     }
 }
@@ -316,11 +319,16 @@ impl proto::node_server::Node for NodeService {
 
     async fn collect_artifacts(
         &self,
-        _request: Request<proto::CollectArtifactsRequest>,
+        request: Request<proto::CollectArtifactsRequest>,
     ) -> Result<Response<proto::CollectArtifactsResponse>, Status> {
-        Err(Status::unimplemented(
-            "artifact collection implemented in Phase 3",
-        ))
+        let req = request.into_inner();
+        let mut client = self.router.get_agent(&req.sandbox_id).await?;
+
+        let s3_config = self.node_config.s3.as_ref();
+        let artifacts =
+            artifacts::collect(&mut client, &req.sandbox_id, &req.paths, s3_config).await?;
+
+        Ok(Response::new(proto::CollectArtifactsResponse { artifacts }))
     }
 
     async fn stop_sandbox(
@@ -396,7 +404,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .unwrap();
 
-    let node_service = NodeService::new(Arc::clone(&sandbox_manager));
+    let node_service = NodeService::new(Arc::clone(&sandbox_manager), Arc::clone(&node_config));
 
     info!(
         node_id = %node_config.node_id,

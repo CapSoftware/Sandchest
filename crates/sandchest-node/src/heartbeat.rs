@@ -109,6 +109,7 @@ mod tests {
             kernel_path: "/tmp/vmlinux".to_string(),
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
+            s3: None,
         });
         let manager = Arc::new(SandboxManager::new(Arc::clone(&config)));
 
@@ -185,6 +186,7 @@ mod tests {
             kernel_path: "/tmp/vmlinux".to_string(),
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
+            s3: None,
         });
         let manager = Arc::new(SandboxManager::new(Arc::clone(&config)));
 

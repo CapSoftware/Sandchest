@@ -1199,6 +1199,7 @@ mod tests {
             kernel_path: "/var/sandchest/images/vmlinux-5.10".to_string(),
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
+            s3: None,
         })
     }
 
