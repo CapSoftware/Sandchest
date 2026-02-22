@@ -17,6 +17,14 @@ import {
   getNodeRootVolumeGb,
   getNodeUserData,
 } from "./infra/node";
+import {
+  GITHUB_OIDC_AUDIENCE,
+  GITHUB_OIDC_PROVIDER_URL,
+  GITHUB_OIDC_THUMBPRINTS,
+  GITHUB_REPO,
+  getDeployRoleName,
+  getDeployRoleTrustPolicy,
+} from "./infra/oidc";
 import { getRedisConfig } from "./infra/redis";
 import { getVpcConfig } from "./infra/vpc";
 
@@ -149,6 +157,26 @@ export default $config({
       tags: { Name: `sandchest-node-${$app.stage}` },
     });
 
+    // --- GitHub Actions OIDC ---
+
+    const oidcProvider = new aws.iam.OpenIdConnectProvider("GitHubOidc", {
+      url: GITHUB_OIDC_PROVIDER_URL,
+      clientIdLists: [GITHUB_OIDC_AUDIENCE],
+      thumbprintLists: GITHUB_OIDC_THUMBPRINTS,
+    });
+
+    const deployRole = new aws.iam.Role("DeployRole", {
+      name: getDeployRoleName($app.stage),
+      assumeRolePolicy: oidcProvider.arn.apply((arn) =>
+        JSON.stringify(getDeployRoleTrustPolicy(arn, GITHUB_REPO)),
+      ),
+    });
+
+    new aws.iam.RolePolicyAttachment("DeployAdminPolicy", {
+      role: deployRole.name,
+      policyArn: "arn:aws:iam::aws:policy/AdministratorAccess",
+    });
+
     return {
       vpcId: vpc.id,
       redisHost: redis.host,
@@ -157,6 +185,7 @@ export default $config({
       apiUrl: api.url,
       nodeInstanceId: node.id,
       nodePrivateIp: node.privateIp,
+      deployRoleArn: deployRole.arn,
     };
   },
 });
