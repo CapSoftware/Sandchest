@@ -73,6 +73,23 @@ describe('ApiKeyManager component', () => {
     expect(src).toMatch(/mutationError/)
   })
 
+  test('imports usePaywall for billing error handling', () => {
+    expect(src).toMatch(/import.*usePaywall.*from ['"]@\/components\/dashboard\/PaywallDialog['"]/)
+  })
+
+  test('imports ApiError for billing error detection', () => {
+    expect(src).toMatch(/import.*ApiError.*from ['"]@\/lib\/api['"]/)
+  })
+
+  test('opens paywall on 403 billing errors during key creation', () => {
+    expect(src).toMatch(/openPaywall/)
+    expect(src).toMatch(/err instanceof ApiError && err\.status === 403/)
+  })
+
+  test('suppresses inline error display for billing errors', () => {
+    expect(src).toMatch(/!isBillingError/)
+  })
+
   test('does not use console.log', () => {
     expect(src).not.toMatch(/console\.log/)
   })

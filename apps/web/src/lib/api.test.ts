@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach, mock } from 'bun:test'
-import { apiFetch } from './api'
+import { apiFetch, ApiError } from './api'
 
 describe('apiFetch', () => {
   const originalFetch = globalThis.fetch
@@ -45,7 +45,7 @@ describe('apiFetch', () => {
     expect(data.next_cursor).toBeNull()
   })
 
-  test('throws on non-ok response with error message', async () => {
+  test('throws ApiError on non-ok response with error message', async () => {
     mockFetch(async () => {
       return new Response(JSON.stringify({ message: 'Not found' }), {
         status: 404,
@@ -53,24 +53,27 @@ describe('apiFetch', () => {
       })
     })
 
-    expect.assertions(1)
+    expect.assertions(3)
     try {
       await apiFetch('/v1/sandboxes/missing')
     } catch (err) {
-      expect((err as Error).message).toBe('Not found')
+      expect(err).toBeInstanceOf(ApiError)
+      expect((err as ApiError).message).toBe('Not found')
+      expect((err as ApiError).status).toBe(404)
     }
   })
 
-  test('throws generic error when response body is not JSON', async () => {
+  test('throws ApiError with generic message when response body is not JSON', async () => {
     mockFetch(async () => {
       return new Response('Internal Server Error', { status: 500 })
     })
 
-    expect.assertions(1)
+    expect.assertions(2)
     try {
       await apiFetch('/v1/sandboxes')
     } catch (err) {
-      expect((err as Error).message).toBe('Request failed: 500')
+      expect(err).toBeInstanceOf(ApiError)
+      expect((err as ApiError).message).toBe('Request failed: 500')
     }
   })
 
@@ -87,5 +90,47 @@ describe('apiFetch', () => {
 
     await apiFetch('/v1/sandboxes/123/stop', { method: 'POST' })
     expect(capturedInit?.method).toBe('POST')
+  })
+
+  test('includes error code from API response', async () => {
+    mockFetch(async () => {
+      return new Response(
+        JSON.stringify({ message: 'Limit reached', code: 'billing_limit' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+
+    expect.assertions(3)
+    try {
+      await apiFetch('/v1/sandboxes')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError)
+      expect((err as ApiError).status).toBe(403)
+      expect((err as ApiError).code).toBe('billing_limit')
+    }
+  })
+})
+
+describe('ApiError', () => {
+  test('has correct name', () => {
+    const err = new ApiError(404, 'Not found')
+    expect(err.name).toBe('ApiError')
+  })
+
+  test('is an instance of Error', () => {
+    const err = new ApiError(500, 'Server error')
+    expect(err).toBeInstanceOf(Error)
+  })
+
+  test('stores status and code', () => {
+    const err = new ApiError(403, 'Forbidden', 'billing_limit')
+    expect(err.status).toBe(403)
+    expect(err.code).toBe('billing_limit')
+    expect(err.message).toBe('Forbidden')
+  })
+
+  test('code is undefined when not provided', () => {
+    const err = new ApiError(404, 'Not found')
+    expect(err.code).toBeUndefined()
   })
 })

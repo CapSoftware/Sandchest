@@ -49,6 +49,22 @@ describe('Providers', () => {
     expect(apClose).toBeLessThan(qcpClose)
   })
 
+  test('imports and wraps children with PaywallProvider', () => {
+    expect(src).toMatch(/import.*PaywallProvider/)
+    expect(src).toMatch(/<PaywallProvider>/)
+    expect(src).toMatch(/<\/PaywallProvider>/)
+  })
+
+  test('PaywallProvider is inside AutumnProvider', () => {
+    const apOpen = src.indexOf('<AutumnProvider')
+    const pwOpen = src.indexOf('<PaywallProvider>')
+    const pwClose = src.indexOf('</PaywallProvider>')
+    const apClose = src.indexOf('</AutumnProvider>')
+
+    expect(apOpen).toBeLessThan(pwOpen)
+    expect(pwClose).toBeLessThan(apClose)
+  })
+
   test('does not use useEffect', () => {
     expect(src).not.toMatch(/useEffect/)
   })

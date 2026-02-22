@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/use-api-keys'
 import { formatShortDate } from '@/lib/format'
+import { ApiError } from '@/lib/api'
+import { usePaywall } from '@/components/dashboard/PaywallDialog'
 import CopyButton from '@/components/ui/CopyButton'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
@@ -11,6 +13,7 @@ export default function ApiKeyManager() {
   const { data: keys, isLoading, error } = useApiKeys()
   const createKey = useCreateApiKey()
   const revokeKey = useRevokeApiKey()
+  const { openPaywall } = usePaywall()
 
   const [newKeyName, setNewKeyName] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -25,10 +28,17 @@ export default function ApiKeyManager() {
         }
         setNewKeyName('')
       },
+      onError: (err) => {
+        if (err instanceof ApiError && err.status === 403) {
+          openPaywall('api_keys', 'API Keys')
+        }
+      },
     })
   }
 
   const mutationError = createKey.error ?? revokeKey.error
+  const isBillingError =
+    mutationError instanceof ApiError && mutationError.status === 403
 
   return (
     <div>
@@ -51,7 +61,7 @@ export default function ApiKeyManager() {
           message={error instanceof Error ? error.message : 'Failed to load API keys'}
         />
       )}
-      {mutationError && (
+      {mutationError && !isBillingError && (
         <ErrorMessage
           message={
             mutationError instanceof Error
