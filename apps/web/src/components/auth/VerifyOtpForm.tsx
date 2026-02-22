@@ -35,7 +35,7 @@ export default function VerifyOtpForm() {
 
   function verify(code: string) {
     verifyOtp.mutate(
-      { email, otp: code },
+      { email, otp: code, type: otpType },
       {
         onSuccess() {
           window.location.href = '/dashboard'

@@ -23,7 +23,7 @@ import { startAllWorkers } from './workers/index.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownController, ShutdownControllerLive } from './shutdown.js'
 
-const PORT = Number(process.env.PORT ?? 3000)
+const PORT = Number(process.env.PORT ?? 3001)
 const REDIS_URL = process.env.REDIS_URL
 const DRAIN_TIMEOUT_MS = Number(process.env.DRAIN_TIMEOUT_MS ?? 30_000)
 

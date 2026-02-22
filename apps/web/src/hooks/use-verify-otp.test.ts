@@ -23,7 +23,11 @@ describe('useVerifyOtp hook', () => {
     expect(src).toMatch(/export function useVerifyOtp/)
   })
 
-  test('calls authClient.emailOtp.verifyEmail', () => {
+  test('calls authClient.signIn.emailOtp for sign-in', () => {
+    expect(src).toMatch(/authClient\.signIn\.emailOtp/)
+  })
+
+  test('calls authClient.emailOtp.verifyEmail for email-verification', () => {
     expect(src).toMatch(/authClient\.emailOtp\.verifyEmail/)
   })
 
