@@ -60,12 +60,21 @@ describe('OnboardingForm step flow', () => {
     expect(src).toMatch(/onboarding-steps/)
   })
 
-  test('redirects to dashboard if user already has orgs', () => {
-    expect(src).toMatch(/router\.replace\(['"]\/dashboard['"]\)/)
+  test('redirects to org-slug dashboard if user already has orgs', () => {
+    expect(src).toMatch(/router\.replace\(`\/dashboard\/\$\{activeOrg\.slug\}`\)/)
   })
 
-  test('finishes by redirecting to dashboard', () => {
-    expect(src).toMatch(/window\.location\.href\s*=\s*['"]\/dashboard['"]/)
+  test('finishes by redirecting to org-slug dashboard', () => {
+    expect(src).toMatch(/window\.location\.href\s*=\s*`\/dashboard\/\$\{createdSlug\}`/)
+  })
+
+  test('tracks created slug in state', () => {
+    expect(src).toMatch(/useState\(''\)/)
+    expect(src).toMatch(/setCreatedSlug/)
+  })
+
+  test('passes slug to PlanStep', () => {
+    expect(src).toMatch(/slug={createdSlug}/)
   })
 })
 
@@ -110,6 +119,10 @@ describe('OrgStep', () => {
     expect(src).toMatch(/createOrg\.mutate/)
   })
 
+  test('passes slug to onComplete callback', () => {
+    expect(src).toMatch(/onComplete\(slug\)/)
+  })
+
   test('shows loading state during creation', () => {
     expect(src).toMatch(/Creating\.\.\./)
   })
@@ -146,14 +159,13 @@ describe('PlanStep', () => {
     expect(src).toMatch(/highlighted/)
   })
 
-  test('sets successUrl to dashboard', () => {
-    expect(src).toMatch(/successUrl/)
-    expect(src).toMatch(/\/dashboard/)
+  test('accepts slug prop for successUrl', () => {
+    expect(src).toMatch(/slug: string;/)
+    expect(src).toMatch(/\/dashboard\/\$\{slug\}/)
   })
 })
 
 describe('slugify utility', () => {
-  // Import and test the slugify function behavior via source analysis
   const src = readFileSync(COMPONENT_PATH, 'utf-8')
 
   test('converts to lowercase', () => {

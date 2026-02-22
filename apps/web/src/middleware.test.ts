@@ -21,8 +21,14 @@ describe('auth middleware', () => {
       expect(new URL(res.headers.get('location')!).pathname).toBe('/login')
     })
 
-    test('redirects unauthenticated users from nested dashboard routes', () => {
-      const res = middleware(makeRequest('/dashboard/keys'))
+    test('redirects unauthenticated users from org-slug dashboard routes', () => {
+      const res = middleware(makeRequest('/dashboard/acme-inc'))
+      expect(res.status).toBe(307)
+      expect(new URL(res.headers.get('location')!).pathname).toBe('/login')
+    })
+
+    test('redirects unauthenticated users from nested org-slug routes', () => {
+      const res = middleware(makeRequest('/dashboard/acme-inc/keys'))
       expect(res.status).toBe(307)
       expect(new URL(res.headers.get('location')!).pathname).toBe('/login')
     })
@@ -32,8 +38,13 @@ describe('auth middleware', () => {
       expect(res.status).toBe(200)
     })
 
-    test('allows authenticated users to access nested dashboard routes', () => {
-      const res = middleware(makeRequest('/dashboard/settings', SESSION_COOKIE))
+    test('allows authenticated users to access org-slug dashboard routes', () => {
+      const res = middleware(makeRequest('/dashboard/acme-inc', SESSION_COOKIE))
+      expect(res.status).toBe(200)
+    })
+
+    test('allows authenticated users to access nested org-slug routes', () => {
+      const res = middleware(makeRequest('/dashboard/acme-inc/settings', SESSION_COOKIE))
       expect(res.status).toBe(200)
     })
 

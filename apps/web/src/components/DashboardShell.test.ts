@@ -11,6 +11,11 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/^['"]use client['"]/)
   })
 
+  test('uses useParams for org slug extraction', () => {
+    expect(src).toMatch(/import.*useParams.*from ['"]next\/navigation['"]/)
+    expect(src).toMatch(/useParams<\{ orgSlug: string \}>/)
+  })
+
   test('uses usePathname for active nav detection', () => {
     expect(src).toMatch(/import.*usePathname.*from ['"]next\/navigation['"]/)
     expect(src).toMatch(/usePathname\(\)/)
@@ -25,10 +30,16 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/import.*useSetActiveOrg.*from ['"]@\/hooks\/use-orgs['"]/)
   })
 
-  test('has nav items for all dashboard pages', () => {
-    expect(src).toMatch(/\/dashboard['"]/)
-    expect(src).toMatch(/\/dashboard\/keys/)
-    expect(src).toMatch(/\/dashboard\/settings/)
+  test('builds nav items with org slug from URL params', () => {
+    expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}`/)
+    expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}\/keys`/)
+    expect(src).toMatch(/`\/dashboard\/\$\{orgSlug\}\/settings`/)
+  })
+
+  test('detects active nav from path segments', () => {
+    expect(src).toMatch(/segments\[3\]/)
+    expect(src).toMatch(/page === 'keys'/)
+    expect(src).toMatch(/page === 'settings'/)
   })
 
   test('renders nav links with active state', () => {
@@ -45,6 +56,16 @@ describe('DashboardShell component', () => {
   test('redirects to onboarding when user has no orgs', () => {
     expect(src).toMatch(/needsOnboarding/)
     expect(src).toMatch(/router\.replace\(['"]\/onboarding['"]\)/)
+  })
+
+  test('redirects to /dashboard when slug does not match any user org', () => {
+    expect(src).toMatch(/!urlOrg/)
+    expect(src).toMatch(/router\.replace\(['"]\/dashboard['"]\)/)
+  })
+
+  test('syncs active org with URL slug via useEffect', () => {
+    expect(src).toMatch(/urlOrg && urlOrg\.id !== activeOrgId/)
+    expect(src).toMatch(/setActiveOrg\.mutate\(urlOrg\.id\)/)
   })
 
   test('does not use console.log', () => {
@@ -104,6 +125,10 @@ describe('OrgSwitcher', () => {
     expect(src).toMatch(/setActiveOrg\.mutate\(/)
   })
 
+  test('navigates to new org slug on switch', () => {
+    expect(src).toMatch(/router\.push\(`\/dashboard\/\$\{org\.slug\}`\)/)
+  })
+
   test('disables trigger when only one org', () => {
     expect(src).toMatch(/hasMultipleOrgs/)
     expect(src).toMatch(/disabled={!hasMultipleOrgs}/)
@@ -148,5 +173,20 @@ describe('UserMenu', () => {
 
   test('imports useRouter from next/navigation', () => {
     expect(src).toMatch(/import.*useRouter.*from ['"]next\/navigation['"]/)
+  })
+})
+
+describe('getActiveId', () => {
+  const src = readFileSync(COMPONENT_PATH, 'utf-8')
+
+  test('extracts page from path segments', () => {
+    const getActiveIdBlock = src.slice(
+      src.indexOf('function getActiveId'),
+      src.indexOf('function OrgSwitcher'),
+    )
+    expect(getActiveIdBlock).toMatch(/segments\[3\]/)
+    expect(getActiveIdBlock).toMatch(/return 'sandboxes'/)
+    expect(getActiveIdBlock).toMatch(/return 'keys'/)
+    expect(getActiveIdBlock).toMatch(/return 'settings'/)
   })
 })

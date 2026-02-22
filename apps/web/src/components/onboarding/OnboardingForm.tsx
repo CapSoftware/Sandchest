@@ -164,7 +164,7 @@ function NameStep({
   )
 }
 
-function OrgStep({ onComplete }: { onComplete: () => void }) {
+function OrgStep({ onComplete }: { onComplete: (slug: string) => void }) {
   const [orgName, setOrgName] = useState('')
   const createOrg = useCreateOrg()
 
@@ -178,7 +178,7 @@ function OrgStep({ onComplete }: { onComplete: () => void }) {
 
     createOrg.mutate(
       { name: trimmed, slug },
-      { onSuccess: onComplete },
+      { onSuccess: () => onComplete(slug) },
     )
   }
 
@@ -232,7 +232,7 @@ function OrgStep({ onComplete }: { onComplete: () => void }) {
   )
 }
 
-function PlanStep({ onComplete }: { onComplete: () => void }) {
+function PlanStep({ slug, onComplete }: { slug: string; onComplete: () => void }) {
   const { attach } = useCustomer()
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -249,7 +249,7 @@ function PlanStep({ onComplete }: { onComplete: () => void }) {
     try {
       const result = await attach({
         productId: plan.productId,
-        successUrl: `${window.location.origin}/dashboard`,
+        successUrl: `${window.location.origin}/dashboard/${slug}`,
       })
 
       if (result.error) {
@@ -325,11 +325,14 @@ export default function OnboardingForm() {
   const { data: session, isPending: sessionLoading } = useSession()
   const { data: orgs, isPending: orgsLoading } = useOrgs()
   const [step, setStep] = useState<Step>('name')
+  const [createdSlug, setCreatedSlug] = useState('')
 
   // Redirect to dashboard if user already has orgs
   const hasOrgs = orgs && orgs.length > 0
   if (hasOrgs && !sessionLoading && !orgsLoading) {
-    router.replace('/dashboard')
+    const activeOrgId = session?.session.activeOrganizationId
+    const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? orgs[0]
+    router.replace(`/dashboard/${activeOrg.slug}`)
     return null
   }
 
@@ -343,12 +346,13 @@ export default function OnboardingForm() {
     setStep('org')
   }
 
-  function goToPlan() {
+  function goToPlan(slug: string) {
+    setCreatedSlug(slug)
     setStep('plan')
   }
 
   function finish() {
-    window.location.href = '/dashboard'
+    window.location.href = `/dashboard/${createdSlug}`
   }
 
   return (
@@ -361,7 +365,7 @@ export default function OnboardingForm() {
         />
       )}
       {step === 'org' && <OrgStep onComplete={goToPlan} />}
-      {step === 'plan' && <PlanStep onComplete={finish} />}
+      {step === 'plan' && <PlanStep slug={createdSlug} onComplete={finish} />}
     </>
   )
 }
