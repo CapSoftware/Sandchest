@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { getRedisConfig, getRedisInstance, getRedisNodes } from "./redis";
 
 describe("getRedisInstance", () => {
-  test("uses r7g.large for production", () => {
-    expect(getRedisInstance("production")).toBe("r7g.large");
+  test("uses t4g.small for production", () => {
+    expect(getRedisInstance("production")).toBe("t4g.small");
   });
 
   test("uses t4g.micro for non-production stages", () => {
@@ -14,11 +14,8 @@ describe("getRedisInstance", () => {
 });
 
 describe("getRedisNodes", () => {
-  test("uses 2 nodes for production", () => {
-    expect(getRedisNodes("production")).toBe(2);
-  });
-
-  test("uses 1 node for non-production stages", () => {
+  test("uses 1 node for all stages", () => {
+    expect(getRedisNodes("production")).toBe(1);
     expect(getRedisNodes("dev")).toBe(1);
     expect(getRedisNodes("staging")).toBe(1);
   });
@@ -48,9 +45,9 @@ describe("getRedisConfig", () => {
     expect(config.cluster.nodes).toBe(1);
   });
 
-  test("configures production with larger instance and replication", () => {
+  test("configures production with small instance and single node", () => {
     const config = getRedisConfig("production", mockVpc);
-    expect(config.instance).toBe("r7g.large");
-    expect(config.cluster.nodes).toBe(2);
+    expect(config.instance).toBe("t4g.small");
+    expect(config.cluster.nodes).toBe(1);
   });
 });
