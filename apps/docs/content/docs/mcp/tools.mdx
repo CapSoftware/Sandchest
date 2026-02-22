@@ -1,0 +1,153 @@
+---
+title: Tools Reference
+description: Complete reference for all 14 MCP tools.
+---
+
+## Sandbox lifecycle
+
+### `sandbox_create`
+
+Create a new isolated Linux sandbox (Firecracker microVM).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `image` | `string` | No | Image URI. Default: `sandchest://ubuntu-22.04/base` |
+| `profile` | `small \| medium \| large` | No | Resource profile. Default: `small` |
+| `env` | `Record<string, string>` | No | Environment variables |
+
+Returns: `sandbox_id`, `replay_url`
+
+### `sandbox_list`
+
+List active sandboxes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | `running \| stopped \| failed` | No | Filter by status |
+
+Returns: Array of `{ sandbox_id, status, replay_url }`
+
+### `sandbox_stop`
+
+Gracefully stop a sandbox. Collects artifacts and flushes logs.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox to stop |
+
+### `sandbox_destroy`
+
+Permanently destroy a sandbox and all its data.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox to destroy |
+
+## Command execution
+
+### `sandbox_exec`
+
+Execute a command in a sandbox. Returns exit code, stdout, and stderr.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox to execute in |
+| `cmd` | `string` | Yes | Command to run (interpreted by `/bin/sh`) |
+| `cwd` | `string` | No | Working directory. Default: `/root` |
+| `timeout` | `number` | No | Timeout in seconds. Default: 300 |
+
+### `sandbox_session_create`
+
+Create a persistent shell session where commands share state.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+
+Returns: `session_id`
+
+### `sandbox_session_exec`
+
+Run a command in a persistent session. Inherits all prior state.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+| `session_id` | `string` | Yes | The session |
+| `cmd` | `string` | Yes | Command to run |
+| `timeout` | `number` | No | Timeout in seconds. Default: 300 |
+
+### `sandbox_session_destroy`
+
+Destroy a persistent shell session.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+| `session_id` | `string` | Yes | The session to destroy |
+
+## Files
+
+### `sandbox_upload`
+
+Upload a file to a sandbox.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+| `path` | `string` | Yes | Destination path (e.g., `/work/config.json`) |
+| `content` | `string` | Yes | File content |
+| `encoding` | `utf-8 \| base64` | No | Content encoding. Default: `utf-8` |
+
+### `sandbox_download`
+
+Download a file from a sandbox.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+| `path` | `string` | Yes | File path in the sandbox |
+
+### `sandbox_file_list`
+
+List files and directories at a path.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+| `path` | `string` | Yes | Directory path to list |
+
+## Artifacts
+
+### `sandbox_artifacts_list`
+
+List registered artifacts for a sandbox.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+
+## Forking
+
+### `sandbox_fork`
+
+Create an instant copy of a running sandbox (memory + filesystem + all state).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox to fork |
+| `env` | `Record<string, string>` | No | Additional env vars for the fork |
+
+Fork is sub-second. The original sandbox is unaffected.
+
+## Replay
+
+### `sandbox_replay`
+
+Get the replay URL for a sandbox.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sandbox_id` | `string` | Yes | The sandbox |
+
+Returns: `sandbox_id`, `replay_url`

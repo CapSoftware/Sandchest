@@ -1,0 +1,39 @@
+---
+title: Sandchest Documentation
+description: Linux sandbox platform for AI agent code execution powered by Firecracker microVMs.
+---
+
+# Sandchest Documentation
+
+Sandchest is a Linux sandbox platform purpose-built for AI agent code execution. Every sandbox is a [Firecracker](https://firecracker-microvm.github.io/) microVM with VM-grade isolation, sub-second fork capability, and a permanent session replay URL.
+
+## Key capabilities
+
+- **VM-grade isolation** -- Each sandbox runs in its own Firecracker microVM with a dedicated kernel, memory, and filesystem. No container escape surface.
+- **Sub-second fork** -- Snapshot the full state of a running sandbox and fork it into independent copies. Branch execution paths without re-running setup.
+- **Session replay** -- Every sandbox gets a permanent replay URL. Review the full execution history of any sandbox after the fact.
+- **File system access** -- Upload and download files to and from sandboxes. Register build artifacts for retrieval after the sandbox stops.
+- **Stateful sessions** -- Open persistent shell sessions that maintain working directory, environment variables, and process state between commands.
+
+## Where to start
+
+<Cards>
+  <Card title="Getting Started" href="/docs/getting-started">
+    Install the SDK, create your first sandbox, and run a command in under five minutes.
+  </Card>
+  <Card title="SDK Reference" href="/docs/sdk">
+    Full TypeScript SDK reference for @sandchest/sdk -- clients, sandboxes, sessions, streaming, and error handling.
+  </Card>
+  <Card title="API Reference" href="/docs/api-reference">
+    HTTP API documentation for the Sandchest control plane at api.sandchest.com.
+  </Card>
+  <Card title="CLI" href="/docs/cli">
+    Command-line interface for creating and managing sandboxes from your terminal.
+  </Card>
+  <Card title="MCP Server" href="/docs/mcp">
+    Model Context Protocol server for connecting Sandchest to AI agents and tool-use frameworks.
+  </Card>
+  <Card title="Guides" href="/docs/guides">
+    Walkthroughs for common patterns: forking strategies, file management, artifact collection, and more.
+  </Card>
+</Cards>

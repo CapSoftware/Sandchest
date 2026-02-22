@@ -1,0 +1,58 @@
+---
+title: Streaming
+description: Real-time command output via SSE streaming and callbacks.
+---
+
+The SDK supports two approaches for real-time command output: callbacks and full streaming.
+
+## Callbacks
+
+Pass `onStdout` and `onStderr` to get output as it arrives while still getting a final `ExecResult`:
+
+```ts
+const result = await sandbox.exec('npm install', {
+  onStdout: (data) => process.stdout.write(data),
+  onStderr: (data) => process.stderr.write(data),
+})
+// result still contains full stdout/stderr
+console.log(result.exitCode)
+```
+
+## ExecStream
+
+Pass `stream: true` to get an `ExecStream` — an async iterable of SSE events:
+
+```ts
+const stream = await sandbox.exec('npm test', { stream: true })
+
+for await (const event of stream) {
+  switch (event.t) {
+    case 'stdout':
+      process.stdout.write(event.data)
+      break
+    case 'stderr':
+      process.stderr.write(event.data)
+      break
+    case 'exit':
+      console.log(`Exit code: ${event.code}`)
+      console.log(`Duration: ${event.duration_ms}ms`)
+      break
+  }
+}
+```
+
+### Event types
+
+| `event.t` | Fields | Description |
+|-----------|--------|-------------|
+| `stdout` | `data: string` | Standard output chunk |
+| `stderr` | `data: string` | Standard error chunk |
+| `exit` | `code: number`, `duration_ms: number` | Command completed |
+
+## When to use which
+
+| Approach | Use case |
+|----------|----------|
+| Default (blocking) | Short commands, don't need real-time output |
+| Callbacks | Want real-time output but still need the final result object |
+| Streaming | Full control over event processing, long-running commands |

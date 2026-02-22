@@ -1,0 +1,50 @@
+---
+title: API Reference
+description: REST API reference for the Sandchest control plane.
+---
+
+The Sandchest API is a REST API for creating and managing sandboxes.
+
+## Base URL
+
+```
+https://api.sandchest.com
+```
+
+## Authentication
+
+All requests require a Bearer token in the `Authorization` header:
+
+```
+Authorization: Bearer sk_your_api_key
+```
+
+## Content type
+
+Request and response bodies use JSON:
+
+```
+Content-Type: application/json
+```
+
+File upload and download endpoints use `application/octet-stream`.
+
+## API versions
+
+All endpoints are under the `/v1` prefix.
+
+## OpenAPI specification
+
+The full OpenAPI 3.1 specification is available and can be used with any OpenAPI-compatible tool.
+
+## Endpoint groups
+
+| Group | Description |
+|-------|-------------|
+| [Sandboxes](/docs/api-reference/sandboxes) | Create, get, list, stop, destroy sandboxes |
+| [Exec](/docs/api-reference/exec) | Execute commands in sandboxes |
+| [Sessions](/docs/api-reference/sessions) | Persistent shell sessions |
+| [Files](/docs/api-reference/files) | Upload, download, list files |
+| [Artifacts](/docs/api-reference/artifacts) | Register and retrieve build artifacts |
+| [Replay](/docs/api-reference/replay) | Replay bundles and visibility |
+| [Health](/docs/api-reference/health) | Health and readiness probes |

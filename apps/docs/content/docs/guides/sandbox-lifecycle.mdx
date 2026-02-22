@@ -1,0 +1,49 @@
+---
+title: Sandbox Lifecycle
+description: Sandbox statuses, transitions, TTL, and idle shutdown behavior.
+---
+
+Every sandbox goes through a defined lifecycle from creation to termination.
+
+## Status transitions
+
+```
+queued → provisioning → running → stopped
+                                → failed
+                                → deleted
+```
+
+| Status | Description |
+|--------|-------------|
+| `queued` | Waiting for a node to be assigned |
+| `provisioning` | Firecracker microVM is being started |
+| `running` | Ready to accept commands |
+| `stopped` | Gracefully shut down (artifacts collected) |
+| `failed` | Failed to start or crashed |
+| `deleted` | Permanently destroyed |
+
+## Time-to-live (TTL)
+
+Sandboxes have a configurable TTL. When the TTL expires, the sandbox is automatically stopped.
+
+```ts
+const sandbox = await sandchest.create({
+  ttlSeconds: 3600, // 1 hour
+})
+```
+
+## Idle shutdown
+
+Sandboxes that receive no commands for an extended period are automatically stopped to conserve resources. Activity is tracked per sandbox — any exec, session command, or file operation resets the idle timer.
+
+## Graceful stop vs destroy
+
+**`stop()`** performs a graceful shutdown:
+- Collects registered artifacts
+- Flushes logs
+- Replay URL remains accessible
+
+**`destroy()`** is an immediate hard delete:
+- No artifact collection
+- Sandbox data is permanently removed
+- Replay URL remains accessible

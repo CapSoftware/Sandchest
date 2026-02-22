@@ -1,0 +1,113 @@
+---
+title: Sandbox
+description: The Sandbox class — execute commands, manage files, fork, and control sandbox lifecycle.
+---
+
+A `Sandbox` represents an isolated Firecracker microVM. All operations hang off this instance.
+
+## Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | Sandbox ID (prefixed `sb_`) |
+| `status` | `SandboxStatus` | Current status |
+| `replayUrl` | `string` | Permanent replay URL |
+
+## `exec(cmd, options?)`
+
+Execute a command in the sandbox. Supports blocking and streaming modes.
+
+### Blocking (default)
+
+```ts
+const result = await sandbox.exec('npm test')
+console.log(result.exitCode) // 0
+console.log(result.stdout)
+console.log(result.stderr)
+console.log(result.durationMs)
+```
+
+Commands can be passed as a string (interpreted by `/bin/sh`) or an array:
+
+```ts
+await sandbox.exec(['node', '-e', 'console.log("hello")'])
+```
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `cwd` | `string` | Working directory |
+| `env` | `Record<string, string>` | Environment variables |
+| `timeout` | `number` | Timeout in seconds |
+| `onStdout` | `(data: string) => void` | Stdout callback |
+| `onStderr` | `(data: string) => void` | Stderr callback |
+
+### Streaming
+
+Pass `stream: true` to get an `ExecStream`:
+
+```ts
+const stream = await sandbox.exec('npm install', { stream: true })
+for await (const event of stream) {
+  if (event.t === 'stdout') process.stdout.write(event.data)
+  if (event.t === 'stderr') process.stderr.write(event.data)
+}
+```
+
+See [Streaming](/docs/sdk/streaming) for details.
+
+## `fork(options?)`
+
+Create an instant copy of the sandbox (memory + filesystem + all state).
+
+```ts
+const fork = await sandbox.fork({
+  env: { EXPERIMENT: 'true' },
+})
+```
+
+Fork is sub-second and uses Firecracker copy-on-write. The original sandbox is unaffected.
+
+## `forks()`
+
+Get the fork tree rooted at this sandbox.
+
+```ts
+const tree = await sandbox.forks()
+console.log(tree.root) // this sandbox's ID
+console.log(tree.tree) // array of fork nodes
+```
+
+## `stop()`
+
+Gracefully stop the sandbox. Collects registered artifacts before shutdown.
+
+```ts
+await sandbox.stop()
+```
+
+## `destroy()`
+
+Immediately destroy the sandbox and all its data.
+
+```ts
+await sandbox.destroy()
+```
+
+## `waitReady(options?)`
+
+Wait for the sandbox to reach `running` status. Called automatically by `create()` unless `waitReady: false`.
+
+```ts
+await sandbox.waitReady({ timeout: 60_000 })
+```
+
+## Auto-cleanup
+
+`Sandbox` implements `Symbol.asyncDispose` for use with `await using`:
+
+```ts
+await using sandbox = await sandchest.create()
+// sandbox.stop() is called automatically when scope exits
+```

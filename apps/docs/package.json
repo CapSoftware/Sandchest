@@ -1,0 +1,32 @@
+{
+  "name": "@sandchest/docs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --turbopack -p 3001",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "generate:api": "bun run scripts/generate-api-docs.ts"
+  },
+  "dependencies": {
+    "@types/mdx": "^2.0.13",
+    "fumadocs-core": "^14.0.0",
+    "fumadocs-mdx": "^11.0.0",
+    "fumadocs-openapi": "^6.0.0",
+    "fumadocs-ui": "^15.0.0",
+    "next": "^15.3.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "shiki": "^3.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/bun": "^1.3.9",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}

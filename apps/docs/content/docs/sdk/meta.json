@@ -1,0 +1,4 @@
+{
+  "title": "SDK",
+  "pages": ["index", "quickstart", "client", "sandbox", "sessions", "files", "artifacts", "streaming", "error-handling"]
+}

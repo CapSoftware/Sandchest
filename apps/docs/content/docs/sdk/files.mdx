@@ -1,0 +1,55 @@
+---
+title: File Operations
+description: Upload, download, list, and delete files in a sandbox.
+---
+
+File operations are available on the `sandbox.fs` namespace.
+
+## Upload a file
+
+```ts
+const content = new TextEncoder().encode('console.log("hello")')
+await sandbox.fs.upload('/work/index.js', content)
+```
+
+Files are uploaded as `Uint8Array`. Use `TextEncoder` for text content.
+
+## Upload a directory
+
+Upload a tar archive that gets extracted at the target path:
+
+```ts
+await sandbox.fs.uploadDir('/work', tarballBytes)
+```
+
+## Download a file
+
+```ts
+const bytes = await sandbox.fs.download('/work/output.json')
+const text = new TextDecoder().decode(bytes)
+const data = JSON.parse(text)
+```
+
+## List files
+
+```ts
+const entries = await sandbox.fs.ls('/work')
+for (const entry of entries) {
+  console.log(entry.name, entry.type, entry.size_bytes)
+}
+```
+
+Each entry has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | File or directory name |
+| `path` | `string` | Full path |
+| `type` | `'file' \| 'directory'` | Entry type |
+| `size_bytes` | `number` | Size in bytes |
+
+## Delete a file
+
+```ts
+await sandbox.fs.rm('/work/temp.txt')
+```

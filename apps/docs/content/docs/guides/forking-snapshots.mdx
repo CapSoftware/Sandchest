@@ -1,0 +1,53 @@
+---
+title: Forking & Snapshots
+description: How Firecracker copy-on-write forking works and when to use it.
+---
+
+Sandchest sandboxes can be forked — creating an instant, independent copy of the entire sandbox state including memory and filesystem.
+
+## How it works
+
+Fork uses Firecracker's snapshot capability with copy-on-write (CoW) semantics:
+
+1. The running VM's memory and disk are snapshotted
+2. A new VM is started from the snapshot
+3. Only changed pages are written to new storage
+4. The original sandbox is completely unaffected
+
+The result is a sub-second operation regardless of sandbox size.
+
+## Using fork
+
+```ts
+const sandbox = await sandchest.create()
+await sandbox.exec('git clone https://github.com/user/repo.git /work')
+await sandbox.exec('cd /work && npm install')
+
+// Fork preserves the entire state including installed packages
+const fork = await sandbox.fork()
+await fork.exec('cd /work && npm test') // runs with everything already installed
+```
+
+## When to fork
+
+| Scenario | Why fork |
+|----------|----------|
+| Risky operations | Try destructive commands without fear |
+| A/B testing | Compare two approaches side by side |
+| Checkpointing | Save expensive setup (clone + install) for reuse |
+| Parallel exploration | Run different strategies simultaneously |
+| Less than 80% confident | Fork first, experiment safely |
+
+## Fork tree
+
+Sandboxes track their fork lineage. You can inspect the fork tree:
+
+```ts
+const tree = await sandbox.forks()
+// tree.root — the root sandbox ID
+// tree.tree — array of fork nodes with parent references
+```
+
+## Cost
+
+Fork is cheap — it uses copy-on-write, so the only additional storage is for pages that differ from the parent. There is no performance penalty for forking.

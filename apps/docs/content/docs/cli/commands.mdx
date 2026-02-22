@@ -1,0 +1,165 @@
+---
+title: Commands Reference
+description: Complete reference for all Sandchest CLI commands.
+---
+
+## `sandchest auth`
+
+Manage authentication credentials.
+
+```bash
+sandchest auth login --key <api-key>  # Save API key
+sandchest auth logout                 # Remove saved key
+sandchest auth status                 # Show auth status
+```
+
+## `sandchest create`
+
+Create a new sandbox.
+
+```bash
+sandchest create [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-i, --image <image>` | Base image URI |
+| `-p, --profile <profile>` | Resource profile: `small`, `medium`, `large` |
+| `-e, --env <KEY=VALUE>` | Environment variable (repeatable) |
+| `--ttl <seconds>` | Time-to-live in seconds |
+| `--json` | JSON output |
+
+## `sandchest exec`
+
+Execute a command in a sandbox. Streams output by default.
+
+```bash
+sandchest exec <sandbox_id> <cmd>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--no-stream` | Wait for completion instead of streaming |
+| `--json` | JSON output |
+
+Exit code is propagated to the CLI process.
+
+## `sandchest ls`
+
+List sandboxes.
+
+```bash
+sandchest ls [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-s, --status <status>` | Filter by status |
+| `--json` | JSON output |
+
+## `sandchest stop`
+
+Gracefully stop a sandbox. Collects artifacts before shutdown.
+
+```bash
+sandchest stop <sandbox_id>
+```
+
+## `sandchest rm`
+
+Permanently destroy a sandbox. Prompts for confirmation.
+
+```bash
+sandchest rm <sandbox_id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Skip confirmation prompt |
+| `--json` | JSON output |
+
+## `sandchest ssh`
+
+Open an interactive shell session.
+
+```bash
+sandchest ssh <sandbox_id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--shell <shell>` | Shell to use (default: `/bin/bash`) |
+| `-e, --env <KEY=VALUE>` | Environment variable (repeatable) |
+
+Type `exit` or press `Ctrl+D` to end the session.
+
+## `sandchest fork`
+
+Fork a sandbox (instant copy of memory + filesystem).
+
+```bash
+sandchest fork <sandbox_id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `-e, --env <KEY=VALUE>` | Environment variable override (repeatable) |
+| `--ttl <seconds>` | Time-to-live for the fork |
+| `--json` | JSON output |
+
+## `sandchest replay`
+
+Show or open the replay URL for a sandbox.
+
+```bash
+sandchest replay <sandbox_id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--open` | Open the replay URL in a browser |
+| `--json` | JSON output |
+
+## `sandchest watch`
+
+Stream live output from a running execution.
+
+```bash
+sandchest watch <sandbox_id> <exec_id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output events as JSON lines |
+
+## `sandchest upload`
+
+Upload a local file to a sandbox.
+
+```bash
+sandchest upload <sandbox_id> <local_path> <remote_path>
+```
+
+## `sandchest download`
+
+Download a file from a sandbox.
+
+```bash
+sandchest download <sandbox_id> <remote_path> [local_path]
+```
+
+If `local_path` is omitted, the filename from the remote path is used.
+
+## `sandchest logs`
+
+List execution history for a sandbox.
+
+```bash
+sandchest logs <sandbox_id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `-s, --status <status>` | Filter by exec status |
+| `-n, --limit <count>` | Max number of results |
+| `--json` | JSON output |

@@ -1,0 +1,78 @@
+---
+title: Client
+description: The Sandchest client class — entry point for all SDK operations.
+---
+
+The `Sandchest` class is the main entry point. It manages authentication and provides methods to create, get, and list sandboxes.
+
+## Constructor
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest({
+  apiKey: 'sk_...', // default: process.env.SANDCHEST_API_KEY
+  baseUrl: 'https://api.sandchest.com', // default
+  timeout: 30_000, // request timeout in ms, default: 30s
+  retries: 3, // max retries on transient failures, default: 3
+})
+```
+
+If `apiKey` is not provided, the SDK reads from the `SANDCHEST_API_KEY` environment variable. An error is thrown if neither is set.
+
+## Methods
+
+### `create(options?)`
+
+Create a new sandbox. Polls until the sandbox is ready by default.
+
+```ts
+const sandbox = await sandchest.create({
+  image: 'sandchest://ubuntu-22.04/node-22',
+  profile: 'small', // 'small' | 'medium' | 'large'
+  env: { NODE_ENV: 'test' },
+  ttlSeconds: 3600,
+  waitReady: true, // default: true
+})
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `image` | `string` | `sandchest://ubuntu-22.04/base` | VM image URI |
+| `profile` | `'small' \| 'medium' \| 'large'` | `'small'` | Resource profile |
+| `env` | `Record<string, string>` | — | Environment variables |
+| `ttlSeconds` | `number` | — | Time-to-live in seconds |
+| `queueTimeoutSeconds` | `number` | — | Max time in queue |
+| `waitReady` | `boolean` | `true` | Poll until running |
+
+### `get(sandboxId)`
+
+Get an existing sandbox by ID.
+
+```ts
+const sandbox = await sandchest.get('sb_abc123')
+```
+
+### `list(options?)`
+
+List sandboxes with optional filters.
+
+```ts
+const sandboxes = await sandchest.list({
+  status: 'running',
+  image: 'sandchest://ubuntu-22.04/node-22',
+  limit: 10,
+})
+```
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `status` | `string` | Filter by status |
+| `image` | `string` | Filter by image |
+| `forkedFrom` | `string` | Filter by parent sandbox |
+| `cursor` | `string` | Pagination cursor |
+| `limit` | `number` | Max results |

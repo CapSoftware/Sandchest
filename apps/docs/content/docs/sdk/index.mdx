@@ -1,0 +1,34 @@
+---
+title: TypeScript SDK
+description: Official TypeScript SDK for the Sandchest API.
+---
+
+The `@sandchest/sdk` package provides a typed, ergonomic client for creating and managing Sandchest sandboxes from TypeScript and JavaScript.
+
+## Installation
+
+```bash
+bun add @sandchest/sdk
+```
+
+## Basic usage
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest() // uses SANDCHEST_API_KEY env var
+
+const sandbox = await sandchest.create()
+const result = await sandbox.exec('echo "Hello from a microVM"')
+console.log(result.stdout)
+
+await sandbox.stop()
+```
+
+## Features
+
+- **Full TypeScript types** — every method, option, and response is typed
+- **Automatic retries** — exponential backoff with jitter on transient failures
+- **Streaming** — real-time stdout/stderr via SSE or callbacks
+- **Resource management** — `Symbol.asyncDispose` support for automatic cleanup
+- **Structured errors** — typed error hierarchy with machine-readable codes

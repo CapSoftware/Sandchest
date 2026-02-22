@@ -1,0 +1,68 @@
+---
+title: Getting Started
+description: Install the Sandchest SDK and create your first sandbox in under five minutes.
+---
+
+# Getting Started
+
+This guide walks you through installing the SDK, configuring authentication, and running your first command inside a Sandchest sandbox.
+
+## Install the SDK
+
+```bash
+bun add @sandchest/sdk
+```
+
+Or with npm:
+
+```bash
+npm install @sandchest/sdk
+```
+
+## Set your API key
+
+Create an API key in the [Sandchest dashboard](https://sandchest.com/dashboard) and export it as an environment variable:
+
+```bash
+export SANDCHEST_API_KEY=sk_your_api_key_here
+```
+
+The SDK reads `SANDCHEST_API_KEY` automatically. You can also pass it explicitly when constructing the client.
+
+## Create and run a sandbox
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest()
+
+// Create a sandbox and wait for it to be ready
+const sandbox = await sandchest.create()
+
+// Execute a command
+const result = await sandbox.exec('echo "Hello from Sandchest!"')
+console.log(result.stdout) // "Hello from Sandchest!\n"
+console.log(result.exitCode) // 0
+
+// Clean up
+await sandbox.stop()
+```
+
+That is all it takes. The SDK handles polling for readiness, retry logic, and cleanup.
+
+## Using the CLI
+
+If you prefer working from the terminal, the Sandchest CLI provides the same capabilities:
+
+```bash
+bun add -g @sandchest/cli
+
+sandchest create
+sandchest exec <sandbox-id> -- echo "Hello from Sandchest!"
+sandchest stop <sandbox-id>
+```
+
+## Next steps
+
+- [Authentication](/docs/getting-started/authentication) -- Learn how API keys work and how to manage them securely.
+- [Your First Sandbox](/docs/getting-started/first-sandbox) -- A step-by-step tutorial covering execution, file operations, forking, and cleanup.

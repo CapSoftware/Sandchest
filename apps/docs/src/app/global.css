@@ -1,0 +1,36 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --fd-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --background: 0 9% 7%;
+  --foreground: 0 4% 71%;
+  --muted: 0 6% 10%;
+  --muted-foreground: 0 2% 49%;
+  --popover: 0 6% 10%;
+  --popover-foreground: 0 4% 71%;
+  --card: 0 6% 10%;
+  --card-foreground: 0 4% 71%;
+  --border: 0 4% 23%;
+  --input: 0 4% 23%;
+  --primary: 62 84% 88%;
+  --primary-foreground: 0 9% 7%;
+  --secondary: 0 6% 15%;
+  --secondary-foreground: 0 15% 94%;
+  --accent: 0 6% 15%;
+  --accent-foreground: 0 15% 94%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 62 84% 88%;
+  --radius: 0.5rem;
+}

@@ -1,0 +1,60 @@
+---
+title: Sessions
+description: Stateful shell sessions that persist working directory and environment between commands.
+---
+
+Sessions provide a persistent shell where commands share state. Each command inherits the working directory, environment variables, and other shell state from previous commands.
+
+## Creating a session
+
+```ts
+const session = await sandbox.session.create({
+  shell: '/bin/bash', // optional
+  env: { DEBUG: '1' }, // optional
+})
+```
+
+## Executing commands
+
+```ts
+await session.exec('cd /work')
+await session.exec('git clone https://github.com/user/repo.git')
+await session.exec('cd repo')
+const result = await session.exec('npm test')
+console.log(result.stdout)
+```
+
+Each command returns an `ExecResult`:
+
+```ts
+interface ExecResult {
+  execId: string
+  exitCode: number
+  stdout: string
+  stderr: string
+  durationMs: number
+}
+```
+
+You can set a timeout per command:
+
+```ts
+await session.exec('npm install', { timeout: 120 })
+```
+
+## Destroying a session
+
+```ts
+await session.destroy()
+```
+
+The sandbox itself is not affected when a session is destroyed.
+
+## When to use sessions vs exec
+
+| Use case | Approach |
+|----------|----------|
+| Independent commands | `sandbox.exec()` |
+| Multi-step workflow (cd, install, test) | Session |
+| Commands that set env vars for later use | Session |
+| Parallel commands | Multiple `sandbox.exec()` calls |

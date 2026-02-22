@@ -1,0 +1,37 @@
+---
+title: Error Codes
+description: API error response format and error code reference.
+---
+
+## Error response format
+
+All API errors return a JSON body with this structure:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "Sandbox sb_abc123 not found",
+    "request_id": "req_xyz789"
+  }
+}
+```
+
+## Error codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `bad_request` | 400 | Malformed request body or parameters |
+| `validation_error` | 400 | Request failed validation rules |
+| `unauthorized` | 401 | Missing or invalid API key |
+| `forbidden` | 403 | API key lacks required permissions |
+| `not_found` | 404 | Resource does not exist |
+| `conflict` | 409 | Resource is in an invalid state for the operation |
+| `sandbox_not_running` | 409 | Sandbox is not in running state |
+| `rate_limited` | 429 | Rate limit exceeded |
+| `internal_error` | 500 | Unexpected server error |
+| `service_unavailable` | 503 | Service temporarily unavailable |
+
+## Request IDs
+
+Every response includes an `x-request-id` header. Include this when reporting issues.

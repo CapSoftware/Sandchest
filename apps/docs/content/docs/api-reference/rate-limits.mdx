@@ -1,0 +1,40 @@
+---
+title: Rate Limits
+description: API rate limiting policies and headers.
+---
+
+Rate limits are enforced per organization using a token bucket algorithm.
+
+## Limits
+
+| Operation | Rate |
+|-----------|------|
+| Sandbox creation | 30 requests / minute |
+| Command execution | 120 requests / minute |
+| Read operations | 600 requests / minute |
+
+## Response headers
+
+Every response includes rate limit headers:
+
+| Header | Description |
+|--------|-------------|
+| `X-RateLimit-Limit` | Maximum requests allowed in the window |
+| `X-RateLimit-Remaining` | Requests remaining in the current window |
+| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+
+## Handling rate limits
+
+When you exceed the limit, the API returns HTTP 429 with a `Retry-After` header indicating how many seconds to wait:
+
+```json
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "Rate limit exceeded. Retry after 3 seconds.",
+    "request_id": "req_xyz789"
+  }
+}
+```
+
+The TypeScript SDK handles rate limit retries automatically using the `Retry-After` header.

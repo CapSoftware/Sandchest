@@ -1,0 +1,93 @@
+---
+title: Error Handling
+description: Structured error classes and handling patterns.
+---
+
+All SDK errors extend `SandchestError` and include a machine-readable `code`, HTTP `status`, and `requestId` for debugging.
+
+## Error hierarchy
+
+```
+SandchestError (base)
+├── NotFoundError          (404)
+├── RateLimitError         (429)
+├── SandboxNotRunningError (409)
+├── ValidationError        (400)
+├── AuthenticationError    (401)
+├── TimeoutError           (client-side)
+└── ConnectionError        (client-side)
+```
+
+## Catching errors
+
+```ts
+import {
+  SandchestError,
+  NotFoundError,
+  RateLimitError,
+} from '@sandchest/sdk'
+
+try {
+  const sandbox = await sandchest.get('sb_nonexistent')
+} catch (err) {
+  if (err instanceof NotFoundError) {
+    console.log('Sandbox not found:', err.message)
+    console.log('Request ID:', err.requestId)
+  } else if (err instanceof RateLimitError) {
+    console.log(`Rate limited. Retry after ${err.retryAfter}s`)
+  } else if (err instanceof SandchestError) {
+    console.log('API error:', err.code, err.status)
+  }
+}
+```
+
+## Error classes
+
+### `SandchestError`
+
+Base class for all errors. Properties: `code`, `message`, `status`, `requestId`.
+
+### `NotFoundError`
+
+Resource not found (HTTP 404). The sandbox, session, or file does not exist.
+
+### `RateLimitError`
+
+Rate limited (HTTP 429). Has a `retryAfter` property (seconds). The SDK retries automatically on rate limits.
+
+### `SandboxNotRunningError`
+
+The sandbox is not in a valid state for the operation (HTTP 409). For example, executing a command on a stopped sandbox.
+
+### `ValidationError`
+
+Invalid request parameters (HTTP 400).
+
+### `AuthenticationError`
+
+Missing or invalid API key (HTTP 401).
+
+### `TimeoutError`
+
+Request timed out before receiving a response. Has a `timeoutMs` property. Client-side only.
+
+### `ConnectionError`
+
+Could not connect to the server. Network-level failure. Client-side only. May have a `cause` property with the underlying error.
+
+## Error codes
+
+| Code | Description |
+|------|-------------|
+| `bad_request` | Invalid request |
+| `unauthorized` | Missing or invalid API key |
+| `forbidden` | Insufficient permissions |
+| `not_found` | Resource not found |
+| `conflict` | Invalid state for operation |
+| `rate_limited` | Rate limit exceeded |
+| `sandbox_not_running` | Sandbox not in running state |
+| `validation_error` | Parameter validation failed |
+| `internal_error` | Server error |
+| `service_unavailable` | Service temporarily unavailable |
+| `timeout` | Request timed out (client) |
+| `connection_error` | Network failure (client) |

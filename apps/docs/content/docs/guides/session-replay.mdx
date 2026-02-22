@@ -1,0 +1,48 @@
+---
+title: Session Replay
+description: How replay works and how to share replay links.
+---
+
+Every Sandchest sandbox gets a permanent replay URL that records everything that happened — every command, its output, and file changes.
+
+## How it works
+
+Events are recorded in real-time as commands execute in the sandbox:
+
+- Command input and arguments
+- Standard output and standard error
+- Exit codes and durations
+- File system changes
+- Session state transitions
+
+These events are stored durably and can be replayed at any time.
+
+## Accessing replays
+
+Every sandbox has a `replayUrl` property:
+
+```ts
+const sandbox = await sandchest.create()
+console.log(sandbox.replayUrl) // https://sandchest.com/replay/...
+```
+
+Via the CLI:
+
+```bash
+sandchest replay sb_abc123
+sandchest replay sb_abc123 --open  # opens in browser
+```
+
+## Replay persistence
+
+Replay URLs are permanent. They remain accessible after the sandbox is stopped or destroyed. You can share them freely — they are read-only views of what happened.
+
+## Use cases
+
+| Use case | How |
+|----------|-----|
+| Debugging | Share the replay URL in a bug report |
+| Code review | Link to the replay showing test runs |
+| Documentation | Embed replay links in guides |
+| Auditing | Review what an agent did in a sandbox |
+| Teaching | Share step-by-step command sequences |

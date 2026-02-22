@@ -1,0 +1,65 @@
+---
+title: MCP Server
+description: Model Context Protocol server for AI agent integration.
+---
+
+The `@sandchest/mcp` package is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents access to Sandchest sandboxes. It works with any MCP-compatible client including Claude, Cursor, and Windsurf.
+
+## Installation
+
+```bash
+bun add @sandchest/mcp
+```
+
+## Configuration
+
+The MCP server requires a `SANDCHEST_API_KEY` environment variable.
+
+### Claude Desktop
+
+Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "sandchest": {
+      "command": "bunx",
+      "args": ["@sandchest/mcp"],
+      "env": {
+        "SANDCHEST_API_KEY": "sk_your_api_key"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to your Cursor MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "sandchest": {
+      "command": "bunx",
+      "args": ["@sandchest/mcp"],
+      "env": {
+        "SANDCHEST_API_KEY": "sk_your_api_key"
+      }
+    }
+  }
+}
+```
+
+## What agents can do
+
+With the MCP server, AI agents can:
+
+- Create isolated sandboxes to run code safely
+- Execute commands and inspect results
+- Upload and download files
+- Fork sandboxes for experimentation
+- Use persistent sessions for multi-step workflows
+- Access replay URLs for sharing
+
+See the [Tools Reference](/docs/mcp/tools) for the complete list.

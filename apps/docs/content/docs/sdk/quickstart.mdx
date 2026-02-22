@@ -1,0 +1,92 @@
+---
+title: Quickstart
+description: Full walkthrough of the Sandchest TypeScript SDK.
+---
+
+This guide walks through the core SDK operations end-to-end.
+
+## Setup
+
+```bash
+bun add @sandchest/sdk
+```
+
+Set your API key:
+
+```bash
+export SANDCHEST_API_KEY=sk_your_key_here
+```
+
+## Create a sandbox
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest()
+
+const sandbox = await sandchest.create({
+  image: 'sandchest://ubuntu-22.04/node-22',
+  profile: 'medium', // 4 vCPU, 8 GB RAM
+})
+
+console.log(sandbox.id)        // sb_...
+console.log(sandbox.replayUrl) // https://sandchest.com/replay/...
+```
+
+## Execute commands
+
+```ts
+const result = await sandbox.exec('node --version')
+console.log(result.stdout) // v22.x.x
+console.log(result.exitCode) // 0
+```
+
+## Work with files
+
+```ts
+// Upload
+const content = new TextEncoder().encode('console.log("hello")')
+await sandbox.fs.upload('/work/index.js', content)
+
+// Run it
+await sandbox.exec('node /work/index.js')
+
+// Download
+const bytes = await sandbox.fs.download('/work/index.js')
+console.log(new TextDecoder().decode(bytes))
+
+// List directory
+const entries = await sandbox.fs.ls('/work')
+```
+
+## Stateful sessions
+
+```ts
+const session = await sandbox.session.create()
+await session.exec('cd /work')
+await session.exec('npm init -y')
+const result = await session.exec('cat package.json')
+console.log(result.stdout)
+await session.destroy()
+```
+
+## Fork a sandbox
+
+```ts
+const fork = await sandbox.fork()
+await fork.exec('rm -rf /work') // original is unaffected
+await fork.stop()
+```
+
+## Cleanup
+
+```ts
+await sandbox.stop() // graceful shutdown, collects artifacts
+```
+
+Or use automatic cleanup with `await using`:
+
+```ts
+await using sandbox = await sandchest.create()
+// sandbox.stop() is called automatically when the block exits
+```

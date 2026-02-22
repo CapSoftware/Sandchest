@@ -1,0 +1,65 @@
+---
+title: CLI
+description: Command-line interface for managing Sandchest sandboxes.
+---
+
+The Sandchest CLI lets you create, manage, and interact with sandboxes from your terminal.
+
+## Installation
+
+```bash
+bun add -g @sandchest/cli
+```
+
+Or run without installing:
+
+```bash
+bunx @sandchest/cli create
+```
+
+## Authentication
+
+Save your API key:
+
+```bash
+sandchest auth login --key sk_your_api_key
+```
+
+Or set the environment variable:
+
+```bash
+export SANDCHEST_API_KEY=sk_your_api_key
+```
+
+Check your auth status:
+
+```bash
+sandchest auth status
+```
+
+## Quick example
+
+```bash
+# Create a sandbox
+sandchest create --image sandchest://ubuntu-22.04/node-22
+
+# Execute a command
+sandchest exec sb_abc123 "node --version"
+
+# Open an interactive shell
+sandchest ssh sb_abc123
+
+# View the replay
+sandchest replay sb_abc123 --open
+
+# Stop the sandbox
+sandchest stop sb_abc123
+```
+
+## JSON output
+
+All commands support `--json` for machine-readable output:
+
+```bash
+sandchest create --json | jq .sandbox_id
+```

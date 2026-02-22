@@ -1,0 +1,82 @@
+---
+title: Authentication
+description: How to authenticate with the Sandchest API using API keys.
+---
+
+# Authentication
+
+All requests to the Sandchest API require authentication via an API key. Keys are scoped to an organization and carry the permissions you assign at creation time.
+
+## Creating an API key
+
+1. Sign in to the [Sandchest dashboard](https://sandchest.com/dashboard).
+2. Navigate to **Settings > API Keys**.
+3. Click **Create Key**, give it a name, and select the scopes you need.
+4. Copy the key immediately -- it is only shown once.
+
+API keys use the prefix `sk_` followed by a base62-encoded identifier.
+
+## Using your API key
+
+### Environment variable (recommended)
+
+Set the `SANDCHEST_API_KEY` environment variable. The SDK and CLI both read it automatically:
+
+```bash
+export SANDCHEST_API_KEY=sk_your_api_key_here
+```
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+// Reads SANDCHEST_API_KEY from the environment
+const sandchest = new Sandchest()
+```
+
+### Explicit option
+
+Pass the key directly when constructing the client:
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest({
+  apiKey: 'sk_your_api_key_here',
+})
+```
+
+This is useful when managing multiple keys or loading secrets from a vault at runtime.
+
+### HTTP header
+
+When calling the REST API directly, pass your key as a Bearer token in the `Authorization` header:
+
+```bash
+curl https://api.sandchest.com/v1/sandboxes \
+  -H "Authorization: Bearer sk_your_api_key_here"
+```
+
+## Security best practices
+
+- **Never commit API keys to source control.** Use environment variables or a secrets manager.
+- **Never expose keys in client-side code.** Sandchest API keys should only be used in server-side or backend environments.
+- **Rotate keys regularly.** You can create multiple keys per organization and revoke old ones from the dashboard.
+- **Use minimal scopes.** Assign only the permissions each key needs. A key that only creates sandboxes should not have delete permissions.
+- **Monitor usage.** The dashboard shows request counts and last-used timestamps for each key. Revoke any key you do not recognize.
+
+## Error handling
+
+If a request is made without a valid API key, the API returns a `401 Unauthorized` response. The SDK raises an `AuthenticationError`:
+
+```ts
+import { Sandchest, AuthenticationError } from '@sandchest/sdk'
+
+try {
+  const sandchest = new Sandchest({ apiKey: 'sk_invalid' })
+  await sandchest.create()
+} catch (err) {
+  if (err instanceof AuthenticationError) {
+    console.error('Invalid API key:', err.message)
+  }
+}
+```

@@ -1,0 +1,48 @@
+---
+title: Artifacts
+description: Register and retrieve build artifacts from a sandbox.
+---
+
+Artifacts are files explicitly marked for collection. They persist after the sandbox is stopped and include download URLs. Use artifacts for build outputs, test reports, coverage data, or any files you want to keep.
+
+## Register artifacts
+
+Mark files for collection by specifying their paths:
+
+```ts
+const result = await sandbox.artifacts.register([
+  '/work/dist/bundle.js',
+  '/work/coverage/lcov.info',
+])
+console.log(result.registered) // number of newly registered
+console.log(result.total)      // total registered artifacts
+```
+
+## List artifacts
+
+```ts
+const artifacts = await sandbox.artifacts.list()
+for (const artifact of artifacts) {
+  console.log(artifact.name)
+  console.log(artifact.download_url)
+  console.log(artifact.bytes)
+  console.log(artifact.sha256)
+}
+```
+
+Each artifact has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Artifact ID |
+| `name` | `string` | File name |
+| `mime` | `string` | MIME type |
+| `bytes` | `number` | File size |
+| `sha256` | `string` | Content hash |
+| `download_url` | `string` | Pre-signed download URL |
+| `exec_id` | `string` | Associated exec ID |
+| `created_at` | `string` | Creation timestamp |
+
+## Lifecycle
+
+Artifacts are collected when the sandbox is stopped via `sandbox.stop()`. They remain accessible after the sandbox is no longer running.

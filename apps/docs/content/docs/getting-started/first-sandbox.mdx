@@ -1,0 +1,227 @@
+---
+title: Your First Sandbox
+description: Step-by-step tutorial covering sandbox creation, command execution, file operations, forking, and cleanup.
+---
+
+# Your First Sandbox
+
+This tutorial walks through the full lifecycle of a Sandchest sandbox. By the end, you will have created a sandbox, executed commands, uploaded and downloaded files, forked the sandbox, and cleaned everything up.
+
+## Prerequisites
+
+- Node.js 18+ or Bun
+- A Sandchest API key (see [Authentication](/docs/getting-started/authentication))
+- `SANDCHEST_API_KEY` exported in your environment
+
+## Step 1: Install the SDK
+
+```bash
+bun add @sandchest/sdk
+```
+
+## Step 2: Create a sandbox
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest()
+
+const sandbox = await sandchest.create()
+console.log(`Sandbox created: ${sandbox.id}`)
+console.log(`Replay URL: ${sandbox.replayUrl}`)
+```
+
+`create()` provisions a Firecracker microVM and polls until it reaches the `running` state. You can customize the sandbox with options:
+
+```ts
+const sandbox = await sandchest.create({
+  image: 'python:3.12',
+  env: { NODE_ENV: 'production' },
+  ttlSeconds: 600, // auto-stop after 10 minutes
+})
+```
+
+## Step 3: Execute commands
+
+Run a command and get the result:
+
+```ts
+const result = await sandbox.exec('uname -a')
+console.log(result.stdout)    // Linux sandchest 6.1...
+console.log(result.exitCode)  // 0
+console.log(result.durationMs) // 12
+```
+
+Pass a command as an array to avoid shell interpretation:
+
+```ts
+const result = await sandbox.exec(['python3', '-c', 'print(2 ** 128)'])
+console.log(result.stdout) // 340282366920938463463374607431768211456
+```
+
+### Streaming output
+
+For long-running commands, stream stdout and stderr as they arrive:
+
+```ts
+const result = await sandbox.exec('apt-get update', {
+  onStdout: (data) => process.stdout.write(data),
+  onStderr: (data) => process.stderr.write(data),
+})
+```
+
+Or use the streaming API for full control:
+
+```ts
+const stream = await sandbox.exec('make build', { stream: true })
+
+for await (const event of stream) {
+  switch (event.t) {
+    case 'stdout':
+      process.stdout.write(event.data)
+      break
+    case 'stderr':
+      process.stderr.write(event.data)
+      break
+    case 'exit':
+      console.log(`Exited with code ${event.code}`)
+      break
+  }
+}
+```
+
+## Step 4: Upload and download files
+
+Upload a file into the sandbox:
+
+```ts
+const content = new TextEncoder().encode('print("hello from uploaded script")')
+await sandbox.fs.upload('/home/user/script.py', content)
+```
+
+Execute it:
+
+```ts
+const result = await sandbox.exec('python3 /home/user/script.py')
+console.log(result.stdout) // hello from uploaded script
+```
+
+Download a file from the sandbox:
+
+```ts
+const data = await sandbox.fs.download('/home/user/script.py')
+console.log(new TextDecoder().decode(data))
+```
+
+List files in a directory:
+
+```ts
+const files = await sandbox.fs.ls('/home/user')
+for (const file of files) {
+  console.log(`${file.name} (${file.size} bytes)`)
+}
+```
+
+## Step 5: Fork the sandbox
+
+Forking creates an instant copy of the sandbox's entire state -- memory, filesystem, and running processes. This is useful for branching execution paths without re-running setup.
+
+```ts
+const fork = await sandbox.fork()
+console.log(`Fork created: ${fork.id}`)
+
+// The fork is independent -- changes do not affect the original
+await fork.exec('rm -rf /home/user/script.py')
+
+// Original still has the file
+const original = await sandbox.exec('cat /home/user/script.py')
+console.log(original.exitCode) // 0
+```
+
+You can inspect the fork tree:
+
+```ts
+const tree = await sandbox.forks()
+console.log(tree)
+```
+
+## Step 6: Stop the sandbox
+
+When you are done, stop the sandbox to release resources:
+
+```ts
+await sandbox.stop()
+await fork.stop()
+```
+
+To hard-stop and immediately delete all data:
+
+```ts
+await sandbox.destroy()
+```
+
+## Auto-cleanup with `using`
+
+The SDK supports the [Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management) proposal. Use the `using` keyword and the sandbox will be stopped automatically when it goes out of scope:
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+const sandchest = new Sandchest()
+
+{
+  await using sandbox = await sandchest.create()
+
+  const result = await sandbox.exec('echo "auto-cleanup works"')
+  console.log(result.stdout)
+
+  // sandbox.stop() is called automatically at the end of this block
+}
+```
+
+This is the recommended pattern for scripts and short-lived tasks. It ensures sandboxes are always cleaned up, even if an error is thrown.
+
+## Full example
+
+Here is the complete tutorial as a single script:
+
+```ts
+import { Sandchest } from '@sandchest/sdk'
+
+async function main() {
+  const sandchest = new Sandchest()
+
+  // Create a sandbox
+  await using sandbox = await sandchest.create()
+  console.log(`Sandbox: ${sandbox.id}`)
+  console.log(`Replay:  ${sandbox.replayUrl}`)
+
+  // Execute a command
+  const hello = await sandbox.exec('echo "Hello, Sandchest!"')
+  console.log(hello.stdout)
+
+  // Upload and run a file
+  const script = new TextEncoder().encode('print("from uploaded script")')
+  await sandbox.fs.upload('/home/user/script.py', script)
+
+  const run = await sandbox.exec('python3 /home/user/script.py')
+  console.log(run.stdout)
+
+  // Fork the sandbox
+  await using fork = await sandbox.fork()
+  console.log(`Fork: ${fork.id}`)
+
+  const forkResult = await fork.exec('echo "I am the fork"')
+  console.log(forkResult.stdout)
+
+  // Both sandboxes are stopped automatically at the end of main()
+}
+
+main()
+```
+
+## Next steps
+
+- [SDK Reference](/docs/sdk) -- Explore the full API surface: sessions, streaming, artifacts, and error handling.
+- [API Reference](/docs/api-reference) -- Use the REST API directly for languages without an SDK.
+- [Guides](/docs/guides) -- Patterns for forking strategies, file management, and production usage.

@@ -1,0 +1,42 @@
+---
+title: Security & Isolation
+description: VM-grade isolation via Firecracker microVMs.
+---
+
+Sandchest provides VM-grade isolation for every sandbox. Each sandbox runs in its own Firecracker microVM — the same technology used by AWS Lambda and AWS Fargate.
+
+## Isolation model
+
+Unlike containers, which share the host kernel, each Sandchest sandbox runs in a **separate virtual machine** with its own:
+
+- Linux kernel
+- Memory space
+- Filesystem
+- Network namespace
+- Process tree
+
+There is no shared kernel surface between sandboxes.
+
+## Firecracker microVMs
+
+[Firecracker](https://firecracker-microvm.github.io/) is a virtual machine monitor (VMM) designed for running many lightweight VMs on a single host:
+
+- Minimal attack surface — stripped-down device model
+- Fast boot — VMs start in milliseconds
+- Memory-efficient — no overhead from running a full hypervisor
+- Proven — powers billions of AWS Lambda invocations
+
+## Network isolation
+
+Each sandbox has its own network namespace. Sandboxes cannot communicate with each other or with the host network directly. Outbound internet access is available for package installation and repository cloning.
+
+## Ephemeral by default
+
+Sandboxes are ephemeral. When stopped or destroyed, all data is removed. Only registered artifacts and replay data persist beyond the sandbox lifetime.
+
+## What this means for you
+
+- Run untrusted code safely — sandbox processes cannot escape the VM
+- No risk of cross-contamination between sandboxes
+- Full root access inside the sandbox without host risk
+- AI agents can execute arbitrary code without security concerns
