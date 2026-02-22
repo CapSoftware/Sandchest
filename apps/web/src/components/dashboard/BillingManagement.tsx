@@ -4,7 +4,7 @@ import { useAutumnCustomer } from '@/hooks/use-autumn-customer'
 import type { FeatureUsage } from '@/hooks/use-autumn-customer'
 import { useCustomer } from 'autumn-js/react'
 import { PricingTable } from 'autumn-js/react'
-import EmptyState from '@/components/ui/EmptyState'
+import { BillingSkeleton } from './skeletons'
 
 function UsageBar({ feature }: { feature: FeatureUsage }) {
   if (feature.unlimited) {
@@ -48,7 +48,7 @@ export default function BillingManagement() {
   const { openBillingPortal } = useCustomer()
 
   if (isLoading) {
-    return <EmptyState message="Loading billing information..." />
+    return <BillingSkeleton />
   }
 
   const activePlan =

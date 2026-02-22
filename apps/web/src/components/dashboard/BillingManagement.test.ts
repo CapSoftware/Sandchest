@@ -64,9 +64,9 @@ describe('BillingManagement component', () => {
     expect(src).toContain('pricing-table-wrapper')
   })
 
-  test('shows loading state via EmptyState', () => {
+  test('shows loading state via BillingSkeleton', () => {
     expect(src).toMatch(/isLoading/)
-    expect(src).toContain('Loading billing information...')
+    expect(src).toContain('BillingSkeleton')
   })
 
   test('does not use useEffect', () => {
