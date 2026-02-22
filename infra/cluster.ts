@@ -32,5 +32,9 @@ export function getServiceEnvironment(stage: string) {
     PORT: "3001",
     NODE_ENV: isProduction(stage) ? "production" : "development",
     DRAIN_TIMEOUT_MS: "30000",
+    BETTER_AUTH_BASE_URL: isProduction(stage)
+      ? "https://api.sandchest.com"
+      : `https://${stage}.api.sandchest.com`,
+    RESEND_FROM_EMAIL: "Sandchest Auth <noreply@send.sandchest.com>",
   };
 }

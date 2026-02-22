@@ -29,7 +29,9 @@ export default $config({
     );
 
     const databaseUrl = new sst.Secret("DatabaseUrl");
+    const betterAuthSecret = new sst.Secret("BetterAuthSecret");
     const resendApiKey = new sst.Secret("ResendApiKey");
+    const autumnSecretKey = new sst.Secret("AutumnSecretKey");
 
     const cluster = new sst.aws.Cluster("Cluster", { vpc });
     const api = cluster.addService("Api", {
@@ -44,7 +46,9 @@ export default $config({
         ...getServiceEnvironment($app.stage),
         REDIS_URL: $interpolate`redis://${redis.host}:${redis.port}`,
         DATABASE_URL: databaseUrl.value,
+        BETTER_AUTH_SECRET: betterAuthSecret.value,
         RESEND_API_KEY: resendApiKey.value,
+        AUTUMN_SECRET_KEY: autumnSecretKey.value,
       },
     });
 

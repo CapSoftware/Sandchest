@@ -2,6 +2,7 @@ import { HttpServer } from '@effect/platform'
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node'
 import { Duration, Effect, Layer } from 'effect'
 import { createServer } from 'node:http'
+import { loadEnv } from './env.js'
 import { ApiRouter } from './server.js'
 import { withAuth, withRequestId } from './middleware.js'
 import { withConnectionDrain } from './middleware/connection-drain.js'
@@ -26,9 +27,8 @@ import { startAllWorkers } from './workers/index.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownController, ShutdownControllerLive } from './shutdown.js'
 
-const PORT = Number(process.env.PORT ?? 3001)
-const REDIS_URL = process.env.REDIS_URL
-const DRAIN_TIMEOUT_MS = Number(process.env.DRAIN_TIMEOUT_MS ?? 30_000)
+const env = loadEnv()
+const { PORT, REDIS_URL, DRAIN_TIMEOUT_MS } = env
 
 // Production pipeline: connection drain is outermost so it gates all requests
 const AppLive = ApiRouter.pipe(

@@ -101,4 +101,28 @@ describe("getServiceEnvironment", () => {
     expect(getServiceEnvironment("dev").DRAIN_TIMEOUT_MS).toBe("30000");
     expect(getServiceEnvironment("production").DRAIN_TIMEOUT_MS).toBe("30000");
   });
+
+  test("sets production BETTER_AUTH_BASE_URL to api.sandchest.com", () => {
+    expect(getServiceEnvironment("production").BETTER_AUTH_BASE_URL).toBe(
+      "https://api.sandchest.com",
+    );
+  });
+
+  test("sets non-production BETTER_AUTH_BASE_URL with stage prefix", () => {
+    expect(getServiceEnvironment("dev").BETTER_AUTH_BASE_URL).toBe(
+      "https://dev.api.sandchest.com",
+    );
+    expect(getServiceEnvironment("staging").BETTER_AUTH_BASE_URL).toBe(
+      "https://staging.api.sandchest.com",
+    );
+  });
+
+  test("sets RESEND_FROM_EMAIL", () => {
+    expect(getServiceEnvironment("dev").RESEND_FROM_EMAIL).toBe(
+      "Sandchest Auth <noreply@send.sandchest.com>",
+    );
+    expect(getServiceEnvironment("production").RESEND_FROM_EMAIL).toBe(
+      "Sandchest Auth <noreply@send.sandchest.com>",
+    );
+  });
 });

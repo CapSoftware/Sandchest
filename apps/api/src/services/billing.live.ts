@@ -1,6 +1,7 @@
 import { Effect, Layer } from 'effect'
 import { Autumn } from 'autumn-js'
 import { BillingService, type BillingApi } from './billing.js'
+import { loadEnv } from '../env.js'
 
 export function createAutumnBillingApi(secretKey: string): BillingApi {
   const autumn = new Autumn({ secretKey })
@@ -41,7 +42,7 @@ export function createAutumnBillingApi(secretKey: string): BillingApi {
 }
 
 export const BillingLive = Layer.sync(BillingService, () => {
-  const secretKey = process.env.AUTUMN_SECRET_KEY
+  const secretKey = loadEnv().AUTUMN_SECRET_KEY
   if (!secretKey) {
     // Return a no-op implementation when Autumn is not configured
     return {
