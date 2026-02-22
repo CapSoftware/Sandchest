@@ -1635,9 +1635,6 @@ a:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.usage-overview-stat-value.loading {
-  color: var(--color-text-weak);
-}
 
 .usage-overview-bars {
   margin-top: 16px;
@@ -2760,4 +2757,59 @@ nav ul {
     border: 1px solid var(--color-border-weak);
     margin-top: 4px;
   }
+}
+
+/* ── Skeleton loading ── */
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skel {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-surface-hover) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 2s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.skel-nav-item {
+  height: 33px;
+  border-radius: 6px;
+}
+
+.skel-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.skel-org-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+}
+
+.skel-org-name {
+  height: 13px;
+  width: 100px;
+}
+
+.skel-user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.skel-user-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
