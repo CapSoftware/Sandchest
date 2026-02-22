@@ -1,0 +1,54 @@
+name: Test GitHub Action
+
+on:
+  pull_request:
+    paths:
+      - 'packages/github-action/**'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/github-action/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Validate action schema
+        run: bun test packages/github-action
+
+      - name: Verify action.yml is parseable
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('packages/github-action/action.yml') as f:
+              action = yaml.safe_load(f)
+          assert action['runs']['using'] == 'composite', 'Not a composite action'
+          assert 'api-key' in action['inputs'], 'Missing api-key input'
+          assert 'sandbox-id' in action['outputs'], 'Missing sandbox-id output'
+          assert 'replay-url' in action['outputs'], 'Missing replay-url output'
+          print('Action schema valid')
+          "
+
+      - name: Verify cleanup action is parseable
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('packages/github-action/cleanup/action.yml') as f:
+              action = yaml.safe_load(f)
+          assert action['runs']['using'] == 'composite', 'Not a composite action'
+          assert 'sandbox-id' in action['inputs'], 'Missing sandbox-id input'
+          assert 'api-key' in action['inputs'], 'Missing api-key input'
+          print('Cleanup action schema valid')
+          "

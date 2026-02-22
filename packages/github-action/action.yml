@@ -1,0 +1,78 @@
+name: 'Sandchest Sandbox'
+description: 'Provision a Sandchest sandbox for CI workflows with VM-grade isolation'
+author: 'Sandchest'
+
+branding:
+  icon: 'box'
+  color: 'orange'
+
+inputs:
+  api-key:
+    description: 'Sandchest API key'
+    required: true
+  image:
+    description: 'Base image for the sandbox'
+    required: false
+    default: 'ubuntu-22.04'
+  profile:
+    description: 'Resource profile (small, medium, large)'
+    required: false
+    default: 'small'
+  ttl:
+    description: 'Time-to-live in seconds'
+    required: false
+    default: '3600'
+  env:
+    description: 'Environment variables (multiline KEY=VALUE format)'
+    required: false
+    default: ''
+
+outputs:
+  sandbox-id:
+    description: 'The provisioned sandbox ID'
+    value: ${{ steps.create.outputs.sandbox-id }}
+  replay-url:
+    description: 'The replay URL for the session'
+    value: ${{ steps.create.outputs.replay-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Mask API key
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api-key }}
+      run: echo "::add-mask::$API_KEY"
+
+    - name: Install Sandchest CLI
+      shell: bash
+      run: npm install -g @sandchest/cli
+
+    - name: Create sandbox
+      id: create
+      shell: bash
+      env:
+        SANDCHEST_API_KEY: ${{ inputs.api-key }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_TTL: ${{ inputs.ttl }}
+        INPUT_ENV: ${{ inputs.env }}
+      run: |
+        ARGS=(--image "$INPUT_IMAGE" --profile "$INPUT_PROFILE" --ttl "$INPUT_TTL" --json)
+
+        if [ -n "$INPUT_ENV" ]; then
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+            ARGS+=(-e "$line")
+          done <<< "$INPUT_ENV"
+        fi
+
+        RESULT=$(sandchest create "${ARGS[@]}")
+
+        SANDBOX_ID=$(echo "$RESULT" | jq -r '.sandbox_id')
+        REPLAY_URL=$(echo "$RESULT" | jq -r '.replay_url')
+
+        echo "sandbox-id=$SANDBOX_ID" >> "$GITHUB_OUTPUT"
+        echo "replay-url=$REPLAY_URL" >> "$GITHUB_OUTPUT"
+
+        echo "::notice::Sandbox $SANDBOX_ID created — Replay: $REPLAY_URL"

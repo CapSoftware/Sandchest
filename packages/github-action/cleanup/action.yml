@@ -1,0 +1,32 @@
+name: 'Sandchest Cleanup'
+description: 'Stop and clean up a Sandchest sandbox after job completion'
+author: 'Sandchest'
+
+inputs:
+  sandbox-id:
+    description: 'Sandbox ID to stop'
+    required: true
+  api-key:
+    description: 'Sandchest API key'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Mask API key
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api-key }}
+      run: echo "::add-mask::$API_KEY"
+
+    - name: Install Sandchest CLI
+      shell: bash
+      run: command -v sandchest >/dev/null 2>&1 || npm install -g @sandchest/cli
+
+    - name: Stop sandbox
+      shell: bash
+      env:
+        SANDCHEST_API_KEY: ${{ inputs.api-key }}
+        SANDBOX_ID: ${{ inputs.sandbox-id }}
+      run: |
+        sandchest stop "$SANDBOX_ID" && echo "::notice::Sandbox $SANDBOX_ID stopped" || echo "::warning::Failed to stop sandbox $SANDBOX_ID"
