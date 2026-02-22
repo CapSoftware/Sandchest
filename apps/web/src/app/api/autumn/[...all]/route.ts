@@ -6,7 +6,7 @@ interface BetterAuthSession {
   user: { id: string; name: string; email: string }
 }
 
-export async function identify(request: Request) {
+async function identify(request: Request) {
   const cookie = request.headers.get('cookie')
   if (!cookie) return null
 
