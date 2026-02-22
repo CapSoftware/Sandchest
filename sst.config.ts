@@ -2,6 +2,14 @@
 
 import { getAppConfig } from "./infra/app";
 import { getBucketConfig } from "./infra/bucket";
+import {
+  getServiceCpu,
+  getServiceEnvironment,
+  getServiceHealthCheck,
+  getServiceMemory,
+  getServicePort,
+  getServiceScaling,
+} from "./infra/cluster";
 import { getRedisConfig } from "./infra/redis";
 import { getVpcConfig } from "./infra/vpc";
 
@@ -20,11 +28,32 @@ export default $config({
       getBucketConfig($app.stage),
     );
 
+    const databaseUrl = new sst.Secret("DatabaseUrl");
+    const resendApiKey = new sst.Secret("ResendApiKey");
+
+    const cluster = new sst.aws.Cluster("Cluster", { vpc });
+    const api = cluster.addService("Api", {
+      cpu: getServiceCpu($app.stage),
+      memory: getServiceMemory($app.stage),
+      scaling: getServiceScaling($app.stage),
+      health: getServiceHealthCheck(),
+      public: { ports: [getServicePort()] },
+      image: { dockerfile: "apps/api/Dockerfile", context: "." },
+      link: [redis, artifactBucket],
+      environment: {
+        ...getServiceEnvironment($app.stage),
+        REDIS_URL: $interpolate`redis://${redis.host}:${redis.port}`,
+        DATABASE_URL: databaseUrl.value,
+        RESEND_API_KEY: resendApiKey.value,
+      },
+    });
+
     return {
       vpcId: vpc.id,
       redisHost: redis.host,
       redisPort: redis.port,
       artifactBucketName: artifactBucket.name,
+      apiUrl: api.url,
     };
   },
 });
