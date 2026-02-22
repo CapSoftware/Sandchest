@@ -47,9 +47,9 @@ describe('UsageOverview component', () => {
     expect(src).toContain('warning')
   })
 
-  test('shows loading state with placeholder values', () => {
+  test('shows loading state with skeleton', () => {
     expect(src).toMatch(/isLoading/)
-    expect(src).toMatch(/loading/)
+    expect(src).toContain('UsageOverviewSkeleton')
   })
 
   test('flattens sandbox pages to get list', () => {

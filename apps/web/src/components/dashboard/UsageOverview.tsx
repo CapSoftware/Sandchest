@@ -3,6 +3,7 @@
 import { useAutumnCustomer } from '@/hooks/use-autumn-customer'
 import type { FeatureUsage } from '@/hooks/use-autumn-customer'
 import { useSandboxes } from '@/hooks/use-sandboxes'
+import { UsageOverviewSkeleton } from './skeletons'
 
 function UsageBar({ feature }: { feature: FeatureUsage }) {
   if (feature.unlimited) {
@@ -53,20 +54,7 @@ export default function UsageOverview() {
   const isLoading = billingLoading || sandboxesLoading
 
   if (isLoading) {
-    return (
-      <section className="usage-overview">
-        <div className="usage-overview-stats">
-          <div className="usage-overview-stat">
-            <span className="usage-overview-stat-label">Plan</span>
-            <span className="usage-overview-stat-value loading">—</span>
-          </div>
-          <div className="usage-overview-stat">
-            <span className="usage-overview-stat-label">Active Sandboxes</span>
-            <span className="usage-overview-stat-value loading">—</span>
-          </div>
-        </div>
-      </section>
-    )
+    return <UsageOverviewSkeleton />
   }
 
   return (
