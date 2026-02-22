@@ -17,6 +17,7 @@ import { NodeClient } from './services/node-client.js'
 import { ArtifactRepo } from './services/artifact-repo.js'
 import { RedisService } from './services/redis.js'
 import { QuotaService } from './services/quota.js'
+import { BillingService } from './services/billing.js'
 import { createInMemorySandboxRepo } from './services/sandbox-repo.memory.js'
 import { createInMemoryExecRepo } from './services/exec-repo.memory.js'
 import { createInMemorySessionRepo } from './services/session-repo.memory.js'
@@ -25,6 +26,7 @@ import { createInMemoryNodeClient } from './services/node-client.memory.js'
 import { createInMemoryRedisApi } from './services/redis.memory.js'
 import { createInMemoryArtifactRepo } from './services/artifact-repo.memory.js'
 import { createInMemoryQuotaApi } from './services/quota.memory.js'
+import { createInMemoryBillingApi } from './services/billing.memory.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
@@ -74,6 +76,7 @@ beforeAll(async () => {
   sandboxRepo = createInMemorySandboxRepo()
   const quotaApi = createInMemoryQuotaApi() as QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, number>) => void }
   quotaApi.setOrgQuota(TEST_ORG, { maxConcurrentSandboxes: 100 })
+  const billingApi = createInMemoryBillingApi()
 
   const TestApp = ApiRouter.pipe(
     withRateLimit,
@@ -92,6 +95,7 @@ beforeAll(async () => {
     Layer.succeed(ArtifactRepo, createInMemoryArtifactRepo()),
     Layer.succeed(RedisService, createInMemoryRedisApi()),
     Layer.succeed(QuotaService, quotaApi),
+    Layer.succeed(BillingService, billingApi),
   )
 
   const FullLayer = TestApp.pipe(

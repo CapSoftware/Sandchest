@@ -22,6 +22,7 @@ import {
   SandboxNotRunningError,
   ValidationError,
   ConflictError,
+  BillingLimitError,
 } from '../errors.js'
 import { AuthContext } from '../context.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
@@ -29,6 +30,7 @@ import { SessionRepo, type SessionRow } from '../services/session-repo.js'
 import { ExecRepo } from '../services/exec-repo.js'
 import { NodeClient } from '../services/node-client.js'
 import { RedisService } from '../services/redis.js'
+import { BillingService } from '../services/billing.js'
 
 const MAX_SESSIONS = 5
 const DEFAULT_SHELL = '/bin/bash'
@@ -147,8 +149,17 @@ const sessionExec = Effect.gen(function* () {
   const execRepo = yield* ExecRepo
   const nodeClient = yield* NodeClient
   const redis = yield* RedisService
+  const billing = yield* BillingService
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
+
+  // Billing: check exec access
+  const billingCheck = yield* billing.check(auth.userId, 'execs')
+  if (!billingCheck.allowed) {
+    return yield* Effect.fail(
+      new BillingLimitError({ message: 'Exec limit reached on your current plan' }),
+    )
+  }
 
   const sandboxIdBytes = yield* parseSandboxId(params.id)
   const sandboxIdStr = params.id!
@@ -223,6 +234,9 @@ const sessionExec = Effect.gen(function* () {
 
   // Async mode
   if (!wait) {
+    // Billing: track exec (fire-and-forget)
+    yield* billing.track(auth.userId, 'execs')
+
     return HttpServerResponse.unsafeJson(
       { exec_id: execIdStr, status: 'queued' },
       { status: 202 },
@@ -284,6 +298,9 @@ const sessionExec = Effect.gen(function* () {
     result.stderr.length > STDOUT_MAX_BYTES
       ? result.stderr.slice(0, STDOUT_MAX_BYTES)
       : result.stderr
+
+  // Billing: track exec (fire-and-forget)
+  yield* billing.track(auth.userId, 'execs')
 
   const response: SessionExecResponse = {
     exec_id: execIdStr,

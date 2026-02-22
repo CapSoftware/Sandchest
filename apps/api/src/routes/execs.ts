@@ -18,13 +18,14 @@ import type {
   ExecStreamEvent,
   Exec,
 } from '@sandchest/contract'
-import { NotFoundError, SandboxNotRunningError, ValidationError } from '../errors.js'
+import { NotFoundError, SandboxNotRunningError, ValidationError, BillingLimitError } from '../errors.js'
 import { AuthContext } from '../context.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
 import { NodeClient } from '../services/node-client.js'
 import { RedisService } from '../services/redis.js'
 import { QuotaService } from '../services/quota.js'
+import { BillingService } from '../services/billing.js'
 
 const VALID_STATUSES: ExecStatus[] = ['queued', 'running', 'done', 'failed', 'timed_out']
 const DEFAULT_TIMEOUT = 300
@@ -75,8 +76,17 @@ const execCommand = Effect.gen(function* () {
   const nodeClient = yield* NodeClient
   const redis = yield* RedisService
   const quotaService = yield* QuotaService
+  const billing = yield* BillingService
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
+
+  // Billing: check exec access
+  const billingCheck = yield* billing.check(auth.userId, 'execs')
+  if (!billingCheck.allowed) {
+    return yield* Effect.fail(
+      new BillingLimitError({ message: 'Exec limit reached on your current plan' }),
+    )
+  }
 
   const sandboxIdStr = params.id
   if (!sandboxIdStr) {
@@ -172,6 +182,9 @@ const execCommand = Effect.gen(function* () {
 
   // Async mode: return immediately
   if (!wait) {
+    // Billing: track exec (fire-and-forget)
+    yield* billing.track(auth.userId, 'execs')
+
     const response: ExecAsyncResponse = {
       exec_id: execIdStr,
       status: 'queued',
@@ -248,6 +261,9 @@ const execCommand = Effect.gen(function* () {
     result.stderr.length > STDOUT_MAX_BYTES
       ? result.stderr.slice(0, STDOUT_MAX_BYTES)
       : result.stderr
+
+  // Billing: track exec (fire-and-forget)
+  yield* billing.track(auth.userId, 'execs')
 
   const response: ExecSyncResponse = {
     exec_id: execIdStr,

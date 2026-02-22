@@ -47,6 +47,8 @@ import { NodeClient } from '../services/node-client.js'
 import { ArtifactRepo } from '../services/artifact-repo.js'
 import { RedisService } from '../services/redis.js'
 import { QuotaService } from '../services/quota.js'
+import { BillingService } from '../services/billing.js'
+import { BillingLimitError } from '../errors.js'
 import type { SandboxRow } from '../services/sandbox-repo.js'
 
 const VALID_PROFILES: ProfileName[] = ['small', 'medium', 'large']
@@ -113,7 +115,16 @@ const createSandbox = Effect.gen(function* () {
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
+  const billing = yield* BillingService
   const request = yield* HttpServerRequest.HttpServerRequest
+
+  // Billing: check sandbox creation access
+  const billingCheck = yield* billing.check(auth.userId, 'sandboxes')
+  if (!billingCheck.allowed) {
+    return yield* Effect.fail(
+      new BillingLimitError({ message: 'Sandbox creation limit reached on your current plan' }),
+    )
+  }
 
   const raw = yield* request.json.pipe(Effect.orElseSucceed(() => ({})))
   const body: CreateSandboxRequest =
@@ -186,6 +197,9 @@ const createSandbox = Effect.gen(function* () {
     replay_url: replayUrl(sandboxId),
     created_at: row.createdAt.toISOString(),
   }
+
+  // Billing: track sandbox creation (fire-and-forget)
+  yield* billing.track(auth.userId, 'sandboxes')
 
   return withReplayWarning(HttpServerResponse.unsafeJson(response, { status: 201 }))
 })
@@ -400,9 +414,18 @@ const forkSandbox = Effect.gen(function* () {
   const auth = yield* AuthContext
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
+  const billing = yield* BillingService
   const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
+
+  // Billing: check sandbox creation access (forks count as sandbox creation)
+  const billingCheck = yield* billing.check(auth.userId, 'sandboxes')
+  if (!billingCheck.allowed) {
+    return yield* Effect.fail(
+      new BillingLimitError({ message: 'Sandbox creation limit reached on your current plan' }),
+    )
+  }
 
   const id = params.id
   if (!id) {
@@ -503,6 +526,9 @@ const forkSandbox = Effect.gen(function* () {
     replay_url: replayUrl(sandboxId),
     created_at: forkRow.createdAt.toISOString(),
   }
+
+  // Billing: track fork as sandbox creation (fire-and-forget)
+  yield* billing.track(auth.userId, 'sandboxes')
 
   return withReplayWarning(HttpServerResponse.unsafeJson(response, { status: 201 }))
 })

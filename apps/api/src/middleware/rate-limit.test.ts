@@ -8,6 +8,7 @@ import { RedisMemory } from '../services/redis.memory.js'
 import { RedisService, type RedisApi } from '../services/redis.js'
 import { QuotaService } from '../services/quota.js'
 import { QuotaMemory, createInMemoryQuotaApi } from '../services/quota.memory.js'
+import { BillingMemory } from '../services/billing.memory.js'
 import { withRequestId } from '../middleware.js'
 
 const TEST_ORG = 'org_ratelimit_test'
@@ -37,6 +38,7 @@ const TestLayer = AppLive.pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(RedisMemory),
   Layer.provide(QuotaMemory),
+  Layer.provide(BillingMemory),
   Layer.provide(TestAuthLayer),
 )
 
@@ -168,6 +170,7 @@ describe('rate limit middleware', () => {
       Layer.provideMerge(NodeHttpServer.layerTest),
       Layer.provide(BrokenRedisLayer),
       Layer.provide(QuotaMemory),
+      Layer.provide(BillingMemory),
       Layer.provide(TestAuthLayer),
     )
 
@@ -194,6 +197,7 @@ describe('rate limit middleware', () => {
       Layer.provideMerge(NodeHttpServer.layerTest),
       Layer.provide(RedisMemory),
       Layer.provide(Layer.succeed(QuotaService, quotaApi)),
+      Layer.provide(BillingMemory),
       Layer.provide(TestAuthLayer),
     )
 

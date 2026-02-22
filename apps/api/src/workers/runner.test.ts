@@ -25,6 +25,8 @@ import { replayRetentionWorker, PURGED_SENTINEL } from './replay-retention.js'
 import { generateUUIDv7, base62Encode, bytesToId, SANDBOX_PREFIX } from '@sandchest/contract'
 import { QuotaService, type QuotaApi } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
+import { BillingService } from '../services/billing.js'
+import { createInMemoryBillingApi } from '../services/billing.memory.js'
 import type { WorkerDeps } from './index.js'
 
 let redis: RedisApi
@@ -54,6 +56,7 @@ beforeEach(() => {
   idempotencyApi = testable.api
   idempotencyStore = testable.store
   quotaApi = createInMemoryQuotaApi()
+  const billingApi = createInMemoryBillingApi()
 
   testLayer = Layer.mergeAll(
     Layer.succeed(RedisService, redis),
@@ -63,6 +66,7 @@ beforeEach(() => {
     Layer.succeed(EventRecorder, eventRecorder),
     Layer.succeed(IdempotencyRepo, idempotencyApi),
     Layer.succeed(QuotaService, quotaApi),
+    Layer.succeed(BillingService, billingApi),
   )
 })
 

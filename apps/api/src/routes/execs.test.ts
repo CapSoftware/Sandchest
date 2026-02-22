@@ -18,6 +18,8 @@ import { ArtifactRepo } from '../services/artifact-repo.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
 import { QuotaService } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
+import { BillingService } from '../services/billing.js'
+import { createInMemoryBillingApi } from '../services/billing.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 
@@ -32,6 +34,7 @@ function createTestEnv() {
   const redis = createInMemoryRedisApi()
   const artifactRepo = createInMemoryArtifactRepo()
   const quotaApi = createInMemoryQuotaApi()
+  const billingApi = createInMemoryBillingApi()
 
   const TestLayer = AppLive.pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -42,6 +45,7 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(RedisService, redis)),
     Layer.provide(Layer.succeed(ArtifactRepo, artifactRepo)),
     Layer.provide(Layer.succeed(QuotaService, quotaApi)),
+    Layer.provide(Layer.succeed(BillingService, billingApi)),
     Layer.provide(ShutdownControllerLive),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG }),
@@ -52,7 +56,7 @@ function createTestEnv() {
     return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
   }
 
-  return { runTest, sandboxRepo, quotaApi }
+  return { runTest, sandboxRepo, quotaApi, billingApi }
 }
 
 /** Helper: create a sandbox via HTTP and transition it to running. */

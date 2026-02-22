@@ -54,6 +54,10 @@ export class NotImplementedError extends Data.TaggedError('NotImplementedError')
   readonly message: string
 }> {}
 
+export class BillingLimitError extends Data.TaggedError('BillingLimitError')<{
+  readonly message: string
+}> {}
+
 export type ApiError =
   | NotFoundError
   | UnauthorizedError
@@ -68,6 +72,7 @@ export type ApiError =
   | QuotaExceededError
   | GoneError
   | NotImplementedError
+  | BillingLimitError
 
 const STATUS_MAP: Record<ApiError['_tag'], number> = {
   NotFoundError: 404,
@@ -83,6 +88,7 @@ const STATUS_MAP: Record<ApiError['_tag'], number> = {
   QuotaExceededError: 429,
   GoneError: 410,
   NotImplementedError: 501,
+  BillingLimitError: 403,
 }
 
 const CODE_MAP: Record<ApiError['_tag'], string> = {
@@ -99,6 +105,7 @@ const CODE_MAP: Record<ApiError['_tag'], string> = {
   QuotaExceededError: 'quota_exceeded',
   GoneError: 'gone',
   NotImplementedError: 'not_implemented',
+  BillingLimitError: 'billing_limit',
 }
 
 export function errorToResponse(error: ApiError, requestId: string) {
