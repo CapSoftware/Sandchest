@@ -2,17 +2,11 @@
   "root": true,
   "pages": [
     "index",
-    "---Getting Started---",
     "getting-started",
-    "---API Reference---",
     "api-reference",
-    "---SDK---",
     "sdk",
-    "---CLI---",
     "cli",
-    "---MCP---",
     "mcp",
-    "---Guides---",
     "guides"
   ]
 }
