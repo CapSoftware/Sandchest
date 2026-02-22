@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   getServiceCpu,
+  getServiceDomain,
   getServiceEnvironment,
-  getServiceHealthCheck,
+  getLoadBalancerHealthCheck,
   getServiceMemory,
-  getServicePort,
+  getServiceRules,
   getServiceScaling,
 } from "./cluster";
 
@@ -58,27 +59,51 @@ describe("getServiceScaling", () => {
   });
 });
 
-describe("getServiceHealthCheck", () => {
-  test("uses /healthz endpoint", () => {
-    expect(getServiceHealthCheck().path).toBe("/healthz");
+describe("getLoadBalancerHealthCheck", () => {
+  test("uses /healthz endpoint on 3001/http", () => {
+    const health = getLoadBalancerHealthCheck();
+    expect(health["3001/http"].path).toBe("/healthz");
   });
 
   test("checks every 15 seconds", () => {
-    expect(getServiceHealthCheck().interval).toBe("15 seconds");
+    const health = getLoadBalancerHealthCheck();
+    expect(health["3001/http"].interval).toBe("15 seconds");
   });
 
   test("times out after 5 seconds", () => {
-    expect(getServiceHealthCheck().timeout).toBe("5 seconds");
+    const health = getLoadBalancerHealthCheck();
+    expect(health["3001/http"].timeout).toBe("5 seconds");
   });
 });
 
-describe("getServicePort", () => {
-  test("listens on port 80 HTTP", () => {
-    expect(getServicePort().listen).toBe("80/http");
+describe("getServiceDomain", () => {
+  test("uses api.sandchest.com for production", () => {
+    expect(getServiceDomain("production")).toBe("api.sandchest.com");
   });
 
-  test("forwards to port 3001 HTTP", () => {
-    expect(getServicePort().forward).toBe("3001/http");
+  test("uses stage-prefixed domain for non-production", () => {
+    expect(getServiceDomain("dev")).toBe("dev.api.sandchest.com");
+    expect(getServiceDomain("staging")).toBe("staging.api.sandchest.com");
+  });
+});
+
+describe("getServiceRules", () => {
+  test("redirects HTTP to HTTPS", () => {
+    const rules = getServiceRules();
+    const redirect = rules.find((r) => "redirect" in r);
+    expect(redirect?.listen).toBe("80/http");
+    expect(redirect && "redirect" in redirect ? redirect.redirect : undefined).toBe("443/https");
+  });
+
+  test("forwards HTTPS to port 3001 HTTP", () => {
+    const rules = getServiceRules();
+    const forward = rules.find((r) => "forward" in r);
+    expect(forward?.listen).toBe("443/https");
+    expect(forward && "forward" in forward ? forward.forward : undefined).toBe("3001/http");
+  });
+
+  test("returns exactly 2 rules", () => {
+    expect(getServiceRules()).toHaveLength(2);
   });
 });
 
