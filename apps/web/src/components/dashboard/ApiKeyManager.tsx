@@ -8,6 +8,7 @@ import { usePaywall } from '@/components/dashboard/PaywallDialog'
 import CopyButton from '@/components/ui/CopyButton'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
+import { ApiKeysSkeleton } from './skeletons'
 
 export default function ApiKeyManager() {
   const { data: keys, isLoading, error } = useApiKeys()
@@ -39,6 +40,10 @@ export default function ApiKeyManager() {
   const mutationError = createKey.error ?? revokeKey.error
   const isBillingError =
     mutationError instanceof ApiError && mutationError.status === 403
+
+  if (isLoading) {
+    return <ApiKeysSkeleton />
+  }
 
   return (
     <div>
@@ -117,9 +122,7 @@ export default function ApiKeyManager() {
         </form>
       )}
 
-      {isLoading ? (
-        <EmptyState message="Loading API keys..." />
-      ) : !keys || keys.length === 0 ? (
+      {!keys || keys.length === 0 ? (
         <EmptyState message="No API keys yet. Create one to authenticate SDK and CLI requests." />
       ) : (
         <div className="dash-table-wrap">
