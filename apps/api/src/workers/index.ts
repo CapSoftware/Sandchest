@@ -2,9 +2,12 @@ import type { Scope } from 'effect'
 import type { RedisService } from '../services/redis.js'
 import type { SandboxRepo } from '../services/sandbox-repo.js'
 import type { ArtifactRepo } from '../services/artifact-repo.js'
+import type { ExecRepo } from '../services/exec-repo.js'
+import type { SessionRepo } from '../services/session-repo.js'
 import type { ObjectStorage } from '../services/object-storage.js'
 import type { QuotaService } from '../services/quota.js'
 import type { EventRecorder } from '../services/event-recorder.js'
+import type { OrgRepo } from '../services/org-repo.js'
 import type { IdempotencyRepo } from './idempotency-cleanup.js'
 import { startWorkers, type WorkerConfig } from './runner.js'
 import { ttlEnforcementWorker } from './ttl-enforcement.js'
@@ -21,9 +24,12 @@ export type WorkerDeps =
   | RedisService
   | SandboxRepo
   | ArtifactRepo
+  | ExecRepo
+  | SessionRepo
   | ObjectStorage
   | QuotaService
   | EventRecorder
+  | OrgRepo
   | IdempotencyRepo
 
 const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [

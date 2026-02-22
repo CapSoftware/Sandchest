@@ -75,6 +75,18 @@ export function createInMemorySessionRepo(): SessionRepoApi {
         store.set(key, updated)
         return updated
       }),
+
+    deleteByOrgId: (orgId) =>
+      Effect.sync(() => {
+        let deleted = 0
+        for (const [key, row] of store) {
+          if (row.orgId === orgId) {
+            store.delete(key)
+            deleted++
+          }
+        }
+        return deleted
+      }),
   }
 }
 

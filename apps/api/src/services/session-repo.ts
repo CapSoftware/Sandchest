@@ -46,6 +46,11 @@ export interface SessionRepoApi {
     sandboxId: Uint8Array,
     orgId: string,
   ) => Effect.Effect<SessionRow | null, never, never>
+
+  /** Hard-delete all sessions for an org. Returns count of deleted rows. */
+  readonly deleteByOrgId: (
+    orgId: string,
+  ) => Effect.Effect<number, never, never>
 }
 
 export class SessionRepo extends Context.Tag('SessionRepo')<SessionRepo, SessionRepoApi>() {}

@@ -100,6 +100,23 @@ export function createInMemoryArtifactRepo(): ArtifactRepoApi {
         }
         return deleted
       }),
+
+    findByOrgId: (orgId) =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter((r) => r.orgId === orgId),
+      ),
+
+    deleteByOrgId: (orgId) =>
+      Effect.sync(() => {
+        let deleted = 0
+        for (const [key, row] of store) {
+          if (row.orgId === orgId) {
+            store.delete(key)
+            deleted++
+          }
+        }
+        return deleted
+      }),
   }
 }
 

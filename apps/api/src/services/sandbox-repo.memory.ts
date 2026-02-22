@@ -347,6 +347,18 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
             r.replayExpiresAt.getTime() <= cutoff.getTime()
         }),
       ),
+
+    deleteByOrgId: (orgId) =>
+      Effect.sync(() => {
+        let deleted = 0
+        for (const [key, row] of store) {
+          if (row.orgId === orgId) {
+            store.delete(key)
+            deleted++
+          }
+        }
+        return deleted
+      }),
   }
 }
 

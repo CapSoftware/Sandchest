@@ -75,6 +75,11 @@ export interface ExecRepoApi {
   readonly nextSeq: (
     sandboxId: Uint8Array,
   ) => Effect.Effect<number, never, never>
+
+  /** Hard-delete all execs for an org. Returns count of deleted rows. */
+  readonly deleteByOrgId: (
+    orgId: string,
+  ) => Effect.Effect<number, never, never>
 }
 
 export class ExecRepo extends Context.Tag('ExecRepo')<ExecRepo, ExecRepoApi>() {}

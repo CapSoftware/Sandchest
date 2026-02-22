@@ -12,9 +12,11 @@ describe('phase 9 gap audit', () => {
     expect(src).not.toContain('Status::unimplemented')
   })
 
-  test('org-hard-delete worker is a stub', () => {
+  test('org-hard-delete worker has cascade deletion', () => {
     const src = readFileSync(resolve(ROOT, 'apps/api/src/workers/org-hard-delete.ts'), 'utf-8')
-    expect(src).toContain('Effect.succeed(0)')
+    expect(src).toContain('findSoftDeletedBefore')
+    expect(src).toContain('deleteByOrgId')
+    expect(src).not.toContain('Effect.succeed(0)')
   })
 
   test('lastActivityAt column exists in DB schema', () => {

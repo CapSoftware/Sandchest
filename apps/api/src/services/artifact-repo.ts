@@ -62,6 +62,16 @@ export interface ArtifactRepoApi {
   readonly deleteByIds: (
     ids: Uint8Array[],
   ) => Effect.Effect<number, never, never>
+
+  /** Find all artifacts for an org. Used by cascade deletion. */
+  readonly findByOrgId: (
+    orgId: string,
+  ) => Effect.Effect<ArtifactRow[], never, never>
+
+  /** Hard-delete all artifacts for an org. Returns count of deleted rows. */
+  readonly deleteByOrgId: (
+    orgId: string,
+  ) => Effect.Effect<number, never, never>
 }
 
 export class ArtifactRepo extends Context.Tag('ArtifactRepo')<ArtifactRepo, ArtifactRepoApi>() {}

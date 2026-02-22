@@ -2,14 +2,20 @@ import { Effect, Layer } from 'effect'
 import { describe, expect, test, beforeEach } from 'bun:test'
 import { createInMemoryRedisApi } from '../services/redis.memory.js'
 import { createInMemorySandboxRepo } from '../services/sandbox-repo.memory.js'
+import { createInMemoryExecRepo } from '../services/exec-repo.memory.js'
+import { createInMemorySessionRepo } from '../services/session-repo.memory.js'
 import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
 import { createInMemoryObjectStorage } from '../services/object-storage.memory.js'
+import { createInMemoryOrgRepo } from '../services/org-repo.memory.js'
 import { createLiveEventRecorder } from '../services/event-recorder.live.js'
 import { RedisService, type RedisApi } from '../services/redis.js'
 import { SandboxRepo, type SandboxRepoApi } from '../services/sandbox-repo.js'
+import { ExecRepo, type ExecRepoApi } from '../services/exec-repo.js'
+import { SessionRepo, type SessionRepoApi } from '../services/session-repo.js'
 import { ArtifactRepo, type ArtifactRepoApi } from '../services/artifact-repo.js'
 import { ObjectStorage, type ObjectStorageApi } from '../services/object-storage.js'
 import { EventRecorder, type EventRecorderApi } from '../services/event-recorder.js'
+import { OrgRepo, type OrgRepoApi } from '../services/org-repo.js'
 import { IdempotencyRepo, type IdempotencyRepoApi } from './idempotency-cleanup.js'
 import { createTestableIdempotencyRepo } from './idempotency-cleanup.memory.js'
 import { runWorkerTick, type WorkerConfig } from './runner.js'
@@ -31,11 +37,14 @@ import type { WorkerDeps } from './index.js'
 
 let redis: RedisApi
 let sandboxRepo: SandboxRepoApi
+let execRepo: ExecRepoApi
+let sessionRepo: SessionRepoApi
 let artifactRepo: ArtifactRepoApi
 let objectStorage: ObjectStorageApi
 let eventRecorder: EventRecorderApi
+let orgRepo: OrgRepoApi & { addDeletedOrg: (orgId: string, deletedAt: Date) => void }
 let idempotencyApi: IdempotencyRepoApi
-let idempotencyStore: Map<string, { createdAt: Date }>
+let idempotencyStore: Map<string, { createdAt: Date; orgId?: string | undefined }>
 let quotaApi: QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, unknown>) => void }
 let testLayer: Layer.Layer<WorkerDeps | RedisService>
 
@@ -49,8 +58,11 @@ const SEED_PROFILE_ID = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 beforeEach(() => {
   redis = createInMemoryRedisApi()
   sandboxRepo = createInMemorySandboxRepo()
+  execRepo = createInMemoryExecRepo()
+  sessionRepo = createInMemorySessionRepo()
   artifactRepo = createInMemoryArtifactRepo()
   objectStorage = createInMemoryObjectStorage()
+  orgRepo = createInMemoryOrgRepo()
   eventRecorder = createLiveEventRecorder(objectStorage, redis)
   const testable = createTestableIdempotencyRepo()
   idempotencyApi = testable.api
@@ -61,9 +73,12 @@ beforeEach(() => {
   testLayer = Layer.mergeAll(
     Layer.succeed(RedisService, redis),
     Layer.succeed(SandboxRepo, sandboxRepo),
+    Layer.succeed(ExecRepo, execRepo),
+    Layer.succeed(SessionRepo, sessionRepo),
     Layer.succeed(ArtifactRepo, artifactRepo),
     Layer.succeed(ObjectStorage, objectStorage),
     Layer.succeed(EventRecorder, eventRecorder),
+    Layer.succeed(OrgRepo, orgRepo),
     Layer.succeed(IdempotencyRepo, idempotencyApi),
     Layer.succeed(QuotaService, quotaApi),
     Layer.succeed(BillingService, billingApi),
@@ -556,9 +571,295 @@ describe('artifact-retention', () => {
 // ---------------------------------------------------------------------------
 
 describe('org-hard-delete', () => {
-  test('returns 0 (stub)', async () => {
+  const DELETED_ORG = 'org_deleted'
+  const THIRTY_ONE_DAYS_AGO = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+
+  test('returns 0 when no soft-deleted orgs exist', async () => {
     const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
     expect(count).toBe(0)
+  })
+
+  test('returns 0 when soft-deleted orgs are within retention period', async () => {
+    // Deleted 10 days ago — still within 30-day retention
+    orgRepo.addDeletedOrg(DELETED_ORG, new Date(Date.now() - 10 * 24 * 60 * 60 * 1000))
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('deletes all sandboxes for a soft-deleted org', async () => {
+    orgRepo.addDeletedOrg(DELETED_ORG, THIRTY_ONE_DAYS_AGO)
+
+    const sbId = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sbId,
+        orgId: DELETED_ORG,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const sb = await Effect.runPromise(sandboxRepo.findById(sbId, DELETED_ORG))
+    expect(sb).toBeNull()
+  })
+
+  test('deletes execs and sessions for a soft-deleted org', async () => {
+    orgRepo.addDeletedOrg(DELETED_ORG, THIRTY_ONE_DAYS_AGO)
+
+    const sbId = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sbId,
+        orgId: DELETED_ORG,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+
+    const execId = generateUUIDv7()
+    await Effect.runPromise(
+      execRepo.create({
+        id: execId,
+        sandboxId: sbId,
+        orgId: DELETED_ORG,
+        seq: 1,
+        cmd: 'echo hello',
+        cmdFormat: 'shell',
+      }),
+    )
+
+    const sessId = generateUUIDv7()
+    await Effect.runPromise(
+      sessionRepo.create({
+        id: sessId,
+        sandboxId: sbId,
+        orgId: DELETED_ORG,
+        shell: '/bin/bash',
+      }),
+    )
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const exec = await Effect.runPromise(execRepo.findById(execId, sbId, DELETED_ORG))
+    expect(exec).toBeNull()
+
+    const sess = await Effect.runPromise(sessionRepo.findById(sessId, sbId, DELETED_ORG))
+    expect(sess).toBeNull()
+  })
+
+  test('deletes artifacts and their S3 objects', async () => {
+    orgRepo.addDeletedOrg(DELETED_ORG, THIRTY_ONE_DAYS_AGO)
+
+    const sbId = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sbId,
+        orgId: DELETED_ORG,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+
+    const artId = generateUUIDv7()
+    const ref = `${DELETED_ORG}/sb_test/artifacts/output.txt`
+    await Effect.runPromise(objectStorage.putObject(ref, 'artifact data'))
+    await Effect.runPromise(
+      artifactRepo.create({
+        id: artId,
+        sandboxId: sbId,
+        orgId: DELETED_ORG,
+        name: 'output.txt',
+        mime: 'text/plain',
+        bytes: 13,
+        sha256: 'abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234',
+        ref,
+      }),
+    )
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    // Artifact S3 object should be deleted
+    const obj = await Effect.runPromise(objectStorage.getObject(ref))
+    expect(obj).toBeNull()
+
+    // Artifact DB row should be deleted
+    const art = await Effect.runPromise(artifactRepo.findById(artId, sbId, DELETED_ORG))
+    expect(art).toBeNull()
+  })
+
+  test('deletes idempotency keys for a soft-deleted org', async () => {
+    orgRepo.addDeletedOrg(DELETED_ORG, THIRTY_ONE_DAYS_AGO)
+
+    idempotencyStore.set('idem-1', { createdAt: new Date(), orgId: DELETED_ORG })
+    idempotencyStore.set('idem-2', { createdAt: new Date(), orgId: DELETED_ORG })
+    idempotencyStore.set('idem-other', { createdAt: new Date(), orgId: 'org_other' })
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    expect(idempotencyStore.size).toBe(1)
+    expect(idempotencyStore.has('idem-other')).toBe(true)
+  })
+
+  test('does not delete data belonging to other orgs', async () => {
+    orgRepo.addDeletedOrg(DELETED_ORG, THIRTY_ONE_DAYS_AGO)
+
+    const otherOrg = 'org_active'
+    const otherId = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: otherId,
+        orgId: otherOrg,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+
+    const deletedSbId = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: deletedSbId,
+        orgId: DELETED_ORG,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+
+    await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+
+    // Other org's sandbox should still exist
+    const other = await Effect.runPromise(sandboxRepo.findById(otherId, otherOrg))
+    expect(other).not.toBeNull()
+
+    // Deleted org's sandbox should be gone
+    const deleted = await Effect.runPromise(sandboxRepo.findById(deletedSbId, DELETED_ORG))
+    expect(deleted).toBeNull()
+  })
+
+  test('handles multiple soft-deleted orgs in one tick', async () => {
+    const org1 = 'org_gone_1'
+    const org2 = 'org_gone_2'
+    orgRepo.addDeletedOrg(org1, THIRTY_ONE_DAYS_AGO)
+    orgRepo.addDeletedOrg(org2, THIRTY_ONE_DAYS_AGO)
+
+    for (const orgId of [org1, org2]) {
+      const sbId = generateUUIDv7()
+      await Effect.runPromise(
+        sandboxRepo.create({
+          id: sbId,
+          orgId,
+          imageId: SEED_IMAGE_ID,
+          profileId: SEED_PROFILE_ID,
+          profileName: 'small',
+          env: null,
+          ttlSeconds: 3600,
+          imageRef: 'sandchest://ubuntu-22.04',
+        }),
+      )
+    }
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(2)
+  })
+
+  test('full cascade deletes all entity types', async () => {
+    orgRepo.addDeletedOrg(DELETED_ORG, THIRTY_ONE_DAYS_AGO)
+
+    // Create sandbox
+    const sbId = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sbId,
+        orgId: DELETED_ORG,
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+
+    // Create exec
+    const execId = generateUUIDv7()
+    await Effect.runPromise(
+      execRepo.create({
+        id: execId,
+        sandboxId: sbId,
+        orgId: DELETED_ORG,
+        seq: 1,
+        cmd: 'ls',
+        cmdFormat: 'shell',
+      }),
+    )
+
+    // Create session
+    const sessId = generateUUIDv7()
+    await Effect.runPromise(
+      sessionRepo.create({
+        id: sessId,
+        sandboxId: sbId,
+        orgId: DELETED_ORG,
+        shell: '/bin/bash',
+      }),
+    )
+
+    // Create artifact with S3 object
+    const artId = generateUUIDv7()
+    const ref = `${DELETED_ORG}/sb/artifacts/file.bin`
+    await Effect.runPromise(objectStorage.putObject(ref, 'data'))
+    await Effect.runPromise(
+      artifactRepo.create({
+        id: artId,
+        sandboxId: sbId,
+        orgId: DELETED_ORG,
+        name: 'file.bin',
+        mime: 'application/octet-stream',
+        bytes: 4,
+        sha256: 'abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234',
+        ref,
+      }),
+    )
+
+    // Create idempotency key
+    idempotencyStore.set('full-cascade-key', { createdAt: new Date(), orgId: DELETED_ORG })
+
+    const count = await run(runWorkerTick(orgHardDeleteWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    // Verify everything is deleted
+    expect(await Effect.runPromise(sandboxRepo.findById(sbId, DELETED_ORG))).toBeNull()
+    expect(await Effect.runPromise(execRepo.findById(execId, sbId, DELETED_ORG))).toBeNull()
+    expect(await Effect.runPromise(sessionRepo.findById(sessId, sbId, DELETED_ORG))).toBeNull()
+    expect(await Effect.runPromise(artifactRepo.findById(artId, sbId, DELETED_ORG))).toBeNull()
+    expect(await Effect.runPromise(objectStorage.getObject(ref))).toBeNull()
+    expect(idempotencyStore.has('full-cascade-key')).toBe(false)
   })
 })
 

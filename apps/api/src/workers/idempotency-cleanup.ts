@@ -8,6 +8,11 @@ export interface IdempotencyRepoApi {
   readonly deleteOlderThan: (
     cutoff: Date,
   ) => Effect.Effect<number, never, never>
+
+  /** Hard-delete all idempotency keys for an org. Returns count deleted. */
+  readonly deleteByOrgId: (
+    orgId: string,
+  ) => Effect.Effect<number, never, never>
 }
 
 export class IdempotencyRepo extends Context.Tag('IdempotencyRepo')<

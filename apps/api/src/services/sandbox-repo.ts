@@ -168,6 +168,11 @@ export interface SandboxRepoApi {
     cutoff: Date,
     minDate: Date,
   ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Hard-delete all sandboxes for an org. Returns count of deleted rows. */
+  readonly deleteByOrgId: (
+    orgId: string,
+  ) => Effect.Effect<number, never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}
