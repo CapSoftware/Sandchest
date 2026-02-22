@@ -31,8 +31,10 @@ Sandchest is built around **forkable VMs**. An agent can set up an environment, 
 - **Sub-100ms VM forking** - fork a running sandbox's full state (memory + disk)
 - **VM-grade isolation** - every sandbox is a real virtual machine, not a container
 - **TypeScript SDK** - `@sandchest/sdk` with a simple, modern API
+- **Python SDK** - `sandchest` on PyPI with full feature parity
 - **CLI** - `sandchest create`, `sandchest exec`, `sandchest fork`, `sandchest ssh`
 - **MCP server** - `@sandchest/mcp` for Claude Code and other AI tools
+- **GitHub Action** - provision sandboxes in CI/CD workflows
 - **Session replay** - every sandbox session is fully replayable (logs, actions, file changes) from the dashboard or as full context for agents in the CLI
 
 ## Quick start
@@ -61,14 +63,17 @@ if (result.exitCode !== 0) {
 ## Project structure
 
 ```
-apps/api          — Control plane API (EffectTS)
-apps/web          — Replay page (Astro)
-packages/sdk-ts   — TypeScript SDK
-packages/mcp      — MCP server
-packages/cli      — CLI tool
-packages/contract — Shared types + protobuf definitions
-packages/db       — Database schema + migrations
-crates/           — Rust node daemon + guest agent
+apps/api            — Control plane API (EffectTS)
+apps/web            — Dashboard + replay page (Next.js 15)
+apps/docs           — Documentation site (Fumadocs)
+packages/sdk-ts     — TypeScript SDK (@sandchest/sdk)
+packages/sdk-py     — Python SDK (sandchest)
+packages/mcp        — MCP server (@sandchest/mcp)
+packages/cli        — CLI tool (sandchest)
+packages/contract   — Shared types + protobuf definitions
+packages/db         — Database schema + migrations (Drizzle)
+packages/github-action — GitHub Action for CI/CD
+crates/             — Rust node daemon + guest agent
 ```
 
 ## Development

@@ -922,10 +922,10 @@ describe('GET /v1/sandboxes/:id/forks — get fork tree', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Route stubs (remaining endpoints)
+// Session routes
 // ---------------------------------------------------------------------------
 
-describe('Route stubs', () => {
+describe('Session routes', () => {
   test('POST /v1/sandboxes/:id/sessions returns 404 for unknown sandbox', async () => {
     const result = await runTest(
       Effect.gen(function* () {

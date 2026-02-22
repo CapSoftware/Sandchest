@@ -36,6 +36,14 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# Lock files (project uses bun)
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Next.js generated
+next-env.d.ts
+
 # Logs
 *.log
 
