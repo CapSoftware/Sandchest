@@ -9,6 +9,7 @@ import {
 } from '@/hooks/use-org-settings'
 import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
+import { SettingsSkeleton } from './skeletons'
 
 export default function OrgSettings() {
   const { data, isLoading, error } = useOrgSettings()
@@ -61,7 +62,7 @@ export default function OrgSettings() {
   }
 
   if (isLoading) {
-    return <EmptyState message="Loading organization settings..." />
+    return <SettingsSkeleton />
   }
 
   if (!org) {
