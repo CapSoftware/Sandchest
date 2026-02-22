@@ -434,13 +434,16 @@ function createMockServer() {
         const paths = artifacts.get(sb.sandbox_id) ?? []
         return json({
           artifacts: paths.map((p, i) => ({
-            artifact_id: `art_${i}`,
-            sandbox_id: sb.sandbox_id,
-            path: p,
-            size: 0,
+            id: `art_${i}`,
+            name: p,
+            mime: 'application/octet-stream',
+            bytes: 0,
             sha256: 'mock',
+            download_url: `https://example.com/artifacts/art_${i}`,
+            exec_id: null,
             created_at: new Date().toISOString(),
           })),
+          next_cursor: null,
         })
       }
 
@@ -692,8 +695,8 @@ describe('SDK E2E: artifacts', () => {
 
     const listed = await sandbox.artifacts.list()
     expect(listed.length).toBe(2)
-    expect(listed[0]!.path).toBe('/output/result.json')
-    expect(listed[1]!.path).toBe('/output/log.txt')
+    expect(listed[0]!.name).toBe('/output/result.json')
+    expect(listed[1]!.name).toBe('/output/log.txt')
   })
 
   test('registering duplicates is idempotent', async () => {
