@@ -33,12 +33,14 @@ export default function VerifyOtpForm() {
     inputRefs.current[0]?.focus()
   }, [email])
 
+  const redirectTo = type === 'sign-up' ? '/onboarding' : '/dashboard'
+
   function verify(code: string) {
     verifyOtp.mutate(
       { email, otp: code, type: otpType },
       {
         onSuccess() {
-          window.location.href = '/dashboard'
+          window.location.href = redirectTo
         },
         onError() {
           setDigits(Array(OTP_LENGTH).fill(''))

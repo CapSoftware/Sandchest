@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server'
 
 const AUTH_COOKIE = 'better-auth.session_token'
 
-const PROTECTED_PREFIXES = ['/dashboard']
+const PROTECTED_PREFIXES = ['/dashboard', '/onboarding']
 const AUTH_PAGES = ['/login', '/signup', '/verify']
 
 function hasSessionCookie(request: NextRequest): boolean {
@@ -36,5 +36,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/login', '/signup', '/verify'],
+  matcher: ['/dashboard/:path*', '/onboarding', '/login', '/signup', '/verify'],
 }

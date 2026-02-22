@@ -36,6 +36,17 @@ describe('auth middleware', () => {
       const res = middleware(makeRequest('/dashboard/settings', SESSION_COOKIE))
       expect(res.status).toBe(200)
     })
+
+    test('redirects unauthenticated users from /onboarding to /login', () => {
+      const res = middleware(makeRequest('/onboarding'))
+      expect(res.status).toBe(307)
+      expect(new URL(res.headers.get('location')!).pathname).toBe('/login')
+    })
+
+    test('allows authenticated users to access /onboarding', () => {
+      const res = middleware(makeRequest('/onboarding', SESSION_COOKIE))
+      expect(res.status).toBe(200)
+    })
   })
 
   describe('auth pages', () => {
@@ -76,6 +87,10 @@ describe('auth middleware', () => {
   describe('matcher config', () => {
     test('includes dashboard routes', () => {
       expect(config.matcher).toContain('/dashboard/:path*')
+    })
+
+    test('includes onboarding route', () => {
+      expect(config.matcher).toContain('/onboarding')
     })
 
     test('includes auth pages', () => {

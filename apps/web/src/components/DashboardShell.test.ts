@@ -42,6 +42,11 @@ describe('DashboardShell component', () => {
     expect(src).toMatch(/dash-mobile-menu/)
   })
 
+  test('redirects to onboarding when user has no orgs', () => {
+    expect(src).toMatch(/needsOnboarding/)
+    expect(src).toMatch(/router\.replace\(['"]\/onboarding['"]\)/)
+  })
+
   test('does not use console.log', () => {
     expect(src).not.toMatch(/console\.log/)
   })

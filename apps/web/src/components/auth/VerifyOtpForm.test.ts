@@ -67,8 +67,10 @@ describe('VerifyOtpForm component', () => {
     expect(src).toMatch(/resendOtp\.isSuccess/)
   })
 
-  test('redirects to dashboard on successful verify', () => {
-    expect(src).toMatch(/window\.location\.href\s*=\s*['"]\/dashboard['"]/)
+  test('redirects sign-ups to onboarding and sign-ins to dashboard', () => {
+    expect(src).toMatch(/sign-up.*\/onboarding|\/onboarding.*sign-up/)
+    expect(src).toMatch(/\/dashboard/)
+    expect(src).toMatch(/redirectTo/)
   })
 
   test('renders 6 OTP digit inputs', () => {

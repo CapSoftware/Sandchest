@@ -166,8 +166,17 @@ function UserMenu() {
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const active = getActiveId(pathname)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const { data: orgs, isPending: orgsLoading } = useOrgs()
+
+  // Redirect to onboarding if user has no organizations
+  const needsOnboarding = !orgsLoading && orgs && orgs.length === 0
+  if (needsOnboarding) {
+    router.replace('/onboarding')
+    return null
+  }
 
   return (
     <div className="dash">
