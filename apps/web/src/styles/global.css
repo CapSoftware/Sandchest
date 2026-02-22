@@ -1599,6 +1599,36 @@ a:hover {
   }
 }
 
+/* ── Pricing table (Autumn overrides) ── */
+.pricing-table-wrapper {
+  max-width: 960px;
+  margin: 0 auto;
+  --au-background: 0 9% 7%;
+  --au-foreground: 0 4% 71%;
+  --au-card: 0 6% 10%;
+  --au-card-foreground: 0 15% 94%;
+  --au-popover: 0 6% 10%;
+  --au-popover-foreground: 0 15% 94%;
+  --au-primary: 0 15% 94%;
+  --au-primary-foreground: 0 9% 7%;
+  --au-secondary: 0 6% 15%;
+  --au-secondary-foreground: 0 15% 94%;
+  --au-muted: 0 6% 15%;
+  --au-muted-foreground: 0 2% 49%;
+  --au-accent: 62 84% 88%;
+  --au-accent-foreground: 0 9% 7%;
+  --au-destructive: 0 70% 60%;
+  --au-destructive-foreground: 0 15% 94%;
+  --au-border: 0 4% 23%;
+  --au-input: 0 4% 23%;
+  --au-ring: 62 84% 88%;
+  --au-radius: 0.375rem;
+}
+
+.pricing-table-wrapper .au-root {
+  font-family: var(--font-mono);
+}
+
 /* ── Footer ── */
 .footer-link:hover {
   text-decoration: underline;

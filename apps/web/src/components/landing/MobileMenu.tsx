@@ -47,6 +47,9 @@ export default function MobileMenu() {
             <a href="#code" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
               See it in action
             </a>
+            <a href="/pricing" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
+              Pricing
+            </a>
             <a
               href="https://github.com/sandchest"
               target="_blank"

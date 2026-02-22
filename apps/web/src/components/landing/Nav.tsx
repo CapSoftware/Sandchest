@@ -21,6 +21,11 @@ export default function Nav() {
               See it in action
             </a>
           </li>
+          <li>
+            <a href="/pricing" className="text-text-weak transition-colors hover:text-text-strong">
+              Pricing
+            </a>
+          </li>
           <li className="star-item">
             <a
               href="https://github.com/sandchest"
