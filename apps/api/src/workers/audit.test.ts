@@ -33,9 +33,11 @@ describe('phase 9 gap audit', () => {
     }
   })
 
-  test('deploy.yml contains TODO placeholders', () => {
+  test('deploy.yml has real deployment targets', () => {
     const src = readFileSync(resolve(ROOT, '.github/workflows/deploy.yml'), 'utf-8')
-    expect(src).toContain('TODO')
+    expect(src).not.toContain('TODO')
+    expect(src).toContain('flyctl deploy')
+    expect(src).toContain('vercel deploy --prod')
   })
 
   test('Python SDK exists', () => {
@@ -69,16 +71,15 @@ describe('phase 9 gap audit', () => {
     expect(src).toContain('action')
   })
 
-  test('MCP has exactly 9 tools (5 missing)', () => {
+  test('MCP has all 14 tools', () => {
     const src = readFileSync(resolve(ROOT, 'packages/mcp/src/tools.ts'), 'utf-8')
     const toolCount = (src.match(/registerTool\(/g) ?? []).length
-    expect(toolCount).toBe(9)
+    expect(toolCount).toBe(14)
   })
 
-  test('no create sandbox dialog in dashboard', () => {
+  test('dashboard has create sandbox dialog', () => {
     const src = readFileSync(resolve(ROOT, 'apps/web/src/components/dashboard/SandboxList.tsx'), 'utf-8')
-    expect(src).not.toContain('CreateSandbox')
-    expect(src).not.toContain('create sandbox')
+    expect(src).toContain('CreateSandbox')
   })
 
   test('no OpenTelemetry packages installed', () => {
