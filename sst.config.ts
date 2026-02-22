@@ -1,5 +1,18 @@
 /// <reference path="./.sst/platform/config.d.ts" />
 
+import {
+  getAlb5xxAlarm,
+  getAlbResponseTimeAlarm,
+  getEcsCpuAlarm,
+  getEcsMemoryAlarm,
+  getEcsRunningTaskAlarm,
+  getNodeHeartbeatAlarm,
+  getRedisEvictionAlarm,
+  getRedisMemoryAlarm,
+  getSnsTopicName,
+  NODE_HEARTBEAT_NAMESPACE,
+  type MetricAlarmConfig,
+} from "./infra/alarms";
 import { getAppConfig } from "./infra/app";
 import { getBucketConfig } from "./infra/bucket";
 import {
@@ -179,6 +192,108 @@ export default $config({
       policyArn: "arn:aws:iam::aws:policy/AdministratorAccess",
     });
 
+    // --- CloudWatch Alarms ---
+
+    const alarmTopic = new aws.sns.Topic("AlarmTopic", {
+      name: getSnsTopicName($app.stage),
+    });
+
+    function createAlarm(
+      name: string,
+      config: MetricAlarmConfig,
+      dimensions: Record<string, unknown>,
+    ) {
+      return new aws.cloudwatch.MetricAlarm(name, {
+        alarmDescription: config.description,
+        namespace: config.namespace,
+        metricName: config.metricName,
+        statistic: config.statistic,
+        period: config.period,
+        evaluationPeriods: config.evaluationPeriods,
+        threshold: config.threshold,
+        comparisonOperator: config.comparisonOperator,
+        treatMissingData: config.treatMissingData,
+        dimensions,
+        alarmActions: [alarmTopic.arn],
+        okActions: [alarmTopic.arn],
+      });
+    }
+
+    const ecsClusterName = cluster.nodes.cluster.name;
+    const ecsServiceName = api.nodes.service.name;
+
+    createAlarm(
+      "EcsRunningTaskAlarm",
+      getEcsRunningTaskAlarm($app.stage),
+      { ClusterName: ecsClusterName, ServiceName: ecsServiceName },
+    );
+
+    createAlarm(
+      "EcsCpuAlarm",
+      getEcsCpuAlarm($app.stage),
+      { ClusterName: ecsClusterName, ServiceName: ecsServiceName },
+    );
+
+    createAlarm(
+      "EcsMemoryAlarm",
+      getEcsMemoryAlarm($app.stage),
+      { ClusterName: ecsClusterName, ServiceName: ecsServiceName },
+    );
+
+    const albArnSuffix = api.nodes.loadBalancer.arnSuffix;
+
+    createAlarm(
+      "Alb5xxAlarm",
+      getAlb5xxAlarm($app.stage),
+      { LoadBalancer: albArnSuffix },
+    );
+
+    createAlarm(
+      "AlbResponseTimeAlarm",
+      getAlbResponseTimeAlarm($app.stage),
+      { LoadBalancer: albArnSuffix },
+    );
+
+    const redisCacheClusterId = redis.clusterId.apply((id) => `${id}-001`);
+
+    createAlarm(
+      "RedisMemoryAlarm",
+      getRedisMemoryAlarm($app.stage),
+      { CacheClusterId: redisCacheClusterId },
+    );
+
+    createAlarm(
+      "RedisEvictionAlarm",
+      getRedisEvictionAlarm($app.stage),
+      { CacheClusterId: redisCacheClusterId },
+    );
+
+    createAlarm(
+      "NodeHeartbeatAlarm",
+      getNodeHeartbeatAlarm(),
+      { InstanceId: node.id },
+    );
+
+    // Allow node daemon to publish heartbeat metrics
+    new aws.iam.RolePolicy("NodeCloudWatchPolicy", {
+      role: nodeRole.id,
+      policy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: "cloudwatch:PutMetricData",
+            Resource: "*",
+            Condition: {
+              StringEquals: {
+                "cloudwatch:namespace": NODE_HEARTBEAT_NAMESPACE,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
     return {
       vpcId: vpc.id,
       redisHost: redis.host,
@@ -188,6 +303,7 @@ export default $config({
       nodeInstanceId: node.id,
       nodePrivateIp: node.privateIp,
       deployRoleArn: deployRole.arn,
+      alarmTopicArn: alarmTopic.arn,
     };
   },
 });
