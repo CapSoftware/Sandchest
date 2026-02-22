@@ -10,6 +10,13 @@ import {
   getServicePort,
   getServiceScaling,
 } from "./infra/cluster";
+import {
+  getNodeAmiSsmParameter,
+  getNodeGrpcPort,
+  getNodeInstanceType,
+  getNodeRootVolumeGb,
+  getNodeUserData,
+} from "./infra/node";
 import { getRedisConfig } from "./infra/redis";
 import { getVpcConfig } from "./infra/vpc";
 
@@ -52,12 +59,104 @@ export default $config({
       },
     });
 
+    // --- Node Daemon (Firecracker host) ---
+
+    const nodeAmi = await aws.ssm.getParameter({
+      name: getNodeAmiSsmParameter(),
+    });
+
+    const nodeRole = new aws.iam.Role("NodeRole", {
+      assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Principal: { Service: "ec2.amazonaws.com" },
+            Action: "sts:AssumeRole",
+          },
+        ],
+      }),
+    });
+
+    new aws.iam.RolePolicyAttachment("NodeSsmPolicy", {
+      role: nodeRole.name,
+      policyArn:
+        "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+    });
+
+    new aws.iam.RolePolicy("NodeS3Policy", {
+      role: nodeRole.id,
+      policy: artifactBucket.name.apply((name) =>
+        JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Effect: "Allow",
+              Action: ["s3:PutObject", "s3:GetObject", "s3:ListBucket"],
+              Resource: [
+                `arn:aws:s3:::${name}`,
+                `arn:aws:s3:::${name}/*`,
+              ],
+            },
+          ],
+        }),
+      ),
+    });
+
+    const nodeProfile = new aws.iam.InstanceProfile("NodeProfile", {
+      role: nodeRole.name,
+    });
+
+    const nodeSg = new aws.ec2.SecurityGroup("NodeSg", {
+      vpcId: vpc.id,
+      description: "Sandchest node daemon",
+      ingress: [
+        {
+          description: "gRPC from VPC",
+          fromPort: getNodeGrpcPort(),
+          toPort: getNodeGrpcPort(),
+          protocol: "tcp",
+          cidrBlocks: [vpc.nodes.vpc.cidrBlock],
+        },
+      ],
+      egress: [
+        {
+          fromPort: 0,
+          toPort: 0,
+          protocol: "-1",
+          cidrBlocks: ["0.0.0.0/0"],
+        },
+      ],
+      tags: { Name: `sandchest-node-${$app.stage}` },
+    });
+
+    const node = new aws.ec2.Instance("NodeInstance", {
+      ami: nodeAmi.value,
+      instanceType: getNodeInstanceType($app.stage),
+      subnetId: vpc.privateSubnets.apply((subs) => subs[0]),
+      iamInstanceProfile: nodeProfile.name,
+      vpcSecurityGroupIds: [nodeSg.id],
+      rootBlockDevice: {
+        volumeSize: getNodeRootVolumeGb(),
+        volumeType: "gp3",
+        encrypted: true,
+      },
+      metadataOptions: {
+        httpEndpoint: "enabled",
+        httpTokens: "required",
+      },
+      userData: getNodeUserData($app.stage),
+      tags: { Name: `sandchest-node-${$app.stage}` },
+    });
+
     return {
       vpcId: vpc.id,
       redisHost: redis.host,
       redisPort: redis.port,
       artifactBucketName: artifactBucket.name,
       apiUrl: api.url,
+      nodeInstanceId: node.id,
+      nodePrivateIp: node.privateIp,
     };
   },
 });
