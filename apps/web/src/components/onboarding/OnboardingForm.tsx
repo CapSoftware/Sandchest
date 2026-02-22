@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from '@/hooks/use-session'
 import { useOrgs } from '@/hooks/use-orgs'
@@ -329,14 +329,17 @@ export default function OnboardingForm() {
 
   // Redirect to dashboard if user already has orgs
   const hasOrgs = orgs && orgs.length > 0
-  if (hasOrgs && !sessionLoading && !orgsLoading) {
-    const activeOrgId = session?.session.activeOrganizationId
-    const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? orgs[0]
-    router.replace(`/dashboard/${activeOrg.slug}`)
-    return null
-  }
+  const redirectSlug = hasOrgs && !sessionLoading && !orgsLoading
+    ? (orgs.find((o) => o.id === session?.session.activeOrganizationId) ?? orgs[0]).slug
+    : null
 
-  if (sessionLoading || orgsLoading) {
+  useEffect(() => {
+    if (redirectSlug) {
+      router.replace(`/dashboard/${redirectSlug}`)
+    }
+  }, [redirectSlug, router])
+
+  if (redirectSlug || sessionLoading || orgsLoading) {
     return null
   }
 

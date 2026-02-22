@@ -61,7 +61,7 @@ describe('OnboardingForm step flow', () => {
   })
 
   test('redirects to org-slug dashboard if user already has orgs', () => {
-    expect(src).toMatch(/router\.replace\(`\/dashboard\/\$\{activeOrg\.slug\}`\)/)
+    expect(src).toMatch(/router\.replace\(`\/dashboard\/\$\{redirectSlug\}`\)/)
   })
 
   test('finishes by redirecting to org-slug dashboard', () => {
