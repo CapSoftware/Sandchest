@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   GITHUB_OIDC_AUDIENCE,
+  GITHUB_OIDC_ISSUER,
   GITHUB_OIDC_PROVIDER_URL,
   GITHUB_OIDC_THUMBPRINTS,
   GITHUB_REPO,
@@ -60,16 +61,16 @@ describe("getDeployRoleTrustPolicy", () => {
     expect(principal.Federated).toBe(providerArn);
   });
 
-  test("requires STS audience", () => {
+  test("condition keys use bare issuer hostname (no https://)", () => {
     const condition = statement.Condition as Record<
       string,
       Record<string, string>
     >;
-    expect(
-      condition.StringEquals[
-        "https://token.actions.githubusercontent.com:aud"
-      ],
-    ).toBe("sts.amazonaws.com");
+    // AWS IAM OIDC condition keys must NOT include the https:// scheme
+    expect(GITHUB_OIDC_ISSUER).not.toMatch(/^https?:\/\//);
+    expect(condition.StringEquals[`${GITHUB_OIDC_ISSUER}:aud`]).toBe(
+      "sts.amazonaws.com",
+    );
   });
 
   test("scopes to the correct repo", () => {
@@ -78,7 +79,7 @@ describe("getDeployRoleTrustPolicy", () => {
       Record<string, string>
     >;
     expect(
-      condition.StringLike["https://token.actions.githubusercontent.com:sub"],
+      condition.StringLike[`${GITHUB_OIDC_ISSUER}:sub`],
     ).toBe(`repo:${GITHUB_REPO}:*`);
   });
 
