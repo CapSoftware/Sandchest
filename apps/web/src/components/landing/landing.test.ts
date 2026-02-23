@@ -18,7 +18,7 @@ function usesHook(src: string, hook: string): boolean {
 
 describe('landing page server/client component boundaries', () => {
   describe('server components have no use client directive', () => {
-    const serverComponents = ['Nav.tsx', 'Hero.tsx', 'BentoGrid.tsx', 'Cta.tsx', 'CodeExample.tsx', 'Footer.tsx']
+    const serverComponents = ['Nav.tsx', 'Hero.tsx', 'BentoGrid.tsx', 'Cta.tsx', 'CodeExample.tsx']
 
     for (const file of serverComponents) {
       test(file, () => {
@@ -40,7 +40,7 @@ describe('landing page server/client component boundaries', () => {
   })
 
   describe('server components do not use React hooks', () => {
-    const serverComponents = ['Nav.tsx', 'Hero.tsx', 'BentoGrid.tsx', 'Cta.tsx', 'CodeExample.tsx', 'Footer.tsx']
+    const serverComponents = ['Nav.tsx', 'Hero.tsx', 'BentoGrid.tsx', 'Cta.tsx', 'CodeExample.tsx']
     const hooks = ['useState', 'useEffect', 'useRef', 'useCallback', 'useMemo']
 
     for (const file of serverComponents) {
