@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const COMPONENT_PATH = join(import.meta.dir, 'VerifyOtpForm.tsx')
+const WRAPPER_PATH = join(import.meta.dir, 'VerifyOtpForm.tsx')
+const INNER_PATH = join(import.meta.dir, 'VerifyOtpFormInner.tsx')
 
 describe('VerifyOtpForm component', () => {
-  const src = readFileSync(COMPONENT_PATH, 'utf-8')
+  const wrapperSrc = readFileSync(WRAPPER_PATH, 'utf-8')
+  const src = readFileSync(INNER_PATH, 'utf-8')
 
   test('is a client component', () => {
     expect(src).toMatch(/^['"]use client['"]/)
@@ -24,6 +26,11 @@ describe('VerifyOtpForm component', () => {
   test('does not call authClient directly', () => {
     expect(src).not.toMatch(/authClient\.emailOtp/)
     expect(src).not.toMatch(/import.*authClient/)
+  })
+
+  test('wraps inner component in Suspense boundary', () => {
+    expect(wrapperSrc).toMatch(/Suspense/)
+    expect(wrapperSrc).toMatch(/VerifyOtpFormInner/)
   })
 
   test('uses useSearchParams instead of window.location.search', () => {
@@ -75,7 +82,7 @@ describe('VerifyOtpForm component', () => {
 
   test('renders 6 OTP digit inputs', () => {
     expect(src).toMatch(/OTP_LENGTH\s*=\s*6/)
-    expect(src).toMatch(/digits\.map/)
+    expect(src).toMatch(/DIGIT_KEYS\.map/)
   })
 
   test('supports paste handling', () => {
