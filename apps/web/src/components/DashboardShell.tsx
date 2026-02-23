@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useReducer, useState, useRef, useEffect } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
@@ -26,32 +27,67 @@ function slugify(text: string): string {
     .replace(/(^-|-$)/g, '')
 }
 
+type OrgSwitcherState = {
+  open: boolean
+  creating: boolean
+  newOrgName: string
+  createError: string | null
+}
+
+type OrgSwitcherAction =
+  | { type: 'TOGGLE_OPEN' }
+  | { type: 'CLOSE' }
+  | { type: 'START_CREATING' }
+  | { type: 'SET_NAME'; name: string }
+  | { type: 'SET_ERROR'; error: string }
+  | { type: 'CANCEL_CREATE' }
+
+function orgSwitcherReducer(state: OrgSwitcherState, action: OrgSwitcherAction): OrgSwitcherState {
+  switch (action.type) {
+    case 'TOGGLE_OPEN':
+      return state.open
+        ? { open: false, creating: false, newOrgName: '', createError: null }
+        : { ...state, open: true }
+    case 'CLOSE':
+      return { open: false, creating: false, newOrgName: '', createError: null }
+    case 'START_CREATING':
+      return { ...state, creating: true }
+    case 'SET_NAME':
+      return { ...state, newOrgName: action.name }
+    case 'SET_ERROR':
+      return { ...state, createError: action.error }
+    case 'CANCEL_CREATE':
+      return { ...state, creating: false, newOrgName: '', createError: null }
+  }
+}
+
+const orgSwitcherInitial: OrgSwitcherState = {
+  open: false,
+  creating: false,
+  newOrgName: '',
+  createError: null,
+}
+
 function OrgSwitcher() {
   const { orgs, activeOrg } = useDashboardSession()
   const setActiveOrg = useSetActiveOrg()
   const createOrg = useCreateOrg()
   const router = useRouter()
   const pathname = usePathname()
-  const [open, setOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [newOrgName, setNewOrgName] = useState('')
-  const [createError, setCreateError] = useState<string | null>(null)
+  const [state, dispatch] = useReducer(orgSwitcherReducer, orgSwitcherInitial)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-        setCreating(false)
-        setNewOrgName('')
-        setCreateError(null)
+        dispatch({ type: 'CLOSE' })
       }
     }
-    if (open) {
+    if (state.open) {
       document.addEventListener('mousedown', handleClickOutside)
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [open])
+  }, [state.open])
 
   function currentPageSuffix(): string {
     const segments = pathname.split('/')
@@ -61,10 +97,7 @@ function OrgSwitcher() {
   }
 
   function handleSwitch(org: ServerOrg) {
-    setOpen(false)
-    setCreating(false)
-    setNewOrgName('')
-    setCreateError(null)
+    dispatch({ type: 'CLOSE' })
     if (org.id !== activeOrg.id) {
       setActiveOrg.mutate(org.id)
       router.push(`/dashboard/${org.slug}${currentPageSuffix()}`)
@@ -73,25 +106,22 @@ function OrgSwitcher() {
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    const name = newOrgName.trim()
+    const name = state.newOrgName.trim()
     if (!name) return
     const slug = slugify(name)
     if (!slug) {
-      setCreateError('Invalid organization name')
+      dispatch({ type: 'SET_ERROR', error: 'Invalid organization name' })
       return
     }
-    setCreateError(null)
     createOrg.mutate(
       { name, slug },
       {
         onSuccess: (data) => {
-          setOpen(false)
-          setCreating(false)
-          setNewOrgName('')
+          dispatch({ type: 'CLOSE' })
           router.push(`/dashboard/${data.slug}`)
         },
         onError: (err) => {
-          setCreateError(err instanceof Error ? err.message : 'Failed to create organization')
+          dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : 'Failed to create organization' })
         },
       },
     )
@@ -103,8 +133,8 @@ function OrgSwitcher() {
     <div className="org-switcher" ref={ref}>
       <button
         className="org-switcher-trigger"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
+        onClick={() => dispatch({ type: 'TOGGLE_OPEN' })}
+        aria-expanded={state.open}
         aria-haspopup="listbox"
       >
         <span className="org-switcher-avatar" aria-hidden="true">
@@ -116,7 +146,7 @@ function OrgSwitcher() {
         </svg>
       </button>
 
-      {open && (
+      {state.open && (
         <div className="org-switcher-dropdown" role="listbox" aria-label="Switch organization">
           {orgs.map((org: ServerOrg) => (
             <button
@@ -140,30 +170,25 @@ function OrgSwitcher() {
 
           <div className="org-switcher-divider" />
 
-          {creating ? (
+          {state.creating ? (
             <form className="org-switcher-create-form" onSubmit={handleCreate}>
               <input
-                autoFocus
                 className="org-switcher-create-input"
                 type="text"
                 placeholder="Organization name"
                 aria-label="Organization name"
-                value={newOrgName}
-                onChange={(e) => setNewOrgName(e.target.value)}
+                value={state.newOrgName}
+                onChange={(e) => dispatch({ type: 'SET_NAME', name: e.target.value })}
                 disabled={createOrg.isPending}
               />
-              {createError && (
-                <span className="org-switcher-create-error">{createError}</span>
+              {state.createError && (
+                <span className="org-switcher-create-error">{state.createError}</span>
               )}
               <div className="org-switcher-create-actions">
                 <button
                   type="button"
                   className="org-switcher-create-cancel"
-                  onClick={() => {
-                    setCreating(false)
-                    setNewOrgName('')
-                    setCreateError(null)
-                  }}
+                  onClick={() => dispatch({ type: 'CANCEL_CREATE' })}
                   disabled={createOrg.isPending}
                 >
                   Cancel
@@ -171,7 +196,7 @@ function OrgSwitcher() {
                 <button
                   type="submit"
                   className="org-switcher-create-submit"
-                  disabled={createOrg.isPending || !newOrgName.trim()}
+                  disabled={createOrg.isPending || !state.newOrgName.trim()}
                 >
                   {createOrg.isPending ? 'Creating...' : 'Create'}
                 </button>
@@ -180,7 +205,7 @@ function OrgSwitcher() {
           ) : (
             <button
               className="org-switcher-option org-switcher-create-trigger"
-              onClick={() => setCreating(true)}
+              onClick={() => dispatch({ type: 'START_CREATING' })}
             >
               <span className="org-switcher-create-icon" aria-hidden="true">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -279,7 +304,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     <div className="dash">
       <aside className="dash-sidebar">
         <Link href="/" className="dash-logo" aria-label="Back to home">
-          <img src="/sandchest-icon.svg" alt="Sandchest" height="28" />
+          <Image src="/sandchest-icon.svg" alt="Sandchest" width={28} height={28} />
         </Link>
 
         <OrgSwitcher />
@@ -304,7 +329,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       {/* Mobile header */}
       <header className="dash-mobile-header">
         <Link href="/" className="dash-logo" aria-label="Back to home">
-          <img src="/sandchest-icon.svg" alt="Sandchest" height="24" />
+          <Image src="/sandchest-icon.svg" alt="Sandchest" width={24} height={24} />
         </Link>
         <button
           className="dash-mobile-toggle"
