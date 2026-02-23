@@ -2,7 +2,7 @@
 
 import { useCustomer } from 'autumn-js/react'
 
-export type BillingCheckResult = {
+type BillingCheckResult = {
   allowed: boolean
   balance: number | null | undefined
   usage: number | undefined

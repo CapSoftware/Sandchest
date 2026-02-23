@@ -3,14 +3,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { authClient } from '@/lib/auth-client'
 
-export interface ApiKey {
+interface ApiKey {
   id: string
   name: string | null
   start: string | null
   createdAt: Date
 }
 
-export const apiKeyKeys = {
+const apiKeyKeys = {
   all: ['apiKeys'] as const,
   list: () => [...apiKeyKeys.all, 'list'] as const,
 }

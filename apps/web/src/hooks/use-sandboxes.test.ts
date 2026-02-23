@@ -46,8 +46,8 @@ describe('useSandboxes hook', () => {
     expect(src).toMatch(/\/v1\/sandboxes/)
   })
 
-  test('exports sandboxKeys for external cache management', () => {
-    expect(src).toMatch(/export const sandboxKeys/)
+  test('defines sandboxKeys for cache management', () => {
+    expect(src).toMatch(/const sandboxKeys/)
   })
 
   test('does not use console.log', () => {

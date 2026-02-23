@@ -15,7 +15,7 @@ import type {
   CreateSandboxResponse,
 } from '@sandchest/contract'
 
-export const sandboxKeys = {
+const sandboxKeys = {
   all: ['sandboxes'] as const,
   lists: () => [...sandboxKeys.all, 'list'] as const,
   list: (status: SandboxStatus | '') =>

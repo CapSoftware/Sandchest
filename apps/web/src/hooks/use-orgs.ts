@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { authClient } from '@/lib/auth-client'
 
-export interface Org {
+interface Org {
   id: string
   name: string
   slug: string

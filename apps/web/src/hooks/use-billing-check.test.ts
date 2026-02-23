@@ -23,8 +23,8 @@ describe('useBillingCheck hook', () => {
     expect(src).toMatch(/useBillingCheck\(featureId: string\)/)
   })
 
-  test('exports BillingCheckResult type', () => {
-    expect(src).toMatch(/export type BillingCheckResult/)
+  test('defines BillingCheckResult type', () => {
+    expect(src).toMatch(/type BillingCheckResult/)
   })
 
   test('returns allowed, balance, usage, and unlimited fields', () => {

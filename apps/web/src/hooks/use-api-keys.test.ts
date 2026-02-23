@@ -41,12 +41,12 @@ describe('useApiKeys hook', () => {
     expect(src).toMatch(/if \(error\) throw new Error/)
   })
 
-  test('exports ApiKey interface', () => {
-    expect(src).toMatch(/export interface ApiKey/)
+  test('defines ApiKey interface', () => {
+    expect(src).toMatch(/interface ApiKey/)
   })
 
-  test('exports apiKeyKeys for external cache management', () => {
-    expect(src).toMatch(/export const apiKeyKeys/)
+  test('defines apiKeyKeys for cache management', () => {
+    expect(src).toMatch(/const apiKeyKeys/)
   })
 
   test('does not use console.log', () => {

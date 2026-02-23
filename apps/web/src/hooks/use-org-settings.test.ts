@@ -37,14 +37,14 @@ describe('useOrgSettings hook', () => {
     expect(src).toMatch(/orgSettingsKeys\.full\(\)/)
   })
 
-  test('exports FullOrg interface with org and members', () => {
-    expect(src).toMatch(/export interface FullOrg/)
+  test('defines FullOrg interface with org and members', () => {
+    expect(src).toMatch(/interface FullOrg/)
     expect(src).toMatch(/org:\s*OrgData/)
     expect(src).toMatch(/members:\s*OrgMember\[\]/)
   })
 
-  test('exports orgSettingsKeys for external cache management', () => {
-    expect(src).toMatch(/export const orgSettingsKeys/)
+  test('defines orgSettingsKeys for cache management', () => {
+    expect(src).toMatch(/const orgSettingsKeys/)
   })
 
   test('does not use console.log', () => {

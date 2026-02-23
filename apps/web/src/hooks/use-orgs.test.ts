@@ -43,8 +43,8 @@ describe('useOrgs hook', () => {
     expect(src).not.toMatch(/console\.log/)
   })
 
-  test('exports Org interface', () => {
-    expect(src).toMatch(/export interface Org/)
+  test('defines Org interface', () => {
+    expect(src).toMatch(/interface Org/)
   })
 })
 

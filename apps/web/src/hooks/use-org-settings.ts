@@ -3,14 +3,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { authClient } from '@/lib/auth-client'
 
-export interface OrgData {
+interface OrgData {
   id: string
   name: string
   slug: string
   createdAt: Date
 }
 
-export interface OrgMember {
+interface OrgMember {
   id: string
   userId: string
   role: string
@@ -20,12 +20,12 @@ export interface OrgMember {
   }
 }
 
-export interface FullOrg {
+interface FullOrg {
   org: OrgData
   members: OrgMember[]
 }
 
-export const orgSettingsKeys = {
+const orgSettingsKeys = {
   all: ['orgSettings'] as const,
   full: () => [...orgSettingsKeys.all, 'full'] as const,
 }
