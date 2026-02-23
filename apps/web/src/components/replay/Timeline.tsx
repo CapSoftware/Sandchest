@@ -203,7 +203,7 @@ function TimelineRow({
   startedAt: string
   defaultExpanded: boolean
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [expanded, setExpanded] = useState(() => defaultExpanded)
   const { event, outputs } = group
   const hasOutput = outputs.length > 0
   const isExecStart = event.type === 'exec.started'
