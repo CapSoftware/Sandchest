@@ -100,6 +100,7 @@ function PaywallDialogContent({
       className="paywall-overlay"
       ref={overlayRef}
       onClick={handleOverlayClick}
+      onKeyDown={(e) => { if (e.key === 'Escape') dismiss() }}
       role="dialog"
       aria-modal="true"
       aria-label="Upgrade required"
