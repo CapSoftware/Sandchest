@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from '@/hooks/use-session'
 import { useOrgs } from '@/hooks/use-orgs'
@@ -105,7 +105,7 @@ function NameStep({
   defaultName: string
   onComplete: () => void
 }) {
-  const [name, setName] = useState(defaultName)
+  const [name, setName] = useState(() => defaultName)
   const updateUser = useUpdateUser()
 
   const trimmed = name.trim()
@@ -140,7 +140,6 @@ function NameStep({
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={updateUser.isPending}
-          autoFocus
           autoComplete="name"
         />
 
@@ -203,7 +202,6 @@ function OrgStep({ onComplete }: { onComplete: (slug: string) => void }) {
           value={orgName}
           onChange={(e) => setOrgName(e.target.value)}
           disabled={createOrg.isPending}
-          autoFocus
         />
 
         {slug && (
@@ -333,13 +331,12 @@ export default function OnboardingForm() {
     ? (orgs.find((o) => o.id === session?.session.activeOrganizationId) ?? orgs[0]).slug
     : null
 
-  useEffect(() => {
-    if (redirectSlug) {
-      router.replace(`/dashboard/${redirectSlug}`)
-    }
-  }, [redirectSlug, router])
+  if (redirectSlug) {
+    router.replace(`/dashboard/${redirectSlug}`)
+    return null
+  }
 
-  if (redirectSlug || sessionLoading || orgsLoading) {
+  if (sessionLoading || orgsLoading) {
     return null
   }
 
