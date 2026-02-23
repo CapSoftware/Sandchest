@@ -1,3 +1,5 @@
+import Image from 'next/image'
+import Link from 'next/link'
 import MobileMenu from './MobileMenu'
 
 export default function Nav() {
@@ -6,9 +8,9 @@ export default function Nav() {
       <nav
         className="nav-bar sticky top-0 z-10 flex items-center justify-between bg-background"
       >
-        <a href="/" className="flex items-center no-underline hover:no-underline">
-          <img src="/sandchest-logo-dark.svg" alt="Sandchest" style={{ height: 48 }} />
-        </a>
+        <Link href="/" className="flex items-center no-underline hover:no-underline">
+          <Image src="/sandchest-logo-dark.svg" alt="Sandchest" width={148} height={48} style={{ height: 48 }} />
+        </Link>
 
         <ul className="hidden items-center sm:flex" style={{ gap: 48 }}>
           <li>
@@ -22,9 +24,9 @@ export default function Nav() {
             </a>
           </li>
           <li>
-            <a href="/pricing" className="text-text-weak transition-colors hover:text-text-strong">
+            <Link href="/pricing" className="text-text-weak transition-colors hover:text-text-strong">
               Pricing
-            </a>
+            </Link>
           </li>
           <li className="star-item">
             <a

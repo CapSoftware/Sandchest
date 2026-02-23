@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 
 export default function MobileMenu() {
   const [isOpen, setIsOpen] = useState(false)
@@ -47,9 +48,9 @@ export default function MobileMenu() {
             <a href="#code" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
               See it in action
             </a>
-            <a href="/pricing" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
+            <Link href="/pricing" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
               Pricing
-            </a>
+            </Link>
             <a
               href="https://github.com/sandchest"
               target="_blank"
