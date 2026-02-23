@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useReducer, useRef, useEffect, useCallback } from 'react'
 import { useCreateSandbox } from '@/hooks/use-sandboxes'
 import { ApiError } from '@/lib/api'
 import { usePaywall } from '@/components/dashboard/PaywallDialog'
@@ -15,8 +15,65 @@ const PROFILES: Array<{ value: ProfileName; label: string }> = [
 ]
 
 interface EnvEntry {
+  id: string
   key: string
   value: string
+}
+
+let envEntryCounter = 0
+
+type DialogState = {
+  image: string
+  profile: ProfileName
+  envEntries: EnvEntry[]
+  ttl: string
+  createdId: string | null
+  createdReplayUrl: string | null
+}
+
+type DialogAction =
+  | { type: 'SET_IMAGE'; value: string }
+  | { type: 'SET_PROFILE'; value: ProfileName }
+  | { type: 'SET_TTL'; value: string }
+  | { type: 'ADD_ENV' }
+  | { type: 'REMOVE_ENV'; index: number }
+  | { type: 'UPDATE_ENV'; index: number; field: 'key' | 'value'; value: string }
+  | { type: 'SET_CREATED'; id: string; replayUrl: string }
+  | { type: 'RESET' }
+
+const dialogInitial: DialogState = {
+  image: '',
+  profile: 'small',
+  envEntries: [],
+  ttl: '',
+  createdId: null,
+  createdReplayUrl: null,
+}
+
+function dialogReducer(state: DialogState, action: DialogAction): DialogState {
+  switch (action.type) {
+    case 'SET_IMAGE':
+      return { ...state, image: action.value }
+    case 'SET_PROFILE':
+      return { ...state, profile: action.value }
+    case 'SET_TTL':
+      return { ...state, ttl: action.value }
+    case 'ADD_ENV':
+      return { ...state, envEntries: [...state.envEntries, { id: `env-${++envEntryCounter}`, key: '', value: '' }] }
+    case 'REMOVE_ENV':
+      return { ...state, envEntries: state.envEntries.filter((_, i) => i !== action.index) }
+    case 'UPDATE_ENV':
+      return {
+        ...state,
+        envEntries: state.envEntries.map((entry, i) =>
+          i === action.index ? { ...entry, [action.field]: action.value } : entry,
+        ),
+      }
+    case 'SET_CREATED':
+      return { ...state, createdId: action.id, createdReplayUrl: action.replayUrl }
+    case 'RESET':
+      return dialogInitial
+  }
 }
 
 export default function CreateSandboxDialog({
@@ -30,22 +87,12 @@ export default function CreateSandboxDialog({
   const { openPaywall } = usePaywall()
   const overlayRef = useRef<HTMLDivElement>(null)
 
-  const [image, setImage] = useState('')
-  const [profile, setProfile] = useState<ProfileName>('small')
-  const [envEntries, setEnvEntries] = useState<EnvEntry[]>([])
-  const [ttl, setTtl] = useState('')
-  const [createdId, setCreatedId] = useState<string | null>(null)
-  const [createdReplayUrl, setCreatedReplayUrl] = useState<string | null>(null)
+  const [state, dispatch] = useReducer(dialogReducer, dialogInitial)
 
   const dismiss = useCallback(() => {
     onClose()
     createSandbox.reset()
-    setImage('')
-    setProfile('small')
-    setEnvEntries([])
-    setTtl('')
-    setCreatedId(null)
-    setCreatedReplayUrl(null)
+    dispatch({ type: 'RESET' })
   }, [onClose, createSandbox])
 
   useEffect(() => {
@@ -71,40 +118,25 @@ export default function CreateSandboxDialog({
     if (e.target === overlayRef.current) dismiss()
   }
 
-  function handleAddEnv() {
-    setEnvEntries((prev) => [...prev, { key: '', value: '' }])
-  }
-
-  function handleRemoveEnv(index: number) {
-    setEnvEntries((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  function handleEnvChange(index: number, field: 'key' | 'value', val: string) {
-    setEnvEntries((prev) =>
-      prev.map((entry, i) => (i === index ? { ...entry, [field]: val } : entry)),
-    )
-  }
-
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
 
     const env: Record<string, string> = {}
-    for (const entry of envEntries) {
+    for (const entry of state.envEntries) {
       const k = entry.key.trim()
       if (k) env[k] = entry.value
     }
 
     const body: CreateSandboxRequest = {
-      profile,
-      ...(image.trim() ? { image: image.trim() } : {}),
+      profile: state.profile,
+      ...(state.image.trim() ? { image: state.image.trim() } : {}),
       ...(Object.keys(env).length > 0 ? { env } : {}),
-      ...(ttl.trim() ? { ttl_seconds: Number(ttl) } : {}),
+      ...(state.ttl.trim() ? { ttl_seconds: Number(state.ttl) } : {}),
     }
 
     createSandbox.mutate(body, {
       onSuccess: (data) => {
-        setCreatedId(data.sandbox_id)
-        setCreatedReplayUrl(data.replay_url)
+        dispatch({ type: 'SET_CREATED', id: data.sandbox_id, replayUrl: data.replay_url })
       },
       onError: (err) => {
         if (err instanceof ApiError && err.status === 403) {
@@ -123,6 +155,7 @@ export default function CreateSandboxDialog({
       className="csb-overlay"
       ref={overlayRef}
       onClick={handleOverlayClick}
+      onKeyDown={(e) => { if (e.key === 'Escape') dismiss() }}
       role="dialog"
       aria-modal="true"
       aria-label="Create sandbox"
@@ -130,7 +163,7 @@ export default function CreateSandboxDialog({
       <div className="csb-dialog">
         <div className="csb-header">
           <h2 className="csb-title">
-            {createdId ? 'Sandbox created' : 'Create sandbox'}
+            {state.createdId ? 'Sandbox created' : 'Create sandbox'}
           </h2>
           <button className="paywall-close" onClick={dismiss} aria-label="Close">
             <svg
@@ -157,18 +190,18 @@ export default function CreateSandboxDialog({
           />
         )}
 
-        {createdId ? (
+        {state.createdId ? (
           <div className="csb-success">
             <p className="csb-success-label">
               Your sandbox is being provisioned.
             </p>
             <div className="csb-success-row">
-              <code className="csb-success-id">{createdId}</code>
-              <CopyButton text={createdId} />
+              <code className="csb-success-id">{state.createdId}</code>
+              <CopyButton text={state.createdId} />
             </div>
-            {createdReplayUrl && (
+            {state.createdReplayUrl && (
               <a
-                href={createdReplayUrl}
+                href={state.createdReplayUrl}
                 target="_blank"
                 rel="noopener"
                 className="csb-replay-link"
@@ -188,8 +221,8 @@ export default function CreateSandboxDialog({
               </label>
               <select
                 id="csb-profile"
-                value={profile}
-                onChange={(e) => setProfile(e.target.value as ProfileName)}
+                value={state.profile}
+                onChange={(e) => dispatch({ type: 'SET_PROFILE', value: e.target.value as ProfileName })}
                 className="dash-select csb-full-width"
                 disabled={createSandbox.isPending}
               >
@@ -209,8 +242,8 @@ export default function CreateSandboxDialog({
                 id="csb-image"
                 type="text"
                 placeholder="default"
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
+                value={state.image}
+                onChange={(e) => dispatch({ type: 'SET_IMAGE', value: e.target.value })}
                 className="dash-input csb-full-width"
                 disabled={createSandbox.isPending}
               />
@@ -225,8 +258,8 @@ export default function CreateSandboxDialog({
                 type="number"
                 placeholder="300"
                 min="1"
-                value={ttl}
-                onChange={(e) => setTtl(e.target.value)}
+                value={state.ttl}
+                onChange={(e) => dispatch({ type: 'SET_TTL', value: e.target.value })}
                 className="dash-input csb-full-width"
                 disabled={createSandbox.isPending}
               />
@@ -238,20 +271,20 @@ export default function CreateSandboxDialog({
                 <button
                   type="button"
                   className="csb-add-env-btn"
-                  onClick={handleAddEnv}
+                  onClick={() => dispatch({ type: 'ADD_ENV' })}
                   disabled={createSandbox.isPending}
                 >
                   + Add
                 </button>
               </div>
-              {envEntries.map((entry, i) => (
-                <div key={i} className="csb-env-row">
+              {state.envEntries.map((entry, i) => (
+                <div key={entry.id} className="csb-env-row">
                   <input
                     type="text"
                     placeholder="KEY"
                     aria-label={`Environment variable ${i + 1} key`}
                     value={entry.key}
-                    onChange={(e) => handleEnvChange(i, 'key', e.target.value)}
+                    onChange={(e) => dispatch({ type: 'UPDATE_ENV', index: i, field: 'key', value: e.target.value })}
                     className="dash-input csb-env-key"
                     disabled={createSandbox.isPending}
                   />
@@ -260,14 +293,14 @@ export default function CreateSandboxDialog({
                     placeholder="value"
                     aria-label={`Environment variable ${i + 1} value`}
                     value={entry.value}
-                    onChange={(e) => handleEnvChange(i, 'value', e.target.value)}
+                    onChange={(e) => dispatch({ type: 'UPDATE_ENV', index: i, field: 'value', value: e.target.value })}
                     className="dash-input csb-env-value"
                     disabled={createSandbox.isPending}
                   />
                   <button
                     type="button"
                     className="csb-remove-env-btn"
-                    onClick={() => handleRemoveEnv(i)}
+                    onClick={() => dispatch({ type: 'REMOVE_ENV', index: i })}
                     disabled={createSandbox.isPending}
                     aria-label="Remove variable"
                   >

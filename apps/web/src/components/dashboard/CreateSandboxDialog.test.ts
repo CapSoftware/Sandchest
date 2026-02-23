@@ -44,9 +44,9 @@ describe('CreateSandboxDialog component', () => {
 
   test('supports environment variable key-value pairs', () => {
     expect(src).toMatch(/envEntries/)
-    expect(src).toMatch(/handleAddEnv/)
-    expect(src).toMatch(/handleRemoveEnv/)
-    expect(src).toMatch(/handleEnvChange/)
+    expect(src).toMatch(/ADD_ENV/)
+    expect(src).toMatch(/REMOVE_ENV/)
+    expect(src).toMatch(/UPDATE_ENV/)
   })
 
   test('calls createSandbox.mutate on form submit', () => {
@@ -68,7 +68,7 @@ describe('CreateSandboxDialog component', () => {
 
   test('provides copy button for created sandbox ID', () => {
     expect(src).toContain('CopyButton')
-    expect(src).toMatch(/text=\{createdId\}/)
+    expect(src).toMatch(/text=\{state\.createdId\}/)
   })
 
   test('handles 403 billing errors by opening paywall', () => {
@@ -98,10 +98,7 @@ describe('CreateSandboxDialog component', () => {
   })
 
   test('resets form state on dismiss', () => {
-    expect(src).toMatch(/setImage\(['"]/)
-    expect(src).toMatch(/setProfile\(['"]small/)
-    expect(src).toMatch(/setEnvEntries\(\[\]\)/)
-    expect(src).toMatch(/setTtl\(['"]/)
+    expect(src).toMatch(/dispatch\(\{\s*type:\s*['"]RESET['"]/)
   })
 
   test('does not use console.log', () => {
