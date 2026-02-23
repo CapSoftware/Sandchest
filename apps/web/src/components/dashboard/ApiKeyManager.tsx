@@ -110,7 +110,6 @@ export default function ApiKeyManager() {
             onChange={(e) => setNewKeyName(e.target.value)}
             className="dash-input"
             disabled={createKey.isPending}
-            autoFocus
           />
           <button
             type="submit"

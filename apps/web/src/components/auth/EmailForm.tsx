@@ -68,7 +68,6 @@ export default function EmailForm({
           id="email"
           type="email"
           autoComplete="email"
-          autoFocus
           placeholder="you@company.com"
           value={email}
           onChange={(e) => {
