@@ -43,7 +43,10 @@ export default function InstallCommand() {
         <div
           className="install-cmd flex items-center"
           style={{ gap: 16, padding: '8px 16px 8px 8px', borderRadius: 4, cursor: 'pointer' }}
+          role="button"
+          tabIndex={0}
           onClick={handleCopy}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy() } }}
         >
           <code className="install-text text-text-strong">{commands[activePkg]}</code>
           <button
