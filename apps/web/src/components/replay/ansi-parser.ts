@@ -1,5 +1,5 @@
 /** Parsed segment of ANSI text with styling information. */
-export interface AnsiSegment {
+interface AnsiSegment {
   text: string
   bold: boolean
   dim: boolean

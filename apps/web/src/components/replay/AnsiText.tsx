@@ -8,11 +8,14 @@ interface AnsiTextProps {
 }
 
 export default function AnsiText({ text, className }: AnsiTextProps) {
-  const segments = useMemo(() => parseAnsi(text), [text])
+  const keyedSegments = useMemo(
+    () => parseAnsi(text).map((seg, idx) => ({ ...seg, key: `s${idx}` })),
+    [text],
+  )
 
   return (
     <pre className={className ?? 'replay-terminal'}>
-      {segments.map((seg, i) => {
+      {keyedSegments.map((seg) => {
         const style: CSSProperties = {}
         if (seg.fg) style.color = seg.fg
         if (seg.bg) style.backgroundColor = seg.bg
@@ -24,7 +27,7 @@ export default function AnsiText({ text, className }: AnsiTextProps) {
         if (!hasStyle) return seg.text
 
         return (
-          <span key={i} style={style}>
+          <span key={seg.key} style={style}>
             {seg.text}
           </span>
         )
