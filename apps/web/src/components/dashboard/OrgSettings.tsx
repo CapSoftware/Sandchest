@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useReducer, useRef, useEffect } from 'react'
 import {
   useOrgSettings,
   useUpdateOrgName,
@@ -11,17 +11,54 @@ import EmptyState from '@/components/ui/EmptyState'
 import ErrorMessage from '@/components/ui/ErrorMessage'
 import { SettingsSkeleton } from './skeletons'
 
+type SettingsState = {
+  orgName: string
+  nameInitialized: boolean
+  inviteEmail: string
+  inviteRole: 'member' | 'admin'
+  updateSuccess: boolean
+}
+
+type SettingsAction =
+  | { type: 'SET_ORG_NAME'; value: string }
+  | { type: 'INIT_NAME'; value: string }
+  | { type: 'SET_INVITE_EMAIL'; value: string }
+  | { type: 'SET_INVITE_ROLE'; value: 'member' | 'admin' }
+  | { type: 'SET_UPDATE_SUCCESS'; value: boolean }
+  | { type: 'CLEAR_INVITE_EMAIL' }
+
+const settingsInitial: SettingsState = {
+  orgName: '',
+  nameInitialized: false,
+  inviteEmail: '',
+  inviteRole: 'member',
+  updateSuccess: false,
+}
+
+function settingsReducer(state: SettingsState, action: SettingsAction): SettingsState {
+  switch (action.type) {
+    case 'SET_ORG_NAME':
+      return { ...state, orgName: action.value }
+    case 'INIT_NAME':
+      return { ...state, orgName: action.value, nameInitialized: true }
+    case 'SET_INVITE_EMAIL':
+      return { ...state, inviteEmail: action.value }
+    case 'SET_INVITE_ROLE':
+      return { ...state, inviteRole: action.value }
+    case 'SET_UPDATE_SUCCESS':
+      return { ...state, updateSuccess: action.value }
+    case 'CLEAR_INVITE_EMAIL':
+      return { ...state, inviteEmail: '' }
+  }
+}
+
 export default function OrgSettings() {
   const { data, isLoading, error } = useOrgSettings()
   const updateName = useUpdateOrgName()
   const invite = useInviteMember()
   const removeMember = useRemoveMember()
 
-  const [orgName, setOrgName] = useState('')
-  const [nameInitialized, setNameInitialized] = useState(false)
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member')
-  const [updateSuccess, setUpdateSuccess] = useState(false)
+  const [state, dispatch] = useReducer(settingsReducer, settingsInitial)
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -31,9 +68,8 @@ export default function OrgSettings() {
   }, [])
 
   // Sync org name to local state once data loads
-  if (data && !nameInitialized) {
-    setOrgName(data.org.name)
-    setNameInitialized(true)
+  if (data && !state.nameInitialized) {
+    dispatch({ type: 'INIT_NAME', value: data.org.name })
   }
 
   const org = data?.org
@@ -43,12 +79,12 @@ export default function OrgSettings() {
   function handleUpdateName(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!org) return
-    setUpdateSuccess(false)
-    updateName.mutate(orgName.trim(), {
+    dispatch({ type: 'SET_UPDATE_SUCCESS', value: false })
+    updateName.mutate(state.orgName.trim(), {
       onSuccess: () => {
-        setUpdateSuccess(true)
+        dispatch({ type: 'SET_UPDATE_SUCCESS', value: true })
         if (successTimerRef.current) clearTimeout(successTimerRef.current)
-        successTimerRef.current = setTimeout(() => setUpdateSuccess(false), 3000)
+        successTimerRef.current = setTimeout(() => dispatch({ type: 'SET_UPDATE_SUCCESS', value: false }), 3000)
       },
     })
   }
@@ -56,8 +92,8 @@ export default function OrgSettings() {
   function handleInvite(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     invite.mutate(
-      { email: inviteEmail.trim(), role: inviteRole },
-      { onSuccess: () => setInviteEmail('') },
+      { email: state.inviteEmail.trim(), role: state.inviteRole },
+      { onSuccess: () => dispatch({ type: 'CLEAR_INVITE_EMAIL' }) },
     )
   }
 
@@ -113,28 +149,28 @@ export default function OrgSettings() {
             <input
               id="org-name"
               type="text"
-              value={orgName}
-              onChange={(e) => setOrgName(e.target.value)}
+              value={state.orgName}
+              onChange={(e) => dispatch({ type: 'SET_ORG_NAME', value: e.target.value })}
               className="dash-input"
               disabled={updateName.isPending}
             />
           </div>
           <div className="dash-field">
-            <label className="dash-label">Slug</label>
-            <p className="dash-static-value">{org.slug}</p>
+            <label htmlFor="org-slug" className="dash-label">Slug</label>
+            <p id="org-slug" className="dash-static-value">{org.slug}</p>
           </div>
           <div className="dash-field">
-            <label className="dash-label">ID</label>
-            <p className="dash-static-value">
+            <label htmlFor="org-id" className="dash-label">ID</label>
+            <p id="org-id" className="dash-static-value">
               <code>{org.id}</code>
             </p>
           </div>
           <button
             type="submit"
             className="dash-primary-btn"
-            disabled={updateName.isPending || orgName.trim() === org.name}
+            disabled={updateName.isPending || state.orgName.trim() === org.name}
           >
-            {updateName.isPending ? 'Saving...' : updateSuccess ? 'Saved' : 'Save'}
+            {updateName.isPending ? 'Saving...' : state.updateSuccess ? 'Saved' : 'Save'}
           </button>
         </form>
       </section>
@@ -188,15 +224,15 @@ export default function OrgSettings() {
           <input
             type="email"
             placeholder="Email address"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
+            value={state.inviteEmail}
+            onChange={(e) => dispatch({ type: 'SET_INVITE_EMAIL', value: e.target.value })}
             className="dash-input"
             disabled={invite.isPending}
             aria-label="Invite email address"
           />
           <select
-            value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value as 'member' | 'admin')}
+            value={state.inviteRole}
+            onChange={(e) => dispatch({ type: 'SET_INVITE_ROLE', value: e.target.value as 'member' | 'admin' })}
             className="dash-select"
             disabled={invite.isPending}
           >
@@ -206,7 +242,7 @@ export default function OrgSettings() {
           <button
             type="submit"
             className="dash-primary-btn"
-            disabled={invite.isPending || !inviteEmail.trim()}
+            disabled={invite.isPending || !state.inviteEmail.trim()}
           >
             {invite.isPending ? 'Inviting...' : 'Invite'}
           </button>
