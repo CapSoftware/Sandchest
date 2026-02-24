@@ -10,7 +10,6 @@ on:
         type: choice
         options:
           - dev
-          - staging
           - production
   workflow_call:
     inputs:

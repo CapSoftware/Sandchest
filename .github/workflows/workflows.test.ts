@@ -98,8 +98,8 @@ describe("deploy workflow", () => {
     expect(inputs.stage.type).toBe("choice");
     const options = inputs.stage.options as string[];
     expect(options).toContain("dev");
-    expect(options).toContain("staging");
     expect(options).toContain("production");
+    expect(options).not.toContain("staging");
   });
 });
 
@@ -255,8 +255,8 @@ describe("migrate workflow", () => {
     expect(inputs.environment.type).toBe("choice");
     const options = inputs.environment.options as string[];
     expect(options).toContain("dev");
-    expect(options).toContain("staging");
     expect(options).toContain("production");
+    expect(options).not.toContain("staging");
   });
 
   test("supports workflow_call for reuse", () => {
