@@ -78,6 +78,9 @@ export function loadEnv() {
     SANDCHEST_S3_SECRET_KEY: process.env.SANDCHEST_S3_SECRET_KEY as string | undefined,
     SANDCHEST_S3_REGION: optional('SANDCHEST_S3_REGION', 'auto'),
 
+    // Admin API token for /v1/admin/* endpoints
+    ADMIN_API_TOKEN: process.env.ADMIN_API_TOKEN as string | undefined,
+
     // Config (always from plain env vars)
     BETTER_AUTH_BASE_URL: optional('BETTER_AUTH_BASE_URL', 'http://localhost:3001'),
     RESEND_FROM_EMAIL: optional('RESEND_FROM_EMAIL', 'Sandchest Auth <noreply@send.sandchest.com>'),
