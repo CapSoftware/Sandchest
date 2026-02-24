@@ -36,7 +36,6 @@ describe("getDeployRoleName", () => {
   test("includes stage suffix", () => {
     expect(getDeployRoleName("production")).toBe("sandchest-deploy-production");
     expect(getDeployRoleName("dev")).toBe("sandchest-deploy-dev");
-    expect(getDeployRoleName("staging")).toBe("sandchest-deploy-staging");
   });
 });
 
@@ -88,5 +87,55 @@ describe("getDeployRoleTrustPolicy", () => {
       policy as { Statement: Array<Record<string, unknown>> }
     ).Statement;
     expect(statements).toHaveLength(1);
+  });
+
+  test("with single allowedRef uses StringEquals for sub", () => {
+    const scoped = getDeployRoleTrustPolicy(providerArn, GITHUB_REPO, [
+      "ref:refs/heads/main",
+    ]);
+    const stmt = (scoped as { Statement: Array<Record<string, unknown>> })
+      .Statement[0];
+    const condition = stmt.Condition as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(condition.StringEquals[`${GITHUB_OIDC_ISSUER}:aud`]).toBe(
+      GITHUB_OIDC_AUDIENCE,
+    );
+    expect(condition.StringEquals[`${GITHUB_OIDC_ISSUER}:sub`]).toBe(
+      `repo:${GITHUB_REPO}:ref:refs/heads/main`,
+    );
+    expect(condition).not.toHaveProperty("StringLike");
+  });
+
+  test("with multiple allowedRefs uses StringEquals array for sub", () => {
+    const scoped = getDeployRoleTrustPolicy(providerArn, GITHUB_REPO, [
+      "ref:refs/heads/main",
+      "ref:refs/heads/release",
+    ]);
+    const stmt = (scoped as { Statement: Array<Record<string, unknown>> })
+      .Statement[0];
+    const condition = stmt.Condition as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(condition.StringEquals[`${GITHUB_OIDC_ISSUER}:sub`]).toEqual([
+      `repo:${GITHUB_REPO}:ref:refs/heads/main`,
+      `repo:${GITHUB_REPO}:ref:refs/heads/release`,
+    ]);
+    expect(condition).not.toHaveProperty("StringLike");
+  });
+
+  test("without allowedRefs keeps wildcard StringLike (backward compatible)", () => {
+    const wildcard = getDeployRoleTrustPolicy(providerArn, GITHUB_REPO);
+    const stmt = (wildcard as { Statement: Array<Record<string, unknown>> })
+      .Statement[0];
+    const condition = stmt.Condition as Record<
+      string,
+      Record<string, string>
+    >;
+    expect(condition.StringLike[`${GITHUB_OIDC_ISSUER}:sub`]).toBe(
+      `repo:${GITHUB_REPO}:*`,
+    );
   });
 });

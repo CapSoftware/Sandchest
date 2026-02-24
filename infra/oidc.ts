@@ -21,7 +21,31 @@ export function getDeployRoleName(stage: string): string {
 export function getDeployRoleTrustPolicy(
   providerArn: string,
   repo: string,
+  allowedRefs?: string[],
 ): Record<string, unknown> {
+  if (allowedRefs) {
+    const subjects = allowedRefs.map(
+      (ref) => `repo:${repo}:${ref}`,
+    );
+    return {
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Effect: "Allow",
+          Principal: { Federated: providerArn },
+          Action: "sts:AssumeRoleWithWebIdentity",
+          Condition: {
+            StringEquals: {
+              [`${GITHUB_OIDC_ISSUER}:aud`]: GITHUB_OIDC_AUDIENCE,
+              [`${GITHUB_OIDC_ISSUER}:sub`]:
+                subjects.length === 1 ? subjects[0] : subjects,
+            },
+          },
+        },
+      ],
+    };
+  }
+
   return {
     Version: "2012-10-17",
     Statement: [
