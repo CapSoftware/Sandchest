@@ -34,18 +34,6 @@ export function getLoadBalancerHealthCheck() {
   };
 }
 
-export function getServiceHealthCheck() {
-  return {
-    path: "/healthz",
-    interval: "15 seconds" as const,
-    timeout: "5 seconds" as const,
-  };
-}
-
-export function getServicePort() {
-  return { listen: "80/http", forward: "3001/http" } as const;
-}
-
 export function getServiceDomain(stage: string): string {
   return isProduction(stage)
     ? "api.sandchest.com"
