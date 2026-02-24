@@ -26,43 +26,12 @@ describe('Providers', () => {
     expect(src).toMatch(/staleTime/)
   })
 
-  test('imports AutumnProvider from autumn-js/react', () => {
-    expect(src).toMatch(/import.*AutumnProvider.*from ['"]autumn-js\/react['"]/)
+  test('does not include AutumnProvider (moved to dashboard layout)', () => {
+    expect(src).not.toMatch(/AutumnProvider/)
   })
 
-  test('wraps children with AutumnProvider', () => {
-    expect(src).toMatch(/<AutumnProvider/)
-    expect(src).toMatch(/<\/AutumnProvider>/)
-  })
-
-  test('enables includeCredentials for cookie-based auth', () => {
-    expect(src).toMatch(/includeCredentials/)
-  })
-
-  test('AutumnProvider is inside QueryClientProvider', () => {
-    const qcpOpen = src.indexOf('<QueryClientProvider')
-    const apOpen = src.indexOf('<AutumnProvider')
-    const apClose = src.indexOf('</AutumnProvider>')
-    const qcpClose = src.indexOf('</QueryClientProvider>')
-
-    expect(qcpOpen).toBeLessThan(apOpen)
-    expect(apClose).toBeLessThan(qcpClose)
-  })
-
-  test('imports and wraps children with PaywallProvider', () => {
-    expect(src).toMatch(/import.*PaywallProvider/)
-    expect(src).toMatch(/<PaywallProvider>/)
-    expect(src).toMatch(/<\/PaywallProvider>/)
-  })
-
-  test('PaywallProvider is inside AutumnProvider', () => {
-    const apOpen = src.indexOf('<AutumnProvider')
-    const pwOpen = src.indexOf('<PaywallProvider>')
-    const pwClose = src.indexOf('</PaywallProvider>')
-    const apClose = src.indexOf('</AutumnProvider>')
-
-    expect(apOpen).toBeLessThan(pwOpen)
-    expect(pwClose).toBeLessThan(apClose)
+  test('does not include PaywallProvider (moved to dashboard layout)', () => {
+    expect(src).not.toMatch(/PaywallProvider/)
   })
 
   test('does not use useEffect', () => {

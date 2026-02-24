@@ -1,7 +1,9 @@
+import DashboardBillingProviders from '@/components/dashboard/DashboardBillingProviders'
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return <>{children}</>
+  return <DashboardBillingProviders>{children}</DashboardBillingProviders>
 }

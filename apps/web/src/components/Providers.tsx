@@ -2,8 +2,6 @@
 
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AutumnProvider } from 'autumn-js/react'
-import { PaywallProvider } from '@/components/dashboard/PaywallDialog'
 import { ApiError } from '@/lib/api'
 
 function isUnauthorized(error: unknown): boolean {
@@ -35,9 +33,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AutumnProvider includeCredentials>
-        <PaywallProvider>{children}</PaywallProvider>
-      </AutumnProvider>
+      {children}
     </QueryClientProvider>
   )
 }
