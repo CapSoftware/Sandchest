@@ -55,7 +55,7 @@ export default function MobileMenu() {
               Compare
             </Link>
             <a
-              href="https://github.com/sandchest"
+              href="https://github.com/CapSoftware/Sandchest"
               target="_blank"
               rel="noopener"
               className="inline-flex items-center justify-center gap-2 bg-text-strong font-medium no-underline transition-all duration-200 hover:bg-white hover:no-underline"

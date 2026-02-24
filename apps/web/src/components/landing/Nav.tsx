@@ -35,7 +35,7 @@ export default function Nav() {
           </li>
           <li className="star-item">
             <a
-              href="https://github.com/sandchest"
+              href="https://github.com/CapSoftware/Sandchest"
               target="_blank"
               rel="noopener"
               className="inline-flex items-center gap-2 bg-text-strong font-medium no-underline transition-all duration-200 hover:bg-white hover:no-underline whitespace-nowrap"
