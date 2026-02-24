@@ -17,7 +17,7 @@
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && bun run db:up",
     "db:generate": "bun run --filter @sandchest/db db:generate",
-    "db:push": "bun run --filter @sandchest/db db:push",
+    "db:push": "cd packages/db && bunx drizzle-kit push",
     "db:migrate": "bun run --filter @sandchest/db db:migrate",
     "db:migrate:run": "bun run --filter @sandchest/db db:migrate:run",
     "db:studio": "bun run --filter @sandchest/db db:studio"
@@ -33,5 +33,8 @@
     "typescript-eslint": "^8.56.0",
     "yaml": "^2.8.2"
   },
-  "packageManager": "bun@1.2.0"
+  "packageManager": "bun@1.2.0",
+  "patchedDependencies": {
+    "drizzle-kit@0.31.9": "patches/drizzle-kit@0.31.9.patch"
+  }
 }

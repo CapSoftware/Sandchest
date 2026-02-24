@@ -1,0 +1,12 @@
+diff --git a/bin.cjs b/bin.cjs
+index 327fdfde1aac8ddf7a0db6dc357796757be8986a..f4908ec68633aa2f5388db46197fa466f1d9cbf4 100755
+--- a/bin.cjs
++++ b/bin.cjs
+@@ -18404,6 +18404,7 @@ AND
+         const constraintValue = checkConstraintRow["CHECK_CLAUSE"];
+         const tableName = checkConstraintRow["TABLE_NAME"];
+         const tableInResult = result[tableName];
++        if (!tableInResult) continue;
+         tableInResult.checkConstraint[constraintName] = {
+           name: constraintName,
+           value: constraintValue
