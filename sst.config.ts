@@ -1,14 +1,15 @@
 /// <reference path="./.sst/platform/config.d.ts" />
 
-import { getAppConfig } from "./infra/app";
-
 export default $config({
-  app(input) {
+  async app(input) {
+    const { getAppConfig } = await import("./infra/app");
     return getAppConfig(input.stage);
   },
   async run() {
     const { getVpcConfig } = await import("./infra/vpc");
-    const { getRedisConfig } = await import("./infra/redis");
+    const { getRedisConfig, getRedisCacheClusterSuffix } = await import(
+      "./infra/redis"
+    );
     const { getBucketConfig } = await import("./infra/bucket");
     const {
       getServiceCpu,
@@ -21,10 +22,9 @@ export default $config({
     } = await import("./infra/cluster");
     const {
       getNodeAmiSsmParameter,
-      getNodeCpuOptions,
+      getNodeAsgConfig,
       getNodeGrpcPort,
-      getNodeInstanceType,
-      getNodeRootVolumeGb,
+      getNodeLaunchTemplateConfig,
       getNodeUserData,
     } = await import("./infra/node");
     const {
@@ -41,6 +41,7 @@ export default $config({
       getEcsCpuAlarm,
       getEcsMemoryAlarm,
       getEcsRunningTaskAlarm,
+      getNodeAsgAlarm,
       getNodeHeartbeatAlarm,
       getRedisEvictionAlarm,
       getRedisMemoryAlarm,
@@ -48,10 +49,6 @@ export default $config({
       NODE_HEARTBEAT_NAMESPACE,
     } = await import("./infra/alarms");
     type MetricAlarmConfig = import("./infra/alarms").MetricAlarmConfig;
-
-    // Note: getAlbUnhealthyHostAlarm was removed — SST's Cluster component
-    // doesn't expose target group ARN, which is a required CloudWatch dimension
-    // for UnHealthyHostCount. The ECS running task alarm covers service health.
 
     const vpc = new sst.aws.Vpc("Vpc", getVpcConfig($app.stage));
     const redis = new sst.aws.Redis(
@@ -69,7 +66,8 @@ export default $config({
     const autumnSecretKey = new sst.Secret("AutumnSecretKey");
 
     const cluster = new sst.aws.Cluster("Cluster", { vpc });
-    const api = cluster.addService("Api", {
+    const api = new sst.aws.Service("Api", {
+      cluster,
       cpu: getServiceCpu($app.stage),
       memory: getServiceMemory($app.stage),
       scaling: getServiceScaling($app.stage),
@@ -161,27 +159,56 @@ export default $config({
       tags: { Name: `sandchest-node-${$app.stage}` },
     });
 
-    const node = new aws.ec2.Instance("NodeInstance", {
-      ami: nodeAmi.value,
-      instanceType: getNodeInstanceType($app.stage),
-      subnetId: vpc.privateSubnets.apply((subs) => subs[0]),
-      iamInstanceProfile: nodeProfile.name,
+    const ltConfig = getNodeLaunchTemplateConfig($app.stage);
+    const nodeLt = new aws.ec2.LaunchTemplate("NodeLaunchTemplate", {
+      imageId: nodeAmi.value,
+      instanceType: ltConfig.instanceType,
+      iamInstanceProfile: { name: nodeProfile.name },
       vpcSecurityGroupIds: [nodeSg.id],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi v6.66.2 InstanceCpuOptions lacks nestedVirtualization field; remove cast once provider is updated
-      cpuOptions: getNodeCpuOptions() as any,
-      rootBlockDevice: {
-        volumeSize: getNodeRootVolumeGb($app.stage),
-        volumeType: "gp3",
-        encrypted: true,
-      },
-      metadataOptions: {
-        httpEndpoint: "enabled",
-        httpTokens: "required",
-      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi v6.66.2 LaunchTemplateCpuOptions lacks nestedVirtualization field; remove cast once provider is updated
+      cpuOptions: ltConfig.cpuOptions as any,
+      blockDeviceMappings: [
+        {
+          deviceName: "/dev/xvda",
+          ebs: {
+            volumeSize: ltConfig.rootVolumeGb,
+            volumeType: "gp3",
+            encrypted: "true",
+          },
+        },
+      ],
+      metadataOptions: ltConfig.metadataOptions,
       userData: artifactBucket.name.apply((name) =>
-        getNodeUserData($app.stage, name),
+        Buffer.from(getNodeUserData($app.stage, name)).toString("base64"),
       ),
-      tags: { Name: `sandchest-node-${$app.stage}` },
+      tagSpecifications: [
+        {
+          resourceType: "instance",
+          tags: { Name: `sandchest-node-${$app.stage}` },
+        },
+      ],
+    });
+
+    const asgConfig = getNodeAsgConfig();
+    const nodeAsg = new aws.autoscaling.Group("NodeAsg", {
+      launchTemplate: {
+        id: nodeLt.id,
+        version: "$Latest",
+      },
+      vpcZoneIdentifiers: vpc.privateSubnets,
+      minSize: asgConfig.minSize,
+      maxSize: asgConfig.maxSize,
+      desiredCapacity: asgConfig.desiredCapacity,
+      healthCheckType: asgConfig.healthCheckType,
+      healthCheckGracePeriod: asgConfig.healthCheckGracePeriod,
+      defaultCooldown: asgConfig.defaultCooldown,
+      tags: [
+        {
+          key: "Name",
+          value: `sandchest-node-${$app.stage}`,
+          propagateAtLaunch: true,
+        },
+      ],
     });
 
     // --- GitHub Actions OIDC ---
@@ -192,10 +219,17 @@ export default $config({
       thumbprintLists: GITHUB_OIDC_THUMBPRINTS,
     });
 
+    const { isProduction } = await import("./infra/vpc");
+    const allowedRefs = isProduction($app.stage)
+      ? ["ref:refs/heads/main"]
+      : undefined;
+
     const deployRole = new aws.iam.Role("DeployRole", {
       name: getDeployRoleName($app.stage),
       assumeRolePolicy: oidcProvider.arn.apply((arn) =>
-        JSON.stringify(getDeployRoleTrustPolicy(arn, GITHUB_REPO)),
+        JSON.stringify(
+          getDeployRoleTrustPolicy(arn, GITHUB_REPO, allowedRefs),
+        ),
       ),
     });
 
@@ -267,7 +301,9 @@ export default $config({
       { LoadBalancer: albArnSuffix },
     );
 
-    const redisCacheClusterId = redis.clusterId.apply((id) => `${id}-001`);
+    const redisCacheClusterId = redis.clusterId.apply(
+      (id) => `${id}${getRedisCacheClusterSuffix()}`,
+    );
 
     createAlarm(
       "RedisMemoryAlarm",
@@ -284,7 +320,13 @@ export default $config({
     createAlarm(
       "NodeHeartbeatAlarm",
       getNodeHeartbeatAlarm(),
-      { InstanceId: node.id },
+      {},
+    );
+
+    createAlarm(
+      "NodeAsgAlarm",
+      getNodeAsgAlarm(),
+      { AutoScalingGroupName: nodeAsg.name },
     );
 
     // Allow node daemon to publish heartbeat metrics
@@ -313,8 +355,7 @@ export default $config({
       redisPort: redis.port,
       artifactBucketName: artifactBucket.name,
       apiUrl: api.url,
-      nodeInstanceId: node.id,
-      nodePrivateIp: node.privateIp,
+      nodeAsgName: nodeAsg.name,
       deployRoleArn: deployRole.arn,
       alarmTopicArn: alarmTopic.arn,
     };
