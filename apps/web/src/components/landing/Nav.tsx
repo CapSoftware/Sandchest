@@ -14,18 +14,23 @@ export default function Nav() {
 
         <ul className="hidden items-center sm:flex" style={{ gap: 48 }}>
           <li>
-            <a href="#features" className="text-text-weak transition-colors hover:text-text-strong">
+            <a href="/#features" className="text-text-weak transition-colors hover:text-text-strong">
               What is Sandchest?
             </a>
           </li>
           <li>
-            <a href="#code" className="text-text-weak transition-colors hover:text-text-strong">
+            <a href="/#code" className="text-text-weak transition-colors hover:text-text-strong">
               See it in action
             </a>
           </li>
           <li>
             <Link href="/pricing" className="text-text-weak transition-colors hover:text-text-strong">
               Pricing
+            </Link>
+          </li>
+          <li>
+            <Link href="/compare" className="text-text-weak transition-colors hover:text-text-strong">
+              Compare
             </Link>
           </li>
           <li className="star-item">
