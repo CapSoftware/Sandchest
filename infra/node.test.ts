@@ -1,34 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import {
   getNodeAmiSsmParameter,
+  getNodeAsgConfig,
   getNodeCpuOptions,
   getNodeEnvironment,
   getNodeGrpcPort,
   getNodeInstanceType,
+  getNodeLaunchTemplateConfig,
   getNodeRootVolumeGb,
   getNodeSystemdUnit,
   getNodeUserData,
 } from "./node";
 
 describe("getNodeInstanceType", () => {
-  test("uses c8i.4xlarge for production", () => {
-    expect(getNodeInstanceType("production")).toBe("c8i.4xlarge");
-  });
-
-  test("uses c8i.2xlarge for non-production stages", () => {
-    expect(getNodeInstanceType("dev")).toBe("c8i.2xlarge");
-    expect(getNodeInstanceType("staging")).toBe("c8i.2xlarge");
+  test("uses c8i.large for all stages", () => {
+    expect(getNodeInstanceType("production")).toBe("c8i.large");
+    expect(getNodeInstanceType("dev")).toBe("c8i.large");
   });
 });
 
 describe("getNodeRootVolumeGb", () => {
-  test("returns 100 GB for production", () => {
-    expect(getNodeRootVolumeGb("production")).toBe(100);
+  test("returns 50 GB for production", () => {
+    expect(getNodeRootVolumeGb("production")).toBe(50);
   });
 
-  test("returns 50 GB for non-production stages", () => {
-    expect(getNodeRootVolumeGb("dev")).toBe(50);
-    expect(getNodeRootVolumeGb("staging")).toBe(50);
+  test("returns 30 GB for non-production stages", () => {
+    expect(getNodeRootVolumeGb("dev")).toBe(30);
   });
 });
 
@@ -56,6 +53,57 @@ describe("getNodeAmiSsmParameter", () => {
   });
 });
 
+describe("getNodeLaunchTemplateConfig", () => {
+  test("composes instance type from getNodeInstanceType", () => {
+    expect(getNodeLaunchTemplateConfig("production").instanceType).toBe(
+      getNodeInstanceType("production"),
+    );
+    expect(getNodeLaunchTemplateConfig("dev").instanceType).toBe(
+      getNodeInstanceType("dev"),
+    );
+  });
+
+  test("composes root volume from getNodeRootVolumeGb", () => {
+    expect(getNodeLaunchTemplateConfig("production").rootVolumeGb).toBe(50);
+    expect(getNodeLaunchTemplateConfig("dev").rootVolumeGb).toBe(30);
+  });
+
+  test("composes CPU options from getNodeCpuOptions", () => {
+    expect(
+      getNodeLaunchTemplateConfig("production").cpuOptions
+        .nestedVirtualization,
+    ).toBe("enabled");
+  });
+
+  test("requires IMDSv2", () => {
+    const config = getNodeLaunchTemplateConfig("production");
+    expect(config.metadataOptions.httpEndpoint).toBe("enabled");
+    expect(config.metadataOptions.httpTokens).toBe("required");
+  });
+});
+
+describe("getNodeAsgConfig", () => {
+  const config = getNodeAsgConfig();
+
+  test("single-instance ASG (min=1, max=1, desired=1)", () => {
+    expect(config.minSize).toBe(1);
+    expect(config.maxSize).toBe(1);
+    expect(config.desiredCapacity).toBe(1);
+  });
+
+  test("uses EC2 health check type", () => {
+    expect(config.healthCheckType).toBe("EC2");
+  });
+
+  test("health check grace period is 300 seconds", () => {
+    expect(config.healthCheckGracePeriod).toBe(300);
+  });
+
+  test("default cooldown is 300 seconds", () => {
+    expect(config.defaultCooldown).toBe(300);
+  });
+});
+
 describe("getNodeEnvironment", () => {
   test("sets RUST_LOG to info for production", () => {
     expect(getNodeEnvironment("production", "test-bucket").RUST_LOG).toBe("info");
@@ -63,7 +111,6 @@ describe("getNodeEnvironment", () => {
 
   test("sets RUST_LOG to debug for non-production", () => {
     expect(getNodeEnvironment("dev", "test-bucket").RUST_LOG).toBe("debug");
-    expect(getNodeEnvironment("staging", "test-bucket").RUST_LOG).toBe("debug");
   });
 
   test("sets SANDCHEST_DATA_DIR to /var/sandchest", () => {
@@ -90,9 +137,6 @@ describe("getNodeEnvironment", () => {
 
   test("disables jailer for non-production", () => {
     expect(getNodeEnvironment("dev", "test-bucket").SANDCHEST_JAILER_ENABLED).toBe("false");
-    expect(getNodeEnvironment("staging", "test-bucket").SANDCHEST_JAILER_ENABLED).toBe(
-      "false",
-    );
   });
 
   test("uses ens5 network interface", () => {

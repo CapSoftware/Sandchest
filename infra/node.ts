@@ -2,16 +2,17 @@ import { isProduction } from "./vpc";
 
 // C8i instances support nested virtualization (AWS launched Feb 2026), exposing
 // /dev/kvm without requiring .metal instances. ~3% CPU overhead, 2-3x slower
-// microVM boot vs bare metal — acceptable at current scale. Fallback if deploy
-// fails: m5zn.metal while waiting for Pulumi provider update.
-export function getNodeInstanceType(stage: string): string {
-  return isProduction(stage) ? "c8i.4xlarge" : "c8i.2xlarge";
+// microVM boot vs bare metal — acceptable at current scale. Both stages use
+// c8i.large (2 vCPU). Scale up to c8i.xlarge/2xlarge/4xlarge when needed.
+// Fallback if deploy fails: m5zn.metal.
+export function getNodeInstanceType(_stage: string): string {
+  return "c8i.large";
 }
 
 // C8i has no NVMe instance storage (unlike i3.metal), so prod needs a larger
 // root EBS volume to store VM images, snapshots, and sandbox working dirs.
 export function getNodeRootVolumeGb(stage: string): number {
-  return isProduction(stage) ? 100 : 50;
+  return isProduction(stage) ? 50 : 30;
 }
 
 // Returns Record<string, unknown> because Pulumi AWS v6.66.2 InstanceCpuOptions
@@ -71,6 +72,44 @@ export function getNodeSystemdUnit(): string {
     "[Install]",
     "WantedBy=multi-user.target",
   ].join("\n");
+}
+
+export interface NodeLaunchTemplateConfig {
+  instanceType: string;
+  rootVolumeGb: number;
+  cpuOptions: Record<string, unknown>;
+  metadataOptions: { httpEndpoint: string; httpTokens: string };
+}
+
+export function getNodeLaunchTemplateConfig(
+  stage: string,
+): NodeLaunchTemplateConfig {
+  return {
+    instanceType: getNodeInstanceType(stage),
+    rootVolumeGb: getNodeRootVolumeGb(stage),
+    cpuOptions: getNodeCpuOptions(),
+    metadataOptions: { httpEndpoint: "enabled", httpTokens: "required" },
+  };
+}
+
+export interface NodeAsgConfig {
+  minSize: number;
+  maxSize: number;
+  desiredCapacity: number;
+  healthCheckType: string;
+  healthCheckGracePeriod: number;
+  defaultCooldown: number;
+}
+
+export function getNodeAsgConfig(): NodeAsgConfig {
+  return {
+    minSize: 1,
+    maxSize: 1,
+    desiredCapacity: 1,
+    healthCheckType: "EC2",
+    healthCheckGracePeriod: 300,
+    defaultCooldown: 300,
+  };
 }
 
 export function getNodeUserData(stage: string, bucketName: string): string {
