@@ -12,6 +12,8 @@
     "dev": "bun --env-file=../../.env --watch run src/index.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.996.0",
+    "@aws-sdk/s3-request-presigner": "^3.996.0",
     "@effect/platform": "^0.94.5",
     "@effect/platform-node": "^0.104.1",
     "@effect/schema": "^0.75.5",
