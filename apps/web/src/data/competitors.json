@@ -1,0 +1,73 @@
+{
+  "e2b": {
+    "name": "E2B",
+    "rates": {
+      "vcpuPerSec": 0.0000140,
+      "vcpuPerHr": 0.0504,
+      "ramGiBPerSec": 0.0000045,
+      "ramGiBPerHr": 0.0162,
+      "storageGiBPerSec": null,
+      "storageGiBPerHr": null
+    },
+    "plans": [
+      {
+        "name": "Hobby",
+        "monthlyPrice": 0,
+        "storageFreeGiB": 10,
+        "maxSessionHours": 1,
+        "maxConcurrent": 20
+      },
+      {
+        "name": "Pro",
+        "monthlyPrice": 150,
+        "storageFreeGiB": 20,
+        "maxSessionHours": 24,
+        "maxConcurrent": 100
+      }
+    ],
+    "freeCredits": {
+      "amount": 100,
+      "recurring": false
+    },
+    "features": {
+      "sessionReplay": false,
+      "subSecondForking": false,
+      "mcpServer": false,
+      "cliWithSsh": false,
+      "vmIsolation": true,
+      "typescriptSdk": true
+    }
+  },
+  "daytona": {
+    "name": "Daytona",
+    "rates": {
+      "vcpuPerSec": 0.0000140,
+      "vcpuPerHr": 0.0504,
+      "ramGiBPerSec": 0.0000045,
+      "ramGiBPerHr": 0.0162,
+      "storageGiBPerSec": 0.00000003,
+      "storageGiBPerHr": 0.000108
+    },
+    "plans": [
+      {
+        "name": "Pay as you go",
+        "monthlyPrice": 0,
+        "storageFreeGiB": 5,
+        "maxSessionHours": null,
+        "maxConcurrent": null
+      }
+    ],
+    "freeCredits": {
+      "amount": 200,
+      "recurring": false
+    },
+    "features": {
+      "sessionReplay": false,
+      "subSecondForking": false,
+      "mcpServer": false,
+      "cliWithSsh": true,
+      "vmIsolation": true,
+      "typescriptSdk": true
+    }
+  }
+}
