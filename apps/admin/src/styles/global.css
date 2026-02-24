@@ -1,0 +1,551 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --color-background: hsl(0, 9%, 7%);
+  --color-surface: hsl(0, 6%, 10%);
+  --color-surface-hover: hsl(0, 6%, 15%);
+
+  --color-text: hsl(0, 4%, 71%);
+  --color-text-weak: hsl(0, 2%, 49%);
+  --color-text-strong: hsl(0, 15%, 94%);
+
+  --color-border: hsl(0, 3%, 28%);
+  --color-border-weak: hsl(0, 4%, 23%);
+
+  --color-accent: hsl(62, 84%, 88%);
+  --color-accent-weak: hsl(60, 20%, 8%);
+
+  --color-success: hsl(142, 71%, 45%);
+  --color-warning: hsl(48, 96%, 53%);
+  --color-danger: hsl(0, 84%, 60%);
+
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html {
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-background);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* --- Admin layout --- */
+
+.admin-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  width: 220px;
+  border-right: 1px solid var(--color-border-weak);
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+}
+
+.admin-sidebar-logo {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  letter-spacing: -0.02em;
+  padding: 0 0.5rem;
+}
+
+.admin-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-text);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.admin-sidebar-link:hover {
+  background-color: var(--color-surface);
+  color: var(--color-text-strong);
+  text-decoration: none;
+}
+
+.admin-sidebar-link[data-active="true"] {
+  background-color: var(--color-surface);
+  color: var(--color-text-strong);
+}
+
+.admin-content {
+  flex: 1;
+  margin-left: 220px;
+  padding: 2rem;
+}
+
+/* --- Cards --- */
+
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+/* --- Status badges --- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid;
+}
+
+.badge-online {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-success), transparent 90%);
+}
+
+.badge-offline {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-danger), transparent 90%);
+}
+
+.badge-provisioning, .badge-draining {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-warning), transparent 90%);
+}
+
+.badge-pending {
+  color: var(--color-text-weak);
+  border-color: var(--color-border);
+  background-color: var(--color-surface);
+}
+
+.badge-failed, .badge-disabled {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-danger), transparent 90%);
+}
+
+.badge-awaiting-daemon {
+  color: var(--color-warning, #c4841d);
+  border-color: color-mix(in srgb, var(--color-warning, #c4841d), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-warning, #c4841d), transparent 90%);
+}
+
+.badge-completed {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-success), transparent 90%);
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+/* --- Metric bars --- */
+
+.metric-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metric-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--color-text-weak);
+}
+
+.metric-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--color-border-weak);
+  overflow: hidden;
+}
+
+.metric-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background-color: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.metric-bar-fill[data-level="warning"] {
+  background-color: var(--color-warning);
+}
+
+.metric-bar-fill[data-level="danger"] {
+  background-color: var(--color-danger);
+}
+
+/* --- Buttons --- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-strong);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.btn:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: var(--color-accent);
+  color: var(--color-background);
+  border-color: var(--color-accent);
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-danger {
+  border-color: color-mix(in srgb, var(--color-danger), transparent 50%);
+  color: var(--color-danger);
+}
+
+.btn-danger:hover {
+  background-color: color-mix(in srgb, var(--color-danger), transparent 90%);
+}
+
+.btn-sm {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+/* --- Forms --- */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.form-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.form-input {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-background);
+  color: var(--color-text-strong);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.form-input:focus {
+  border-color: var(--color-accent);
+}
+
+.form-input::placeholder {
+  color: var(--color-text-weak);
+}
+
+textarea.form-input {
+  resize: vertical;
+  min-height: 120px;
+}
+
+/* --- Dialog / Modal --- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.dialog-content {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.dialog-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  margin-bottom: 1.25rem;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* --- Provision timeline --- */
+
+.provision-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 2rem;
+}
+
+.provision-timeline::before {
+  content: "";
+  position: absolute;
+  left: 0.6875rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--color-border-weak);
+}
+
+.provision-step {
+  position: relative;
+  padding: 0.75rem 0;
+}
+
+.provision-step-icon {
+  position: absolute;
+  left: -2rem;
+  top: 0.75rem;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-weak);
+  z-index: 1;
+}
+
+.provision-step-icon[data-status="completed"] {
+  background-color: var(--color-success);
+  border-color: var(--color-success);
+  color: white;
+}
+
+.provision-step-icon[data-status="running"] {
+  background-color: var(--color-warning);
+  border-color: var(--color-warning);
+  color: var(--color-background);
+}
+
+.provision-step-icon[data-status="failed"] {
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+  color: white;
+}
+
+.provision-step-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-strong);
+}
+
+.provision-step-output {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 4px;
+  padding: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--color-text);
+}
+
+/* --- Command runner --- */
+
+.terminal-output {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  padding: 0.75rem;
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-stdout {
+  color: var(--color-text);
+}
+
+.terminal-stderr {
+  color: var(--color-danger);
+}
+
+/* --- Login page --- */
+
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.login-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  margin-bottom: 0.25rem;
+}
+
+.login-subtitle {
+  font-size: 0.8125rem;
+  color: var(--color-text-weak);
+  margin-bottom: 1.5rem;
+}
+
+/* --- Page header --- */
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.page-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+}
+
+/* --- Utility --- */
+
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.add-server-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  min-height: 160px;
+  cursor: pointer;
+  color: var(--color-text-weak);
+  font-size: 0.8125rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.add-server-card:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-strong);
+}

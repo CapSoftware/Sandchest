@@ -1,0 +1,188 @@
+'use client'
+
+import { use } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useServer } from '@/hooks/use-server'
+import StatusBadge from '@/components/StatusBadge'
+import ServerMetrics from '@/components/ServerMetrics'
+import CommandRunner from '@/components/CommandRunner'
+
+export default function ServerDetailPage({
+  params,
+}: {
+  params: Promise<{ serverId: string }>
+}) {
+  const { serverId } = use(params)
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const { data: server, isLoading } = useServer(serverId)
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete')
+    },
+    onSuccess: () => {
+      router.push('/servers')
+    },
+  })
+
+  const provisionMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/provision/${serverId}/start`, { method: 'POST' })
+      if (!res.ok) throw new Error('Failed to start provisioning')
+    },
+    onSuccess: () => {
+      router.push(`/servers/${serverId}/provision`)
+    },
+  })
+
+  const actionMutation = useMutation({
+    mutationFn: async (action: string) => {
+      if (!server?.node_id) throw new Error('No node linked')
+      const res = await fetch(`/api/servers/${serverId}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) throw new Error('Action failed')
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+  })
+
+  if (isLoading || !server) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
+        <span className="spinner" />
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <Link href="/servers" style={{ fontSize: '0.75rem', color: 'var(--color-text-weak)' }}>
+          &larr; Back to servers
+        </Link>
+      </div>
+
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{server.name}</h1>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-weak)', marginTop: '0.25rem' }}>
+            {server.ip}:{server.ssh_port}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <StatusBadge status={
+            server.provision_status === 'completed' && !server.node_id
+              ? 'awaiting-daemon'
+              : server.provision_status
+          } />
+
+          {server.provision_status === 'pending' && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => provisionMutation.mutate()}
+              disabled={provisionMutation.isPending}
+            >
+              Provision
+            </button>
+          )}
+          {server.provision_status === 'failed' && (
+            <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
+              View Logs
+            </Link>
+          )}
+          {server.provision_status === 'provisioning' && (
+            <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
+              View Progress
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* System Info */}
+      {server.system_info && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-text-strong)', marginBottom: '0.5rem' }}>
+            System Info
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
+            {server.system_info.cpu && <div><span style={{ color: 'var(--color-text-weak)' }}>CPU:</span> {server.system_info.cpu}</div>}
+            {server.system_info.ram && <div><span style={{ color: 'var(--color-text-weak)' }}>RAM:</span> {server.system_info.ram}</div>}
+            {server.system_info.disk && <div><span style={{ color: 'var(--color-text-weak)' }}>Disk:</span> {server.system_info.disk}</div>}
+            {server.system_info.os && <div><span style={{ color: 'var(--color-text-weak)' }}>OS:</span> {server.system_info.os}</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Metrics (placeholder — will show real data when node heartbeat sends metrics) */}
+      <div style={{ marginBottom: '1rem' }}>
+        <ServerMetrics metrics={null} />
+      </div>
+
+      {/* Command Runner */}
+      {server.provision_status === 'completed' && (
+        <div style={{ marginBottom: '1rem' }}>
+          <CommandRunner serverId={serverId} />
+        </div>
+      )}
+
+      {/* Actions */}
+      {server.provision_status === 'completed' && server.node_id && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-text-strong)', marginBottom: '0.75rem' }}>
+            Node Actions
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-sm"
+              onClick={() => actionMutation.mutate('drain')}
+              disabled={actionMutation.isPending}
+            >
+              Drain
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => actionMutation.mutate('disable')}
+              disabled={actionMutation.isPending}
+            >
+              Disable
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => actionMutation.mutate('enable')}
+              disabled={actionMutation.isPending}
+            >
+              Enable
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Danger Zone */}
+      <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--color-danger), transparent 70%)' }}>
+        <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-danger)', marginBottom: '0.75rem' }}>
+          Danger Zone
+        </div>
+        <button
+          className="btn btn-danger btn-sm"
+          onClick={() => {
+            if (confirm(`Delete server "${server.name}"? This cannot be undone.`)) {
+              deleteMutation.mutate()
+            }
+          }}
+          disabled={deleteMutation.isPending}
+        >
+          Remove Server
+        </button>
+      </div>
+    </div>
+  )
+}
