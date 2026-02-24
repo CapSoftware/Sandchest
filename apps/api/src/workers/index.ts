@@ -9,6 +9,7 @@ import type { QuotaService } from '../services/quota.js'
 import type { EventRecorder } from '../services/event-recorder.js'
 import type { OrgRepo } from '../services/org-repo.js'
 import type { IdempotencyRepo } from './idempotency-cleanup.js'
+import type { MetricsRepo } from '../services/metrics-repo.js'
 import { startWorkers, type WorkerConfig } from './runner.js'
 import { ttlEnforcementWorker } from './ttl-enforcement.js'
 import { ttlWarningWorker } from './ttl-warning.js'
@@ -19,6 +20,7 @@ import { idempotencyCleanupWorker } from './idempotency-cleanup.js'
 import { artifactRetentionWorker } from './artifact-retention.js'
 import { orgHardDeleteWorker } from './org-hard-delete.js'
 import { replayRetentionWorker } from './replay-retention.js'
+import { metricsRetentionWorker } from './metrics-retention.js'
 
 export type WorkerDeps =
   | RedisService
@@ -31,6 +33,7 @@ export type WorkerDeps =
   | EventRecorder
   | OrgRepo
   | IdempotencyRepo
+  | MetricsRepo
 
 const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [
   ttlEnforcementWorker,
@@ -42,6 +45,7 @@ const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [
   artifactRetentionWorker,
   orgHardDeleteWorker,
   replayRetentionWorker,
+  metricsRetentionWorker,
 ]
 
 export function startAllWorkers() {
