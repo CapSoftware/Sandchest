@@ -15,7 +15,11 @@ function getResend() {
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_BASE_URL,
   secret: env.BETTER_AUTH_SECRET,
-  trustedOrigins: ['http://localhost:3000'],
+  trustedOrigins: [
+    'http://localhost:3000',
+    'https://sandchest.com',
+    'https://*.sandchest.com',
+  ],
   database: createPool({
     uri: env.DATABASE_URL,
     waitForConnections: true,
