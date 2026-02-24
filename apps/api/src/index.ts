@@ -12,6 +12,7 @@ import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
 import { ExecRepoMemory } from './services/exec-repo.memory.js'
 import { SessionRepoMemory } from './services/session-repo.memory.js'
 import { ObjectStorageMemory } from './services/object-storage.memory.js'
+import { createObjectStorageLayer } from './services/object-storage.live.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
 import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
@@ -28,7 +29,7 @@ import { JsonLoggerLive } from './logger.js'
 import { ShutdownController, ShutdownControllerLive } from './shutdown.js'
 
 const env = loadEnv()
-const { PORT, REDIS_URL, DRAIN_TIMEOUT_MS } = env
+const { PORT, REDIS_URL, DRAIN_TIMEOUT_MS, SANDCHEST_S3_ENDPOINT, SANDCHEST_S3_ACCESS_KEY, SANDCHEST_S3_SECRET_KEY, SANDCHEST_S3_REGION, ARTIFACT_BUCKET_NAME } = env
 
 // Production pipeline: connection drain is outermost so it gates all requests
 const AppLive = ApiRouter.pipe(
@@ -41,6 +42,17 @@ const AppLive = ApiRouter.pipe(
 )
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL) : RedisMemory
+
+const ObjectStorageLive =
+  SANDCHEST_S3_ENDPOINT && SANDCHEST_S3_ACCESS_KEY && SANDCHEST_S3_SECRET_KEY && ARTIFACT_BUCKET_NAME
+    ? createObjectStorageLayer({
+        endpoint: SANDCHEST_S3_ENDPOINT,
+        accessKeyId: SANDCHEST_S3_ACCESS_KEY,
+        secretAccessKey: SANDCHEST_S3_SECRET_KEY,
+        region: SANDCHEST_S3_REGION,
+        bucket: ARTIFACT_BUCKET_NAME,
+      })
+    : ObjectStorageMemory
 
 // Workers launch as scoped fibers alongside the HTTP server
 const WorkersLive = Layer.scopedDiscard(
@@ -90,7 +102,7 @@ const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pi
   Layer.provide(SandboxRepoMemory),
   Layer.provide(ExecRepoMemory),
   Layer.provide(SessionRepoMemory),
-  Layer.provide(ObjectStorageMemory),
+  Layer.provide(ObjectStorageLive),
   Layer.provide(NodeClientMemory),
   Layer.provide(ArtifactRepoMemory),
   Layer.provide(IdempotencyRepoMemory),
