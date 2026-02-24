@@ -1,9 +1,11 @@
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform'
 import { Effect } from 'effect'
+import { timingSafeEqual } from 'node:crypto'
 import { parseScopes } from '@sandchest/contract'
 import { UnauthorizedError } from './errors.js'
 import { AuthContext } from './context.js'
 import { auth } from './auth.js'
+import { loadEnv } from './env.js'
 
 /**
  * Generates a request ID (or propagates from X-Request-Id header)
@@ -32,6 +34,26 @@ export const withAuth = HttpMiddleware.make((app) =>
 
     if (request.url.startsWith('/health') || request.url.startsWith('/readyz') || request.url.startsWith('/api/auth') || request.url.startsWith('/v1/public/') || request.url.startsWith('/v1/internal/') || request.url === '/openapi.json' || request.url === '/docs') {
       return yield* Effect.provideService(app, AuthContext, { userId: '', orgId: '', scopes: null })
+    }
+
+    // Admin API routes: validate static bearer token
+    if (request.url.startsWith('/v1/admin/')) {
+      const env = loadEnv()
+      const adminToken = env.ADMIN_API_TOKEN
+      if (!adminToken) {
+        return yield* Effect.fail(new UnauthorizedError({ message: 'Admin API not configured' }))
+      }
+      const authHeader = request.headers['authorization']
+      const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+      if (!provided || provided.length !== adminToken.length) {
+        return yield* Effect.fail(new UnauthorizedError({ message: 'Invalid admin token' }))
+      }
+      const a = new TextEncoder().encode(provided)
+      const b = new TextEncoder().encode(adminToken)
+      if (!timingSafeEqual(a, b)) {
+        return yield* Effect.fail(new UnauthorizedError({ message: 'Invalid admin token' }))
+      }
+      return yield* Effect.provideService(app, AuthContext, { userId: 'admin', orgId: '', scopes: null })
     }
 
     const authHeader = request.headers['authorization']
