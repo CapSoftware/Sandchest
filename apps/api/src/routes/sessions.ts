@@ -428,7 +428,11 @@ const sessionStream = Effect.gen(function* () {
 
   return HttpServerResponse.text(sseBody, {
     contentType: 'text/event-stream',
-    headers: { 'cache-control': 'no-cache' },
+    headers: {
+      'cache-control': 'no-cache',
+      'connection': 'keep-alive',
+      'x-accel-buffering': 'no',
+    },
   })
 })
 
