@@ -1,4 +1,5 @@
 import Nav from '@/components/landing/Nav'
+import Footer from '@/components/landing/Footer'
 
 export default function MarketingLayout({
   children,
@@ -6,14 +7,12 @@ export default function MarketingLayout({
   children: React.ReactNode
 }) {
   return (
-    <main className="flex flex-col pb-20" style={{ gap: 'var(--vertical-padding)' }}>
+    <main className="flex flex-col" style={{ gap: 'var(--vertical-padding)' }}>
       <div className="page-container">
         <Nav />
         <div>{children}</div>
       </div>
-      <div className="text-center text-text-weak text-[13px]">
-        <span>&copy; 2026 Sandchest.com</span>
-      </div>
+      <Footer />
     </main>
   )
 }
