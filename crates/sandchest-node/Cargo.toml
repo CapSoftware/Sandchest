@@ -21,6 +21,7 @@ http-body-util = "0.1"
 tower = "0.5"
 hyper-unix-socket = "0.3"
 sha2 = "0.10"
+sysinfo = "0.32"
 aws-sdk-s3 = "1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-credential-types = "1"
