@@ -2,10 +2,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use sysinfo::{Disks, Networks, System};
 use tracing::{debug, warn};
 
 use crate::config::NodeConfig;
 use crate::events::{self, EventSender};
+use crate::proto;
 use crate::sandbox::SandboxManager;
 
 /// Default heartbeat interval.
@@ -14,15 +16,57 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// Maximum number of network slots (matches slot.rs).
 const MAX_SLOTS: u32 = 256;
 
+/// Collect system metrics using the sysinfo crate.
+fn collect_metrics(sys: &mut System, networks: &mut Networks, disks: &mut Disks) -> proto::NodeMetrics {
+    sys.refresh_cpu_all();
+    sys.refresh_memory();
+    networks.refresh(true);
+    disks.refresh(true);
+
+    let cpu_percent = sys.global_cpu_usage();
+    let memory_used_bytes = sys.used_memory();
+    let memory_total_bytes = sys.total_memory();
+
+    let (mut disk_used, mut disk_total) = (0u64, 0u64);
+    for disk in disks.list() {
+        disk_total += disk.total_space();
+        disk_used += disk.total_space() - disk.available_space();
+    }
+
+    let (mut rx_bytes, mut tx_bytes) = (0u64, 0u64);
+    for (_name, data) in networks.iter() {
+        rx_bytes += data.total_received();
+        tx_bytes += data.total_transmitted();
+    }
+
+    let load_avg = System::load_average();
+
+    proto::NodeMetrics {
+        cpu_percent,
+        memory_used_bytes,
+        memory_total_bytes,
+        disk_used_bytes: disk_used,
+        disk_total_bytes: disk_total,
+        network_rx_bytes: rx_bytes,
+        network_tx_bytes: tx_bytes,
+        load_avg_1: load_avg.one as f32,
+        load_avg_5: load_avg.five as f32,
+        load_avg_15: load_avg.fifteen as f32,
+    }
+}
+
 /// Start the heartbeat loop that reports node health to the control plane.
 ///
-/// Sends a heartbeat every 15 seconds via the event sender.
+/// Sends a heartbeat every 15 seconds via the event sender, including system metrics.
 pub async fn start_heartbeat(
     node_config: Arc<NodeConfig>,
     sandbox_manager: Arc<SandboxManager>,
     event_sender: EventSender,
 ) {
     let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+    let mut sys = System::new();
+    let mut networks = Networks::new_with_refreshed_list();
+    let mut disks = Disks::new_with_refreshed_list();
 
     loop {
         interval.tick().await;
@@ -30,6 +74,7 @@ pub async fn start_heartbeat(
         let active_ids = sandbox_manager.active_sandbox_ids().await;
         let slots_used = sandbox_manager.slots_used();
         let snapshot_ids = scan_snapshots(&node_config.snapshots_dir()).await;
+        let metrics = collect_metrics(&mut sys, &mut networks, &mut disks);
 
         let msg = events::heartbeat_msg(
             &node_config.node_id,
@@ -37,6 +82,7 @@ pub async fn start_heartbeat(
             MAX_SLOTS,
             slots_used,
             snapshot_ids,
+            Some(metrics),
         );
 
         if let Err(e) = event_sender.try_send(msg) {
