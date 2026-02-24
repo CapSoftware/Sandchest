@@ -15,6 +15,8 @@ import { RedisMemory } from './services/redis.memory.js'
 import { QuotaMemory } from './services/quota.memory.js'
 import { BillingMemory } from './services/billing.memory.js'
 import { AuditLogMemory } from './services/audit-log.memory.js'
+import { NodeRepoMemory } from './services/node-repo.memory.js'
+import { MetricsRepoMemory } from './services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from './shutdown.js'
 
 const TEST_ORG = 'org_test_123'
@@ -37,6 +39,8 @@ const TestLayer = AppLive.pipe(
   Layer.provide(QuotaMemory),
   Layer.provide(BillingMemory),
   Layer.provide(AuditLogMemory),
+  Layer.provide(NodeRepoMemory),
+  Layer.provide(MetricsRepoMemory),
   Layer.provide(ShutdownControllerLive),
   Layer.provide(TestAuthLayer),
 )

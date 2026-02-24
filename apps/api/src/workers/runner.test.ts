@@ -33,6 +33,8 @@ import { QuotaService, type QuotaApi } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { BillingService } from '../services/billing.js'
 import { createInMemoryBillingApi } from '../services/billing.memory.js'
+import { MetricsRepo } from '../services/metrics-repo.js'
+import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import type { WorkerDeps } from './index.js'
 
 let redis: RedisApi
@@ -82,6 +84,7 @@ beforeEach(() => {
     Layer.succeed(IdempotencyRepo, idempotencyApi),
     Layer.succeed(QuotaService, quotaApi),
     Layer.succeed(BillingService, billingApi),
+    Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
   )
 })
 

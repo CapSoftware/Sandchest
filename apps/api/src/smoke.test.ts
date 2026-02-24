@@ -29,6 +29,10 @@ import { createInMemoryArtifactRepo } from './services/artifact-repo.memory.js'
 import { createInMemoryQuotaApi } from './services/quota.memory.js'
 import { createInMemoryBillingApi } from './services/billing.memory.js'
 import { createInMemoryAuditLog } from './services/audit-log.memory.js'
+import { NodeRepo } from './services/node-repo.js'
+import { createInMemoryNodeRepo } from './services/node-repo.memory.js'
+import { MetricsRepo } from './services/metrics-repo.js'
+import { createInMemoryMetricsRepo } from './services/metrics-repo.memory.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownControllerLive } from './shutdown.js'
 import { sstResource } from './env.js'
@@ -816,6 +820,8 @@ describe('smoke: API health endpoints (full HTTP stack)', () => {
       Layer.succeed(QuotaService, quotaApi),
       Layer.succeed(BillingService, createInMemoryBillingApi()),
       Layer.succeed(AuditLog, createInMemoryAuditLog()),
+      Layer.succeed(NodeRepo, createInMemoryNodeRepo()),
+      Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
     )
 
     const FullLayer = TestApp.pipe(

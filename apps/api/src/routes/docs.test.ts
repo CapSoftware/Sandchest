@@ -12,6 +12,8 @@ import { ArtifactRepoMemory } from '../services/artifact-repo.memory.js'
 import { RedisMemory } from '../services/redis.memory.js'
 import { QuotaMemory } from '../services/quota.memory.js'
 import { BillingMemory } from '../services/billing.memory.js'
+import { NodeRepoMemory } from '../services/node-repo.memory.js'
+import { MetricsRepoMemory } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 
 const TestAuthLayer = Layer.succeed(AuthContext, {
@@ -30,6 +32,8 @@ const TestLayer = AppLive.pipe(
   Layer.provide(RedisMemory),
   Layer.provide(QuotaMemory),
   Layer.provide(BillingMemory),
+  Layer.provide(NodeRepoMemory),
+  Layer.provide(MetricsRepoMemory),
   Layer.provide(ShutdownControllerLive),
   Layer.provide(TestAuthLayer),
 )

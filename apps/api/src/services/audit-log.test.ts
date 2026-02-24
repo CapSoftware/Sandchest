@@ -24,6 +24,10 @@ import { createInMemoryArtifactRepo } from '../services/artifact-repo.memory.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { createInMemoryBillingApi } from '../services/billing.memory.js'
 import { createInMemoryAuditLog } from '../services/audit-log.memory.js'
+import { NodeRepo } from '../services/node-repo.js'
+import { createInMemoryNodeRepo } from '../services/node-repo.memory.js'
+import { MetricsRepo } from '../services/metrics-repo.js'
+import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 
@@ -54,6 +58,8 @@ function createTestEnv() {
     Layer.provide(Layer.succeed(QuotaService, quotaApi)),
     Layer.provide(Layer.succeed(BillingService, billingApi)),
     Layer.provide(Layer.succeed(AuditLog, auditLog)),
+    Layer.provide(Layer.succeed(NodeRepo, createInMemoryNodeRepo())),
+    Layer.provide(Layer.succeed(MetricsRepo, createInMemoryMetricsRepo())),
     Layer.provide(ShutdownControllerLive),
     Layer.provide(
       Layer.succeed(AuthContext, { userId: TEST_USER, orgId: TEST_ORG, scopes: null }),

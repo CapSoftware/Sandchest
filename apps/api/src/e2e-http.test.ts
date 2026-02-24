@@ -29,6 +29,10 @@ import { createInMemoryQuotaApi } from './services/quota.memory.js'
 import { createInMemoryBillingApi } from './services/billing.memory.js'
 import { AuditLog } from './services/audit-log.js'
 import { createInMemoryAuditLog } from './services/audit-log.memory.js'
+import { NodeRepo } from './services/node-repo.js'
+import { createInMemoryNodeRepo } from './services/node-repo.memory.js'
+import { MetricsRepo } from './services/metrics-repo.js'
+import { createInMemoryMetricsRepo } from './services/metrics-repo.memory.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
@@ -100,6 +104,8 @@ beforeAll(async () => {
     Layer.succeed(QuotaService, quotaApi),
     Layer.succeed(BillingService, billingApi),
     Layer.succeed(AuditLog, createInMemoryAuditLog()),
+    Layer.succeed(NodeRepo, createInMemoryNodeRepo()),
+    Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
   )
 
   const FullLayer = TestApp.pipe(
