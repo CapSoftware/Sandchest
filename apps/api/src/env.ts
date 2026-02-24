@@ -72,6 +72,12 @@ export function loadEnv() {
     ARTIFACT_BUCKET_NAME: bucket?.name
       ?? (process.env.ARTIFACT_BUCKET_NAME as string | undefined),
 
+    // S3-compatible object storage (Scaleway / R2 / MinIO)
+    SANDCHEST_S3_ENDPOINT: process.env.SANDCHEST_S3_ENDPOINT as string | undefined,
+    SANDCHEST_S3_ACCESS_KEY: process.env.SANDCHEST_S3_ACCESS_KEY as string | undefined,
+    SANDCHEST_S3_SECRET_KEY: process.env.SANDCHEST_S3_SECRET_KEY as string | undefined,
+    SANDCHEST_S3_REGION: optional('SANDCHEST_S3_REGION', 'auto'),
+
     // Config (always from plain env vars)
     BETTER_AUTH_BASE_URL: optional('BETTER_AUTH_BASE_URL', 'http://localhost:3001'),
     RESEND_FROM_EMAIL: optional('RESEND_FROM_EMAIL', 'Sandchest Auth <noreply@send.sandchest.com>'),
