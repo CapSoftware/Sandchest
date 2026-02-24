@@ -13,6 +13,7 @@ import { SessionRouter } from './routes/sessions.js'
 import { FileRouter } from './routes/files.js'
 import { ArtifactRouter } from './routes/artifacts.js'
 import { NodeRouter } from './routes/nodes.js'
+import { AdminNodeRouter } from './routes/admin-nodes.js'
 import { DocsRouter } from './routes/docs.js'
 
 const handleBetterAuth = Effect.gen(function* () {
@@ -30,6 +31,7 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(FileRouter),
   HttpRouter.concat(ArtifactRouter),
   HttpRouter.concat(NodeRouter),
+  HttpRouter.concat(AdminNodeRouter),
   HttpRouter.concat(DocsRouter),
   HttpRouter.all('/api/auth/*', handleBetterAuth),
   HttpRouter.all('/api/auth', handleBetterAuth),
