@@ -9,7 +9,7 @@ export default function Nav() {
         className="nav-bar sticky top-0 z-10 flex items-center justify-between bg-background"
       >
         <Link href="/" className="flex items-center no-underline hover:no-underline">
-          <Image src="/sandchest-logo-dark.svg" alt="Sandchest" width={148} height={48} style={{ height: 48 }} />
+          <Image src="/sandchest-logo-dark.svg" alt="Sandchest" width={148} height={48} style={{ height: 48, marginLeft: -7 }} />
         </Link>
 
         <ul className="hidden items-center sm:flex" style={{ gap: 48 }}>
