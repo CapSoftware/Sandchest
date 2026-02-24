@@ -94,9 +94,9 @@ describe('react-doctor: anti-pattern detection', () => {
   })
 
   describe('no useEffect to notify parent (onChange in effect)', () => {
-    // ScrollReveal uses IntersectionObserver in useEffect — the "onO" in
-    // "IntersectionObserver" is a false positive for the on[A-Z] regex.
-    const FALSE_POSITIVES = new Set(['landing/ScrollReveal.tsx'])
+    // ScrollReveal and ScenarioGrid use IntersectionObserver in useEffect —
+    // the "onO" in "IntersectionObserver" is a false positive for the on[A-Z] regex.
+    const FALSE_POSITIVES = new Set(['landing/ScrollReveal.tsx', 'compare/ScenarioGrid.tsx'])
 
     for (const file of componentFiles) {
       test(label(file), () => {
