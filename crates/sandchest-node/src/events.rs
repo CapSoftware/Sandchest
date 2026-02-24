@@ -46,6 +46,7 @@ pub fn heartbeat_msg(
     slots_total: u32,
     slots_used: u32,
     snapshot_ids: Vec<String>,
+    metrics: Option<proto::NodeMetrics>,
 ) -> proto::NodeToControl {
     proto::NodeToControl {
         event: Some(proto::node_to_control::Event::Heartbeat(
@@ -55,6 +56,7 @@ pub fn heartbeat_msg(
                 slots_total,
                 slots_used,
                 snapshot_ids,
+                metrics,
             },
         )),
     }
@@ -309,6 +311,7 @@ mod tests {
             256,
             2,
             vec!["snap_a".to_string()],
+            None,
         );
         match msg.event {
             Some(proto::node_to_control::Event::Heartbeat(hb)) => {
@@ -407,7 +410,7 @@ mod tests {
         for i in 0..MAX_BUFFER_SIZE + 10 {
             buffer_event(
                 &mut buffer,
-                heartbeat_msg(&format!("node_{}", i), vec![], 256, 0, vec![]),
+                heartbeat_msg(&format!("node_{}", i), vec![], 256, 0, vec![], None),
             );
         }
         assert_eq!(buffer.len(), MAX_BUFFER_SIZE);
@@ -507,7 +510,7 @@ mod tests {
 
     #[test]
     fn heartbeat_msg_with_empty_fields() {
-        let msg = heartbeat_msg("node_empty", vec![], 0, 0, vec![]);
+        let msg = heartbeat_msg("node_empty", vec![], 0, 0, vec![], None);
         match msg.event {
             Some(proto::node_to_control::Event::Heartbeat(hb)) => {
                 assert_eq!(hb.node_id, "node_empty");
@@ -545,7 +548,7 @@ mod tests {
         // Add one more — should drop node_0
         buffer_event(
             &mut buffer,
-            heartbeat_msg("node_new", vec![], 0, 0, vec![]),
+            heartbeat_msg("node_new", vec![], 0, 0, vec![], None),
         );
         assert_eq!(buffer.len(), MAX_BUFFER_SIZE);
 
