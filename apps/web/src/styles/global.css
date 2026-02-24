@@ -2138,11 +2138,114 @@ a:hover {
 }
 
 /* ── Footer ── */
+.footer {
+  border-top: 1px solid var(--color-border-weak);
+  padding: 0 var(--padding);
+  margin-top: var(--vertical-padding);
+}
+
+.footer-inner {
+  max-width: 80rem;
+  margin: 0 auto;
+}
+
+.footer-top {
+  padding: 64px 0 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.footer-tagline {
+  font-size: 14px;
+  color: var(--color-text-weak);
+  line-height: 170%;
+}
+
+.footer-columns {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  padding-bottom: 56px;
+  border-bottom: 1px solid var(--color-border-weak);
+}
+
+.footer-column-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 20px;
+  line-height: 1;
+}
+
+.footer-column-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.footer-link {
+  font-size: 13px;
+  color: var(--color-text-weak);
+  transition: color 0.15s;
+  line-height: 1;
+}
+
 .footer-link:hover {
   text-decoration: underline;
   text-underline-offset: 4px;
   text-decoration-thickness: 1px;
   color: var(--color-text-strong);
+}
+
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 0;
+  font-size: 12px;
+}
+
+.footer-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-weak);
+  font-size: 12px;
+  transition: color 0.15s;
+}
+
+.footer-github:hover {
+  color: var(--color-text-strong);
+}
+
+@media (max-width: 50rem) {
+  .footer-columns {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 40px 24px;
+  }
+
+  .footer-top {
+    padding: 48px 0 40px;
+  }
+}
+
+@media (max-width: 30rem) {
+  .footer-columns {
+    grid-template-columns: 1fr;
+    gap: 36px;
+    padding-bottom: 40px;
+  }
+
+  .footer-bottom {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
 }
 
 /* ── Navigation ── */
