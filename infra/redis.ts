@@ -14,6 +14,14 @@ export function getRedisNodes(_stage: string): number {
   return 1;
 }
 
+// ElastiCache names individual cache nodes as `{replicationGroupId}-001`,
+// `-002`, etc. We only monitor the first node because getRedisNodes returns 1.
+// If node count increases, this must return all suffixes or switch to the
+// replication group-level metric namespace.
+export function getRedisCacheClusterSuffix(): string {
+  return "-001";
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vpc is sst.aws.Vpc, unavailable outside sst.config.ts
 export function getRedisConfig(stage: string, vpc: any) {
   return {

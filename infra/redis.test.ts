@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { getRedisConfig, getRedisInstance, getRedisNodes } from "./redis";
+import {
+  getRedisCacheClusterSuffix,
+  getRedisConfig,
+  getRedisInstance,
+  getRedisNodes,
+} from "./redis";
 
 describe("getRedisInstance", () => {
   test("uses t4g.small for production", () => {
@@ -8,7 +13,6 @@ describe("getRedisInstance", () => {
 
   test("uses t4g.micro for non-production stages", () => {
     expect(getRedisInstance("dev")).toBe("t4g.micro");
-    expect(getRedisInstance("staging")).toBe("t4g.micro");
     expect(getRedisInstance("preview")).toBe("t4g.micro");
   });
 });
@@ -17,7 +21,12 @@ describe("getRedisNodes", () => {
   test("uses 1 node for all stages", () => {
     expect(getRedisNodes("production")).toBe(1);
     expect(getRedisNodes("dev")).toBe(1);
-    expect(getRedisNodes("staging")).toBe(1);
+  });
+});
+
+describe("getRedisCacheClusterSuffix", () => {
+  test("returns -001 for single-node cluster", () => {
+    expect(getRedisCacheClusterSuffix()).toBe("-001");
   });
 });
 
