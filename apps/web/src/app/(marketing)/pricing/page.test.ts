@@ -22,13 +22,22 @@ describe('pricing page', () => {
     expect(src).toContain('<Nav')
   })
 
-  test('imports and renders PricingSection', () => {
-    expect(src).toContain("import PricingSection from '@/components/pricing/PricingSection'")
-    expect(src).toContain('<PricingSection')
+  test('imports and renders pricing components', () => {
+    expect(src).toContain("import PricingHero from '@/components/pricing/PricingHero'")
+    expect(src).toContain("import PricingCards from '@/components/pricing/PricingCards'")
+    expect(src).toContain("import UsageCalculator from '@/components/pricing/UsageCalculator'")
+    expect(src).toContain("import PricingCompare from '@/components/pricing/PricingCompare'")
+    expect(src).toContain("import PricingFaq from '@/components/pricing/PricingFaq'")
+    expect(src).toContain('<PricingHero')
+    expect(src).toContain('<PricingCards')
+    expect(src).toContain('<UsageCalculator')
+    expect(src).toContain('<PricingCompare')
+    expect(src).toContain('<PricingFaq')
   })
 
-  test('has page heading', () => {
-    expect(src).toMatch(/<h1[\s\S]*?>[\s\S]*?Pricing[\s\S]*?<\/h1>/)
+  test('uses ScrollReveal for entrance animations', () => {
+    expect(src).toContain("import ScrollReveal from '@/components/landing/ScrollReveal'")
+    expect(src).toContain('<ScrollReveal')
   })
 
   test('includes OpenGraph metadata', () => {
