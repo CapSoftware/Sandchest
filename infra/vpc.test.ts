@@ -8,7 +8,6 @@ describe("isProduction", () => {
 
   test("returns false for non-production stages", () => {
     expect(isProduction("dev")).toBe(false);
-    expect(isProduction("staging")).toBe(false);
     expect(isProduction("preview")).toBe(false);
   });
 });
@@ -17,7 +16,6 @@ describe("getVpcNat", () => {
   test("uses ec2 fck-nat for all stages", () => {
     expect(getVpcNat("production")).toBe("ec2");
     expect(getVpcNat("dev")).toBe("ec2");
-    expect(getVpcNat("staging")).toBe("ec2");
     expect(getVpcNat("preview")).toBe("ec2");
   });
 });

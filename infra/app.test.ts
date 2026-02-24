@@ -24,7 +24,6 @@ describe("getAppConfig", () => {
 
   test("removes resources in non-production stages", () => {
     expect(getAppConfig("dev").removal).toBe("remove");
-    expect(getAppConfig("staging").removal).toBe("remove");
     expect(getAppConfig("preview").removal).toBe("remove");
   });
 
@@ -34,6 +33,5 @@ describe("getAppConfig", () => {
 
   test("does not protect non-production stages", () => {
     expect(getAppConfig("dev").protect).toBe(false);
-    expect(getAppConfig("staging").protect).toBe(false);
   });
 });

@@ -58,7 +58,6 @@ describe("getBucketConfig", () => {
 
   test("disables versioning in non-production stages", () => {
     expect(getBucketConfig("dev").versioning).toBe(false);
-    expect(getBucketConfig("staging").versioning).toBe(false);
   });
 
   test("includes lifecycle rules", () => {

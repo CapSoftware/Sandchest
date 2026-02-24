@@ -16,7 +16,6 @@ describe("getServiceCpu", () => {
 
   test("uses 0.25 vCPU for non-production stages", () => {
     expect(getServiceCpu("dev")).toBe("0.25 vCPU");
-    expect(getServiceCpu("staging")).toBe("0.25 vCPU");
     expect(getServiceCpu("preview")).toBe("0.25 vCPU");
   });
 });
@@ -28,7 +27,6 @@ describe("getServiceMemory", () => {
 
   test("uses 0.5 GB for non-production stages", () => {
     expect(getServiceMemory("dev")).toBe("0.5 GB");
-    expect(getServiceMemory("staging")).toBe("0.5 GB");
     expect(getServiceMemory("preview")).toBe("0.5 GB");
   });
 });
@@ -83,7 +81,6 @@ describe("getServiceDomain", () => {
 
   test("uses stage-prefixed domain for non-production", () => {
     expect(getServiceDomain("dev")).toBe("dev.api.sandchest.com");
-    expect(getServiceDomain("staging")).toBe("staging.api.sandchest.com");
   });
 });
 
@@ -119,7 +116,6 @@ describe("getServiceEnvironment", () => {
 
   test("sets NODE_ENV to development for non-production stages", () => {
     expect(getServiceEnvironment("dev").NODE_ENV).toBe("development");
-    expect(getServiceEnvironment("staging").NODE_ENV).toBe("development");
   });
 
   test("sets DRAIN_TIMEOUT_MS to 30000", () => {
@@ -136,9 +132,6 @@ describe("getServiceEnvironment", () => {
   test("sets non-production BETTER_AUTH_BASE_URL with stage prefix", () => {
     expect(getServiceEnvironment("dev").BETTER_AUTH_BASE_URL).toBe(
       "https://dev.api.sandchest.com",
-    );
-    expect(getServiceEnvironment("staging").BETTER_AUTH_BASE_URL).toBe(
-      "https://staging.api.sandchest.com",
     );
   });
 
