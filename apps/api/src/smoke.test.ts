@@ -53,8 +53,8 @@ import {
   getServiceCpu,
   getServiceMemory,
   getServiceScaling,
-  getServiceHealthCheck,
-  getServicePort,
+  getLoadBalancerHealthCheck,
+  getServiceRules,
   getServiceEnvironment,
 } from '../../../infra/cluster.js'
 import {
@@ -81,7 +81,6 @@ import {
   getEcsMemoryAlarm,
   getAlb5xxAlarm,
   getAlbResponseTimeAlarm,
-  getAlbUnhealthyHostAlarm,
   getRedisMemoryAlarm,
   getRedisEvictionAlarm,
   getNodeHeartbeatAlarm,
@@ -104,7 +103,6 @@ describe('infra: VPC config', () => {
   test('all stages use EC2 NAT', () => {
     expect(getVpcNat('production')).toBe('ec2')
     expect(getVpcNat('dev')).toBe('ec2')
-    expect(getVpcNat('staging')).toBe('ec2')
   })
 
   test('VPC config has 2 AZs', () => {
@@ -115,7 +113,6 @@ describe('infra: VPC config', () => {
   test('isProduction identifies production stage only', () => {
     expect(isProduction('production')).toBe(true)
     expect(isProduction('dev')).toBe(false)
-    expect(isProduction('staging')).toBe(false)
   })
 })
 
@@ -212,16 +209,18 @@ describe('infra: ECS cluster config', () => {
   })
 
   test('health check targets /healthz', () => {
-    const health = getServiceHealthCheck()
-    expect(health.path).toBe('/healthz')
-    expect(health.interval).toBe('15 seconds')
-    expect(health.timeout).toBe('5 seconds')
+    const health = getLoadBalancerHealthCheck()
+    const check = health['3001/http']
+    expect(check.path).toBe('/healthz')
+    expect(check.interval).toBe('15 seconds')
+    expect(check.timeout).toBe('5 seconds')
   })
 
-  test('service port forwards 80 to 3001', () => {
-    const port = getServicePort()
-    expect(port.listen).toBe('80/http')
-    expect(port.forward).toBe('3001/http')
+  test('service rules redirect HTTP and forward HTTPS to 3001', () => {
+    const rules = getServiceRules()
+    expect(rules).toHaveLength(2)
+    expect(rules[0]).toEqual({ listen: '80/http', redirect: '443/https' })
+    expect(rules[1]).toEqual({ listen: '443/https', forward: '3001/http' })
   })
 
   test('service environment sets PORT and NODE_ENV', () => {
@@ -249,14 +248,14 @@ describe('infra: ECS cluster config', () => {
 // ---------------------------------------------------------------------------
 
 describe('infra: node daemon config', () => {
-  test('production uses c8i.4xlarge, dev uses c8i.2xlarge', () => {
+  test('production uses c8i.4xlarge, dev uses c8i.large', () => {
     expect(getNodeInstanceType('production')).toBe('c8i.4xlarge')
-    expect(getNodeInstanceType('dev')).toBe('c8i.2xlarge')
+    expect(getNodeInstanceType('dev')).toBe('c8i.large')
   })
 
-  test('root volume is 100 GB for production, 50 GB for dev', () => {
+  test('root volume is 100 GB for production, 30 GB for dev', () => {
     expect(getNodeRootVolumeGb('production')).toBe(100)
-    expect(getNodeRootVolumeGb('dev')).toBe(50)
+    expect(getNodeRootVolumeGb('dev')).toBe(30)
   })
 
   test('gRPC port is 50051', () => {
@@ -420,12 +419,6 @@ describe('infra: CloudWatch alarms', () => {
     expect(dev.threshold).toBe(5)
   })
 
-  test('ALB unhealthy host alarm fires on any unhealthy host', () => {
-    const alarm = getAlbUnhealthyHostAlarm()
-    expect(alarm.threshold).toBe(0)
-    expect(alarm.comparisonOperator).toBe('GreaterThanThreshold')
-  })
-
   test('Redis memory alarm fires at correct threshold', () => {
     const prod = getRedisMemoryAlarm('production')
     const dev = getRedisMemoryAlarm('dev')
@@ -455,7 +448,6 @@ describe('infra: CloudWatch alarms', () => {
       getEcsMemoryAlarm('production'),
       getAlb5xxAlarm('production'),
       getAlbResponseTimeAlarm('production'),
-      getAlbUnhealthyHostAlarm(),
       getRedisMemoryAlarm('production'),
       getRedisEvictionAlarm('production'),
       getNodeHeartbeatAlarm(),

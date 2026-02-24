@@ -48,7 +48,7 @@ describe('deploy.yml', () => {
   test('supports stage selection via workflow_dispatch', () => {
     expect(workflow).toContain('stage:')
     expect(workflow).toContain('SST stage to deploy')
-    expect(workflow).toMatch(/options:\s*\n\s*- dev\s*\n\s*- staging\s*\n\s*- production/)
+    expect(workflow).toMatch(/options:\s*\n\s*- dev\s*\n\s*- production/)
   })
 
   test('uses concurrency group to prevent parallel deploys', () => {
@@ -241,9 +241,11 @@ describe('sst.config.ts', () => {
     expect(config).toContain('resendApiKey')
   })
 
-  test('creates node daemon EC2 instance', () => {
-    expect(config).toContain('aws.ec2.Instance')
-    expect(config).toContain('NodeInstance')
+  test('creates node LaunchTemplate and ASG', () => {
+    expect(config).toContain('aws.ec2.LaunchTemplate')
+    expect(config).toContain('NodeLaunchTemplate')
+    expect(config).toContain('aws.autoscaling.Group')
+    expect(config).toContain('NodeAsg')
   })
 
   test('creates GitHub OIDC provider and deploy role', () => {
@@ -261,6 +263,7 @@ describe('sst.config.ts', () => {
     expect(config).toContain('RedisMemoryAlarm')
     expect(config).toContain('RedisEvictionAlarm')
     expect(config).toContain('NodeHeartbeatAlarm')
+    expect(config).toContain('NodeAsgAlarm')
   })
 
   test('exports infrastructure outputs', () => {
@@ -268,7 +271,7 @@ describe('sst.config.ts', () => {
     expect(config).toContain('redisHost')
     expect(config).toContain('artifactBucketName')
     expect(config).toContain('apiUrl')
-    expect(config).toContain('nodeInstanceId')
+    expect(config).toContain('nodeAsgName')
     expect(config).toContain('deployRoleArn')
     expect(config).toContain('alarmTopicArn')
   })
