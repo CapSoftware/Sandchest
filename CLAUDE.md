@@ -322,6 +322,16 @@ One commit per task. Stage specific files — never `git add -A` blindly.
 
 ---
 
+## Deployment
+
+When the user says "deploy to dev", "deploy to production" (or variations like "push to prod", "ship it", "deploy"), invoke the `/deploy` command with the appropriate stage.
+
+Valid stages: `dev`, `production`. If the stage is unspecified or ambiguous, ask.
+
+**Never deploy to production without the full pre-flight checklist and explicit user confirmation.**
+
+---
+
 ## Skills to Use
 
 | Situation | Skill |
