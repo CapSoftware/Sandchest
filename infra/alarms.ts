@@ -90,20 +90,6 @@ export function getAlbResponseTimeAlarm(stage: string): MetricAlarmConfig {
   };
 }
 
-export function getAlbUnhealthyHostAlarm(): MetricAlarmConfig {
-  return {
-    description: "ALB unhealthy host count above zero",
-    namespace: "AWS/ApplicationELB",
-    metricName: "UnHealthyHostCount",
-    statistic: "Maximum",
-    period: 60,
-    evaluationPeriods: 2,
-    threshold: 0,
-    comparisonOperator: "GreaterThanThreshold",
-    treatMissingData: "notBreaching",
-  };
-}
-
 // --- Redis alarms ---
 
 export function getRedisMemoryAlarm(stage: string): MetricAlarmConfig {
@@ -138,6 +124,20 @@ export function getRedisEvictionAlarm(stage: string): MetricAlarmConfig {
 
 export const NODE_HEARTBEAT_NAMESPACE = "Sandchest/Node";
 export const NODE_HEARTBEAT_METRIC = "Heartbeat";
+
+export function getNodeAsgAlarm(): MetricAlarmConfig {
+  return {
+    description: "Node ASG has no healthy instances",
+    namespace: "AWS/AutoScaling",
+    metricName: "GroupInServiceInstances",
+    statistic: "Minimum",
+    period: 60,
+    evaluationPeriods: 2,
+    threshold: 1,
+    comparisonOperator: "LessThanThreshold",
+    treatMissingData: "breaching",
+  };
+}
 
 export function getNodeHeartbeatAlarm(): MetricAlarmConfig {
   return {

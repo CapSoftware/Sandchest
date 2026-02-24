@@ -5,6 +5,7 @@ import {
   getEcsCpuAlarm,
   getEcsMemoryAlarm,
   getEcsRunningTaskAlarm,
+  getNodeAsgAlarm,
   getNodeHeartbeatAlarm,
   getRedisEvictionAlarm,
   getRedisMemoryAlarm,
@@ -184,6 +185,36 @@ describe("getRedisEvictionAlarm", () => {
 
   test("uses Sum statistic", () => {
     expect(getRedisEvictionAlarm("production").statistic).toBe("Sum");
+  });
+});
+
+describe("getNodeAsgAlarm", () => {
+  const alarm = getNodeAsgAlarm();
+
+  test("uses AutoScaling namespace", () => {
+    expect(alarm.namespace).toBe("AWS/AutoScaling");
+  });
+
+  test("tracks GroupInServiceInstances metric", () => {
+    expect(alarm.metricName).toBe("GroupInServiceInstances");
+  });
+
+  test("alarms when fewer than 1 instance in service", () => {
+    expect(alarm.threshold).toBe(1);
+    expect(alarm.comparisonOperator).toBe("LessThanThreshold");
+  });
+
+  test("treats missing data as breaching", () => {
+    expect(alarm.treatMissingData).toBe("breaching");
+  });
+
+  test("evaluates over 2 consecutive 1-minute periods", () => {
+    expect(alarm.period).toBe(60);
+    expect(alarm.evaluationPeriods).toBe(2);
+  });
+
+  test("uses Minimum statistic", () => {
+    expect(alarm.statistic).toBe("Minimum");
   });
 });
 
