@@ -1,7 +1,7 @@
 export interface ProvisionStep {
   readonly id: string
   readonly name: string
-  readonly commands: string[]
+  readonly commands: string[] | (() => string[])
   readonly validate?: string | undefined
 }
 
@@ -9,6 +9,16 @@ export interface StepResult {
   readonly id: string
   readonly status: 'pending' | 'running' | 'completed' | 'failed'
   readonly output?: string | undefined
+}
+
+export function getDaemonBinaryUrl(): string {
+  const url = process.env.DAEMON_BINARY_URL
+  if (!url) throw new Error('DAEMON_BINARY_URL environment variable is not set')
+  return url
+}
+
+export function resolveCommands(step: ProvisionStep): string[] {
+  return typeof step.commands === 'function' ? step.commands() : step.commands
 }
 
 export const PROVISION_STEPS: ProvisionStep[] = [
@@ -100,12 +110,14 @@ export const PROVISION_STEPS: ProvisionStep[] = [
   {
     id: 'deploy-node-daemon',
     name: 'Deploy node daemon',
-    commands: [
-      'echo "Node daemon deployment — binary URL configured in production"',
+    commands: () => [
+      `curl -fsSL "${getDaemonBinaryUrl()}" -o /usr/local/bin/sandchest-node`,
+      'chmod +x /usr/local/bin/sandchest-node',
       'printf \'[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n\' > /etc/systemd/system/sandchest-node.service',
       'systemctl daemon-reload',
       'systemctl enable sandchest-node',
     ],
+    validate: '/usr/local/bin/sandchest-node --version || true',
   },
   {
     id: 'start-services',
