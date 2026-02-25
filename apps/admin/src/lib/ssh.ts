@@ -6,6 +6,7 @@ export interface SshConfig {
   port: number
   username: string
   privateKey: string
+  readyTimeout?: number | undefined
 }
 
 export interface PasswordSshConfig {
@@ -32,7 +33,7 @@ export function createSshConnection(config: SshConfig): Promise<Client> {
         port: config.port,
         username: config.username,
         privateKey: config.privateKey,
-        readyTimeout: 15_000,
+        readyTimeout: config.readyTimeout ?? 15_000,
       })
   })
 }
