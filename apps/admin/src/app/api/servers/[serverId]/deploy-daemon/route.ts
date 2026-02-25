@@ -5,6 +5,7 @@ import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
 import { presignDaemonBinary } from '@/lib/r2'
+import { generateId, idToBytes, NODE_PREFIX } from '@sandchest/contract'
 
 export async function POST(
   _request: Request,
@@ -63,10 +64,19 @@ export async function POST(
     )
   }
 
+  // Generate a stable node ID so we can link the daemon back to this server
+  const nodeId = generateId(NODE_PREFIX)
+  const nodeIdBytes = idToBytes(nodeId) as unknown as Uint8Array
+
   try {
     const commands = [
       `curl -fsSL '${binaryUrl}' -o /usr/local/bin/sandchest-node`,
       'chmod +x /usr/local/bin/sandchest-node',
+      'mkdir -p /etc/sandchest',
+      `printf 'SANDCHEST_NODE_ID=${nodeId}\\n' > /etc/sandchest/node.env`,
+      // Ensure the systemd unit references the env file (idempotent — rewrites the unit)
+      `printf '[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/sandchest-node.service`,
+      'systemctl daemon-reload',
       'systemctl restart sandchest-node',
     ]
 
@@ -80,8 +90,15 @@ export async function POST(
       )
     }
 
+    // Link the daemon to the server record
+    await db
+      .update(adminServers)
+      .set({ nodeId: nodeIdBytes, updatedAt: new Date() })
+      .where(eq(adminServers.id, serverIdBuf))
+
     return NextResponse.json({
       success: true,
+      node_id: nodeId,
       output: (result.stdout + '\n' + result.stderr).trim(),
     })
   } catch (err) {
