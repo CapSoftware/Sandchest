@@ -4,7 +4,7 @@ import { getDb } from '@/lib/db'
 import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
-import { PROVISION_STEPS, type StepResult } from '@/lib/provisioner'
+import { PROVISION_STEPS, resolveCommands, type StepResult } from '@/lib/provisioner'
 
 export async function POST(
   _request: Request,
@@ -112,7 +112,7 @@ async function retryProvisioning(
       })
       .where(eq(adminServers.id, serverIdBuf))
 
-    const fullCommand = step.commands.join(' && ')
+    const fullCommand = resolveCommands(step).join(' && ')
 
     try {
       const result = await execCommand(conn, fullCommand)
