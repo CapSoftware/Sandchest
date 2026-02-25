@@ -39,6 +39,19 @@ export default function ServerDetailPage({
     },
   })
 
+  const deployMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/deploy-daemon`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Deploy failed' })) as { error: string }
+        throw new Error(data.error)
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+  })
+
   const actionMutation = useMutation({
     mutationFn: async (action: string) => {
       if (!server?.node_id) throw new Error('No node linked')
@@ -104,8 +117,33 @@ export default function ServerDetailPage({
               View Progress
             </Link>
           )}
+          {server.provision_status === 'completed' && !server.node_id && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => deployMutation.mutate()}
+              disabled={deployMutation.isPending}
+            >
+              {deployMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Deploying…</> : 'Deploy Daemon'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Deploy feedback */}
+      {deployMutation.isError && (
+        <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--color-danger)', background: 'color-mix(in srgb, var(--color-danger), transparent 92%)' }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>
+            Deploy failed: {deployMutation.error.message}
+          </div>
+        </div>
+      )}
+      {deployMutation.isSuccess && (
+        <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--color-success)', background: 'color-mix(in srgb, var(--color-success), transparent 92%)' }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--color-success)' }}>
+            Daemon deployed successfully. Waiting for heartbeat…
+          </div>
+        </div>
+      )}
 
       {/* System Info */}
       {server.system_info && (
