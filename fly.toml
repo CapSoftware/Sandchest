@@ -2,8 +2,8 @@ app = "sandchest-api"
 primary_region = "fra"
 
 [build]
-  dockerfile = "Dockerfile"
-  ignorefile = ".dockerignore"
+  dockerfile = "apps/api/Dockerfile"
+  ignorefile = "apps/api/.dockerignore"
 
 [env]
   NODE_ENV = "production"

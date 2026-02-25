@@ -20,8 +20,8 @@ const MAX_SLOTS: u32 = 256;
 fn collect_metrics(sys: &mut System, networks: &mut Networks, disks: &mut Disks) -> proto::NodeMetrics {
     sys.refresh_cpu_all();
     sys.refresh_memory();
-    networks.refresh(true);
-    disks.refresh(true);
+    networks.refresh();
+    disks.refresh();
 
     let cpu_percent = sys.global_cpu_usage();
     let memory_used_bytes = sys.used_memory();
