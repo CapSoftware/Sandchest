@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServer } from '@/hooks/use-server'
+import { useServerMetrics } from '@/hooks/use-server-metrics'
 import StatusBadge from '@/components/StatusBadge'
 import ServerMetrics from '@/components/ServerMetrics'
 import CommandRunner from '@/components/CommandRunner'
@@ -18,6 +19,17 @@ export default function ServerDetailPage({
   const router = useRouter()
   const queryClient = useQueryClient()
   const { data: server, isLoading } = useServer(serverId)
+  const isProvisioned = server?.provision_status === 'completed'
+  const { data: metricsData } = useServerMetrics(serverId, isProvisioned)
+
+  const derivedStatus = (() => {
+    if (!server) return 'pending' as const
+    if (server.provision_status !== 'completed') return server.provision_status
+    if (!server.node_id) return 'awaiting-daemon' as const
+    if (!metricsData) return 'online' as const // assume online until we know otherwise
+    if (metricsData.daemon_status === 'active') return 'online' as const
+    return 'offline' as const
+  })()
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -92,11 +104,7 @@ export default function ServerDetailPage({
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <StatusBadge status={
-            server.provision_status === 'completed' && !server.node_id
-              ? 'awaiting-daemon'
-              : server.provision_status
-          } />
+          <StatusBadge status={derivedStatus} />
 
           {server.provision_status === 'pending' && (
             <button
@@ -160,9 +168,9 @@ export default function ServerDetailPage({
         </div>
       )}
 
-      {/* Metrics (placeholder — will show real data when node heartbeat sends metrics) */}
+      {/* Live Metrics */}
       <div style={{ marginBottom: '1rem' }}>
-        <ServerMetrics metrics={null} />
+        <ServerMetrics metrics={metricsData?.metrics ?? null} />
       </div>
 
       {/* Command Runner */}
