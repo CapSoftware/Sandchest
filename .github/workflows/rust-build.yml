@@ -11,11 +11,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 env:
-  AWS_REGION: us-east-1
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -46,14 +44,15 @@ jobs:
           path: target/release/sandchest-node
           retention-days: 30
 
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Upload binary to S3
+      - name: Upload binary to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         run: |
           aws s3 cp target/release/sandchest-node \
-            "s3://${{ vars.ARTIFACT_BUCKET }}/binaries/sandchest-node/${{ github.sha }}/sandchest-node"
+            "s3://${{ secrets.R2_BUCKET }}/binaries/sandchest-node/${{ github.sha }}/sandchest-node" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
           aws s3 cp target/release/sandchest-node \
-            "s3://${{ vars.ARTIFACT_BUCKET }}/binaries/sandchest-node/latest/sandchest-node"
+            "s3://${{ secrets.R2_BUCKET }}/binaries/sandchest-node/latest/sandchest-node" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
