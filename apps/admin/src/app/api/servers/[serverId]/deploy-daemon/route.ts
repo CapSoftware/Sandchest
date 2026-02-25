@@ -4,7 +4,7 @@ import { getDb } from '@/lib/db'
 import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
-import { getDaemonBinaryUrl } from '@/lib/provisioner'
+import { presignDaemonBinary } from '@/lib/r2'
 
 export async function POST(
   _request: Request,
@@ -33,10 +33,10 @@ export async function POST(
 
   let binaryUrl: string
   try {
-    binaryUrl = getDaemonBinaryUrl()
-  } catch {
+    binaryUrl = await presignDaemonBinary()
+  } catch (err) {
     return NextResponse.json(
-      { error: 'DAEMON_BINARY_URL is not configured' },
+      { error: `R2 presign failed: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 },
     )
   }
@@ -65,7 +65,7 @@ export async function POST(
 
   try {
     const commands = [
-      `curl -fsSL "${binaryUrl}" -o /usr/local/bin/sandchest-node`,
+      `curl -fsSL '${binaryUrl}' -o /usr/local/bin/sandchest-node`,
       'chmod +x /usr/local/bin/sandchest-node',
       'systemctl restart sandchest-node',
     ]

@@ -112,7 +112,8 @@ async function retryProvisioning(
       })
       .where(eq(adminServers.id, serverIdBuf))
 
-    const fullCommand = resolveCommands(step).join(' && ')
+    const commands = await resolveCommands(step)
+    const fullCommand = commands.join(' && ')
 
     try {
       const result = await execCommand(conn, fullCommand)

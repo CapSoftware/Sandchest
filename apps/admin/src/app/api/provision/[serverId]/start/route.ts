@@ -125,7 +125,8 @@ async function runProvisioning(
       .where(eq(adminServers.id, serverIdBuf))
 
     // Execute all commands for this step
-    const fullCommand = resolveCommands(step).join(' && ')
+    const commands = await resolveCommands(step)
+    const fullCommand = commands.join(' && ')
     let output = ''
 
     try {

@@ -1,7 +1,9 @@
+import { presignDaemonBinary } from './r2.js'
+
 export interface ProvisionStep {
   readonly id: string
   readonly name: string
-  readonly commands: string[] | (() => string[])
+  readonly commands: string[] | (() => string[] | Promise<string[]>)
   readonly validate?: string | undefined
 }
 
@@ -11,14 +13,11 @@ export interface StepResult {
   readonly output?: string | undefined
 }
 
-export function getDaemonBinaryUrl(): string {
-  const url = process.env.DAEMON_BINARY_URL
-  if (!url) throw new Error('DAEMON_BINARY_URL environment variable is not set')
-  return url
-}
-
-export function resolveCommands(step: ProvisionStep): string[] {
-  return typeof step.commands === 'function' ? step.commands() : step.commands
+export async function resolveCommands(step: ProvisionStep): Promise<string[]> {
+  if (typeof step.commands === 'function') {
+    return step.commands()
+  }
+  return step.commands
 }
 
 export const PROVISION_STEPS: ProvisionStep[] = [
@@ -110,13 +109,16 @@ export const PROVISION_STEPS: ProvisionStep[] = [
   {
     id: 'deploy-node-daemon',
     name: 'Deploy node daemon',
-    commands: () => [
-      `curl -fsSL "${getDaemonBinaryUrl()}" -o /usr/local/bin/sandchest-node`,
-      'chmod +x /usr/local/bin/sandchest-node',
-      'printf \'[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n\' > /etc/systemd/system/sandchest-node.service',
-      'systemctl daemon-reload',
-      'systemctl enable sandchest-node',
-    ],
+    commands: async () => {
+      const url = await presignDaemonBinary()
+      return [
+        `curl -fsSL '${url}' -o /usr/local/bin/sandchest-node`,
+        'chmod +x /usr/local/bin/sandchest-node',
+        'printf \'[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n\' > /etc/systemd/system/sandchest-node.service',
+        'systemctl daemon-reload',
+        'systemctl enable sandchest-node',
+      ]
+    },
     validate: '/usr/local/bin/sandchest-node --version || true',
   },
   {

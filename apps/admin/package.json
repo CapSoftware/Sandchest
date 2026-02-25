@@ -11,6 +11,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.997.0",
+    "@aws-sdk/s3-request-presigner": "^3.997.0",
     "@sandchest/contract": "workspace:*",
     "@sandchest/db": "workspace:*",
     "@tanstack/react-query": "^5.90.21",
