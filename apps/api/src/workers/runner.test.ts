@@ -28,7 +28,7 @@ import { idempotencyCleanupWorker } from './idempotency-cleanup.js'
 import { artifactRetentionWorker } from './artifact-retention.js'
 import { orgHardDeleteWorker } from './org-hard-delete.js'
 import { replayRetentionWorker, PURGED_SENTINEL } from './replay-retention.js'
-import { generateUUIDv7, base62Encode, bytesToId, SANDBOX_PREFIX } from '@sandchest/contract'
+import { generateUUIDv7, bytesToId, SANDBOX_PREFIX, NODE_PREFIX } from '@sandchest/contract'
 import { QuotaService, type QuotaApi } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { BillingService } from '../services/billing.js'
@@ -317,7 +317,7 @@ describe('orphan-reconciliation', () => {
     await Effect.runPromise(sandboxRepo.assignNode(sandboxId, 'org_test', nodeId))
 
     // Register heartbeat for this node
-    const nodeIdStr = base62Encode(nodeId)
+    const nodeIdStr = bytesToId(NODE_PREFIX, nodeId)
     await Effect.runPromise(redis.registerNodeHeartbeat(nodeIdStr, 60))
 
     const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
@@ -410,7 +410,7 @@ describe('orphan-reconciliation', () => {
     }
 
     // Only register heartbeat for the online node
-    await Effect.runPromise(redis.registerNodeHeartbeat(base62Encode(onlineNodeId), 60))
+    await Effect.runPromise(redis.registerNodeHeartbeat(bytesToId(NODE_PREFIX, onlineNodeId), 60))
 
     const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
     expect(count).toBe(1)
@@ -1215,7 +1215,7 @@ describe('ttl-warning', () => {
     )
     // assignNode sets status to 'running' and startedAt
     const nodeId = generateUUIDv7()
-    await Effect.runPromise(redis.registerNodeHeartbeat(base62Encode(nodeId), 300))
+    await Effect.runPromise(redis.registerNodeHeartbeat(bytesToId(NODE_PREFIX, nodeId), 300))
     await Effect.runPromise(sandboxRepo.assignNode(id, orgId, nodeId))
 
     // Backdate startedAt to simulate time passing

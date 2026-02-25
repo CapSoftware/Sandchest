@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { RedisService } from '../services/redis.js'
-import { base62Encode } from '@sandchest/contract'
+import { bytesToId, NODE_PREFIX } from '@sandchest/contract'
 import type { WorkerConfig } from './runner.js'
 
 export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService> = {
@@ -16,7 +16,7 @@ export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService
 
     const offlineNodeIds: Uint8Array[] = []
     for (const nodeId of activeNodeIds) {
-      const alive = yield* redis.hasNodeHeartbeat(base62Encode(nodeId))
+      const alive = yield* redis.hasNodeHeartbeat(bytesToId(NODE_PREFIX, nodeId))
       if (!alive) {
         offlineNodeIds.push(nodeId)
       }
