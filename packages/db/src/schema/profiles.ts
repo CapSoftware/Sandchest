@@ -1,5 +1,5 @@
 import { int, mysqlTable, smallint, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, updatedAt, uuidv7Binary } from '../columns'
+import { createdAt, updatedAt, uuidv7Binary } from '../columns.js'
 
 export const profiles = mysqlTable('profiles', {
   id: uuidv7Binary('id').primaryKey(),

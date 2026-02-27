@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/mysql2'
 import mysql from 'mysql2/promise'
-import * as schema from './schema/index'
+import * as schema from './schema/index.js'
 
 export function createDatabase(url: string) {
   const pool = mysql.createPool({ uri: url, waitForConnections: true, connectionLimit: 10 })

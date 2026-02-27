@@ -1,5 +1,5 @@
 import { index, mysqlTable, text, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, uuidv7Binary } from '../columns'
+import { createdAt, uuidv7Binary } from '../columns.js'
 
 export const auditLogs = mysqlTable(
   'audit_logs',

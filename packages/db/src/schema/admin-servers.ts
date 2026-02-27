@@ -1,5 +1,5 @@
 import { int, json, mysqlEnum, mysqlTable, text, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, updatedAt, uuidv7Binary } from '../columns'
+import { createdAt, updatedAt, uuidv7Binary } from '../columns.js'
 
 export const adminServers = mysqlTable('admin_servers', {
   id: uuidv7Binary('id').primaryKey(),

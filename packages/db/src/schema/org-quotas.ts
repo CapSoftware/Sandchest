@@ -1,5 +1,5 @@
 import { int, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, updatedAt } from '../columns'
+import { createdAt, updatedAt } from '../columns.js'
 
 export const orgQuotas = mysqlTable('org_quotas', {
   orgId: varchar('org_id', { length: 36 }).primaryKey(),

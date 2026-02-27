@@ -1,5 +1,5 @@
 import { bigint, mysqlTable, primaryKey, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, timestampMicro, updatedAt } from '../columns'
+import { createdAt, timestampMicro, updatedAt } from '../columns.js'
 
 /**
  * Daily usage rollup per org. Composite PK of (org_id, period_start) gives

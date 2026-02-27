@@ -1,5 +1,5 @@
 import { bigint, float, index, mysqlTable } from 'drizzle-orm/mysql-core'
-import { createdAt, uuidv7Binary } from '../columns'
+import { createdAt, uuidv7Binary } from '../columns.js'
 
 export const nodeMetrics = mysqlTable(
   'node_metrics',

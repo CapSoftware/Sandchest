@@ -1,5 +1,5 @@
 import { index, json, mysqlEnum, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, timestampMicro, uuidv7Binary } from '../columns'
+import { createdAt, timestampMicro, uuidv7Binary } from '../columns.js'
 
 export const sandboxSessions = mysqlTable(
   'sandbox_sessions',

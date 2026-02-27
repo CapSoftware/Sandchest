@@ -1,5 +1,5 @@
 import { index, json, mysqlEnum, mysqlTable, smallint, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, timestampMicro, updatedAt, uuidv7Binary } from '../columns'
+import { createdAt, timestampMicro, updatedAt, uuidv7Binary } from '../columns.js'
 
 export const nodes = mysqlTable(
   'nodes',

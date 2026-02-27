@@ -1,5 +1,5 @@
 import { index, int, mediumtext, mysqlEnum, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt } from '../columns'
+import { createdAt } from '../columns.js'
 
 export const idempotencyKeys = mysqlTable(
   'idempotency_keys',

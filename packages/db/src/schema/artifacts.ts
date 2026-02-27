@@ -1,5 +1,5 @@
 import { bigint, char, index, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
-import { createdAt, timestampMicro, uuidv7Binary } from '../columns'
+import { createdAt, timestampMicro, uuidv7Binary } from '../columns.js'
 
 export const artifacts = mysqlTable(
   'artifacts',

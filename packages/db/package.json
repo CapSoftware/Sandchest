@@ -15,11 +15,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint configured yet'",
     "test": "bun test",
-    "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "tsx ./node_modules/.bin/drizzle-kit generate",
+    "db:push": "tsx ./node_modules/.bin/drizzle-kit push",
+    "db:migrate": "tsx ./node_modules/.bin/drizzle-kit migrate",
     "db:migrate:run": "bun run src/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "tsx ./node_modules/.bin/drizzle-kit studio"
   },
   "dependencies": {
     "drizzle-orm": "^0.39.0",

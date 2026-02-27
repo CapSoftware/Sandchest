@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
-import { nodes } from './schema/nodes'
-import { images } from './schema/images'
-import { profiles } from './schema/profiles'
-import type { Database } from './client'
+import { nodes } from './schema/nodes.js'
+import { images } from './schema/images.js'
+import { profiles } from './schema/profiles.js'
+import type { Database } from './client.js'
 
 /**
  * Idempotent seed function. Safe to run multiple times — uses onDuplicateKeyUpdate

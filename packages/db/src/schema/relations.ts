@@ -1,11 +1,11 @@
 import { relations } from 'drizzle-orm'
-import { nodes } from './nodes'
-import { images } from './images'
-import { profiles } from './profiles'
-import { sandboxes } from './sandboxes'
-import { sandboxSessions } from './sandbox-sessions'
-import { execs } from './execs'
-import { artifacts } from './artifacts'
+import { nodes } from './nodes.js'
+import { images } from './images.js'
+import { profiles } from './profiles.js'
+import { sandboxes } from './sandboxes.js'
+import { sandboxSessions } from './sandbox-sessions.js'
+import { execs } from './execs.js'
+import { artifacts } from './artifacts.js'
 
 export const nodesRelations = relations(nodes, ({ many }) => ({
   sandboxes: many(sandboxes),
