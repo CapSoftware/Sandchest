@@ -2,37 +2,40 @@ import { HttpServer } from '@effect/platform'
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node'
 import { Duration, Effect, Layer } from 'effect'
 import { createServer } from 'node:http'
+import { createDatabase } from '@sandchest/db/client'
 import { loadEnv } from './env.js'
 import { ApiRouter } from './server.js'
 import { withAuth, withRequestId } from './middleware.js'
 import { withConnectionDrain } from './middleware/connection-drain.js'
 import { withRateLimit } from './middleware/rate-limit.js'
 import { withSecurityHeaders } from './middleware/security-headers.js'
-import { SandboxRepoMemory } from './services/sandbox-repo.memory.js'
-import { ExecRepoMemory } from './services/exec-repo.memory.js'
-import { SessionRepoMemory } from './services/session-repo.memory.js'
+import { makeSandboxRepoDrizzle } from './services/sandbox-repo.drizzle.js'
+import { makeExecRepoDrizzle } from './services/exec-repo.drizzle.js'
+import { makeSessionRepoDrizzle } from './services/session-repo.drizzle.js'
 import { ObjectStorageMemory } from './services/object-storage.memory.js'
 import { createObjectStorageLayer } from './services/object-storage.live.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
 import { createNodeClientLayer } from './services/node-client.live.js'
-import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
+import { makeArtifactRepoDrizzle } from './services/artifact-repo.drizzle.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
 import { EventRecorderLive } from './services/event-recorder.live.js'
-import { IdempotencyRepoMemory } from './workers/idempotency-cleanup.memory.js'
-import { OrgRepoMemory } from './services/org-repo.memory.js'
-import { AuditLogMemory } from './services/audit-log.memory.js'
-import { NodeRepoMemory } from './services/node-repo.memory.js'
-import { MetricsRepoMemory } from './services/metrics-repo.memory.js'
-import { QuotaMemory } from './services/quota.memory.js'
-import { UsageMemory } from './services/usage.memory.js'
+import { makeIdempotencyRepoDrizzle } from './workers/idempotency-cleanup.drizzle.js'
+import { makeOrgRepoDrizzle } from './services/org-repo.drizzle.js'
+import { makeAuditLogDrizzle } from './services/audit-log.drizzle.js'
+import { makeNodeRepoDrizzle } from './services/node-repo.drizzle.js'
+import { makeMetricsRepoDrizzle } from './services/metrics-repo.drizzle.js'
+import { makeQuotaDrizzle } from './services/quota.drizzle.js'
+import { makeUsageDrizzle } from './services/usage.drizzle.js'
 import { BillingLive } from './services/billing.live.js'
 import { startAllWorkers } from './workers/index.js'
 import { JsonLoggerLive } from './logger.js'
 import { ShutdownController, ShutdownControllerLive } from './shutdown.js'
 
 const env = loadEnv()
-const { PORT, REDIS_URL, REDIS_FAMILY, DRAIN_TIMEOUT_MS, SANDCHEST_S3_ENDPOINT, SANDCHEST_S3_ACCESS_KEY, SANDCHEST_S3_SECRET_KEY, SANDCHEST_S3_REGION, ARTIFACT_BUCKET_NAME } = env
+const { PORT, DATABASE_URL, REDIS_URL, REDIS_FAMILY, DRAIN_TIMEOUT_MS, SANDCHEST_S3_ENDPOINT, SANDCHEST_S3_ACCESS_KEY, SANDCHEST_S3_SECRET_KEY, SANDCHEST_S3_REGION, ARTIFACT_BUCKET_NAME } = env
+
+const db = createDatabase(DATABASE_URL)
 
 // Production pipeline: connection drain is outermost so it gates all requests
 const AppLive = ApiRouter.pipe(
@@ -114,19 +117,19 @@ const GracefulShutdownLive = Layer.scopedDiscard(
 const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pipe(
   Layer.provide(ShutdownControllerLive),
   Layer.provide(EventRecorderLive),
-  Layer.provide(SandboxRepoMemory),
-  Layer.provide(ExecRepoMemory),
-  Layer.provide(SessionRepoMemory),
+  Layer.provide(makeSandboxRepoDrizzle(db)),
+  Layer.provide(makeExecRepoDrizzle(db)),
+  Layer.provide(makeSessionRepoDrizzle(db)),
   Layer.provide(ObjectStorageLive),
   Layer.provide(NodeClientLive),
-  Layer.provide(ArtifactRepoMemory),
-  Layer.provide(IdempotencyRepoMemory),
-  Layer.provide(OrgRepoMemory),
-  Layer.provide(QuotaMemory),
-  Layer.provide(UsageMemory),
-  Layer.provide(AuditLogMemory),
-  Layer.provide(NodeRepoMemory),
-  Layer.provide(MetricsRepoMemory),
+  Layer.provide(makeArtifactRepoDrizzle(db)),
+  Layer.provide(makeIdempotencyRepoDrizzle(db)),
+  Layer.provide(makeOrgRepoDrizzle(db)),
+  Layer.provide(makeQuotaDrizzle(db)),
+  Layer.provide(makeUsageDrizzle(db)),
+  Layer.provide(makeAuditLogDrizzle(db)),
+  Layer.provide(makeNodeRepoDrizzle(db)),
+  Layer.provide(makeMetricsRepoDrizzle(db)),
   Layer.provide(BillingLive),
   Layer.provide(RedisLive),
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT })),
