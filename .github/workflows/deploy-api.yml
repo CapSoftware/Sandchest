@@ -49,6 +49,10 @@ jobs:
 
       - name: Test API
         run: bun run --filter @sandchest/api test
+        env:
+          DATABASE_URL: mysql://test:test@localhost:3306/test
+          BETTER_AUTH_SECRET: test-secret-for-ci-only-not-real
+          RESEND_API_KEY: re_test_000000000000000000000000
 
   migrate:
     name: Run Database Migrations
