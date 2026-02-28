@@ -167,7 +167,7 @@ describe('Dockerfile', () => {
   })
 
   test('production stage uses slim image', () => {
-    expect(dockerfile).toContain('FROM oven/bun:1-slim')
+    expect(dockerfile).toMatch(/FROM oven\/bun:[\d.]+-slim/)
   })
 
   test('sets NODE_ENV to production', () => {
