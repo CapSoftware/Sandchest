@@ -16,7 +16,7 @@ COPY packages/admin-cli/package.json packages/admin-cli/
 COPY packages/github-action/package.json packages/github-action/
 COPY examples/package.json examples/
 COPY patches/ patches/
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --ignore-scripts
 
 FROM deps AS build
 COPY . .
@@ -43,7 +43,7 @@ COPY packages/admin-cli/package.json packages/admin-cli/
 COPY packages/github-action/package.json packages/github-action/
 COPY examples/package.json examples/
 COPY patches/ patches/
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/contract/dist packages/contract/dist
