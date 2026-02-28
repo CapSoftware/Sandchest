@@ -145,6 +145,23 @@ export function createIoRedisApi(client: Redis): RedisApi {
         return result === 'OK'
       }),
 
+    getWorkerLeaderInfo: (workerNames) =>
+      Effect.promise(async () => {
+        if (workerNames.length === 0) return []
+        const pipeline = client.pipeline()
+        for (const name of workerNames) {
+          const key = `worker:${name}:leader`
+          pipeline.exists(key)
+          pipeline.pttl(key)
+        }
+        const results = await pipeline.exec()
+        return workerNames.map((name, i) => {
+          const exists = (results?.[i * 2]?.[1] as number) ?? 0
+          const pttl = (results?.[i * 2 + 1]?.[1] as number) ?? -2
+          return { name, active: exists === 1, ttlMs: pttl }
+        })
+      }),
+
     ping: () =>
       Effect.promise(async () => {
         try {

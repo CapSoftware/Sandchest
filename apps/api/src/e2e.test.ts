@@ -361,7 +361,7 @@ describe('E2E: sandbox lifecycle — create, exec, session, file, stop', () => {
           status: string
         }
 
-        expect(stopRes.status).toBe(200)
+        expect(stopRes.status).toBe(202)
         expect(stopped.sandbox_id).toBe(sandboxId)
         expect(stopped.status).toBe('stopped')
 

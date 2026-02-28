@@ -111,6 +111,11 @@ export interface RedisApi {
     ttlSeconds: number,
   ) => Effect.Effect<boolean, never, never>
 
+  /** Check worker leader lock status for multiple workers. */
+  readonly getWorkerLeaderInfo: (
+    workerNames: string[],
+  ) => Effect.Effect<Array<{ name: string; active: boolean; ttlMs: number }>, never, never>
+
   /** Ping to check connectivity. */
   readonly ping: () => Effect.Effect<boolean, never, never>
 }

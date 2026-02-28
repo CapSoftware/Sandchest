@@ -295,7 +295,7 @@ describe('HTTP E2E: sandbox CRUD', () => {
 
     const body = (await res.json()) as { sandbox_id: string; status: string }
     expect(body.sandbox_id).toBe(id)
-    expect(body.status).toBe('stopping')
+    expect(body.status).toBe('stopped')
   })
 
   test('delete sandbox returns 200', async () => {

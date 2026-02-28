@@ -2,7 +2,7 @@ import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/p
 import { Effect } from 'effect'
 import { timingSafeEqual } from 'node:crypto'
 import { parseScopes } from '@sandchest/contract'
-import { UnauthorizedError } from './errors.js'
+import { UnauthorizedError, formatApiError } from './errors.js'
 import { AuthContext } from './context.js'
 import { auth } from './auth.js'
 import { loadEnv } from './env.js'
@@ -41,17 +41,17 @@ export const withAuth = HttpMiddleware.make((app) =>
       const env = loadEnv()
       const adminToken = env.ADMIN_API_TOKEN
       if (!adminToken) {
-        return yield* Effect.fail(new UnauthorizedError({ message: 'Admin API not configured' }))
+        return formatApiError(new UnauthorizedError({ message: 'Admin API not configured' }))
       }
       const authHeader = request.headers['authorization']
       const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
       if (!provided || provided.length !== adminToken.length) {
-        return yield* Effect.fail(new UnauthorizedError({ message: 'Invalid admin token' }))
+        return formatApiError(new UnauthorizedError({ message: 'Invalid admin token' }))
       }
       const a = new TextEncoder().encode(provided)
       const b = new TextEncoder().encode(adminToken)
       if (!timingSafeEqual(a, b)) {
-        return yield* Effect.fail(new UnauthorizedError({ message: 'Invalid admin token' }))
+        return formatApiError(new UnauthorizedError({ message: 'Invalid admin token' }))
       }
       return yield* Effect.provideService(app, AuthContext, { userId: 'admin', orgId: '', scopes: null })
     }
@@ -62,10 +62,12 @@ export const withAuth = HttpMiddleware.make((app) =>
       const result = yield* Effect.tryPromise({
         try: () => auth.api.verifyApiKey({ body: { key } }),
         catch: () => new UnauthorizedError({ message: 'Invalid API key' }),
-      })
+      }).pipe(
+        Effect.catchAll(() => Effect.succeed(null)),
+      )
 
       if (!result?.valid) {
-        return yield* Effect.fail(new UnauthorizedError({ message: 'Invalid API key' }))
+        return formatApiError(new UnauthorizedError({ message: 'Invalid API key' }))
       }
 
       const metadata = (result as { metadata?: { orgId?: string; scopes?: string[] } }).metadata
@@ -85,10 +87,12 @@ export const withAuth = HttpMiddleware.make((app) =>
           headers: new Headers(request.headers as Record<string, string>),
         }),
       catch: () => new UnauthorizedError({ message: 'Invalid session' }),
-    })
+    }).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
+    )
 
     if (!sessionResult?.session) {
-      return yield* Effect.fail(new UnauthorizedError({ message: 'Authentication required' }))
+      return formatApiError(new UnauthorizedError({ message: 'Authentication required' }))
     }
 
     return yield* Effect.provideService(app, AuthContext, {

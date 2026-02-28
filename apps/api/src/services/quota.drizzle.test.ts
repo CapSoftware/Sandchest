@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { createDrizzleQuotaApi, makeQuotaDrizzle } from './quota.drizzle.js'
 import { DEFAULT_QUOTA, type QuotaApi } from './quota.js'
 import { createDatabase, type Database } from '@sandchest/db/client'
@@ -36,9 +36,12 @@ describe.skipIf(!DATABASE_URL)('quota.drizzle (integration)', () => {
   const ORG_A = 'org_quota_test_a'
   const ORG_B = 'org_quota_test_b'
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(() => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     api = createDrizzleQuotaApi(db)
+  })
+
+  beforeEach(async () => {
     await db.execute(sql`DELETE FROM org_quotas WHERE org_id IN (${ORG_A}, ${ORG_B})`)
   })
 

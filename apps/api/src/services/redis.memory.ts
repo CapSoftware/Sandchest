@@ -190,6 +190,11 @@ export function createInMemoryRedisApi(): RedisApi {
         return true
       }),
 
+    getWorkerLeaderInfo: (workerNames) =>
+      Effect.sync(() =>
+        workerNames.map((name) => ({ name, active: false, ttlMs: -1 })),
+      ),
+
     ping: () => Effect.succeed(true),
   }
 }

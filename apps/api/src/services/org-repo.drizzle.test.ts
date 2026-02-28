@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { createDrizzleOrgRepo, makeOrgRepoDrizzle } from './org-repo.drizzle.js'
 import type { OrgRepoApi } from './org-repo.js'
 import { createDatabase, type Database } from '@sandchest/db/client'
@@ -36,9 +36,12 @@ describe.skipIf(!DATABASE_URL)('org-repo.drizzle (integration)', () => {
   const ORG_A = 'org_repo_test_a'
   const ORG_B = 'org_repo_test_b'
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(() => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     repo = createDrizzleOrgRepo(db)
+  })
+
+  beforeEach(async () => {
     // Clean up test data
     await db.execute(sql`DELETE FROM org_quotas WHERE org_id IN (${ORG_A}, ${ORG_B})`)
     await db.execute(sql`DELETE FROM org_usage WHERE org_id IN (${ORG_A}, ${ORG_B})`)

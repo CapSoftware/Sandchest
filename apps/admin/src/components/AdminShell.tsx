@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 
 const NAV_ITEMS = [
   { href: '/servers', label: 'Servers' },
+  { href: '/status', label: 'Status' },
 ]
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {

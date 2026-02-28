@@ -426,7 +426,7 @@ const stopSandbox = Effect.gen(function* () {
     status: stopped?.status ?? 'stopped',
   }
 
-  return HttpServerResponse.unsafeJson(response)
+  return HttpServerResponse.unsafeJson(response, { status: 202 })
 })
 
 // -- Delete sandbox ----------------------------------------------------------

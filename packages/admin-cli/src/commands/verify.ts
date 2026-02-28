@@ -30,12 +30,26 @@ export function verifyCommand(): Command {
             },
           },
           {
-            name: 'API /healthz',
+            name: 'API readiness (Redis + dependencies)',
             run: async () => {
               const baseUrl = config.api?.baseUrl
               if (!baseUrl) return false
-              const result = await exec('curl', ['-sf', '-o', '/dev/null', '-w', '%{http_code}', `${baseUrl}/healthz`])
-              return result.stdout.trim() === '200'
+              const result = await exec('curl', ['-sf', `${baseUrl}/readyz`])
+              if (result.code !== 0) return false
+              try {
+                const body = JSON.parse(result.stdout.trim())
+                if (body.checks?.redis === 'fail') {
+                  warn('Redis health check failed')
+                  return false
+                }
+                if (body.checks?.shutdown === 'draining') {
+                  warn('API is draining (shutting down)')
+                  return false
+                }
+                return body.status === 'ok'
+              } catch {
+                return false
+              }
             },
           },
           {

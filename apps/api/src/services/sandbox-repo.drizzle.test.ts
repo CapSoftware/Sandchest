@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { generateUUIDv7, bytesToId, SANDBOX_PREFIX } from '@sandchest/contract'
 import { createDrizzleSandboxRepo, makeSandboxRepoDrizzle } from './sandbox-repo.drizzle.js'
 import type { SandboxRepoApi } from './sandbox-repo.js'
@@ -52,11 +52,14 @@ describe.skipIf(!DATABASE_URL)('sandbox-repo.drizzle (integration)', () => {
     }
   }
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(async () => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     repo = createDrizzleSandboxRepo(db)
     // Seed reference data (idempotent)
     await seed(db)
+  })
+
+  beforeEach(async () => {
     // Truncate sandboxes between tests
     await db.execute(sql`DELETE FROM sandboxes`)
   })

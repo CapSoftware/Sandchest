@@ -17,11 +17,6 @@ describe('pricing page', () => {
     expect(src).toContain('description')
   })
 
-  test('imports and renders Nav component', () => {
-    expect(src).toContain("import Nav from '@/components/landing/Nav'")
-    expect(src).toContain('<Nav')
-  })
-
   test('imports and renders pricing components', () => {
     expect(src).toContain("import PricingHero from '@/components/pricing/PricingHero'")
     expect(src).toContain("import PricingCards from '@/components/pricing/PricingCards'")

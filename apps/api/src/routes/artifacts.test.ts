@@ -369,7 +369,7 @@ describe('Stop sandbox — artifact collection integration', () => {
         const response = yield* client.execute(
           HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/stop`),
         )
-        expect(response.status).toBe(200)
+        expect(response.status).toBe(202)
       }),
     )
 
@@ -404,7 +404,7 @@ describe('Stop sandbox — artifact collection integration', () => {
       }),
     )
 
-    expect(result.status).toBe(200)
+    expect(result.status).toBe(202)
   })
 
   test('stop succeeds even if registered paths do not exist on sandbox', async () => {
@@ -436,7 +436,7 @@ describe('Stop sandbox — artifact collection integration', () => {
       }),
     )
 
-    expect(result.status).toBe(200)
+    expect(result.status).toBe(202)
 
     // No artifacts should be collected (file didn't exist)
     const listResult = await env.runTest(

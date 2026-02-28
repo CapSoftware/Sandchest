@@ -1,7 +1,7 @@
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform'
 import { Effect } from 'effect'
 import { AuthContext } from '../context.js'
-import { RateLimitedError } from '../errors.js'
+import { RateLimitedError, formatApiError } from '../errors.js'
 import { RedisService, type RateLimitResult } from '../services/redis.js'
 import { QuotaService, type OrgQuota } from '../services/quota.js'
 
@@ -76,7 +76,7 @@ export const withRateLimit = HttpMiddleware.make((app) =>
 
     if (!result.allowed) {
       const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000)
-      return yield* Effect.fail(
+      return formatApiError(
         new RateLimitedError({
           message: 'Rate limit exceeded',
           retryAfter: Math.max(1, retryAfter),

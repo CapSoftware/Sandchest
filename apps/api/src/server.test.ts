@@ -479,13 +479,13 @@ describe('POST /v1/sandboxes/:id/stop — stop sandbox', () => {
       }),
     )
 
-    expect(result.status).toBe(200)
+    expect(result.status).toBe(202)
     const body = result.body as Record<string, unknown>
     expect(body.sandbox_id).toBeDefined()
     expect(body.status).toBe('stopped')
   })
 
-  test('stopping already-stopping sandbox returns 200', async () => {
+  test('stopping already-stopped sandbox returns 200', async () => {
     const result = await runTest(
       Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient

@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { generateUUIDv7 } from '@sandchest/contract'
 import { createDrizzleSessionRepo, makeSessionRepoDrizzle } from './session-repo.drizzle.js'
 import type { SessionRepoApi } from './session-repo.js'
@@ -47,9 +47,12 @@ describe.skipIf(!DATABASE_URL)('session-repo.drizzle (integration)', () => {
     }
   }
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(() => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     repo = createDrizzleSessionRepo(db)
+  })
+
+  beforeEach(async () => {
     await db.execute(sql`DELETE FROM sandbox_sessions`)
   })
 

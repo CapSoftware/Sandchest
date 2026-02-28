@@ -8,6 +8,7 @@ import { flyRedisCommand } from './commands/fly/redis.js'
 import { flySecretsCommand } from './commands/fly/secrets.js'
 import { flyDeployCommand } from './commands/fly/deploy.js'
 import { flyStatusCommand } from './commands/fly/status.js'
+import { flyRedisStatusCommand } from './commands/fly/redis-status.js'
 import { nodeProvisionCommand } from './commands/node/provision.js'
 import { nodeDeployCommand } from './commands/node/deploy.js'
 import { nodeEnvCommand } from './commands/node/env.js'
@@ -44,6 +45,7 @@ fly.addCommand(flyRedisCommand())
 fly.addCommand(flySecretsCommand())
 fly.addCommand(flyDeployCommand())
 fly.addCommand(flyStatusCommand())
+fly.addCommand(flyRedisStatusCommand())
 program.addCommand(fly)
 
 // node subcommands

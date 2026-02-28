@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { createDrizzleIdempotencyRepo, makeIdempotencyRepoDrizzle } from './idempotency-cleanup.drizzle.js'
 import type { IdempotencyRepoApi } from './idempotency-cleanup.js'
 import { createDatabase, type Database } from '@sandchest/db/client'
@@ -36,9 +36,12 @@ describe.skipIf(!DATABASE_URL)('idempotency-cleanup.drizzle (integration)', () =
   const ORG_A = 'org_idem_test_a'
   const ORG_B = 'org_idem_test_b'
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(() => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     repo = createDrizzleIdempotencyRepo(db)
+  })
+
+  beforeEach(async () => {
     await db.execute(sql`DELETE FROM idempotency_keys WHERE org_id IN (${ORG_A}, ${ORG_B})`)
   })
 

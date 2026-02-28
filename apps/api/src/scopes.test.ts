@@ -195,7 +195,7 @@ describe('scope enforcement — sandbox scopes', () => {
         return { status: response.status }
       }),
     )
-    expect(result.status).toBe(200)
+    expect(result.status).toBe(202)
   })
 
   test('missing sandbox:write rejects DELETE /v1/sandboxes/:id', async () => {

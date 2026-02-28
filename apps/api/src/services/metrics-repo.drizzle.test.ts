@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { generateUUIDv7 } from '@sandchest/contract'
 import { createDrizzleMetricsRepo, makeMetricsRepoDrizzle } from './metrics-repo.drizzle.js'
 import type { MetricsRepoApi, MetricsInput } from './metrics-repo.js'
@@ -53,9 +53,12 @@ describe.skipIf(!DATABASE_URL)('metrics-repo.drizzle (integration)', () => {
     }
   }
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(() => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     repo = createDrizzleMetricsRepo(db)
+  })
+
+  beforeEach(async () => {
     await db.execute(sql`DELETE FROM node_metrics`)
   })
 

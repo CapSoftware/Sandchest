@@ -46,7 +46,7 @@ export async function POST(
 
   // Call the admin API to update the node status
   const apiToken = process.env.ADMIN_API_TOKEN
-  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+  const apiUrl = process.env.API_URL ?? 'https://api.sandchest.com'
   const nodeIdHex = Buffer.from(server.nodeId).toString('hex')
 
   // Try to call the control plane API

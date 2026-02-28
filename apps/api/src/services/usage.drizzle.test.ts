@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { createDrizzleUsageApi, makeUsageDrizzle } from './usage.drizzle.js'
 import type { UsageApi } from './usage.js'
 import { createDatabase, type Database } from '@sandchest/db/client'
@@ -36,9 +36,12 @@ describe.skipIf(!DATABASE_URL)('usage.drizzle (integration)', () => {
   const ORG_A = 'org_usage_test_a'
   const ORG_B = 'org_usage_test_b'
 
-  beforeEach(async () => {
-    db = createDatabase(DATABASE_URL!)
+  beforeAll(() => {
+    db = createDatabase(DATABASE_URL!, { connectionLimit: 2 })
     api = createDrizzleUsageApi(db)
+  })
+
+  beforeEach(async () => {
     await db.execute(sql`DELETE FROM org_usage WHERE org_id IN (${ORG_A}, ${ORG_B})`)
   })
 
