@@ -30,7 +30,7 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
-import type { ReplayBundle } from '@sandchest/contract'
+import type { CreateSandboxResponse, GetSandboxResponse, ReplayBundle } from '@sandchest/contract'
 import type { BufferedEvent } from '../services/redis.js'
 
 const TEST_ORG = 'org_test_123'
@@ -86,9 +86,8 @@ function createRunningSandbox(
           HttpClientRequest.bodyUnsafeJson({}),
         ),
       )
-      const created = (yield* createRes.json) as { sandbox_id: string }
-      const bytes = idToBytes(created.sandbox_id)
-      yield* env.sandboxRepo.updateStatus(bytes, TEST_ORG, 'running')
+      const created = (yield* createRes.json) as { sandbox_id: string; status: string }
+      // Sandbox is now automatically running after creation (node daemon called inline)
       return created.sandbox_id
     }),
   )
@@ -361,10 +360,10 @@ describe('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
     expect(result.events_url).toContain('events.jsonl')
   })
 
-  test('queued sandbox has in_progress status', async () => {
+  test('running sandbox has in_progress status', async () => {
     const env = createTestEnv()
 
-    // Create sandbox but don't transition to running (stays queued)
+    // Create sandbox (auto-transitions to running via node daemon)
     const sandboxId = await env.runTest(
       Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient
@@ -453,6 +452,113 @@ describe('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
 })
 
 // ---------------------------------------------------------------------------
+// POST /v1/sandboxes — node daemon integration
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/sandboxes — node daemon integration', () => {
+  test('sandbox is running after creation (node daemon called inline)', async () => {
+    const env = createTestEnv()
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as CreateSandboxResponse }
+      }),
+    )
+
+    expect(result.status).toBe(201)
+    expect(result.body.status).toBe('running')
+    expect(result.body.sandbox_id).toBeDefined()
+    expect(result.body.sandbox_id.startsWith('sb_')).toBe(true)
+    expect(result.body.estimated_ready_seconds).toBe(0)
+  })
+
+  test('sandbox has nodeId assigned after creation', async () => {
+    const env = createTestEnv()
+
+    const sandboxId = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = (yield* response.json) as CreateSandboxResponse
+        return body.sandbox_id
+      }),
+    )
+
+    const row = await Effect.runPromise(
+      env.sandboxRepo.findById(idToBytes(sandboxId), TEST_ORG),
+    )
+    expect(row).not.toBeNull()
+    expect(row!.status).toBe('running')
+    expect(row!.nodeId).not.toBeNull()
+    expect(row!.startedAt).not.toBeNull()
+  })
+
+  test('GET sandbox returns running status after creation', async () => {
+    const env = createTestEnv()
+
+    const sandboxId = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = (yield* response.json) as CreateSandboxResponse
+        return body.sandbox_id
+      }),
+    )
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}`),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as GetSandboxResponse }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.body.status).toBe('running')
+    expect(result.body.started_at).not.toBeNull()
+  })
+
+  test('sandbox creation passes correct env to node daemon', async () => {
+    const env = createTestEnv()
+    const customEnv = { FOO: 'bar', BAZ: 'qux' }
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post('/v1/sandboxes').pipe(
+            HttpClientRequest.bodyUnsafeJson({ env: customEnv }),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as CreateSandboxResponse }
+      }),
+    )
+
+    expect(result.status).toBe(201)
+    expect(result.body.status).toBe('running')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Quota enforcement — create sandbox
 // ---------------------------------------------------------------------------
 
@@ -502,7 +608,7 @@ describe('POST /v1/sandboxes — quota enforcement', () => {
     const env = createTestEnv()
     env.quotaApi.setOrgQuota(TEST_ORG, { maxConcurrentSandboxes: 2 })
 
-    // Create 2 sandboxes (they start as queued, which counts as active)
+    // Create 2 sandboxes (they start as running, which counts as active)
     await env.runTest(
       Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient

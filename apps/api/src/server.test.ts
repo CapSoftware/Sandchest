@@ -197,9 +197,9 @@ describe('POST /v1/sandboxes — create sandbox', () => {
     const body = result.body as Record<string, unknown>
     expect(body.sandbox_id).toBeDefined()
     expect((body.sandbox_id as string).startsWith('sb_')).toBe(true)
-    expect(body.status).toBe('queued')
+    expect(body.status).toBe('running')
     expect(body.queue_position).toBe(0)
-    expect(body.estimated_ready_seconds).toBe(2)
+    expect(body.estimated_ready_seconds).toBe(0)
     expect(body.replay_url).toBeDefined()
     expect(body.created_at).toBeDefined()
   })
@@ -224,7 +224,7 @@ describe('POST /v1/sandboxes — create sandbox', () => {
 
     expect(result.status).toBe(201)
     const body = result.body as Record<string, unknown>
-    expect(body.status).toBe('queued')
+    expect(body.status).toBe('running')
   })
 
   test('rejects invalid profile', async () => {
@@ -314,7 +314,7 @@ describe('GET /v1/sandboxes/:id — get sandbox', () => {
     expect(result.status).toBe(200)
     const body = result.body as Record<string, unknown>
     expect(body.sandbox_id).toBeDefined()
-    expect(body.status).toBe('queued')
+    expect(body.status).toBe('running')
     expect(body.profile).toBe('small')
     expect(body.image).toBe('sandchest://ubuntu-22.04')
     expect(body.env).toEqual({ CI: '1' })
@@ -415,16 +415,16 @@ describe('GET /v1/sandboxes — list sandboxes', () => {
       Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient
 
-        // Create a sandbox (status: queued)
+        // Create a sandbox (auto-transitions to running)
         yield* client.execute(
           HttpClientRequest.post('/v1/sandboxes').pipe(
             HttpClientRequest.bodyUnsafeJson({}),
           ),
         )
 
-        // Filter for running (should return empty)
+        // Filter for stopped (should return empty since sandbox is running)
         const response = yield* client.execute(
-          HttpClientRequest.get('/v1/sandboxes?status=running'),
+          HttpClientRequest.get('/v1/sandboxes?status=stopped'),
         )
         const body = yield* response.json
         return { status: response.status, body }
@@ -751,14 +751,16 @@ describe('POST /v1/sandboxes/:id/fork — fork sandbox', () => {
     const result = await runTest(
       Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient
+        const repo = yield* SandboxRepo
 
-        // Create sandbox (status: queued — not running)
+        // Create sandbox (auto-transitions to running) then stop it
         const createRes = yield* client.execute(
           HttpClientRequest.post('/v1/sandboxes').pipe(
             HttpClientRequest.bodyUnsafeJson({}),
           ),
         )
         const created = (yield* createRes.json) as { sandbox_id: string }
+        yield* repo.updateStatus(idToBytes(created.sandbox_id), TEST_ORG, 'stopped')
 
         const forkRes = yield* client.execute(
           HttpClientRequest.post(`/v1/sandboxes/${created.sandbox_id}/fork`).pipe(

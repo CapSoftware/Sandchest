@@ -126,7 +126,7 @@ afterAll(async () => {
   await Effect.runPromise(Scope.close(scope, Exit.void))
 })
 
-/** Create a sandbox via HTTP and transition it to running. */
+/** Create a sandbox via HTTP (auto-transitions to running via node daemon). */
 async function createRunningSandbox(): Promise<string> {
   const res = await fetch(`${baseUrl}/v1/sandboxes`, {
     method: 'POST',
@@ -134,9 +134,6 @@ async function createRunningSandbox(): Promise<string> {
     body: JSON.stringify({}),
   })
   const data = (await res.json()) as { sandbox_id: string }
-  await Effect.runPromise(
-    sandboxRepo.updateStatus(idToBytes(data.sandbox_id), TEST_ORG, 'running'),
-  )
   return data.sandbox_id
 }
 
@@ -256,7 +253,7 @@ describe('HTTP E2E: sandbox CRUD', () => {
       created_at: string
     }
     expect(body.sandbox_id).toMatch(/^sb_/)
-    expect(body.status).toBe('queued')
+    expect(body.status).toBe('running')
     expect(body.replay_url).toContain(body.sandbox_id)
     expect(body.created_at).toBeTruthy()
     expect(res.headers.get('x-replay-access')).toBe('public')

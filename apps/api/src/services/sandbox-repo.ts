@@ -35,12 +35,12 @@ export interface SandboxRepoApi {
   /** Look up image by string like "ubuntu-22.04" or "ubuntu-22.04/base". */
   readonly resolveImage: (
     imageStr: string,
-  ) => Effect.Effect<{ id: Uint8Array; ref: string } | null, never, never>
+  ) => Effect.Effect<{ id: Uint8Array; ref: string; kernelRef: string; rootfsRef: string } | null, never, never>
 
   /** Look up profile by name. */
   readonly resolveProfile: (
     name: ProfileName,
-  ) => Effect.Effect<{ id: Uint8Array } | null, never, never>
+  ) => Effect.Effect<{ id: Uint8Array; cpuCores: number; memoryMb: number; diskGb: number } | null, never, never>
 
   /** Insert a new sandbox row and return it. */
   readonly create: (params: {

@@ -14,6 +14,11 @@ const SEED_PROFILE_IDS: Record<ProfileName, Uint8Array> = {
   medium: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]),
   large: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]),
 }
+const SEED_PROFILE_SPECS: Record<ProfileName, { cpuCores: number; memoryMb: number; diskGb: number }> = {
+  small: { cpuCores: 2, memoryMb: 4096, diskGb: 40 },
+  medium: { cpuCores: 4, memoryMb: 8192, diskGb: 80 },
+  large: { cpuCores: 8, memoryMb: 16384, diskGb: 160 },
+}
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false
@@ -34,13 +39,20 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
     resolveImage: (imageStr) =>
       Effect.succeed(
         imageStr === 'ubuntu-22.04' || imageStr === 'ubuntu-22.04/base'
-          ? { id: SEED_IMAGE_ID, ref: `sandchest://${imageStr}` }
+          ? {
+              id: SEED_IMAGE_ID,
+              ref: `sandchest://${imageStr}`,
+              kernelRef: 'images/ubuntu-22.04-base/vmlinux',
+              rootfsRef: 'images/ubuntu-22.04-base/rootfs.ext4',
+            }
           : null,
       ),
 
     resolveProfile: (name) =>
       Effect.succeed(
-        name in SEED_PROFILE_IDS ? { id: SEED_PROFILE_IDS[name] } : null,
+        name in SEED_PROFILE_IDS
+          ? { id: SEED_PROFILE_IDS[name], ...SEED_PROFILE_SPECS[name] }
+          : null,
       ),
 
     create: (params) =>

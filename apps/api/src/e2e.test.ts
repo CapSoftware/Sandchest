@@ -93,13 +93,13 @@ describe('E2E: sandbox lifecycle — create, exec, session, file, stop', () => {
 
         expect(createRes.status).toBe(201)
         expect(created.sandbox_id.startsWith('sb_')).toBe(true)
-        expect(created.status).toBe('queued')
+        expect(created.status).toBe('running')
         expect(created.replay_url).toBeDefined()
         expect(created.created_at).toBeDefined()
 
         const sandboxId = created.sandbox_id
 
-        // --- 2. Verify sandbox is retrievable ---
+        // --- 2. Verify sandbox is retrievable and running ---
         const getRes = yield* client.execute(
           HttpClientRequest.get(`/v1/sandboxes/${sandboxId}`),
         )
@@ -113,21 +113,10 @@ describe('E2E: sandbox lifecycle — create, exec, session, file, stop', () => {
 
         expect(getRes.status).toBe(200)
         expect(sandbox.sandbox_id).toBe(sandboxId)
-        expect(sandbox.status).toBe('queued')
+        expect(sandbox.status).toBe('running')
         expect(sandbox.env).toEqual({ NODE_ENV: 'test' })
         expect(sandbox.profile).toBe('small')
         expect(sandbox.image).toBe('sandchest://ubuntu-22.04')
-
-        // --- 3. Transition to running (simulates provisioning) ---
-        const bytes = idToBytes(sandboxId)
-        yield* env.sandboxRepo.updateStatus(bytes, TEST_ORG, 'running')
-
-        // Verify running state
-        const runningRes = yield* client.execute(
-          HttpClientRequest.get(`/v1/sandboxes/${sandboxId}`),
-        )
-        const runningSandbox = (yield* runningRes.json) as { status: string }
-        expect(runningSandbox.status).toBe('running')
 
         // --- 4. Exec: sync command ---
         const syncExecRes = yield* client.execute(

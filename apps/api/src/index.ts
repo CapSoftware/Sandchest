@@ -46,14 +46,15 @@ const AppLive = ApiRouter.pipe(
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL) : RedisMemory
 
-const { NODE_GRPC_ADDR, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH } = env
+const { NODE_GRPC_ADDR, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, NODE_GRPC_NODE_ID } = env
 const NodeClientLive =
-  NODE_GRPC_ADDR && NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH
+  NODE_GRPC_ADDR && NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH && NODE_GRPC_NODE_ID
     ? createNodeClientLayer({
         address: NODE_GRPC_ADDR,
         certPath: NODE_GRPC_CERT_PATH,
         keyPath: NODE_GRPC_KEY_PATH,
         caPath: NODE_GRPC_CA_PATH,
+        nodeId: NODE_GRPC_NODE_ID,
       })
     : NodeClientMemory
 

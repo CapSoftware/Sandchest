@@ -27,6 +27,21 @@ export interface NodeFileEntry {
 }
 
 export interface NodeClientApi {
+  /** The ID of the node this client is connected to. */
+  readonly nodeId: Uint8Array
+
+  /** Create a new sandbox VM on the node. */
+  readonly createSandbox: (params: {
+    sandboxId: Uint8Array
+    kernelRef: string
+    rootfsRef: string
+    cpuCores: number
+    memoryMb: number
+    diskGb: number
+    env: Record<string, string>
+    ttlSeconds: number
+  }) => Effect.Effect<void, never, never>
+
   /** Execute a command on the node hosting the sandbox. */
   readonly exec: (params: {
     sandboxId: Uint8Array

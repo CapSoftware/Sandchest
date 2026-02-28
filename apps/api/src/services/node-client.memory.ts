@@ -1,6 +1,9 @@
 import { Effect, Layer } from 'effect'
 import { NodeClient, type NodeClientApi, type CollectedArtifact } from './node-client.js'
 
+/** Well-known fake node ID for in-memory testing. */
+const MEMORY_NODE_ID = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff])
+
 export function createInMemoryNodeClient(): NodeClientApi {
   const files = new Map<string, Uint8Array>()
 
@@ -9,6 +12,10 @@ export function createInMemoryNodeClient(): NodeClientApi {
   }
 
   return {
+    nodeId: MEMORY_NODE_ID,
+
+    createSandbox: () => Effect.void,
+
     exec: () =>
       Effect.succeed({
         exitCode: 0,

@@ -23,12 +23,30 @@ export interface NodeGrpcConfig {
   readonly keyPath: string
   /** Path to CA certificate PEM file. */
   readonly caPath: string
+  /** Node ID as a 32-char hex string (16-byte UUID). */
+  readonly nodeId: string
 }
 
-export function createLiveNodeClient(channel: Channel): NodeClientApi {
+export function createLiveNodeClient(channel: Channel, nodeIdBytes: Uint8Array): NodeClientApi {
   const client = createClient(nodeRpc.NodeDefinition, channel)
 
   return {
+    nodeId: nodeIdBytes,
+
+    createSandbox: (params) =>
+      Effect.promise(async () => {
+        await client.createSandbox({
+          sandboxId: bytesToHex(params.sandboxId),
+          kernelRef: params.kernelRef,
+          rootfsRef: params.rootfsRef,
+          cpuCores: params.cpuCores,
+          memoryMb: params.memoryMb,
+          diskGb: params.diskGb,
+          env: params.env,
+          ttlSeconds: params.ttlSeconds,
+        })
+      }),
+
     exec: (params) =>
       Effect.promise(async () => {
         let stdout = ''
@@ -198,6 +216,11 @@ export function createLiveNodeClient(channel: Channel): NodeClientApi {
   }
 }
 
+/** Convert a 32-char hex string to a 16-byte Uint8Array. */
+function hexToBytes(hex: string): Uint8Array {
+  return new Uint8Array(Buffer.from(hex, 'hex'))
+}
+
 export function createNodeClientLayer(config: NodeGrpcConfig): Layer.Layer<NodeClient> {
   return Layer.scoped(
     NodeClient,
@@ -208,10 +231,11 @@ export function createNodeClientLayer(config: NodeGrpcConfig): Layer.Layer<NodeC
 
       const credentials = ChannelCredentials.createSsl(ca, key, cert)
       const channel = createChannel(config.address, credentials)
+      const nodeIdBytes = hexToBytes(config.nodeId)
 
       yield* Effect.addFinalizer(() => Effect.sync(() => channel.close()))
 
-      return createLiveNodeClient(channel)
+      return createLiveNodeClient(channel, nodeIdBytes)
     }),
   )
 }

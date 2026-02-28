@@ -119,6 +119,7 @@ const createSandbox = Effect.gen(function* () {
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
   const billing = yield* BillingService
+  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
 
   // Billing: check sandbox creation access
@@ -191,12 +192,27 @@ const createSandbox = Effect.gen(function* () {
     imageRef: image.ref,
   })
 
+  // Tell the node daemon to create the VM
+  yield* nodeClient.createSandbox({
+    sandboxId: id,
+    kernelRef: image.kernelRef,
+    rootfsRef: image.rootfsRef,
+    cpuCores: profile.cpuCores,
+    memoryMb: profile.memoryMb,
+    diskGb: profile.diskGb,
+    env: body.env ?? {},
+    ttlSeconds,
+  })
+
+  // Transition to running and assign to the node
+  const assigned = yield* repo.assignNode(id, auth.orgId, nodeClient.nodeId)
+
   const sandboxId = bytesToId(SANDBOX_PREFIX, row.id)
   const response: CreateSandboxResponse = {
     sandbox_id: sandboxId,
-    status: row.status,
+    status: assigned?.status ?? row.status,
     queue_position: 0,
-    estimated_ready_seconds: 2,
+    estimated_ready_seconds: 0,
     replay_url: replayUrl(sandboxId),
     created_at: row.createdAt.toISOString(),
   }

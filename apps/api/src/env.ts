@@ -83,6 +83,7 @@ export function loadEnv() {
     NODE_GRPC_CERT_PATH: process.env.NODE_GRPC_CERT_PATH as string | undefined,
     NODE_GRPC_KEY_PATH: process.env.NODE_GRPC_KEY_PATH as string | undefined,
     NODE_GRPC_CA_PATH: process.env.NODE_GRPC_CA_PATH as string | undefined,
+    NODE_GRPC_NODE_ID: process.env.NODE_GRPC_NODE_ID as string | undefined,
 
     // Admin API token for /v1/admin/* endpoints
     ADMIN_API_TOKEN: process.env.ADMIN_API_TOKEN as string | undefined,

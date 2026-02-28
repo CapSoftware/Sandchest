@@ -245,6 +245,8 @@ describe('POST /v1/sandboxes/:id/exec — execute command', () => {
           ),
         )
         const created = (yield* createRes.json) as { sandbox_id: string }
+        // Stop the sandbox so it's no longer running
+        yield* env.sandboxRepo.updateStatus(idToBytes(created.sandbox_id), TEST_ORG, 'stopped')
         return created.sandbox_id
       }),
     )

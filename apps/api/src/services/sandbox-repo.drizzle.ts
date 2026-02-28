@@ -87,7 +87,13 @@ export function createDrizzleSandboxRepo(db: Database): SandboxRepoApi {
         const parsed = parseImageRef(imageStr)
         if (!parsed) return null
         const [row] = await db
-          .select({ id: images.id, osVersion: images.osVersion, toolchain: images.toolchain })
+          .select({
+            id: images.id,
+            osVersion: images.osVersion,
+            toolchain: images.toolchain,
+            kernelRef: images.kernelRef,
+            rootfsRef: images.rootfsRef,
+          })
           .from(images)
           .where(
             and(
@@ -97,13 +103,23 @@ export function createDrizzleSandboxRepo(db: Database): SandboxRepoApi {
           )
           .limit(1)
         if (!row) return null
-        return { id: row.id, ref: buildImageUri(row.osVersion, row.toolchain) }
+        return {
+          id: row.id,
+          ref: buildImageUri(row.osVersion, row.toolchain),
+          kernelRef: row.kernelRef,
+          rootfsRef: row.rootfsRef,
+        }
       }),
 
     resolveProfile: (name) =>
       Effect.promise(async () => {
         const [row] = await db
-          .select({ id: profiles.id })
+          .select({
+            id: profiles.id,
+            cpuCores: profiles.cpuCores,
+            memoryMb: profiles.memoryMb,
+            diskGb: profiles.diskGb,
+          })
           .from(profiles)
           .where(eq(profiles.name, name))
           .limit(1)

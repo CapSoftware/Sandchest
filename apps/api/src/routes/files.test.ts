@@ -203,7 +203,10 @@ describe('PUT /v1/sandboxes/:id/files — upload file', () => {
             HttpClientRequest.bodyUnsafeJson({}),
           ),
         )
-        return ((yield* createRes.json) as { sandbox_id: string }).sandbox_id
+        const created = (yield* createRes.json) as { sandbox_id: string }
+        // Stop the sandbox so it's no longer running
+        yield* env.sandboxRepo.updateStatus(idToBytes(created.sandbox_id), TEST_ORG, 'stopped')
+        return created.sandbox_id
       }),
     )
 
