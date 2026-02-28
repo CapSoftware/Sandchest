@@ -1200,6 +1200,7 @@ mod tests {
             control_plane_url: None,
             jailer: crate::jailer::JailerConfig::disabled(),
             s3: None,
+            tls: None,
         })
     }
 

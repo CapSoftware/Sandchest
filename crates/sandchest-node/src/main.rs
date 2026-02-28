@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::info;
 
@@ -390,7 +391,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn event stream to control plane (if URL configured)
     if let Some(ref url) = node_config.control_plane_url {
         info!(url = %url, "starting event stream to control plane");
-        tokio::spawn(events::run_event_stream(event_rx, url.clone()));
+        tokio::spawn(events::run_event_stream(
+            event_rx,
+            url.clone(),
+            node_config.tls.clone(),
+        ));
     } else {
         info!("no control plane URL configured, event stream disabled");
         // Spawn a drain task so events don't pile up
@@ -406,14 +411,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node_service = NodeService::new(Arc::clone(&sandbox_manager), Arc::clone(&node_config));
 
+    let mut server_builder = tonic::transport::Server::builder();
+
+    if let Some(ref tls) = node_config.tls {
+        let cert = std::fs::read(&tls.cert_path)?;
+        let key = std::fs::read(&tls.key_path)?;
+        let ca = std::fs::read(&tls.ca_cert_path)?;
+
+        let tls_config = ServerTlsConfig::new()
+            .identity(Identity::from_pem(cert, key))
+            .client_ca_root(Certificate::from_pem(ca));
+
+        server_builder = server_builder.tls_config(tls_config)?;
+        info!("gRPC server mTLS enabled");
+    }
+
     info!(
         node_id = %node_config.node_id,
         grpc_port = node_config.grpc_port,
         data_dir = %node_config.data_dir,
+        tls = node_config.tls.is_some(),
         "Sandchest node daemon ready"
     );
 
-    tonic::transport::Server::builder()
+    server_builder
         .add_service(proto::node_server::NodeServer::new(node_service))
         .serve(addr)
         .await?;

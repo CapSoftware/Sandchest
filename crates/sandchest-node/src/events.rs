@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::transport::{Certificate, ClientTlsConfig, Identity};
 use tracing::{info, warn};
 
+use crate::config::TlsConfig;
 use crate::proto;
 
 /// Maximum number of events to buffer when disconnected from the control plane.
@@ -162,11 +164,12 @@ async fn drain_during_sleep(
 pub async fn run_event_stream(
     mut rx: mpsc::Receiver<proto::NodeToControl>,
     control_plane_url: String,
+    tls: Option<TlsConfig>,
 ) {
     let mut buffer: VecDeque<proto::NodeToControl> = VecDeque::new();
 
     loop {
-        match connect_and_stream(&mut rx, &mut buffer, &control_plane_url).await {
+        match connect_and_stream(&mut rx, &mut buffer, &control_plane_url, tls.as_ref()).await {
             StreamResult::Disconnected(reason) => {
                 warn!(
                     reason = %reason,
@@ -202,12 +205,41 @@ async fn connect_and_stream(
     rx: &mut mpsc::Receiver<proto::NodeToControl>,
     buffer: &mut VecDeque<proto::NodeToControl>,
     control_plane_url: &str,
+    tls: Option<&TlsConfig>,
 ) -> StreamResult {
-    let channel = match tonic::transport::Channel::from_shared(control_plane_url.to_string()) {
-        Ok(endpoint) => match endpoint.connect().await {
-            Ok(ch) => ch,
-            Err(e) => return StreamResult::ConnectFailed(e.to_string()),
-        },
+    let endpoint = match tonic::transport::Channel::from_shared(control_plane_url.to_string()) {
+        Ok(ep) => ep,
+        Err(e) => return StreamResult::ConnectFailed(e.to_string()),
+    };
+
+    let endpoint = if let Some(tls_config) = tls {
+        let cert = match std::fs::read(&tls_config.cert_path) {
+            Ok(c) => c,
+            Err(e) => return StreamResult::ConnectFailed(format!("read cert: {}", e)),
+        };
+        let key = match std::fs::read(&tls_config.key_path) {
+            Ok(k) => k,
+            Err(e) => return StreamResult::ConnectFailed(format!("read key: {}", e)),
+        };
+        let ca = match std::fs::read(&tls_config.ca_cert_path) {
+            Ok(c) => c,
+            Err(e) => return StreamResult::ConnectFailed(format!("read CA cert: {}", e)),
+        };
+
+        let client_tls = ClientTlsConfig::new()
+            .identity(Identity::from_pem(cert, key))
+            .ca_certificate(Certificate::from_pem(ca));
+
+        match endpoint.tls_config(client_tls) {
+            Ok(ep) => ep,
+            Err(e) => return StreamResult::ConnectFailed(format!("TLS config: {}", e)),
+        }
+    } else {
+        endpoint
+    };
+
+    let channel = match endpoint.connect().await {
+        Ok(ch) => ch,
         Err(e) => return StreamResult::ConnectFailed(e.to_string()),
     };
 
@@ -540,7 +572,7 @@ mod tests {
         for i in 0..MAX_BUFFER_SIZE {
             buffer_event(
                 &mut buffer,
-                heartbeat_msg(&format!("node_{}", i), vec![], 0, 0, vec![]),
+                heartbeat_msg(&format!("node_{}", i), vec![], 0, 0, vec![], None),
             );
         }
         assert_eq!(buffer.len(), MAX_BUFFER_SIZE);

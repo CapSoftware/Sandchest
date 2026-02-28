@@ -176,6 +176,33 @@ impl S3Config {
     }
 }
 
+/// mTLS configuration for the gRPC server and outbound control plane stream.
+///
+/// All three paths must be set for TLS to be enabled. When enabled, the gRPC
+/// server requires client certificates signed by the CA and the outbound stream
+/// authenticates to the control plane with the same identity.
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    pub cert_path: String,
+    pub key_path: String,
+    pub ca_cert_path: String,
+}
+
+impl TlsConfig {
+    /// Read TLS configuration from environment variables.
+    /// Returns `None` if any of the required variables are not set.
+    pub fn from_env() -> Option<Self> {
+        let cert_path = std::env::var("SANDCHEST_GRPC_CERT").ok()?;
+        let key_path = std::env::var("SANDCHEST_GRPC_KEY").ok()?;
+        let ca_cert_path = std::env::var("SANDCHEST_GRPC_CA").ok()?;
+        Some(Self {
+            cert_path,
+            key_path,
+            ca_cert_path,
+        })
+    }
+}
+
 /// Node daemon configuration.
 pub struct NodeConfig {
     pub node_id: String,
@@ -185,6 +212,7 @@ pub struct NodeConfig {
     pub control_plane_url: Option<String>,
     pub jailer: JailerConfig,
     pub s3: Option<S3Config>,
+    pub tls: Option<TlsConfig>,
 }
 
 impl NodeConfig {
@@ -203,6 +231,7 @@ impl NodeConfig {
             control_plane_url: std::env::var("SANDCHEST_CONTROL_PLANE_URL").ok(),
             jailer: JailerConfig::from_env(&data_dir),
             s3: S3Config::from_env(),
+            tls: TlsConfig::from_env(),
             data_dir,
         }
     }
@@ -447,6 +476,7 @@ mod tests {
             control_plane_url: None,
             jailer: JailerConfig::disabled(),
             s3: None,
+            tls: None,
         };
         assert_eq!(config.sandboxes_dir(), "/var/sandchest/sandboxes");
     }
@@ -461,6 +491,7 @@ mod tests {
             control_plane_url: None,
             jailer: JailerConfig::disabled(),
             s3: None,
+            tls: None,
         };
         assert_eq!(config.images_dir(), "/data/images");
     }
@@ -475,6 +506,7 @@ mod tests {
             control_plane_url: None,
             jailer: JailerConfig::disabled(),
             s3: None,
+            tls: None,
         };
         assert_eq!(config.snapshots_dir(), "/data/snapshots");
     }
@@ -496,5 +528,70 @@ mod tests {
         let p2 = p;
         // Both should still be valid (Copy trait)
         assert_eq!(p.vcpu_count(), p2.vcpu_count());
+    }
+
+    #[test]
+    fn tls_config_from_env_all_set() {
+        std::env::set_var("SANDCHEST_GRPC_CERT", "/certs/server.pem");
+        std::env::set_var("SANDCHEST_GRPC_KEY", "/certs/server.key");
+        std::env::set_var("SANDCHEST_GRPC_CA", "/certs/ca.pem");
+
+        let tls = TlsConfig::from_env().expect("should parse TLS config");
+        assert_eq!(tls.cert_path, "/certs/server.pem");
+        assert_eq!(tls.key_path, "/certs/server.key");
+        assert_eq!(tls.ca_cert_path, "/certs/ca.pem");
+
+        std::env::remove_var("SANDCHEST_GRPC_CERT");
+        std::env::remove_var("SANDCHEST_GRPC_KEY");
+        std::env::remove_var("SANDCHEST_GRPC_CA");
+    }
+
+    #[test]
+    fn tls_config_from_env_missing_cert() {
+        std::env::remove_var("SANDCHEST_GRPC_CERT");
+        std::env::set_var("SANDCHEST_GRPC_KEY", "/certs/server.key");
+        std::env::set_var("SANDCHEST_GRPC_CA", "/certs/ca.pem");
+
+        assert!(TlsConfig::from_env().is_none());
+
+        std::env::remove_var("SANDCHEST_GRPC_KEY");
+        std::env::remove_var("SANDCHEST_GRPC_CA");
+    }
+
+    #[test]
+    fn tls_config_from_env_missing_key() {
+        std::env::set_var("SANDCHEST_GRPC_CERT", "/certs/server.pem");
+        std::env::remove_var("SANDCHEST_GRPC_KEY");
+        std::env::set_var("SANDCHEST_GRPC_CA", "/certs/ca.pem");
+
+        assert!(TlsConfig::from_env().is_none());
+
+        std::env::remove_var("SANDCHEST_GRPC_CERT");
+        std::env::remove_var("SANDCHEST_GRPC_CA");
+    }
+
+    #[test]
+    fn tls_config_from_env_missing_ca() {
+        std::env::set_var("SANDCHEST_GRPC_CERT", "/certs/server.pem");
+        std::env::set_var("SANDCHEST_GRPC_KEY", "/certs/server.key");
+        std::env::remove_var("SANDCHEST_GRPC_CA");
+
+        assert!(TlsConfig::from_env().is_none());
+
+        std::env::remove_var("SANDCHEST_GRPC_CERT");
+        std::env::remove_var("SANDCHEST_GRPC_KEY");
+    }
+
+    #[test]
+    fn tls_config_clone() {
+        let tls = TlsConfig {
+            cert_path: "/cert.pem".to_string(),
+            key_path: "/key.pem".to_string(),
+            ca_cert_path: "/ca.pem".to_string(),
+        };
+        let tls2 = tls.clone();
+        assert_eq!(tls.cert_path, tls2.cert_path);
+        assert_eq!(tls.key_path, tls2.key_path);
+        assert_eq!(tls.ca_cert_path, tls2.ca_cert_path);
     }
 }
