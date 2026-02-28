@@ -45,10 +45,15 @@ export function loadEnv() {
 
     // Node daemon gRPC (mTLS)
     NODE_GRPC_ADDR: process.env.NODE_GRPC_ADDR as string | undefined,
+    NODE_GRPC_NODE_ID: process.env.NODE_GRPC_NODE_ID as string | undefined,
+    // mTLS via file paths (local dev)
     NODE_GRPC_CERT_PATH: process.env.NODE_GRPC_CERT_PATH as string | undefined,
     NODE_GRPC_KEY_PATH: process.env.NODE_GRPC_KEY_PATH as string | undefined,
     NODE_GRPC_CA_PATH: process.env.NODE_GRPC_CA_PATH as string | undefined,
-    NODE_GRPC_NODE_ID: process.env.NODE_GRPC_NODE_ID as string | undefined,
+    // mTLS via PEM content (Fly.io secrets — preferred in production)
+    MTLS_CA_PEM: process.env.MTLS_CA_PEM as string | undefined,
+    MTLS_CLIENT_CERT_PEM: process.env.MTLS_CLIENT_CERT_PEM as string | undefined,
+    MTLS_CLIENT_KEY_PEM: process.env.MTLS_CLIENT_KEY_PEM as string | undefined,
 
     // Admin API token for /v1/admin/* endpoints
     ADMIN_API_TOKEN: process.env.ADMIN_API_TOKEN as string | undefined,

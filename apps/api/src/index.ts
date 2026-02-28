@@ -49,15 +49,21 @@ const AppLive = ApiRouter.pipe(
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL, { family: REDIS_FAMILY }) : RedisMemory
 
-const { NODE_GRPC_ADDR, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, NODE_GRPC_NODE_ID } = env
+const { NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM } = env
+const hasPemContent = MTLS_CA_PEM && MTLS_CLIENT_CERT_PEM && MTLS_CLIENT_KEY_PEM
+const hasFilePaths = NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH
 const NodeClientLive =
-  NODE_GRPC_ADDR && NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH && NODE_GRPC_NODE_ID
+  NODE_GRPC_ADDR && NODE_GRPC_NODE_ID && (hasPemContent || hasFilePaths)
     ? createNodeClientLayer({
         address: NODE_GRPC_ADDR,
+        nodeId: NODE_GRPC_NODE_ID,
+        // Prefer PEM content (Fly.io secrets) over file paths (local dev)
+        caPem: MTLS_CA_PEM,
+        certPem: MTLS_CLIENT_CERT_PEM,
+        keyPem: MTLS_CLIENT_KEY_PEM,
+        caPath: NODE_GRPC_CA_PATH,
         certPath: NODE_GRPC_CERT_PATH,
         keyPath: NODE_GRPC_KEY_PATH,
-        caPath: NODE_GRPC_CA_PATH,
-        nodeId: NODE_GRPC_NODE_ID,
       })
     : NodeClientMemory
 

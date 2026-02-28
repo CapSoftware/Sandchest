@@ -17,14 +17,20 @@ export function bytesToHex(bytes: Uint8Array): string {
 export interface NodeGrpcConfig {
   /** gRPC address, e.g. "node1.sandchest.com:50051". */
   readonly address: string
-  /** Path to client certificate PEM file. */
-  readonly certPath: string
-  /** Path to client private key PEM file. */
-  readonly keyPath: string
-  /** Path to CA certificate PEM file. */
-  readonly caPath: string
   /** Node ID as a 32-char hex string (16-byte UUID). */
   readonly nodeId: string
+  /** Path to client certificate PEM file (local dev). */
+  readonly certPath?: string | undefined
+  /** Path to client private key PEM file (local dev). */
+  readonly keyPath?: string | undefined
+  /** Path to CA certificate PEM file (local dev). */
+  readonly caPath?: string | undefined
+  /** CA certificate PEM content (Fly.io secrets). */
+  readonly caPem?: string | undefined
+  /** Client certificate PEM content (Fly.io secrets). */
+  readonly certPem?: string | undefined
+  /** Client private key PEM content (Fly.io secrets). */
+  readonly keyPem?: string | undefined
 }
 
 export function createLiveNodeClient(channel: Channel, nodeIdBytes: Uint8Array): NodeClientApi {
@@ -239,9 +245,10 @@ export function createNodeClientLayer(config: NodeGrpcConfig): Layer.Layer<NodeC
   return Layer.scoped(
     NodeClient,
     Effect.gen(function* () {
-      const cert = readFileSync(config.certPath)
-      const key = readFileSync(config.keyPath)
-      const ca = readFileSync(config.caPath)
+      // Prefer PEM content from env vars (Fly.io), fall back to file paths (local dev)
+      const ca = config.caPem ? Buffer.from(config.caPem) : readFileSync(config.caPath!)
+      const key = config.keyPem ? Buffer.from(config.keyPem) : readFileSync(config.keyPath!)
+      const cert = config.certPem ? Buffer.from(config.certPem) : readFileSync(config.certPath!)
 
       const credentials = ChannelCredentials.createSsl(ca, key, cert)
       const channel = createChannel(config.address, credentials)
