@@ -60,6 +60,7 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -68,6 +69,16 @@ jobs:
           bun-version: latest
 
       - run: bun install --frozen-lockfile
+
+      - name: Validate secrets
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret is not set. Add it to repo Settings → Secrets or the 'production' environment."
+            exit 1
+          fi
+          echo "DATABASE_URL is set (${#DATABASE_URL} chars)"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Run database migrations
         run: bun run db:migrate:run
@@ -79,6 +90,7 @@ jobs:
     needs: migrate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
