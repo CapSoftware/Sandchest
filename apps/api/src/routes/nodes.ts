@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import { idToBytes } from '@sandchest/contract'
 import { RedisService } from '../services/redis.js'
 import { MetricsRepo } from '../services/metrics-repo.js'
+import { NodeRepo } from '../services/node-repo.js'
 
 const DEFAULT_HEARTBEAT_TTL = 30
 
@@ -41,21 +42,29 @@ export const NodeRouter = HttpRouter.empty.pipe(
       const redis = yield* RedisService
       yield* redis.registerNodeHeartbeat(nodeId, ttlSeconds)
 
+      // Try to parse node ID for DB operations
+      let nodeIdBytes: Uint8Array | null = null
+      try {
+        nodeIdBytes = idToBytes(nodeId)
+      } catch {
+        // Non-prefixed ID — skip DB updates
+      }
+
+      // Update lastSeenAt in DB so node health is tracked persistently
+      if (nodeIdBytes) {
+        const nodeRepo = yield* NodeRepo
+        yield* nodeRepo.touchLastSeen(nodeIdBytes)
+      }
+
       // Store metrics if present
       const metrics = body.metrics as MetricsPayload | undefined
-      if (metrics && typeof metrics === 'object' && typeof metrics.cpu_percent === 'number') {
+      if (
+        nodeIdBytes &&
+        metrics &&
+        typeof metrics === 'object' &&
+        typeof metrics.cpu_percent === 'number'
+      ) {
         const metricsRepo = yield* MetricsRepo
-        let nodeIdBytes: Uint8Array
-        try {
-          nodeIdBytes = idToBytes(nodeId)
-        } catch {
-          // If node ID doesn't parse, skip metrics storage
-          return HttpServerResponse.unsafeJson(
-            { node_id: nodeId, ttl_seconds: ttlSeconds },
-            { status: 200 },
-          )
-        }
-
         yield* metricsRepo.insert({
           nodeId: nodeIdBytes,
           cpuPercent: metrics.cpu_percent,

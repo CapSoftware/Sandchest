@@ -92,6 +92,15 @@ export function createDrizzleNodeRepo(db: Database): NodeRepoApi {
           )
         return result?.count ?? 0
       }),
+
+    touchLastSeen: (id) =>
+      Effect.promise(async () => {
+        const now = new Date()
+        await db
+          .update(nodes)
+          .set({ lastSeenAt: now, updatedAt: now })
+          .where(eq(nodes.id, id))
+      }),
   }
 }
 

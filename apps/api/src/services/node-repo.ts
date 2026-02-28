@@ -43,6 +43,8 @@ export interface NodeRepoApi {
   readonly remove: (id: Uint8Array) => Effect.Effect<void, never, never>
 
   readonly countActiveSandboxes: (nodeId: Uint8Array) => Effect.Effect<number, never, never>
+
+  readonly touchLastSeen: (id: Uint8Array) => Effect.Effect<void, never, never>
 }
 
 export class NodeRepo extends Context.Tag('NodeRepo')<NodeRepo, NodeRepoApi>() {}

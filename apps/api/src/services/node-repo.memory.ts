@@ -53,6 +53,15 @@ export function createInMemoryNodeRepo(): NodeRepoApi {
       }),
 
     countActiveSandboxes: () => Effect.succeed(0),
+
+    touchLastSeen: (id) =>
+      Effect.sync(() => {
+        const key = keyOf(id)
+        const existing = store.get(key)
+        if (!existing) return
+        const now = new Date()
+        store.set(key, { ...existing, lastSeenAt: now, updatedAt: now })
+      }),
   }
 }
 
