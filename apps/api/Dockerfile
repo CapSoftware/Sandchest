@@ -6,6 +6,11 @@ COPY apps/api/package.json apps/api/
 COPY packages/contract/package.json packages/contract/
 COPY packages/db/package.json packages/db/
 COPY packages/config/package.json packages/config/
+COPY packages/sdk-ts/package.json packages/sdk-ts/
+COPY packages/cli/package.json packages/cli/
+COPY packages/mcp/package.json packages/mcp/
+COPY examples/package.json examples/
+COPY patches/ patches/
 RUN bun install --frozen-lockfile
 
 FROM deps AS build
@@ -23,6 +28,11 @@ COPY apps/api/package.json apps/api/
 COPY packages/contract/package.json packages/contract/
 COPY packages/db/package.json packages/db/
 COPY packages/config/package.json packages/config/
+COPY packages/sdk-ts/package.json packages/sdk-ts/
+COPY packages/cli/package.json packages/cli/
+COPY packages/mcp/package.json packages/mcp/
+COPY examples/package.json examples/
+COPY patches/ patches/
 RUN bun install --frozen-lockfile --production
 
 COPY --from=build /app/apps/api/dist apps/api/dist
