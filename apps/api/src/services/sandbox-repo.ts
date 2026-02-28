@@ -179,6 +179,11 @@ export interface SandboxRepoApi {
     id: Uint8Array,
     orgId: string,
   ) => Effect.Effect<void, never, never>
+
+  /** Find sandboxes in 'stopping' state with updatedAt before the given cutoff. */
+  readonly findStoppingBefore: (
+    cutoff: Date,
+  ) => Effect.Effect<SandboxRow[], never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}

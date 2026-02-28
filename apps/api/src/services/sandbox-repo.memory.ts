@@ -380,6 +380,13 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         const now = new Date()
         store.set(key, { ...row, lastActivityAt: now, updatedAt: now })
       }),
+
+    findStoppingBefore: (cutoff) =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter(
+          (r) => r.status === 'stopping' && r.updatedAt.getTime() < cutoff.getTime(),
+        ),
+      ),
   }
 }
 

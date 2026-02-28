@@ -679,3 +679,53 @@ describe('touchLastActivity', () => {
     )
   })
 })
+
+// ---------------------------------------------------------------------------
+// findStoppingBefore
+// ---------------------------------------------------------------------------
+
+describe('findStoppingBefore', () => {
+  test('returns empty when no sandboxes are stopping', async () => {
+    const result = await run(repo.findStoppingBefore(new Date()))
+    expect(result).toEqual([])
+  })
+
+  test('returns stopping sandboxes with updatedAt before cutoff', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.updateStatus(params.id, ORG_A, 'stopping'))
+
+    // Backdate updatedAt
+    const row = await run(repo.findById(params.id, ORG_A))
+    ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
+
+    const cutoff = new Date(Date.now() - 30_000)
+    const result = await run(repo.findStoppingBefore(cutoff))
+    expect(result.length).toBe(1)
+    expect(result[0].id).toBe(params.id)
+  })
+
+  test('does not return recently stopping sandboxes', async () => {
+    const params = makeSandbox()
+    await run(repo.create(params))
+    await run(repo.updateStatus(params.id, ORG_A, 'stopping'))
+
+    const cutoff = new Date(Date.now() - 30_000)
+    const result = await run(repo.findStoppingBefore(cutoff))
+    expect(result).toEqual([])
+  })
+
+  test('does not return sandboxes in other states', async () => {
+    for (const status of ['queued', 'running', 'stopped', 'failed'] as const) {
+      const params = makeSandbox()
+      await run(repo.create(params))
+      await run(repo.updateStatus(params.id, ORG_A, status))
+      const row = await run(repo.findById(params.id, ORG_A))
+      ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
+    }
+
+    const cutoff = new Date(Date.now() - 30_000)
+    const result = await run(repo.findStoppingBefore(cutoff))
+    expect(result).toEqual([])
+  })
+})

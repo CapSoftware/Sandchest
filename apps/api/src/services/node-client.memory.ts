@@ -105,6 +105,10 @@ export function createInMemoryNodeClient(): NodeClientApi {
         }
         return results
       }),
+
+    stopSandbox: () => Effect.void,
+
+    destroySandbox: () => Effect.void,
   }
 }
 

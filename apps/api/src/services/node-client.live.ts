@@ -213,6 +213,20 @@ export function createLiveNodeClient(channel: Channel, nodeIdBytes: Uint8Array):
           }),
         )
       }),
+
+    stopSandbox: (params) =>
+      Effect.promise(async () => {
+        await client.stopSandbox({
+          sandboxId: bytesToHex(params.sandboxId),
+        })
+      }),
+
+    destroySandbox: (params) =>
+      Effect.promise(async () => {
+        await client.destroySandbox({
+          sandboxId: bytesToHex(params.sandboxId),
+        })
+      }),
   }
 }
 

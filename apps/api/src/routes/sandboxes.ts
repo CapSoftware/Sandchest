@@ -385,12 +385,23 @@ const stopSandbox = Effect.gen(function* () {
   }
 
   // Transition to stopping
-  const updated = yield* repo.updateStatus(idBytes, auth.orgId, 'stopping', {
+  yield* repo.updateStatus(idBytes, auth.orgId, 'stopping', {
     failureReason: 'sandbox_stopped',
   })
 
-  // Collect artifacts before fully stopping (non-blocking)
+  // Collect artifacts before fully stopping (best-effort)
   yield* collectArtifactsOnStop(id, idBytes, auth.orgId)
+
+  // Tell the node daemon to stop the VM (best-effort)
+  const nodeClient = yield* NodeClient
+  yield* nodeClient.stopSandbox({ sandboxId: idBytes }).pipe(
+    Effect.catchAll(() => Effect.void),
+  )
+
+  // Transition to stopped
+  const stopped = yield* repo.updateStatus(idBytes, auth.orgId, 'stopped', {
+    endedAt: new Date(),
+  })
 
   const auditLog = yield* AuditLog
   yield* auditLog.append({
@@ -403,10 +414,10 @@ const stopSandbox = Effect.gen(function* () {
 
   const response: StopSandboxResponse = {
     sandbox_id: id,
-    status: updated?.status ?? 'stopping',
+    status: stopped?.status ?? 'stopped',
   }
 
-  return HttpServerResponse.unsafeJson(response, { status: 202 })
+  return HttpServerResponse.unsafeJson(response)
 })
 
 // -- Delete sandbox ----------------------------------------------------------
@@ -438,6 +449,15 @@ const deleteSandbox = Effect.gen(function* () {
   if (row.status === 'deleted') {
     return HttpServerResponse.unsafeJson(
       { sandbox_id: id, status: 'deleted' },
+    )
+  }
+
+  // Destroy the VM on the node if it's still active (best-effort)
+  const isActive = row.status === 'running' || row.status === 'stopping' || row.status === 'queued' || row.status === 'provisioning'
+  if (isActive) {
+    const nodeClient = yield* NodeClient
+    yield* nodeClient.destroySandbox({ sandboxId: idBytes }).pipe(
+      Effect.catchAll(() => Effect.void),
     )
   }
 

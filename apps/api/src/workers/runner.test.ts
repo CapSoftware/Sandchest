@@ -35,6 +35,9 @@ import { BillingService } from '../services/billing.js'
 import { createInMemoryBillingApi } from '../services/billing.memory.js'
 import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
+import { NodeClient, type NodeClientApi } from '../services/node-client.js'
+import { createInMemoryNodeClient } from '../services/node-client.memory.js'
+import { vmTeardownWorker } from './vm-teardown.js'
 import type { WorkerDeps } from './index.js'
 
 let redis: RedisApi
@@ -48,6 +51,7 @@ let orgRepo: OrgRepoApi & { addDeletedOrg: (orgId: string, deletedAt: Date) => v
 let idempotencyApi: IdempotencyRepoApi
 let idempotencyStore: Map<string, { createdAt: Date; orgId?: string | undefined }>
 let quotaApi: QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, unknown>) => void }
+let nodeClientApi: NodeClientApi
 let testLayer: Layer.Layer<WorkerDeps | RedisService>
 
 function run<A>(effect: Effect.Effect<A, never, WorkerDeps | RedisService>): Promise<A> {
@@ -71,6 +75,7 @@ beforeEach(() => {
   idempotencyStore = testable.store
   quotaApi = createInMemoryQuotaApi()
   const billingApi = createInMemoryBillingApi()
+  nodeClientApi = createInMemoryNodeClient()
 
   testLayer = Layer.mergeAll(
     Layer.succeed(RedisService, redis),
@@ -85,6 +90,7 @@ beforeEach(() => {
     Layer.succeed(QuotaService, quotaApi),
     Layer.succeed(BillingService, billingApi),
     Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
+    Layer.succeed(NodeClient, nodeClientApi),
   )
 })
 
@@ -1304,5 +1310,120 @@ describe('ttl-warning', () => {
 
     const count = await run(runWorkerTick(ttlWarningWorker, 'inst-1'))
     expect(count).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// VM teardown worker
+// ---------------------------------------------------------------------------
+
+describe('vm-teardown', () => {
+  test('returns 0 with no sandboxes', async () => {
+    const count = await run(runWorkerTick(vmTeardownWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('returns 0 for recently stopping sandboxes', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
+
+    const count = await run(runWorkerTick(vmTeardownWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('destroys sandboxes stuck in stopping beyond grace period', async () => {
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
+
+    // Backdate updatedAt to 60 seconds ago (beyond the 30s grace period)
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
+
+    const count = await run(runWorkerTick(vmTeardownWorker, 'inst-1'))
+    expect(count).toBe(1)
+
+    const updated = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(updated!.status).toBe('stopped')
+    expect(updated!.endedAt).toBeInstanceOf(Date)
+  })
+
+  test('ignores sandboxes in other states', async () => {
+    for (const status of ['queued', 'running', 'stopped', 'failed', 'deleted'] as const) {
+      const id = generateUUIDv7()
+      await Effect.runPromise(
+        sandboxRepo.create({
+          id,
+          orgId: 'org_test',
+          imageId: SEED_IMAGE_ID,
+          profileId: SEED_PROFILE_ID,
+          profileName: 'small',
+          env: null,
+          ttlSeconds: 3600,
+          imageRef: 'sandchest://ubuntu-22.04',
+        }),
+      )
+      await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', status))
+      // Backdate updatedAt
+      const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+      if (row) {
+        ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 120_000)
+      }
+    }
+
+    const count = await run(runWorkerTick(vmTeardownWorker, 'inst-1'))
+    expect(count).toBe(0)
+  })
+
+  test('tears down multiple stuck sandboxes in one tick', async () => {
+    const ids = [generateUUIDv7(), generateUUIDv7()]
+    for (const id of ids) {
+      await Effect.runPromise(
+        sandboxRepo.create({
+          id,
+          orgId: 'org_test',
+          imageId: SEED_IMAGE_ID,
+          profileId: SEED_PROFILE_ID,
+          profileName: 'small',
+          env: null,
+          ttlSeconds: 3600,
+          imageRef: 'sandchest://ubuntu-22.04',
+        }),
+      )
+      await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
+      const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+      ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
+    }
+
+    const count = await run(runWorkerTick(vmTeardownWorker, 'inst-1'))
+    expect(count).toBe(2)
+
+    for (const id of ids) {
+      const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+      expect(row!.status).toBe('stopped')
+    }
   })
 })

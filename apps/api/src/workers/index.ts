@@ -10,6 +10,7 @@ import type { EventRecorder } from '../services/event-recorder.js'
 import type { OrgRepo } from '../services/org-repo.js'
 import type { IdempotencyRepo } from './idempotency-cleanup.js'
 import type { MetricsRepo } from '../services/metrics-repo.js'
+import type { NodeClient } from '../services/node-client.js'
 import { startWorkers, type WorkerConfig } from './runner.js'
 import { ttlEnforcementWorker } from './ttl-enforcement.js'
 import { ttlWarningWorker } from './ttl-warning.js'
@@ -21,6 +22,7 @@ import { artifactRetentionWorker } from './artifact-retention.js'
 import { orgHardDeleteWorker } from './org-hard-delete.js'
 import { replayRetentionWorker } from './replay-retention.js'
 import { metricsRetentionWorker } from './metrics-retention.js'
+import { vmTeardownWorker } from './vm-teardown.js'
 
 export type WorkerDeps =
   | RedisService
@@ -34,6 +36,7 @@ export type WorkerDeps =
   | OrgRepo
   | IdempotencyRepo
   | MetricsRepo
+  | NodeClient
 
 const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [
   ttlEnforcementWorker,
@@ -46,6 +49,7 @@ const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [
   orgHardDeleteWorker,
   replayRetentionWorker,
   metricsRetentionWorker,
+  vmTeardownWorker,
 ]
 
 export function startAllWorkers() {

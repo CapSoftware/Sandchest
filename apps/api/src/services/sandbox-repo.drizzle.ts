@@ -509,6 +509,20 @@ export function createDrizzleSandboxRepo(db: Database): SandboxRepoApi {
             ),
           )
       }),
+
+    findStoppingBefore: (cutoff) =>
+      Effect.promise(async () => {
+        const rows = await db
+          .select()
+          .from(sandboxes)
+          .where(
+            and(
+              eq(sandboxes.status, 'stopping'),
+              lt(sandboxes.updatedAt, cutoff),
+            ),
+          )
+        return rows.map(toSandboxRow)
+      }),
   }
 }
 

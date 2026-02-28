@@ -117,6 +117,16 @@ export interface NodeClientApi {
     sandboxId: Uint8Array
     paths: string[]
   }) => Effect.Effect<CollectedArtifact[], never, never>
+
+  /** Gracefully stop a sandbox VM on the node. */
+  readonly stopSandbox: (params: {
+    sandboxId: Uint8Array
+  }) => Effect.Effect<void, never, never>
+
+  /** Destroy a sandbox VM and clean up all resources on the node. */
+  readonly destroySandbox: (params: {
+    sandboxId: Uint8Array
+  }) => Effect.Effect<void, never, never>
 }
 
 /** Artifact metadata returned by the node after collection. */
