@@ -55,9 +55,9 @@ impl Router {
             }
         }
 
-        // Create new connection
-        let endpoint = agent_endpoint();
-        let agent = AgentClient::new(&endpoint);
+        // Create new connection using the sandbox's vsock UDS path
+        let endpoint = AgentClient::endpoint_for_sandbox(&info.vsock_uds_path);
+        let agent = AgentClient::new(endpoint.clone());
         let client = agent.connect().await.map_err(|e| {
             Status::unavailable(format!(
                 "agent unreachable for sandbox {}: {}",
@@ -78,15 +78,6 @@ impl Router {
     pub async fn remove_client(&self, sandbox_id: &str) {
         self.clients.write().await.remove(sandbox_id);
     }
-}
-
-/// Determine the agent gRPC endpoint.
-///
-/// In dev mode (TCP), all sandboxes share the same localhost endpoint.
-/// In production (bare-metal Linux), this would derive the vsock path
-/// from the sandbox's UDS socket.
-fn agent_endpoint() -> String {
-    AgentClient::dev_endpoint()
 }
 
 // --- Type conversions: node proto -> agent proto ---

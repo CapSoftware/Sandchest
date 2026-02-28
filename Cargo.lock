@@ -2207,6 +2207,7 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "aws-sdk-s3",
+ "http 1.4.0",
  "http-body-util",
  "hyper 1.8.1",
  "hyper-unix-socket",

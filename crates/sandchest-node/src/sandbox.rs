@@ -43,6 +43,9 @@ pub struct SandboxInfo {
     pub created_at: Instant,
     pub boot_duration_ms: Option<u64>,
     pub network_slot: Option<u16>,
+    /// Host-side vsock UDS path for this sandbox's Firecracker vsock device.
+    /// Used to derive the agent endpoint (appending `_{port}`).
+    pub vsock_uds_path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,7 +168,8 @@ impl SandboxManager {
             .map_err(|e| SandboxError::CreateFailed(e.to_string()))?;
 
         // Insert as provisioning
-        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot)).await?;
+        let paths = self.sandbox_paths(sandbox_id);
+        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot), &paths.vsock).await?;
         self.report_event(events::sandbox_event(
             sandbox_id,
             proto::SandboxEventType::Created,
@@ -315,7 +319,8 @@ impl SandboxManager {
             .allocate()
             .map_err(|e| SandboxError::CreateFailed(e.to_string()))?;
 
-        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot)).await?;
+        let snapshot_paths = self.sandbox_paths(sandbox_id);
+        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot), &snapshot_paths.vsock).await?;
         self.report_event(events::sandbox_event(
             sandbox_id,
             proto::SandboxEventType::Created,
@@ -575,8 +580,9 @@ impl SandboxManager {
             .map_err(|e| SandboxError::ForkFailed(e.to_string()))?;
 
         // Insert fork as provisioning
+        let fork_initial_paths = self.sandbox_paths(new_sandbox_id);
         if let Err(e) = self
-            .insert_provisioning(new_sandbox_id, profile, &env, start, Some(slot))
+            .insert_provisioning(new_sandbox_id, profile, &env, start, Some(slot), &fork_initial_paths.vsock)
             .await
         {
             self.slot_manager.release(slot);
@@ -963,6 +969,7 @@ impl SandboxManager {
             created_at: info.created_at,
             boot_duration_ms: info.boot_duration_ms,
             network_slot: info.network_slot,
+            vsock_uds_path: info.vsock_uds_path.clone(),
         })
     }
 
@@ -979,6 +986,7 @@ impl SandboxManager {
                 created_at: info.created_at,
                 boot_duration_ms: info.boot_duration_ms,
                 network_slot: info.network_slot,
+                vsock_uds_path: info.vsock_uds_path.clone(),
             })
             .collect()
     }
@@ -1049,6 +1057,7 @@ impl SandboxManager {
         env: &HashMap<String, String>,
         created_at: Instant,
         network_slot: Option<u16>,
+        vsock_uds_path: &str,
     ) -> Result<(), SandboxError> {
         let mut sandboxes = self.sandboxes.write().await;
         if sandboxes.contains_key(sandbox_id) {
@@ -1064,6 +1073,7 @@ impl SandboxManager {
                 created_at,
                 boot_duration_ms: None,
                 network_slot,
+                vsock_uds_path: vsock_uds_path.to_string(),
             },
         );
         Ok(())
@@ -1118,20 +1128,16 @@ impl SandboxManager {
         }
     }
 
-    async fn wait_for_agent_health(&self, _sandbox_id: &str) -> Result<(), SandboxError> {
-        // In dev mode, connect via TCP; in production, use vsock
-        let endpoint = if std::env::var("SANDCHEST_AGENT_DEV").unwrap_or_default() == "1" {
-            AgentClient::dev_endpoint()
-        } else {
-            // vsock endpoint — for now, fall back to dev endpoint since
-            // tonic doesn't natively support vsock URIs. Full vsock transport
-            // will be wired up when running on bare-metal Linux.
-            let port = std::env::var("SANDCHEST_AGENT_DEV_PORT")
-                .ok()
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(8052);
-            format!("http://127.0.0.1:{}", port)
+    async fn wait_for_agent_health(&self, sandbox_id: &str) -> Result<(), SandboxError> {
+        let vsock_uds_path = {
+            let sandboxes = self.sandboxes.read().await;
+            sandboxes
+                .get(sandbox_id)
+                .map(|info| info.vsock_uds_path.clone())
+                .unwrap_or_default()
         };
+
+        let endpoint = AgentClient::endpoint_for_sandbox(&vsock_uds_path);
 
         AgentClient::wait_for_health(&endpoint, AGENT_HEALTH_TIMEOUT)
             .await
@@ -1238,12 +1244,12 @@ mod tests {
 
         let env = HashMap::new();
         let result = manager
-            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await;
         assert!(result.is_ok());
 
         let result = manager
-            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(1))
+            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
             .await;
         assert!(matches!(result, Err(SandboxError::AlreadyExists(_))));
     }
@@ -1340,7 +1346,7 @@ mod tests {
         env.insert("KEY".to_string(), "value".to_string());
 
         manager
-            .insert_provisioning("sb_fields", Profile::Medium, &env, Instant::now(), Some(5))
+            .insert_provisioning("sb_fields", Profile::Medium, &env, Instant::now(), Some(5), "/tmp/vsock.sock")
             .await
             .unwrap();
 
@@ -1351,6 +1357,7 @@ mod tests {
         assert_eq!(info.env.get("KEY").unwrap(), "value");
         assert!(info.boot_duration_ms.is_none());
         assert_eq!(info.network_slot, Some(5));
+        assert_eq!(info.vsock_uds_path, "/tmp/vsock.sock");
     }
 
     #[tokio::test]
@@ -1359,11 +1366,11 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_a", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_a", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
-            .insert_provisioning("sb_b", Profile::Large, &env, Instant::now(), Some(1))
+            .insert_provisioning("sb_b", Profile::Large, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
             .await
             .unwrap();
 
@@ -1381,7 +1388,7 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_fin", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_fin", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
 
@@ -1398,7 +1405,7 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_status", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_status", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
 
@@ -1425,11 +1432,11 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_prov", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_prov", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
-            .insert_provisioning("sb_run", Profile::Small, &env, Instant::now(), Some(1))
+            .insert_provisioning("sb_run", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
             .await
             .unwrap();
 
@@ -1446,11 +1453,11 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_p", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_p", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
-            .insert_provisioning("sb_r", Profile::Small, &env, Instant::now(), Some(1))
+            .insert_provisioning("sb_r", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager.finalize_running("sb_r", 50).await;
@@ -1465,7 +1472,7 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_f", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_f", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
@@ -1473,7 +1480,7 @@ mod tests {
             .await;
 
         manager
-            .insert_provisioning("sb_s", Profile::Small, &env, Instant::now(), Some(1))
+            .insert_provisioning("sb_s", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
@@ -1525,7 +1532,7 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
 
@@ -1538,7 +1545,7 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
@@ -1554,7 +1561,7 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager
@@ -1570,7 +1577,7 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager.finalize_running("sb_src", 100).await;
@@ -1609,7 +1616,7 @@ mod tests {
         let env = HashMap::new();
         // Source is Medium profile
         manager
-            .insert_provisioning("sb_src", Profile::Medium, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Medium, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager.finalize_running("sb_src", 100).await;
@@ -1627,7 +1634,7 @@ mod tests {
         env.insert("MY_VAR".to_string(), "my_value".to_string());
 
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager.finalize_running("sb_src", 100).await;
@@ -1650,7 +1657,7 @@ mod tests {
         // We can't add a real VM handle, so we test the AlreadyExists path
         // by making the new_sandbox_id already exist
         manager
-            .insert_provisioning("sb_existing", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_existing", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
         manager.finalize_running("sb_existing", 100).await;
@@ -1671,7 +1678,7 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0))
+            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
             .await
             .unwrap();
 
