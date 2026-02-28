@@ -11,6 +11,7 @@ on:
       - 'fly.toml'
       - 'package.json'
       - 'bun.lock'
+      - '.github/workflows/deploy-api.yml'
 
   workflow_dispatch:
     inputs:
