@@ -158,12 +158,18 @@ export function createIoRedisApi(client: Redis): RedisApi {
 }
 
 /** Create a RedisService Layer from a REDIS_URL. */
-export function createRedisLayer(redisUrl: string): Layer.Layer<RedisService> {
+export function createRedisLayer(
+  redisUrl: string,
+  opts?: { family?: 4 | 6 | undefined },
+): Layer.Layer<RedisService> {
   return Layer.sync(RedisService, () => {
     // ioredis CJS/ESM interop: handle both default and named exports
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const Ctor = (IoRedis as any).default ?? IoRedis
-    const client: Redis = new Ctor(redisUrl, { maxRetriesPerRequest: 3 })
+    const client: Redis = new Ctor(redisUrl, {
+      maxRetriesPerRequest: 3,
+      ...(opts?.family ? { family: opts.family } : {}),
+    })
     return createIoRedisApi(client)
   })
 }

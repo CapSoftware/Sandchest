@@ -143,9 +143,8 @@ impl VmConfig {
 
 /// S3-compatible object storage configuration for artifact uploads.
 ///
-/// When running on EC2 with an instance profile, `access_key` and `secret_key`
-/// can be omitted — the AWS SDK will use the default credential chain (IMDS).
-/// Explicit keys are only needed for S3-compatible endpoints (e.g. Scaleway).
+/// For Cloudflare R2, `access_key`, `secret_key`, and `endpoint` are all
+/// required. The region should be set to `"auto"` (the default).
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub bucket: String,
@@ -157,16 +156,34 @@ pub struct S3Config {
 
 impl S3Config {
     /// Read S3 configuration from environment variables.
-    /// Returns `None` if the required `SANDCHEST_S3_BUCKET` is not set.
+    /// Returns `None` if `SANDCHEST_S3_BUCKET` is not set.
+    ///
+    /// # Panics
+    ///
+    /// Panics if only one of `SANDCHEST_S3_ACCESS_KEY` or
+    /// `SANDCHEST_S3_SECRET_KEY` is set — both or neither must be provided.
     pub fn from_env() -> Option<Self> {
         let bucket = std::env::var("SANDCHEST_S3_BUCKET").ok()?;
+        let access_key = std::env::var("SANDCHEST_S3_ACCESS_KEY").ok();
+        let secret_key = std::env::var("SANDCHEST_S3_SECRET_KEY").ok();
+
+        match (&access_key, &secret_key) {
+            (Some(_), None) => {
+                panic!("SANDCHEST_S3_ACCESS_KEY is set but SANDCHEST_S3_SECRET_KEY is missing");
+            }
+            (None, Some(_)) => {
+                panic!("SANDCHEST_S3_SECRET_KEY is set but SANDCHEST_S3_ACCESS_KEY is missing");
+            }
+            _ => {}
+        }
+
         Some(Self {
             bucket,
             region: std::env::var("SANDCHEST_S3_REGION")
-                .unwrap_or_else(|_| "us-east-1".to_string()),
+                .unwrap_or_else(|_| "auto".to_string()),
             endpoint: std::env::var("SANDCHEST_S3_ENDPOINT").ok(),
-            access_key: std::env::var("SANDCHEST_S3_ACCESS_KEY").ok(),
-            secret_key: std::env::var("SANDCHEST_S3_SECRET_KEY").ok(),
+            access_key,
+            secret_key,
         })
     }
 
@@ -593,5 +610,72 @@ mod tests {
         assert_eq!(tls.cert_path, tls2.cert_path);
         assert_eq!(tls.key_path, tls2.key_path);
         assert_eq!(tls.ca_cert_path, tls2.ca_cert_path);
+    }
+
+    #[test]
+    fn s3_config_region_defaults_to_auto() {
+        std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
+        std::env::remove_var("SANDCHEST_S3_REGION");
+        std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
+        std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
+
+        let config = S3Config::from_env().expect("should parse S3 config");
+        assert_eq!(config.region, "auto");
+
+        std::env::remove_var("SANDCHEST_S3_BUCKET");
+    }
+
+    #[test]
+    fn s3_config_both_credentials_valid() {
+        std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
+        std::env::set_var("SANDCHEST_S3_ACCESS_KEY", "access");
+        std::env::set_var("SANDCHEST_S3_SECRET_KEY", "secret");
+
+        let config = S3Config::from_env().expect("should parse S3 config");
+        assert!(config.has_static_credentials());
+        assert_eq!(config.access_key.as_deref(), Some("access"));
+        assert_eq!(config.secret_key.as_deref(), Some("secret"));
+
+        std::env::remove_var("SANDCHEST_S3_BUCKET");
+        std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
+        std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
+    }
+
+    #[test]
+    fn s3_config_no_credentials_valid() {
+        std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
+        std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
+        std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
+
+        let config = S3Config::from_env().expect("should parse S3 config");
+        assert!(!config.has_static_credentials());
+
+        std::env::remove_var("SANDCHEST_S3_BUCKET");
+    }
+
+    #[test]
+    #[should_panic(expected = "SANDCHEST_S3_SECRET_KEY is missing")]
+    fn s3_config_access_key_without_secret_panics() {
+        std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
+        std::env::set_var("SANDCHEST_S3_ACCESS_KEY", "access");
+        std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
+
+        let _config = S3Config::from_env();
+
+        std::env::remove_var("SANDCHEST_S3_BUCKET");
+        std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
+    }
+
+    #[test]
+    #[should_panic(expected = "SANDCHEST_S3_ACCESS_KEY is missing")]
+    fn s3_config_secret_key_without_access_panics() {
+        std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
+        std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
+        std::env::set_var("SANDCHEST_S3_SECRET_KEY", "secret");
+
+        let _config = S3Config::from_env();
+
+        std::env::remove_var("SANDCHEST_S3_BUCKET");
+        std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
     }
 }

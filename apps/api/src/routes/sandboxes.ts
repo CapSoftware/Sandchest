@@ -134,6 +134,15 @@ const createSandbox = Effect.gen(function* () {
   const body: CreateSandboxRequest =
     raw && typeof raw === 'object' ? (raw as CreateSandboxRequest) : {}
 
+  // Sandbox creation is always synchronous — reject wait=false
+  if ('wait' in body && (body as Record<string, unknown>).wait === false) {
+    return yield* Effect.fail(
+      new ValidationError({
+        message: 'wait=false is not supported for sandbox creation',
+      }),
+    )
+  }
+
   const imageStr = body.image ?? DEFAULT_IMAGE
   const profileName = body.profile ?? DEFAULT_PROFILE
   const ttlSeconds = body.ttl_seconds ?? DEFAULT_TTL

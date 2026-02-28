@@ -10,7 +10,7 @@ function readFile(path: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Deploy workflow (SST)
+// Deploy workflow
 // ---------------------------------------------------------------------------
 
 describe('deploy.yml', () => {
@@ -28,27 +28,9 @@ describe('deploy.yml', () => {
     expect(workflow).toContain('DATABASE_URL')
   })
 
-  test('has deploy job using SST', () => {
+  test('has deploy job', () => {
     expect(workflow).toContain('deploy:')
     expect(workflow).toContain('needs: [migrate]')
-    expect(workflow).toContain('bunx sst deploy')
-  })
-
-  test('deploy job assumes AWS role via OIDC', () => {
-    expect(workflow).toContain('aws-actions/configure-aws-credentials@v4')
-    expect(workflow).toContain('role-to-assume')
-    expect(workflow).toContain('AWS_ROLE_ARN')
-  })
-
-  test('requests id-token permission for OIDC', () => {
-    expect(workflow).toContain('id-token: write')
-    expect(workflow).toContain('contents: read')
-  })
-
-  test('supports stage selection via workflow_dispatch', () => {
-    expect(workflow).toContain('stage:')
-    expect(workflow).toContain('SST stage to deploy')
-    expect(workflow).toMatch(/options:\s*\n\s*- dev\s*\n\s*- production/)
   })
 
   test('uses concurrency group to prevent parallel deploys', () => {
@@ -207,89 +189,11 @@ describe('Dockerfile', () => {
 })
 
 // ---------------------------------------------------------------------------
-// SST config
+// Required deployment files
 // ---------------------------------------------------------------------------
 
-describe('sst.config.ts', () => {
-  const config = readFile('sst.config.ts')
-
-  test('exists and imports all infra modules', () => {
-    expect(config).toContain('infra/alarms')
-    expect(config).toContain('infra/app')
-    expect(config).toContain('infra/bucket')
-    expect(config).toContain('infra/cluster')
-    expect(config).toContain('infra/node')
-    expect(config).toContain('infra/oidc')
-    expect(config).toContain('infra/redis')
-    expect(config).toContain('infra/vpc')
-  })
-
-  test('creates all core infrastructure resources', () => {
-    expect(config).toContain('sst.aws.Vpc')
-    expect(config).toContain('sst.aws.Redis')
-    expect(config).toContain('sst.aws.Bucket')
-    expect(config).toContain('sst.aws.Cluster')
-    expect(config).toContain('sst.Secret')
-  })
-
-  test('links secrets and resources to API service', () => {
-    expect(config).toContain('link: [')
-    expect(config).toContain('redis')
-    expect(config).toContain('artifactBucket')
-    expect(config).toContain('databaseUrl')
-    expect(config).toContain('betterAuthSecret')
-    expect(config).toContain('resendApiKey')
-  })
-
-  test('creates node LaunchTemplate and ASG', () => {
-    expect(config).toContain('aws.ec2.LaunchTemplate')
-    expect(config).toContain('NodeLaunchTemplate')
-    expect(config).toContain('aws.autoscaling.Group')
-    expect(config).toContain('NodeAsg')
-  })
-
-  test('creates GitHub OIDC provider and deploy role', () => {
-    expect(config).toContain('aws.iam.OpenIdConnectProvider')
-    expect(config).toContain('GitHubOidc')
-    expect(config).toContain('DeployRole')
-  })
-
-  test('creates CloudWatch alarms', () => {
-    expect(config).toContain('EcsRunningTaskAlarm')
-    expect(config).toContain('EcsCpuAlarm')
-    expect(config).toContain('EcsMemoryAlarm')
-    expect(config).toContain('Alb5xxAlarm')
-    expect(config).toContain('AlbResponseTimeAlarm')
-    expect(config).toContain('RedisMemoryAlarm')
-    expect(config).toContain('RedisEvictionAlarm')
-    expect(config).toContain('NodeHeartbeatAlarm')
-    expect(config).toContain('NodeAsgAlarm')
-  })
-
-  test('exports infrastructure outputs', () => {
-    expect(config).toContain('vpcId')
-    expect(config).toContain('redisHost')
-    expect(config).toContain('artifactBucketName')
-    expect(config).toContain('apiUrl')
-    expect(config).toContain('nodeAsgName')
-    expect(config).toContain('deployRoleArn')
-    expect(config).toContain('alarmTopicArn')
-  })
-
-  test('grants node IAM roles for S3 and CloudWatch', () => {
-    expect(config).toContain('NodeS3Policy')
-    expect(config).toContain('NodeCloudWatchPolicy')
-    expect(config).toContain('s3:PutObject')
-    expect(config).toContain('s3:GetObject')
-    expect(config).toContain('cloudwatch:PutMetricData')
-  })
-
-  test('references Dockerfile in correct location', () => {
-    expect(config).toContain('dockerfile: "apps/api/Dockerfile"')
-  })
-
+describe('required deployment files', () => {
   test('required files exist', () => {
-    expect(existsSync(resolve(ROOT, 'sst.config.ts'))).toBe(true)
     expect(existsSync(resolve(ROOT, 'apps/api/Dockerfile'))).toBe(true)
     expect(existsSync(resolve(ROOT, '.github/workflows/deploy.yml'))).toBe(true)
     expect(existsSync(resolve(ROOT, '.github/workflows/docker-build.yml'))).toBe(true)

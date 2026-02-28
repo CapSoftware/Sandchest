@@ -1,35 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
-import { loadEnv, sstResource } from './env.js'
-
-describe('sstResource', () => {
-  const originalEnv = { ...process.env }
-
-  afterEach(() => {
-    process.env = { ...originalEnv }
-  })
-
-  test('returns parsed JSON when SST_RESOURCE_ env var is set', () => {
-    process.env.SST_RESOURCE_Redis = JSON.stringify({ host: 'redis.internal', port: 6379 })
-    const result = sstResource<{ host: string; port: number }>('Redis')
-    expect(result).toEqual({ host: 'redis.internal', port: 6379 })
-  })
-
-  test('returns undefined when SST_RESOURCE_ env var is not set', () => {
-    delete process.env.SST_RESOURCE_Redis
-    expect(sstResource('Redis')).toBeUndefined()
-  })
-
-  test('returns undefined when SST_RESOURCE_ env var is invalid JSON', () => {
-    process.env.SST_RESOURCE_Redis = 'not-json'
-    expect(sstResource('Redis')).toBeUndefined()
-  })
-
-  test('parses SST secret format', () => {
-    process.env.SST_RESOURCE_DatabaseUrl = JSON.stringify({ value: 'mysql://prod:secret@rds:3306/db' })
-    const result = sstResource<{ value: string }>('DatabaseUrl')
-    expect(result?.value).toBe('mysql://prod:secret@rds:3306/db')
-  })
-})
+import { loadEnv } from './env.js'
 
 describe('loadEnv', () => {
   const originalEnv = { ...process.env }
@@ -48,9 +18,9 @@ describe('loadEnv', () => {
     process.env = { ...originalEnv }
   })
 
-  // --- Plain env var path (local development) ---
+  // --- Required secrets ---
 
-  test('returns all required secrets from plain env vars', () => {
+  test('returns all required secrets from env vars', () => {
     const env = loadEnv()
     expect(env.DATABASE_URL).toBe('mysql://test:test@localhost:3306/test')
     expect(env.BETTER_AUTH_SECRET).toBe('test-secret-key')
@@ -71,6 +41,8 @@ describe('loadEnv', () => {
     delete process.env.RESEND_API_KEY
     expect(() => loadEnv()).toThrow('Missing required environment variable: RESEND_API_KEY')
   })
+
+  // --- Optional vars ---
 
   test('returns undefined for optional AUTUMN_SECRET_KEY when unset', () => {
     const env = loadEnv()
@@ -99,11 +71,13 @@ describe('loadEnv', () => {
     expect(env.ARTIFACT_BUCKET_NAME).toBeUndefined()
   })
 
-  test('returns ARTIFACT_BUCKET_NAME from plain env var', () => {
+  test('returns ARTIFACT_BUCKET_NAME from env var', () => {
     process.env.ARTIFACT_BUCKET_NAME = 'my-bucket'
     const env = loadEnv()
     expect(env.ARTIFACT_BUCKET_NAME).toBe('my-bucket')
   })
+
+  // --- Defaults ---
 
   test('uses default PORT when unset', () => {
     const env = loadEnv()
@@ -154,71 +128,27 @@ describe('loadEnv', () => {
     expect(env.NODE_ENV).toBe('production')
   })
 
-  // --- SST-linked resource path (ECS deployment) ---
-
-  test('reads DATABASE_URL from SST-linked secret', () => {
-    delete process.env.DATABASE_URL
-    process.env.SST_RESOURCE_DatabaseUrl = JSON.stringify({ value: 'mysql://prod:secret@rds:3306/db' })
+  test('uses default S3 region of auto', () => {
     const env = loadEnv()
-    expect(env.DATABASE_URL).toBe('mysql://prod:secret@rds:3306/db')
+    expect(env.SANDCHEST_S3_REGION).toBe('auto')
   })
 
-  test('reads BETTER_AUTH_SECRET from SST-linked secret', () => {
-    delete process.env.BETTER_AUTH_SECRET
-    process.env.SST_RESOURCE_BetterAuthSecret = JSON.stringify({ value: 'sst-auth-secret' })
+  // --- Redis family ---
+
+  test('REDIS_FAMILY defaults to undefined when unset', () => {
     const env = loadEnv()
-    expect(env.BETTER_AUTH_SECRET).toBe('sst-auth-secret')
+    expect(env.REDIS_FAMILY).toBeUndefined()
   })
 
-  test('reads RESEND_API_KEY from SST-linked secret', () => {
-    delete process.env.RESEND_API_KEY
-    process.env.SST_RESOURCE_ResendApiKey = JSON.stringify({ value: 're_prod_key' })
+  test('REDIS_FAMILY is 6 when set to "6"', () => {
+    process.env.REDIS_FAMILY = '6'
     const env = loadEnv()
-    expect(env.RESEND_API_KEY).toBe('re_prod_key')
+    expect(env.REDIS_FAMILY).toBe(6)
   })
 
-  test('reads AUTUMN_SECRET_KEY from SST-linked secret', () => {
-    process.env.SST_RESOURCE_AutumnSecretKey = JSON.stringify({ value: 'autumn-sst-key' })
+  test('REDIS_FAMILY is undefined for non-"6" values', () => {
+    process.env.REDIS_FAMILY = '4'
     const env = loadEnv()
-    expect(env.AUTUMN_SECRET_KEY).toBe('autumn-sst-key')
-  })
-
-  test('constructs REDIS_URL from SST-linked Redis resource', () => {
-    process.env.SST_RESOURCE_Redis = JSON.stringify({ host: 'redis.cluster.internal', port: 6380 })
-    const env = loadEnv()
-    expect(env.REDIS_URL).toBe('redis://redis.cluster.internal:6380')
-  })
-
-  test('reads ARTIFACT_BUCKET_NAME from SST-linked Bucket resource', () => {
-    process.env.SST_RESOURCE_ArtifactBucket = JSON.stringify({ name: 'sandchest-artifacts-prod' })
-    const env = loadEnv()
-    expect(env.ARTIFACT_BUCKET_NAME).toBe('sandchest-artifacts-prod')
-  })
-
-  test('SST-linked secret takes precedence over plain env var', () => {
-    process.env.DATABASE_URL = 'mysql://local@localhost/test'
-    process.env.SST_RESOURCE_DatabaseUrl = JSON.stringify({ value: 'mysql://prod@rds/prod' })
-    const env = loadEnv()
-    expect(env.DATABASE_URL).toBe('mysql://prod@rds/prod')
-  })
-
-  test('SST-linked Redis takes precedence over REDIS_URL env var', () => {
-    process.env.REDIS_URL = 'redis://localhost:6379'
-    process.env.SST_RESOURCE_Redis = JSON.stringify({ host: 'redis.prod', port: 6379 })
-    const env = loadEnv()
-    expect(env.REDIS_URL).toBe('redis://redis.prod:6379')
-  })
-
-  test('SST-linked Bucket takes precedence over ARTIFACT_BUCKET_NAME env var', () => {
-    process.env.ARTIFACT_BUCKET_NAME = 'local-bucket'
-    process.env.SST_RESOURCE_ArtifactBucket = JSON.stringify({ name: 'prod-bucket' })
-    const env = loadEnv()
-    expect(env.ARTIFACT_BUCKET_NAME).toBe('prod-bucket')
-  })
-
-  test('falls back to env var when SST resource JSON is malformed', () => {
-    process.env.SST_RESOURCE_DatabaseUrl = 'not-json'
-    const env = loadEnv()
-    expect(env.DATABASE_URL).toBe('mysql://test:test@localhost:3306/test')
+    expect(env.REDIS_FAMILY).toBeUndefined()
   })
 })

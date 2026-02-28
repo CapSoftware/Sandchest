@@ -32,7 +32,7 @@ import { JsonLoggerLive } from './logger.js'
 import { ShutdownController, ShutdownControllerLive } from './shutdown.js'
 
 const env = loadEnv()
-const { PORT, REDIS_URL, DRAIN_TIMEOUT_MS, SANDCHEST_S3_ENDPOINT, SANDCHEST_S3_ACCESS_KEY, SANDCHEST_S3_SECRET_KEY, SANDCHEST_S3_REGION, ARTIFACT_BUCKET_NAME } = env
+const { PORT, REDIS_URL, REDIS_FAMILY, DRAIN_TIMEOUT_MS, SANDCHEST_S3_ENDPOINT, SANDCHEST_S3_ACCESS_KEY, SANDCHEST_S3_SECRET_KEY, SANDCHEST_S3_REGION, ARTIFACT_BUCKET_NAME } = env
 
 // Production pipeline: connection drain is outermost so it gates all requests
 const AppLive = ApiRouter.pipe(
@@ -44,7 +44,7 @@ const AppLive = ApiRouter.pipe(
   HttpServer.serve(),
 )
 
-const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL) : RedisMemory
+const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL, { family: REDIS_FAMILY }) : RedisMemory
 
 const { NODE_GRPC_ADDR, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, NODE_GRPC_NODE_ID } = env
 const NodeClientLive =

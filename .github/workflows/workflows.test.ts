@@ -51,41 +51,22 @@ describe("deploy workflow", () => {
     expect(env.DATABASE_URL).toContain("secrets.DATABASE_URL");
   });
 
-  test("deploy job uses OIDC-based AWS credentials", () => {
+  test("deploy job uses Fly.io", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
     const steps = jobs.deploy.steps as Array<Record<string, unknown>>;
-    const awsStep = steps.find(
-      (s) =>
-        (s.uses as string | undefined)?.startsWith(
-          "aws-actions/configure-aws-credentials",
-        ),
+    const flyStep = steps.find((s) =>
+      (s.run as string | undefined)?.includes("flyctl deploy"),
     );
-    expect(awsStep).toBeDefined();
-    const withConfig = awsStep!.with as Record<string, string>;
-    expect(withConfig["role-to-assume"]).toContain("secrets.AWS_ROLE_ARN");
-    expect(withConfig["aws-region"]).toBe("us-east-1");
+    expect(flyStep).toBeDefined();
   });
 
-  test("deploy job runs sst deploy", () => {
+  test("deploy job sets up flyctl", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
     const steps = jobs.deploy.steps as Array<Record<string, unknown>>;
-    const sstStep = steps.find((s) =>
-      (s.run as string | undefined)?.includes("sst deploy"),
+    const flyStep = steps.find((s) =>
+      (s.uses as string | undefined)?.includes("flyctl-actions"),
     );
-    expect(sstStep).toBeDefined();
-  });
-
-  test("deploy job installs bun and dependencies", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.deploy.steps as Array<Record<string, unknown>>;
-    const bunStep = steps.find((s) =>
-      (s.uses as string | undefined)?.includes("setup-bun"),
-    );
-    const installStep = steps.find(
-      (s) => (s.run as string | undefined) === "bun install --frozen-lockfile",
-    );
-    expect(bunStep).toBeDefined();
-    expect(installStep).toBeDefined();
+    expect(flyStep).toBeDefined();
   });
 
   test("workflow_dispatch allows stage selection", () => {

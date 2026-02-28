@@ -1,29 +1,10 @@
 /**
  * Centralized environment configuration.
  *
- * On ECS, SST injects linked resources and secrets as SST_RESOURCE_<Name>
- * environment variables (JSON-encoded). During local development, values
- * come from the root .env file as plain environment variables.
- *
- * Resolution order per variable:
- *   1. SST-linked resource/secret (SST_RESOURCE_*)
- *   2. Plain environment variable (process.env.*)
- *   3. Default value (for optional/config vars)
+ * All values come from plain environment variables (process.env.*).
+ * In production, these are set via Fly.io secrets and env config.
+ * During local development, values come from the root .env file.
  */
-
-/**
- * Read an SST-linked resource from the injected environment.
- * SST sets SST_RESOURCE_<Name> as JSON for each linked resource/secret.
- */
-export function sstResource<T>(name: string): T | undefined {
-  const raw = process.env[`SST_RESOURCE_${name}`]
-  if (!raw) return undefined
-  try {
-    return JSON.parse(raw) as T
-  } catch {
-    return undefined
-  }
-}
 
 function required(name: string): string {
   const value = process.env[name]
@@ -37,42 +18,26 @@ function optional(name: string, fallback: string): string {
 
 /** Lazily load and validate all environment variables. */
 export function loadEnv() {
-  // SST-linked infrastructure resources
-  const redis = sstResource<{ host: string; port: number }>('Redis')
-  const bucket = sstResource<{ name: string }>('ArtifactBucket')
-
   return {
-    // Server config (always from plain env vars — set by SST environment block)
+    // Server config
     PORT: Number(optional('PORT', '3001')),
     NODE_ENV: optional('NODE_ENV', 'development'),
     DRAIN_TIMEOUT_MS: Number(optional('DRAIN_TIMEOUT_MS', '30000')),
 
-    // Required secrets: SST-linked first, then plain env var fallback
-    DATABASE_URL:
-      sstResource<{ value: string }>('DatabaseUrl')?.value
-      ?? required('DATABASE_URL'),
-    BETTER_AUTH_SECRET:
-      sstResource<{ value: string }>('BetterAuthSecret')?.value
-      ?? required('BETTER_AUTH_SECRET'),
-    RESEND_API_KEY:
-      sstResource<{ value: string }>('ResendApiKey')?.value
-      ?? required('RESEND_API_KEY'),
+    // Required secrets
+    DATABASE_URL: required('DATABASE_URL'),
+    BETTER_AUTH_SECRET: required('BETTER_AUTH_SECRET'),
+    RESEND_API_KEY: required('RESEND_API_KEY'),
 
-    // Optional secrets: SST-linked first, then plain env var
-    AUTUMN_SECRET_KEY:
-      sstResource<{ value: string }>('AutumnSecretKey')?.value
-      ?? (process.env.AUTUMN_SECRET_KEY as string | undefined),
+    // Optional secrets
+    AUTUMN_SECRET_KEY: process.env.AUTUMN_SECRET_KEY as string | undefined,
 
-    // Redis: construct URL from SST-linked resource, or use plain env var
-    REDIS_URL: redis
-      ? `redis://${redis.host}:${redis.port}`
-      : (process.env.REDIS_URL as string | undefined),
+    // Redis (set REDIS_FAMILY=6 for IPv6, e.g. Upstash on Fly.io)
+    REDIS_URL: process.env.REDIS_URL as string | undefined,
+    REDIS_FAMILY: process.env.REDIS_FAMILY === '6' ? (6 as const) : undefined,
 
-    // S3 bucket: SST-linked resource, or plain env var
-    ARTIFACT_BUCKET_NAME: bucket?.name
-      ?? (process.env.ARTIFACT_BUCKET_NAME as string | undefined),
-
-    // S3-compatible object storage (Scaleway / R2 / MinIO)
+    // S3-compatible object storage (R2 / MinIO)
+    ARTIFACT_BUCKET_NAME: process.env.ARTIFACT_BUCKET_NAME as string | undefined,
     SANDCHEST_S3_ENDPOINT: process.env.SANDCHEST_S3_ENDPOINT as string | undefined,
     SANDCHEST_S3_ACCESS_KEY: process.env.SANDCHEST_S3_ACCESS_KEY as string | undefined,
     SANDCHEST_S3_SECRET_KEY: process.env.SANDCHEST_S3_SECRET_KEY as string | undefined,
@@ -88,7 +53,7 @@ export function loadEnv() {
     // Admin API token for /v1/admin/* endpoints
     ADMIN_API_TOKEN: process.env.ADMIN_API_TOKEN as string | undefined,
 
-    // Config (always from plain env vars)
+    // Config
     BETTER_AUTH_BASE_URL: optional('BETTER_AUTH_BASE_URL', 'http://localhost:3001'),
     RESEND_FROM_EMAIL: optional('RESEND_FROM_EMAIL', 'Sandchest Auth <noreply@send.sandchest.com>'),
   }

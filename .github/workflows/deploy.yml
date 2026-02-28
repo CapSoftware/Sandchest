@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: SST stage to deploy
+        description: Deployment stage
         required: true
         default: dev
         type: choice
@@ -21,9 +21,6 @@ permissions:
 concurrency:
   group: deploy-${{ inputs.stage || 'production' }}
   cancel-in-progress: false
-
-env:
-  SST_STAGE: ${{ inputs.stage || 'production' }}
 
 jobs:
   migrate:
@@ -46,7 +43,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
   deploy:
-    name: Deploy SST (${{ inputs.stage || 'production' }})
+    name: Deploy API (${{ inputs.stage || 'production' }})
     needs: [migrate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -54,16 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+      - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - run: bun install --frozen-lockfile
-
-      - name: Deploy with SST
-        run: bunx sst deploy --stage $SST_STAGE
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
