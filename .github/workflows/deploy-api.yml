@@ -41,9 +41,14 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - run: bun run typecheck
+      - name: Build dependencies
+        run: bun run --filter @sandchest/contract build && bun run --filter @sandchest/db build
 
-      - run: bun test
+      - name: Typecheck API
+        run: bun run --filter @sandchest/api typecheck
+
+      - name: Test API
+        run: bun run --filter @sandchest/api test
 
   migrate:
     name: Run Database Migrations

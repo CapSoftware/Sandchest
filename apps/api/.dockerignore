@@ -1,6 +1,21 @@
-node_modules
-dist
-.turbo
+# Large build artifacts
+target/
+node_modules/
+.git/
+
+# Build caches
+dist/
+.turbo/
 *.tsbuildinfo
+.next/
+
+# Secrets
 .env
 .env.*
+
+# Not needed in API image
+docs/
+images/
+.sst/
+.vscode/
+.idea/
