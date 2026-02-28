@@ -1,8 +1,17 @@
-name: Deploy
+name: Deploy API
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'packages/contract/**'
+      - 'packages/db/**'
+      - 'packages/config/**'
+      - 'fly.toml'
+      - 'package.json'
+      - 'bun.lock'
+
   workflow_dispatch:
     inputs:
       stage:
@@ -14,17 +23,31 @@ on:
           - dev
           - production
 
-permissions:
-  id-token: write
-  contents: read
-
 concurrency:
-  group: deploy-${{ inputs.stage || 'production' }}
+  group: deploy-api-${{ inputs.stage || 'production' }}
   cancel-in-progress: false
 
 jobs:
+  check:
+    name: Typecheck & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun test
+
   migrate:
     name: Run Database Migrations
+    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: ${{ inputs.stage || 'production' }}
@@ -43,10 +66,10 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
   deploy:
-    name: Deploy API (${{ inputs.stage || 'production' }})
-    needs: [migrate]
+    name: Deploy to Fly.io
+    needs: migrate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     environment: ${{ inputs.stage || 'production' }}
     steps:
       - uses: actions/checkout@v4
@@ -55,5 +78,12 @@ jobs:
 
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          flyctl status -a sandchest-api
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

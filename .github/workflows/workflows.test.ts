@@ -11,25 +11,53 @@ function loadWorkflow(filename: string): Record<string, unknown> {
   return parse(content) as Record<string, unknown>;
 }
 
-describe("deploy workflow", () => {
-  const wf = loadWorkflow("deploy.yml");
+describe("deploy-api workflow", () => {
+  const wf = loadWorkflow("deploy-api.yml");
 
-  test("triggers on push to main and manual dispatch", () => {
-    const on = wf.on as Record<string, unknown>;
-    expect(on.push).toEqual({ branches: ["main"] });
-    expect(on.workflow_dispatch).toBeDefined();
+  test("triggers on push to main with API path filters", () => {
+    const on = wf.on as Record<string, Record<string, unknown>>;
+    const push = on.push as Record<string, unknown>;
+    expect(push.branches).toEqual(["main"]);
+    const paths = push.paths as string[];
+    expect(paths).toContain("apps/api/**");
+    expect(paths).toContain("packages/contract/**");
+    expect(paths).toContain("packages/db/**");
+    expect(paths).toContain("fly.toml");
   });
 
-  test("requests OIDC id-token permission", () => {
-    const perms = wf.permissions as Record<string, string>;
-    expect(perms["id-token"]).toBe("write");
-    expect(perms.contents).toBe("read");
+  test("supports manual dispatch with stage selection", () => {
+    const on = wf.on as Record<string, Record<string, unknown>>;
+    const inputs = on.workflow_dispatch.inputs as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(inputs.stage).toBeDefined();
+    expect(inputs.stage.type).toBe("choice");
+    const options = inputs.stage.options as string[];
+    expect(options).toContain("dev");
+    expect(options).toContain("production");
   });
 
   test("has concurrency group per stage", () => {
     const concurrency = wf.concurrency as Record<string, unknown>;
-    expect(concurrency.group).toContain("deploy");
+    expect(concurrency.group).toContain("deploy-api");
     expect(concurrency["cancel-in-progress"]).toBe(false);
+  });
+
+  test("has check job that runs before migrate", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    expect(jobs.check).toBeDefined();
+    expect(jobs.migrate.needs).toContain("check");
+  });
+
+  test("check job runs typecheck and tests", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs.check.steps as Array<Record<string, unknown>>;
+    const runs = steps
+      .filter((s) => s.run)
+      .map((s) => s.run as string);
+    expect(runs).toContain("bun run typecheck");
+    expect(runs).toContain("bun test");
   });
 
   test("has migrate job before deploy", () => {
@@ -51,120 +79,79 @@ describe("deploy workflow", () => {
     expect(env.DATABASE_URL).toContain("secrets.DATABASE_URL");
   });
 
-  test("deploy job uses Fly.io", () => {
+  test("deploy job uses Fly.io with flyctl", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
     const steps = jobs.deploy.steps as Array<Record<string, unknown>>;
-    const flyStep = steps.find((s) =>
-      (s.run as string | undefined)?.includes("flyctl deploy"),
-    );
-    expect(flyStep).toBeDefined();
-  });
-
-  test("deploy job sets up flyctl", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.deploy.steps as Array<Record<string, unknown>>;
-    const flyStep = steps.find((s) =>
+    const flySetup = steps.find((s) =>
       (s.uses as string | undefined)?.includes("flyctl-actions"),
     );
-    expect(flyStep).toBeDefined();
+    const flyDeploy = steps.find((s) =>
+      (s.run as string | undefined)?.includes("flyctl deploy --remote-only"),
+    );
+    expect(flySetup).toBeDefined();
+    expect(flyDeploy).toBeDefined();
   });
 
-  test("workflow_dispatch allows stage selection", () => {
-    const on = wf.on as Record<string, Record<string, unknown>>;
-    const inputs = on.workflow_dispatch.inputs as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(inputs.stage).toBeDefined();
-    expect(inputs.stage.type).toBe("choice");
-    const options = inputs.stage.options as string[];
-    expect(options).toContain("dev");
-    expect(options).toContain("production");
-    expect(options).not.toContain("staging");
+  test("deploy job verifies deployment health", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs.deploy.steps as Array<Record<string, unknown>>;
+    const verifyStep = steps.find((s) =>
+      (s.run as string | undefined)?.includes("flyctl status"),
+    );
+    expect(verifyStep).toBeDefined();
+  });
+
+  test("deploy job has reasonable timeout", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    expect(jobs.deploy["timeout-minutes"]).toBeLessThanOrEqual(30);
+    expect(jobs.deploy["timeout-minutes"]).toBeGreaterThan(0);
   });
 });
 
-describe("docker-build workflow", () => {
-  const wf = loadWorkflow("docker-build.yml");
+describe("deploy-node workflow", () => {
+  const wf = loadWorkflow("deploy-node.yml");
 
-  test("triggers on push to main with path filters", () => {
+  test("triggers on push to main with crate path filters", () => {
     const on = wf.on as Record<string, Record<string, unknown>>;
     const push = on.push as Record<string, unknown>;
     expect(push.branches).toEqual(["main"]);
     const paths = push.paths as string[];
-    expect(paths).toContain("apps/api/**");
-  });
-
-  test("requests OIDC id-token permission", () => {
-    const perms = wf.permissions as Record<string, string>;
-    expect(perms["id-token"]).toBe("write");
-  });
-
-  test("logs into ECR", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
-    const ecrStep = steps.find((s) =>
-      (s.uses as string | undefined)?.includes("amazon-ecr-login"),
-    );
-    expect(ecrStep).toBeDefined();
-  });
-
-  test("uses buildx for caching", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
-    const buildxStep = steps.find((s) =>
-      (s.uses as string | undefined)?.includes("setup-buildx"),
-    );
-    expect(buildxStep).toBeDefined();
-  });
-
-  test("builds and pushes with SHA and latest tags", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
-    const pushStep = steps.find((s) =>
-      (s.uses as string | undefined)?.includes("build-push-action"),
-    );
-    expect(pushStep).toBeDefined();
-    const withConfig = pushStep!.with as Record<string, unknown>;
-    expect(withConfig.push).toBe(true);
-    expect(withConfig.file).toBe("apps/api/Dockerfile");
-    const tags = withConfig.tags as string;
-    expect(tags).toContain("sandchest-api");
-    expect(tags).toContain("latest");
-  });
-
-  test("uses GHA cache for Docker layers", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
-    const pushStep = steps.find((s) =>
-      (s.uses as string | undefined)?.includes("build-push-action"),
-    );
-    const withConfig = pushStep!.with as Record<string, unknown>;
-    expect(withConfig["cache-from"]).toBe("type=gha");
-    expect(withConfig["cache-to"]).toBe("type=gha,mode=max");
-  });
-});
-
-describe("rust-build workflow", () => {
-  const wf = loadWorkflow("rust-build.yml");
-
-  test("triggers on push to main with path filters for crates and protos", () => {
-    const on = wf.on as Record<string, Record<string, unknown>>;
-    const push = on.push as Record<string, unknown>;
-    expect(push.branches).toEqual(["main"]);
-    const paths = push.paths as string[];
-    expect(paths).toContain("crates/sandchest-node/**");
+    expect(paths).toContain("crates/**");
     expect(paths).toContain("packages/contract/proto/**");
   });
 
-  test("requests OIDC id-token permission", () => {
-    const perms = wf.permissions as Record<string, string>;
-    expect(perms["id-token"]).toBe("write");
+  test("supports manual dispatch", () => {
+    const on = wf.on as Record<string, unknown>;
+    expect(on.workflow_dispatch).toBeDefined();
+  });
+
+  test("has concurrency group that prevents parallel deploys", () => {
+    const concurrency = wf.concurrency as Record<string, unknown>;
+    expect(concurrency.group).toContain("deploy-node");
+    expect(concurrency["cancel-in-progress"]).toBe(false);
+  });
+
+  test("has check job that gates build-and-deploy", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    expect(jobs.check).toBeDefined();
+    expect(jobs["build-and-deploy"].needs).toContain("check");
+  });
+
+  test("check job runs cargo test and clippy", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs.check.steps as Array<Record<string, unknown>>;
+    const runs = steps
+      .filter((s) => s.run)
+      .map((s) => s.run as string);
+    expect(runs.some((r) => r.includes("cargo test"))).toBe(true);
+    expect(runs.some((r) => r.includes("cargo clippy"))).toBe(true);
   });
 
   test("uses Rust toolchain and cache", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
     const rustStep = steps.find((s) =>
       (s.uses as string | undefined)?.includes("rust-toolchain"),
     );
@@ -177,7 +164,9 @@ describe("rust-build workflow", () => {
 
   test("installs protobuf compiler", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
     const protoStep = steps.find((s) =>
       (s.run as string | undefined)?.includes("protobuf-compiler"),
     );
@@ -186,7 +175,9 @@ describe("rust-build workflow", () => {
 
   test("builds sandchest-node in release mode", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
     const buildStep = steps.find((s) =>
       (s.run as string | undefined)?.includes(
         "cargo build --release --package sandchest-node",
@@ -197,29 +188,63 @@ describe("rust-build workflow", () => {
 
   test("uploads binary as GitHub artifact", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
     const uploadStep = steps.find((s) =>
       (s.uses as string | undefined)?.includes("upload-artifact"),
     );
     expect(uploadStep).toBeDefined();
     const withConfig = uploadStep!.with as Record<string, string>;
-    expect(withConfig.name).toBe("sandchest-node");
     expect(withConfig.path).toContain("sandchest-node");
   });
 
-  test("uploads binary to S3", () => {
+  test("uploads binary to R2", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs.build.steps as Array<Record<string, unknown>>;
-    const s3Step = steps.find((s) =>
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
+    const r2Step = steps.find((s) =>
       (s.run as string | undefined)?.includes("aws s3 cp"),
     );
-    expect(s3Step).toBeDefined();
-    expect(s3Step!.run as string).toContain("sandchest-node");
+    expect(r2Step).toBeDefined();
+    expect(r2Step!.run as string).toContain("sandchest-node");
+    expect(r2Step!.run as string).toContain("R2_ENDPOINT");
   });
 
-  test("has 20-minute timeout", () => {
+  test("deploys to Hetzner via SSH", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    expect(jobs.build["timeout-minutes"]).toBe(20);
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
+    const deployStep = steps.find((s) => s.name === "Deploy to Hetzner");
+    expect(deployStep).toBeDefined();
+    const run = deployStep!.run as string;
+    expect(run).toContain("scp");
+    expect(run).toContain("HETZNER_SSH_KEY");
+    expect(run).toContain("HETZNER_HOST");
+    expect(run).toContain("systemctl restart sandchest-node");
+  });
+
+  test("Hetzner deploy uses atomic binary replacement", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
+    const deployStep = steps.find((s) => s.name === "Deploy to Hetzner");
+    const run = deployStep!.run as string;
+    expect(run).toContain("sandchest-node.new");
+    expect(run).toContain("mv ");
+  });
+
+  test("Hetzner deploy verifies service is active after restart", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs["build-and-deploy"].steps as Array<
+      Record<string, unknown>
+    >;
+    const deployStep = steps.find((s) => s.name === "Deploy to Hetzner");
+    const run = deployStep!.run as string;
+    expect(run).toContain("systemctl is-active sandchest-node");
   });
 });
 

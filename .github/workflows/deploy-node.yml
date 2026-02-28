@@ -1,0 +1,104 @@
+name: Deploy Node Daemon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'packages/contract/proto/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-node
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Test & Lint Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - run: cargo test --workspace
+
+      - run: cargo clippy --workspace -- -D warnings
+
+  build-and-deploy:
+    name: Build & Deploy
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Build release binary
+        run: cargo build --release --package sandchest-node
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandchest-node-${{ github.sha }}
+          path: target/release/sandchest-node
+          retention-days: 30
+
+      - name: Upload binary to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp target/release/sandchest-node \
+            "s3://${{ secrets.R2_BUCKET }}/binaries/sandchest-node/${{ github.sha }}/sandchest-node" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+          aws s3 cp target/release/sandchest-node \
+            "s3://${{ secrets.R2_BUCKET }}/binaries/sandchest-node/latest/sandchest-node" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+      - name: Deploy to Hetzner
+        env:
+          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$HETZNER_SSH_KEY" > ~/.ssh/hetzner_key
+          chmod 600 ~/.ssh/hetzner_key
+          ssh-keyscan -H "$HETZNER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          scp -i ~/.ssh/hetzner_key \
+            target/release/sandchest-node \
+            "root@${HETZNER_HOST}:/usr/local/bin/sandchest-node.new"
+
+          ssh -i ~/.ssh/hetzner_key "root@${HETZNER_HOST}" << 'DEPLOY'
+            set -euo pipefail
+            mv /usr/local/bin/sandchest-node.new /usr/local/bin/sandchest-node
+            chmod +x /usr/local/bin/sandchest-node
+            systemctl restart sandchest-node
+            sleep 3
+            systemctl is-active sandchest-node
+          DEPLOY
