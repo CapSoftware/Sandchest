@@ -78,6 +78,12 @@ export function loadEnv() {
     SANDCHEST_S3_SECRET_KEY: process.env.SANDCHEST_S3_SECRET_KEY as string | undefined,
     SANDCHEST_S3_REGION: optional('SANDCHEST_S3_REGION', 'auto'),
 
+    // Node daemon gRPC (mTLS)
+    NODE_GRPC_ADDR: process.env.NODE_GRPC_ADDR as string | undefined,
+    NODE_GRPC_CERT_PATH: process.env.NODE_GRPC_CERT_PATH as string | undefined,
+    NODE_GRPC_KEY_PATH: process.env.NODE_GRPC_KEY_PATH as string | undefined,
+    NODE_GRPC_CA_PATH: process.env.NODE_GRPC_CA_PATH as string | undefined,
+
     // Admin API token for /v1/admin/* endpoints
     ADMIN_API_TOKEN: process.env.ADMIN_API_TOKEN as string | undefined,
 

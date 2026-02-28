@@ -14,6 +14,7 @@ import { SessionRepoMemory } from './services/session-repo.memory.js'
 import { ObjectStorageMemory } from './services/object-storage.memory.js'
 import { createObjectStorageLayer } from './services/object-storage.live.js'
 import { NodeClientMemory } from './services/node-client.memory.js'
+import { createNodeClientLayer } from './services/node-client.live.js'
 import { ArtifactRepoMemory } from './services/artifact-repo.memory.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
@@ -44,6 +45,17 @@ const AppLive = ApiRouter.pipe(
 )
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL) : RedisMemory
+
+const { NODE_GRPC_ADDR, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH } = env
+const NodeClientLive =
+  NODE_GRPC_ADDR && NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH
+    ? createNodeClientLayer({
+        address: NODE_GRPC_ADDR,
+        certPath: NODE_GRPC_CERT_PATH,
+        keyPath: NODE_GRPC_KEY_PATH,
+        caPath: NODE_GRPC_CA_PATH,
+      })
+    : NodeClientMemory
 
 const ObjectStorageLive =
   SANDCHEST_S3_ENDPOINT && SANDCHEST_S3_ACCESS_KEY && SANDCHEST_S3_SECRET_KEY && ARTIFACT_BUCKET_NAME
@@ -105,7 +117,7 @@ const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pi
   Layer.provide(ExecRepoMemory),
   Layer.provide(SessionRepoMemory),
   Layer.provide(ObjectStorageLive),
-  Layer.provide(NodeClientMemory),
+  Layer.provide(NodeClientLive),
   Layer.provide(ArtifactRepoMemory),
   Layer.provide(IdempotencyRepoMemory),
   Layer.provide(OrgRepoMemory),
