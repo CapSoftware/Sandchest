@@ -19,6 +19,8 @@
     "db:push": "tsx ./node_modules/.bin/drizzle-kit push",
     "db:migrate": "tsx ./node_modules/.bin/drizzle-kit migrate",
     "db:migrate:run": "bun run src/migrate.ts",
+    "db:seed": "bun run src/seed.ts",
+    "db:seed:dev": "bun run src/seed.ts --dev",
     "db:studio": "tsx ./node_modules/.bin/drizzle-kit studio"
   },
   "dependencies": {

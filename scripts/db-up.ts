@@ -50,10 +50,10 @@ if (result.drizzleMigrations) console.log('  - Drizzle migrations applied')
 // Seed data
 console.log('Seeding database...')
 const { createDatabase } = await import('../packages/db/src/client')
-const { seed } = await import('../packages/db/src/seed')
+const { seedDev } = await import('../packages/db/src/seed')
 const db = createDatabase(databaseUrl)
-await seed(db)
-console.log('  - Seed data applied')
+await seedDev(db)
+console.log('  - Seed data applied (production + dev)')
 
 console.log('Local database ready.')
 process.exit(0)
