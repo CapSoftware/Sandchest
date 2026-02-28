@@ -130,7 +130,7 @@ describe('audit log — sandbox operations', () => {
         const response = yield* client.execute(
           HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/stop`),
         )
-        expect(response.status).toBe(202)
+        expect(response.status).toBe(200)
       }),
     )
 

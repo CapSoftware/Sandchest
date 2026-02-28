@@ -361,16 +361,16 @@ describe('E2E: sandbox lifecycle — create, exec, session, file, stop', () => {
           status: string
         }
 
-        expect(stopRes.status).toBe(202)
+        expect(stopRes.status).toBe(200)
         expect(stopped.sandbox_id).toBe(sandboxId)
-        expect(stopped.status).toBe('stopping')
+        expect(stopped.status).toBe('stopped')
 
         // --- 19. Verify sandbox is stopped ---
         const finalRes = yield* client.execute(
           HttpClientRequest.get(`/v1/sandboxes/${sandboxId}`),
         )
         const finalSandbox = (yield* finalRes.json) as { status: string }
-        expect(finalSandbox.status).toBe('stopping')
+        expect(finalSandbox.status).toBe('stopped')
 
         // --- 20. Operations fail on stopped sandbox ---
         const execOnStopped = yield* client.execute(

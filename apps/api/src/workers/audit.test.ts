@@ -33,8 +33,8 @@ describe('phase 9 gap audit', () => {
     }
   })
 
-  test('deploy.yml has real deployment targets', () => {
-    const src = readFileSync(resolve(ROOT, '.github/workflows/deploy.yml'), 'utf-8')
+  test('deploy-api.yml has real deployment targets', () => {
+    const src = readFileSync(resolve(ROOT, '.github/workflows/deploy-api.yml'), 'utf-8')
     expect(src).not.toContain('TODO')
     expect(src).toContain('flyctl deploy')
   })

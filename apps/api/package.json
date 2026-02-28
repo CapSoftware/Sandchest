@@ -7,7 +7,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "bun test --ignore='src/e2e*.test.ts'",
+    "test": "bun test $(find src -name '*.test.ts' -not -name '*.drizzle.test.ts' -not -name '*.ioredis.test.ts' -not -name 'e2e*')",
+    "test:integration": "bun test src/services/*.drizzle.test.ts src/services/*.ioredis.test.ts",
     "test:e2e": "bun test src/e2e.test.ts src/e2e-http.test.ts",
     "dev": "bun --env-file=../../.env --watch run src/index.ts"
   },
