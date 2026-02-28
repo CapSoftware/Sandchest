@@ -131,10 +131,109 @@ a {
   padding: 1.25rem;
 }
 
+.card-hover {
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.card-hover:hover {
+  border-color: var(--color-border);
+  background-color: var(--color-surface-hover);
+}
+
+.card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.card-title {
+  font-weight: 600;
+  color: var(--color-text-strong);
+  font-size: 0.875rem;
+}
+
+.card-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-text-weak);
+  margin-top: 0.125rem;
+}
+
+.card-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.card-section-title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--color-text-strong);
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1rem;
+}
+
+/* --- Detail page utilities --- */
+
+.back-link {
+  font-size: 0.75rem;
+  color: var(--color-text-weak);
+  transition: color 0.15s;
+}
+
+.back-link:hover {
+  color: var(--color-text);
+}
+
+.detail-subtitle {
+  font-size: 0.8125rem;
+  color: var(--color-text-weak);
+  margin-top: 0.25rem;
+}
+
+.detail-stat {
+  font-size: 0.75rem;
+  color: var(--color-text-weak);
+}
+
+.text-weak {
+  color: var(--color-text-weak);
+}
+
+.feedback-card {
+  font-size: 0.8125rem;
+}
+
+.feedback-danger {
+  border-color: var(--color-danger);
+  background-color: color-mix(in srgb, var(--color-danger), transparent 92%);
+  color: var(--color-danger);
+}
+
+.feedback-success {
+  border-color: var(--color-success);
+  background-color: color-mix(in srgb, var(--color-success), transparent 92%);
+  color: var(--color-success);
+}
+
+.danger-zone {
+  border-color: color-mix(in srgb, var(--color-danger), transparent 70%);
+}
+
+.danger-title {
+  color: var(--color-danger);
 }
 
 /* --- Status badges --- */
@@ -181,9 +280,9 @@ a {
 }
 
 .badge-awaiting-daemon {
-  color: var(--color-warning, #c4841d);
-  border-color: color-mix(in srgb, var(--color-warning, #c4841d), transparent 70%);
-  background-color: color-mix(in srgb, var(--color-warning, #c4841d), transparent 90%);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning), transparent 70%);
+  background-color: color-mix(in srgb, var(--color-warning), transparent 90%);
 }
 
 .badge-completed {
@@ -234,6 +333,38 @@ a {
 
 .metric-bar-fill[data-level="danger"] {
   background-color: var(--color-danger);
+}
+
+/* --- Skeleton loading --- */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-border-weak) 0%,
+    var(--color-surface-hover) 40%,
+    var(--color-surface-hover) 60%,
+    var(--color-border-weak) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.skeleton-text {
+  display: inline-block;
+  height: 0.75rem;
+}
+
+.skeleton-badge {
+  display: inline-block;
+  width: 4.5rem;
+  height: 1.375rem;
+  border-radius: 9999px;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* --- Buttons --- */

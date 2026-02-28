@@ -6,9 +6,57 @@ import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServer } from '@/hooks/use-server'
 import { useServerMetrics } from '@/hooks/use-server-metrics'
+import { deriveStatus } from '@/lib/derive-status'
 import StatusBadge from '@/components/StatusBadge'
 import ServerMetrics from '@/components/ServerMetrics'
 import CommandRunner from '@/components/CommandRunner'
+
+function DetailSkeleton() {
+  return (
+    <div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div className="skeleton skeleton-text" style={{ width: '6rem', height: '0.75rem' }} />
+      </div>
+
+      <div className="page-header">
+        <div>
+          <div className="skeleton skeleton-text" style={{ width: '10rem', height: '1.25rem' }} />
+          <div className="skeleton skeleton-text" style={{ width: '7rem', height: '0.8125rem', marginTop: '0.375rem' }} />
+        </div>
+        <div className="skeleton skeleton-badge" />
+      </div>
+
+      {/* System Info skeleton */}
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div className="skeleton skeleton-text" style={{ width: '5rem', height: '0.8125rem', marginBottom: '0.75rem' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          <div className="skeleton skeleton-text" style={{ width: '80%', height: '0.75rem' }} />
+          <div className="skeleton skeleton-text" style={{ width: '60%', height: '0.75rem' }} />
+          <div className="skeleton skeleton-text" style={{ width: '70%', height: '0.75rem' }} />
+          <div className="skeleton skeleton-text" style={{ width: '50%', height: '0.75rem' }} />
+        </div>
+      </div>
+
+      {/* Metrics skeleton */}
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div className="skeleton skeleton-text" style={{ width: '6rem', height: '0.8125rem', marginBottom: '1rem' }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="metric-bar-container">
+              <div className="metric-bar-label">
+                <span className="skeleton skeleton-text" style={{ width: '2.5rem' }} />
+                <span className="skeleton skeleton-text" style={{ width: '3rem' }} />
+              </div>
+              <div className="metric-bar-track">
+                <div className="skeleton" style={{ height: '100%', width: '100%', borderRadius: '3px' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function ServerDetailPage({
   params,
@@ -22,14 +70,9 @@ export default function ServerDetailPage({
   const isProvisioned = server?.provision_status === 'completed'
   const { data: metricsData } = useServerMetrics(serverId, isProvisioned)
 
-  const derivedStatus = (() => {
-    if (!server) return 'pending' as const
-    if (server.provision_status !== 'completed') return server.provision_status
-    if (!server.node_id) return 'awaiting-daemon' as const
-    if (!metricsData) return 'online' as const // assume online until we know otherwise
-    if (metricsData.daemon_status === 'active') return 'online' as const
-    return 'offline' as const
-  })()
+  const status = server
+    ? deriveStatus(server.provision_status, server.node_id, metricsData?.daemon_status)
+    : 'pending'
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -80,18 +123,14 @@ export default function ServerDetailPage({
   })
 
   if (isLoading || !server) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
-        <span className="spinner" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   return (
     <div>
       {/* Header */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <Link href="/servers" style={{ fontSize: '0.75rem', color: 'var(--color-text-weak)' }}>
+        <Link href="/servers" className="back-link">
           &larr; Back to servers
         </Link>
       </div>
@@ -99,12 +138,12 @@ export default function ServerDetailPage({
       <div className="page-header">
         <div>
           <h1 className="page-title">{server.name}</h1>
-          <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-weak)', marginTop: '0.25rem' }}>
+          <div className="detail-subtitle">
             {server.ip}:{server.ssh_port}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <StatusBadge status={derivedStatus} />
+          <StatusBadge status={status} />
 
           {server.provision_status === 'pending' && (
             <button
@@ -139,31 +178,25 @@ export default function ServerDetailPage({
 
       {/* Deploy feedback */}
       {deployMutation.isError && (
-        <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--color-danger)', background: 'color-mix(in srgb, var(--color-danger), transparent 92%)' }}>
-          <div style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>
-            Deploy failed: {deployMutation.error.message}
-          </div>
+        <div className="card feedback-card feedback-danger" style={{ marginBottom: '1rem' }}>
+          Deploy failed: {deployMutation.error.message}
         </div>
       )}
       {deployMutation.isSuccess && (
-        <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--color-success)', background: 'color-mix(in srgb, var(--color-success), transparent 92%)' }}>
-          <div style={{ fontSize: '0.8125rem', color: 'var(--color-success)' }}>
-            Daemon deployed successfully. Waiting for heartbeat…
-          </div>
+        <div className="card feedback-card feedback-success" style={{ marginBottom: '1rem' }}>
+          Daemon deployed successfully. Waiting for heartbeat…
         </div>
       )}
 
       {/* System Info */}
       {server.system_info && (
         <div className="card" style={{ marginBottom: '1rem' }}>
-          <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-text-strong)', marginBottom: '0.5rem' }}>
-            System Info
-          </div>
+          <div className="card-section-title">System Info</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
-            {server.system_info.cpu && <div><span style={{ color: 'var(--color-text-weak)' }}>CPU:</span> {server.system_info.cpu}</div>}
-            {server.system_info.ram && <div><span style={{ color: 'var(--color-text-weak)' }}>RAM:</span> {server.system_info.ram}</div>}
-            {server.system_info.disk && <div><span style={{ color: 'var(--color-text-weak)' }}>Disk:</span> {server.system_info.disk}</div>}
-            {server.system_info.os && <div><span style={{ color: 'var(--color-text-weak)' }}>OS:</span> {server.system_info.os}</div>}
+            {server.system_info.cpu && <div><span className="text-weak">CPU:</span> {server.system_info.cpu}</div>}
+            {server.system_info.ram && <div><span className="text-weak">RAM:</span> {server.system_info.ram}</div>}
+            {server.system_info.disk && <div><span className="text-weak">Disk:</span> {server.system_info.disk}</div>}
+            {server.system_info.os && <div><span className="text-weak">OS:</span> {server.system_info.os}</div>}
           </div>
         </div>
       )}
@@ -183,7 +216,7 @@ export default function ServerDetailPage({
       {/* Actions */}
       {server.provision_status === 'completed' && server.node_id && (
         <div className="card" style={{ marginBottom: '1rem' }}>
-          <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-text-strong)', marginBottom: '0.75rem' }}>
+          <div className="card-section-title" style={{ marginBottom: '0.75rem' }}>
             Node Actions
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -213,8 +246,8 @@ export default function ServerDetailPage({
       )}
 
       {/* Danger Zone */}
-      <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--color-danger), transparent 70%)' }}>
-        <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-danger)', marginBottom: '0.75rem' }}>
+      <div className="card danger-zone">
+        <div className="card-section-title danger-title" style={{ marginBottom: '0.75rem' }}>
           Danger Zone
         </div>
         <button

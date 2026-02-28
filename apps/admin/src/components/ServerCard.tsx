@@ -1,21 +1,26 @@
 import Link from 'next/link'
 import StatusBadge from './StatusBadge'
+import { deriveStatus } from '@/lib/derive-status'
+import type { MetricsResult } from '@/lib/metrics'
 
 export interface ServerSummary {
   id: string
   name: string
   ip: string
   provision_status: 'pending' | 'provisioning' | 'completed' | 'failed'
-  node_status?: 'online' | 'offline' | 'draining' | 'disabled' | undefined
-  heartbeat_active?: boolean | undefined
+  node_id: string | null
   slots_total: number
-  slots_used?: number | undefined
-  cpu_percent?: number | undefined
-  memory_percent?: number | undefined
-  disk_percent?: number | undefined
 }
 
-function MetricBar({ label, value, max }: { label: string; value: number; max: number }) {
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  const value = bytes / Math.pow(1024, i)
+  return `${value.toFixed(1)} ${units[i]}`
+}
+
+function MetricBar({ label, value, max, detail }: { label: string; value: number; max: number; detail?: string | undefined }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
   const level = pct > 90 ? 'danger' : pct > 70 ? 'warning' : undefined
 
@@ -23,7 +28,7 @@ function MetricBar({ label, value, max }: { label: string; value: number; max: n
     <div className="metric-bar-container">
       <div className="metric-bar-label">
         <span>{label}</span>
-        <span>{pct}%</span>
+        <span>{detail ?? `${pct}%`}</span>
       </div>
       <div className="metric-bar-track">
         <div
@@ -36,47 +41,94 @@ function MetricBar({ label, value, max }: { label: string; value: number; max: n
   )
 }
 
-export default function ServerCard({ server }: { server: ServerSummary }) {
-  const displayStatus = server.provision_status === 'completed'
-    ? server.heartbeat_active
-      ? 'online'
-      : server.node_status && server.node_status !== 'offline'
-        ? server.node_status
-        : 'awaiting-daemon' as const
-    : server.provision_status
+function MetricBarSkeleton() {
+  return (
+    <div className="metric-bar-container">
+      <div className="metric-bar-label">
+        <span className="skeleton skeleton-text" style={{ width: '2.5rem' }} />
+        <span className="skeleton skeleton-text" style={{ width: '2rem' }} />
+      </div>
+      <div className="metric-bar-track">
+        <div className="skeleton" style={{ height: '100%', width: '100%', borderRadius: '3px' }} />
+      </div>
+    </div>
+  )
+}
+
+export default function ServerCard({
+  server,
+  metricsResult,
+}: {
+  server: ServerSummary
+  metricsResult?: MetricsResult | undefined
+}) {
+  const status = deriveStatus(
+    server.provision_status,
+    server.node_id,
+    metricsResult?.daemon_status,
+  )
+
+  const isProvisioned = server.provision_status === 'completed'
+  const metrics = metricsResult?.metrics
 
   return (
-    <Link href={`/servers/${server.id}`} style={{ textDecoration: 'none' }}>
-      <div className="card" style={{ cursor: 'pointer', transition: 'border-color 0.15s' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+    <Link href={`/servers/${server.id}`} className="card-link">
+      <div className="card card-hover">
+        <div className="card-header">
           <div>
-            <div style={{ fontWeight: 600, color: 'var(--color-text-strong)', fontSize: '0.875rem' }}>
-              {server.name}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-weak)', marginTop: '0.125rem' }}>
-              {server.ip}
-            </div>
+            <div className="card-title">{server.name}</div>
+            <div className="card-subtitle">{server.ip}</div>
           </div>
-          <StatusBadge status={displayStatus} />
+          <StatusBadge status={status} />
         </div>
 
-        {server.provision_status === 'completed' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-weak)' }}>
-              Slots: {server.slots_used ?? 0} / {server.slots_total}
-            </div>
-            {server.cpu_percent !== undefined && (
-              <MetricBar label="CPU" value={server.cpu_percent} max={100} />
-            )}
-            {server.memory_percent !== undefined && (
-              <MetricBar label="Memory" value={server.memory_percent} max={100} />
-            )}
-            {server.disk_percent !== undefined && (
-              <MetricBar label="Disk" value={server.disk_percent} max={100} />
+        {isProvisioned && (
+          <div className="card-metrics">
+            {metrics ? (
+              <>
+                <MetricBar label="CPU" value={metrics.cpu_percent} max={100} />
+                <MetricBar
+                  label="Memory"
+                  value={metrics.memory_used_bytes}
+                  max={metrics.memory_total_bytes}
+                  detail={`${formatBytes(metrics.memory_used_bytes)} / ${formatBytes(metrics.memory_total_bytes)}`}
+                />
+                <MetricBar
+                  label="Disk"
+                  value={metrics.disk_used_bytes}
+                  max={metrics.disk_total_bytes}
+                  detail={`${formatBytes(metrics.disk_used_bytes)} / ${formatBytes(metrics.disk_total_bytes)}`}
+                />
+              </>
+            ) : (
+              <>
+                <MetricBarSkeleton />
+                <MetricBarSkeleton />
+                <MetricBarSkeleton />
+              </>
             )}
           </div>
         )}
       </div>
     </Link>
+  )
+}
+
+export function ServerCardSkeleton() {
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div>
+          <div className="skeleton skeleton-text" style={{ width: '8rem', height: '0.875rem' }} />
+          <div className="skeleton skeleton-text" style={{ width: '5rem', height: '0.75rem', marginTop: '0.25rem' }} />
+        </div>
+        <div className="skeleton skeleton-badge" />
+      </div>
+      <div className="card-metrics">
+        <MetricBarSkeleton />
+        <MetricBarSkeleton />
+        <MetricBarSkeleton />
+      </div>
+    </div>
   )
 }

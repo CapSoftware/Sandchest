@@ -1,18 +1,12 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import type { MetricsData } from '@/components/ServerMetrics'
+import type { MetricsResult } from '@/lib/metrics'
 
-interface ServerMetricsResponse {
-  metrics: MetricsData | null
-  daemon_status: string
-  collected_at: string
-}
-
-async function fetchMetrics(serverId: string): Promise<ServerMetricsResponse> {
+async function fetchMetrics(serverId: string): Promise<MetricsResult> {
   const res = await fetch(`/api/servers/${serverId}/metrics`)
   if (!res.ok) throw new Error('Failed to fetch metrics')
-  return res.json() as Promise<ServerMetricsResponse>
+  return res.json() as Promise<MetricsResult>
 }
 
 export function useServerMetrics(serverId: string, enabled: boolean) {
