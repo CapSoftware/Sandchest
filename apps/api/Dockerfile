@@ -1,4 +1,4 @@
-FROM oven/bun:1 AS deps
+FROM oven/bun:1.3.6 AS deps
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -18,7 +18,7 @@ COPY . .
 RUN bun run --filter @sandchest/contract build && \
     bun run --filter @sandchest/api build
 
-FROM oven/bun:1-slim
+FROM oven/bun:1.3.6-slim
 WORKDIR /app
 
 ENV NODE_ENV=production
