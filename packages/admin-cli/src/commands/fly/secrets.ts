@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { readConfig, requireConfig } from '../../config.js'
-import { exec, commandExists } from '../../shell.js'
+import { flyctl, commandExists } from '../../shell.js'
 import { success, step, warn, error, info, handleError } from '../../output.js'
 
 const SECRET_KEYS = [
@@ -147,7 +147,7 @@ export function flySecretsCommand(): Command {
         const flyArgs = ['secrets', 'set', ...secretArgs, '-a', appName]
         if (opts.stage) flyArgs.push('--stage')
 
-        const result = await exec('flyctl', flyArgs)
+        const result = await flyctl(flyArgs)
         if (result.code !== 0) {
           error(result.stderr.trim() || result.stdout.trim())
           process.exit(1)

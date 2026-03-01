@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { readConfig, requireConfig } from '../../config.js'
-import { execInherit, commandExists } from '../../shell.js'
+import { flyctlInherit, commandExists } from '../../shell.js'
 import { success, step, error, handleError } from '../../output.js'
 
 export function flyDeployCommand(): Command {
@@ -18,7 +18,7 @@ export function flyDeployCommand(): Command {
         const appName = config.fly!.appName!
 
         step('[1/1]', `Deploying ${appName} via flyctl...`)
-        const code = await execInherit('flyctl', ['deploy', '--remote-only', '-a', appName])
+        const code = await flyctlInherit(['deploy', '--remote-only', '-a', appName])
         if (code !== 0) {
           error(`flyctl deploy exited with code ${code}`)
           process.exit(code)

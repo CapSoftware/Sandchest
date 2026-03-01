@@ -20,7 +20,8 @@
     "db:push": "cd packages/db && bunx drizzle-kit push",
     "db:migrate": "bun run --filter @sandchest/db db:migrate",
     "db:migrate:run": "bun run --filter @sandchest/db db:migrate:run",
-    "db:studio": "bun run --filter @sandchest/db db:studio"
+    "db:studio": "bun run --filter @sandchest/db db:studio",
+    "sandchest-admin": "bun run packages/admin-cli/dist/index.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

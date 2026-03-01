@@ -55,6 +55,25 @@ export function execInherit(
   })
 }
 
+/**
+ * Clean env for flyctl — bun auto-loads .env which may contain a stale FLY_ACCESS_TOKEN
+ * that overrides the user's `flyctl auth login` session.
+ */
+function cleanFlyEnv(): Record<string, string> {
+  // Set to '' rather than delete — bun auto-loads .env and re-injects deleted vars into children
+  return { ...process.env, FLY_ACCESS_TOKEN: '' } as Record<string, string>
+}
+
+/** Run flyctl with FLY_ACCESS_TOKEN cleared from env */
+export function flyctl(args: string[]): Promise<ExecResult> {
+  return exec('flyctl', args, { env: cleanFlyEnv() })
+}
+
+/** Run flyctl with inherited stdio (streaming output) */
+export function flyctlInherit(args: string[]): Promise<number> {
+  return execInherit('flyctl', args, { env: cleanFlyEnv() })
+}
+
 export function commandExists(cmd: string): boolean {
   try {
     accessSync(cmd)

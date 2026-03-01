@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { readConfig, requireConfig } from '../../config.js'
-import { exec, commandExists } from '../../shell.js'
+import { flyctl, commandExists } from '../../shell.js'
 import { success, step, error, info, handleError } from '../../output.js'
 
 export function flyRedisCommand(): Command {
@@ -21,7 +21,7 @@ export function flyRedisCommand(): Command {
         const org = config.fly!.org ?? 'personal'
 
         step('[1/1]', `Creating Upstash Redis '${opts.name}' in ${region}...`)
-        const result = await exec('flyctl', [
+        const result = await flyctl([
           'redis', 'create',
           '--name', opts.name,
           '--region', region,

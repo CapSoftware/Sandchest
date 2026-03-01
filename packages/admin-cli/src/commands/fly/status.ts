@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { readConfig, requireConfig } from '../../config.js'
-import { execInherit, commandExists } from '../../shell.js'
+import { flyctlInherit, commandExists } from '../../shell.js'
 import { error, handleError } from '../../output.js'
 
 export function flyStatusCommand(): Command {
@@ -17,7 +17,7 @@ export function flyStatusCommand(): Command {
         requireConfig(config, 'fly.appName')
         const appName = config.fly!.appName!
 
-        const code = await execInherit('flyctl', ['status', '-a', appName])
+        const code = await flyctlInherit(['status', '-a', appName])
         if (code !== 0) process.exit(code)
       } catch (err) {
         handleError(err)

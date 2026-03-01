@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { readConfig, requireConfig } from '../../config.js'
-import { exec, commandExists } from '../../shell.js'
-import { success, step, error, info, handleError } from '../../output.js'
+import { flyctl, commandExists } from '../../shell.js'
+import { success, step, error, warn, info, handleError } from '../../output.js'
 
 export function flySetupCommand(): Command {
   return new Command('setup')
@@ -25,7 +25,7 @@ export function flySetupCommand(): Command {
         const totalSteps = opts.skipRedis ? 3 : 4
 
         step(`[1/${totalSteps}]`, `Creating Fly app '${appName}' in ${region}...`)
-        let result = await exec('flyctl', ['apps', 'create', appName, '--org', org])
+        let result = await flyctl( ['apps', 'create', appName, '--org', org])
         if (result.code !== 0) {
           if (result.stderr.includes('already exists')) {
             info(`App '${appName}' already exists, continuing...`)
@@ -36,14 +36,14 @@ export function flySetupCommand(): Command {
         }
 
         step(`[2/${totalSteps}]`, `Setting primary region to ${region}...`)
-        result = await exec('flyctl', ['regions', 'set', region, '-a', appName])
+        result = await flyctl( ['regions', 'set', region, '-a', appName])
         if (result.code !== 0) {
           error(result.stderr.trim())
           process.exit(1)
         }
 
         step(`[3/${totalSteps}]`, `Adding certificate for ${opts.domain}...`)
-        result = await exec('flyctl', ['certs', 'add', opts.domain, '-a', appName])
+        result = await flyctl( ['certs', 'add', opts.domain, '-a', appName])
         if (result.code !== 0) {
           if (result.stderr.includes('already exists') || result.stdout.includes('already exists')) {
             info(`Certificate for ${opts.domain} already exists, continuing...`)
@@ -55,7 +55,7 @@ export function flySetupCommand(): Command {
 
         if (!opts.skipRedis) {
           step(`[4/${totalSteps}]`, `Provisioning Upstash Redis '${opts.redisName}' in ${region}...`)
-          result = await exec('flyctl', [
+          result = await flyctl( [
             'redis', 'create',
             '--name', opts.redisName,
             '--region', region,
@@ -73,7 +73,29 @@ export function flySetupCommand(): Command {
               process.exit(1)
             }
           } else {
-            if (result.stdout) console.log(result.stdout.trim())
+            // Try to extract Redis URL from flyctl output and set it as a secret
+            const redisUrlMatch = result.stdout.match(/rediss?:\/\/[^\s]+/)
+            if (redisUrlMatch) {
+              const redisUrl = redisUrlMatch[0]
+              info(`Captured Redis URL, setting as Fly secret...`)
+              const secretResult = await flyctl( [
+                'secrets', 'set',
+                `REDIS_URL=${redisUrl}`,
+                'REDIS_FAMILY=6',
+                '--stage',
+                '-a', appName,
+              ])
+              if (secretResult.code === 0) {
+                success('REDIS_URL and REDIS_FAMILY=6 staged as Fly secrets')
+              } else {
+                warn('Could not auto-set Redis secrets. Set them manually:')
+                info(`  flyctl secrets set -a ${appName} REDIS_URL="${redisUrl}" REDIS_FAMILY=6`)
+              }
+            } else {
+              warn('Could not parse Redis URL from output. Set it manually:')
+              info(`  flyctl secrets set -a ${appName} REDIS_URL="<url>" REDIS_FAMILY=6`)
+              if (result.stdout) console.log(result.stdout.trim())
+            }
           }
         }
 

@@ -20,6 +20,7 @@ import { dbSeedCommand } from './commands/db/seed.js'
 import { dnsShowCommand } from './commands/dns/show.js'
 import { verifyCommand } from './commands/verify.js'
 import { setupCommand } from './commands/setup.js'
+import { preflightCommand } from './commands/preflight.js'
 
 const program = new Command()
   .name('sandchest-admin')
@@ -28,6 +29,7 @@ const program = new Command()
 
 // Top-level commands
 program.addCommand(initCommand())
+program.addCommand(preflightCommand())
 program.addCommand(verifyCommand())
 program.addCommand(setupCommand())
 

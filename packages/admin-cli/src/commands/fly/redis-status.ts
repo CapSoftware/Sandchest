@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { readConfig } from '../../config.js'
-import { execInherit, commandExists } from '../../shell.js'
+import { flyctlInherit, commandExists } from '../../shell.js'
 import { error, handleError } from '../../output.js'
 
 export function flyRedisStatusCommand(): Command {
@@ -17,7 +17,7 @@ export function flyRedisStatusCommand(): Command {
         const config = readConfig()
         const org = config.fly?.org ?? 'personal'
 
-        const code = await execInherit('flyctl', ['redis', 'status', opts.name, '-o', org])
+        const code = await flyctlInherit(['redis', 'status', opts.name, '-o', org])
         if (code !== 0) process.exit(code)
       } catch (err) {
         handleError(err)

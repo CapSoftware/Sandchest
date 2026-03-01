@@ -1,0 +1,130 @@
+name: Build VM Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'images/**'
+      - 'crates/sandchest-agent/**'
+
+  workflow_dispatch:
+    inputs:
+      toolchain:
+        description: 'Toolchain to build'
+        required: true
+        default: 'base'
+        type: choice
+        options:
+          - base
+          - node-22
+          - python-3.12
+          - go-1.22
+
+concurrency:
+  group: build-images
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler musl-tools
+
+      - name: Build guest agent (static musl binary)
+        run: cargo build --release --package sandchest-agent --target x86_64-unknown-linux-musl
+
+      - name: Fetch kernel
+        working-directory: images
+        run: make kernel
+
+      - name: Build base rootfs with guest agent
+        working-directory: images
+        run: |
+          sudo make rootfs \
+            AGENT_BIN=../target/x86_64-unknown-linux-musl/release/sandchest-agent
+
+      - name: Install toolchain
+        if: ${{ github.event.inputs.toolchain && github.event.inputs.toolchain != 'base' }}
+        working-directory: images
+        run: |
+          sudo make toolchain \
+            TOOLCHAIN=${{ github.event.inputs.toolchain }}
+
+      - name: Validate image
+        working-directory: images
+        run: ./scripts/validate-image.sh --output output/ubuntu-22.04/${{ github.event.inputs.toolchain || 'base' }}
+
+      - name: Upload kernel to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp images/kernel/vmlinux-5.10 \
+            "s3://${{ secrets.R2_BUCKET }}/binaries/vmlinux/latest/vmlinux" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+      - name: Upload rootfs to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          TOOLCHAIN=${{ github.event.inputs.toolchain || 'base' }}
+          aws s3 cp "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
+            "s3://${{ secrets.R2_BUCKET }}/binaries/rootfs/latest/rootfs.ext4" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+          aws s3 cp "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
+            "s3://${{ secrets.R2_BUCKET }}/binaries/rootfs/${{ github.sha }}/rootfs.ext4" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-images-${{ github.sha }}
+          path: |
+            images/kernel/vmlinux-5.10
+            images/output/ubuntu-22.04/*/rootfs.ext4
+            images/output/ubuntu-22.04/*/rootfs.sha256
+          retention-days: 30
+
+      - name: Deploy images to Hetzner
+        env:
+          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$HETZNER_SSH_KEY" > ~/.ssh/hetzner_key
+          chmod 600 ~/.ssh/hetzner_key
+          ssh-keyscan -H "$HETZNER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          TOOLCHAIN=${{ github.event.inputs.toolchain || 'base' }}
+
+          scp -i ~/.ssh/hetzner_key \
+            images/kernel/vmlinux-5.10 \
+            "root@${HETZNER_HOST}:/var/sandchest/images/vmlinux-5.10"
+
+          scp -i ~/.ssh/hetzner_key \
+            "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
+            "root@${HETZNER_HOST}:/var/sandchest/images/rootfs.ext4"
+
+          ssh -i ~/.ssh/hetzner_key "root@${HETZNER_HOST}" << 'DEPLOY'
+            chmod 644 /var/sandchest/images/vmlinux-5.10
+            chmod 644 /var/sandchest/images/rootfs.ext4
+            echo "Images deployed:"
+            ls -lh /var/sandchest/images/
+          DEPLOY

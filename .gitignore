@@ -19,6 +19,9 @@ target/
 .env.*
 !.env.example
 
+# mTLS certificates (private keys)
+/certs/
+
 # Docker
 docker-compose.override.yml
 
