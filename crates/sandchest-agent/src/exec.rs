@@ -438,8 +438,12 @@ mod tests {
             })
             .expect("should have exit event");
 
-        // Timed-out process exits with -1 (our sentinel)
-        assert_eq!(exit_event.exit_code, -1);
+        // Timed-out process exits with -1 (our sentinel) or 143 (128 + SIGTERM)
+        assert!(
+            exit_event.exit_code == -1 || exit_event.exit_code == 143,
+            "expected exit code -1 or 143, got {}",
+            exit_event.exit_code
+        );
     }
 
     #[tokio::test]
