@@ -418,8 +418,8 @@ mod tests {
     #[tokio::test]
     async fn exec_timeout_kills_process() {
         let mut req = make_request();
-        // Use trap to prevent orphan processes on CI (GHA fails on orphan cleanup)
-        req.shell_cmd = "trap 'exit 143' TERM; sleep 10 & wait".into();
+        // Use exec to replace shell with sleep — SIGTERM kills sleep directly, no orphans on CI
+        req.shell_cmd = "exec sleep 10".into();
         req.timeout_seconds = 1;
 
         let start = Instant::now();
@@ -438,15 +438,8 @@ mod tests {
             })
             .expect("should have exit event");
 
-        // Timed-out process exits with -1 (our sentinel) or 143 (128 + SIGTERM) depending on timing
-        assert!(
-            exit_event.exit_code == -1 || exit_event.exit_code == 143,
-            "timed-out process should exit with -1 or 143, got {}",
-            exit_event.exit_code
-        );
-
-        // Brief wait to ensure process is fully reaped (prevents GHA orphan cleanup errors)
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Timed-out process exits with -1 (our sentinel)
+        assert_eq!(exit_event.exit_code, -1);
     }
 
     #[tokio::test]
