@@ -49,9 +49,8 @@ if [[ -f "$DEST" ]]; then
     exit 0
 fi
 
-# Firecracker publishes kernels on their GitHub releases
-BASE_URL="https://github.com/firecracker-microvm/firecracker/releases/download/${FC_VERSION}"
-DOWNLOAD_URL="${BASE_URL}/vmlinux-${KERNEL_VERSION}-x86_64.bin"
+# Firecracker publishes guest kernels on their S3 bucket (not in release tarballs since v1.10+)
+DOWNLOAD_URL="https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin"
 
 echo "=== Fetching Firecracker guest kernel ==="
 echo "Kernel version:      ${KERNEL_VERSION}"
