@@ -131,7 +131,8 @@ describe('ci.yml', () => {
   test('has Rust check job with clippy', () => {
     expect(workflow).toContain('check-rust')
     expect(workflow).toContain('cargo check --workspace')
-    expect(workflow).toContain('cargo test --workspace')
+    expect(workflow).toContain('cargo test -p sandchest-agent')
+    expect(workflow).toContain('cargo test -p sandchest-node')
     expect(workflow).toContain('cargo clippy --workspace -- -D warnings')
   })
 
