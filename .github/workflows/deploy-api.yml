@@ -96,6 +96,24 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Validate Fly secrets
+        run: |
+          SECRETS=$(flyctl secrets list -a sandchest-api --json | jq -r '.[].Name')
+          MISSING=""
+          for name in DATABASE_URL BETTER_AUTH_SECRET RESEND_API_KEY REDIS_URL ADMIN_API_TOKEN; do
+            if ! echo "$SECRETS" | grep -qx "$name"; then
+              MISSING="$MISSING $name"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing Fly secrets:$MISSING"
+            echo "Fix: flyctl secrets set -a sandchest-api NAME=value"
+            exit 1
+          fi
+          echo "All required secrets are set"
+        env:
+          FLY_ACCESS_TOKEN: ${{ secrets.FLY_ACCESS_TOKEN }}
+
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
         env:

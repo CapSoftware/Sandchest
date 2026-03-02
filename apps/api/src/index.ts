@@ -47,6 +47,8 @@ const AppLive = ApiRouter.pipe(
   HttpServer.serve(),
 )
 
+const isProduction = env.NODE_ENV === 'production'
+
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL, { family: REDIS_FAMILY }) : RedisMemory
 
 const { NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM } = env
@@ -120,7 +122,34 @@ const GracefulShutdownLive = Layer.scopedDiscard(
   }),
 )
 
-const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive).pipe(
+// In production, warn when infrastructure services fall back to in-memory stubs.
+// These fallbacks work for local dev but silently degrade real deployments.
+const ProductionFallbackWarnings = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    if (!isProduction) return
+
+    if (!REDIS_URL) {
+      yield* Effect.logWarning(
+        'REDIS_URL is not set — using in-memory stub. Rate limiting, workers, SSE reconnection, and event buffering are degraded. Fix: flyctl secrets set REDIS_URL=<url> REDIS_FAMILY=6',
+      )
+    }
+
+    if (!(SANDCHEST_S3_ENDPOINT && SANDCHEST_S3_ACCESS_KEY && SANDCHEST_S3_SECRET_KEY && ARTIFACT_BUCKET_NAME)) {
+      yield* Effect.logWarning(
+        'Object storage is not configured — using in-memory stub. Artifacts and event logs will not persist. Fix: set SANDCHEST_S3_ENDPOINT, SANDCHEST_S3_ACCESS_KEY, SANDCHEST_S3_SECRET_KEY, and ARTIFACT_BUCKET_NAME',
+      )
+    }
+
+    const hasNodeClient = NODE_GRPC_ADDR && NODE_GRPC_NODE_ID && (hasPemContent || hasFilePaths)
+    if (!hasNodeClient) {
+      yield* Effect.logWarning(
+        'Node gRPC client is not configured — using in-memory stub. Sandbox creation, exec, and session operations will return mock data. Fix: set NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, and mTLS credentials',
+      )
+    }
+  }),
+)
+
+const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive, ProductionFallbackWarnings).pipe(
   Layer.provide(ShutdownControllerLive),
   Layer.provide(EventRecorderLive),
   Layer.provide(makeSandboxRepoDrizzle(db)),
