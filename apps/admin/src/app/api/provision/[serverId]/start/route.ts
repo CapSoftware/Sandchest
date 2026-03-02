@@ -127,11 +127,10 @@ async function runProvisioning(
     // Execute all commands for this step
     const commands = await resolveCommands(step)
     const fullCommand = commands.join(' && ')
-    let output = ''
 
     try {
       const result = await execCommand(conn, fullCommand)
-      output = result.stdout + (result.stderr ? `\n${result.stderr}` : '')
+      let output = result.stdout + (result.stderr ? `\n${result.stderr}` : '')
 
       if (result.code !== 0) {
         stepResults[i] = { id: step.id, status: 'failed', output: output.trim() }

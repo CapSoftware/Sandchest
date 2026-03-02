@@ -10,11 +10,11 @@ interface StepData {
 }
 
 function StepIcon({ status }: { status: string }) {
-  let label = ''
-  if (status === 'completed') label = '\u2713'
-  else if (status === 'running') label = '\u25B6'
-  else if (status === 'failed') label = '\u2717'
-  else label = '\u2022'
+  const label =
+    status === 'completed' ? '\u2713'
+    : status === 'running' ? '\u25B6'
+    : status === 'failed' ? '\u2717'
+    : '\u2022'
 
   return (
     <div className="provision-step-icon" data-status={status}>
