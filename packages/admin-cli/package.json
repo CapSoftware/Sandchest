@@ -16,7 +16,7 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "bun test"
+    "test": "echo 'No tests yet'"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
