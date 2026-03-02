@@ -118,6 +118,13 @@ fn kill_orphaned_processes() {
     #[cfg(target_os = "linux")]
     {
         let my_pid = std::process::id();
+
+        // Only kill orphans when running as PID 1 (inside a Firecracker VM).
+        // In tests or on CI runners, this would kill unrelated processes.
+        if my_pid != 1 {
+            return;
+        }
+
         let mut killed = 0u32;
 
         if let Ok(entries) = std::fs::read_dir("/proc") {
