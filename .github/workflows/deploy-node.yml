@@ -35,7 +35,11 @@ jobs:
       - name: Install protobuf compiler
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
-      - run: cargo test --workspace
+      - name: Test sandchest-agent
+        run: cargo test -p sandchest-agent
+
+      - name: Test sandchest-node
+        run: cargo test -p sandchest-node
 
       - run: cargo clippy --workspace -- -D warnings
 
