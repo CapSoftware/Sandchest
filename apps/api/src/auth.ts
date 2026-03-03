@@ -21,6 +21,12 @@ function createAuth() {
       'https://sandchest.com',
       'https://*.sandchest.com',
     ],
+    advanced: {
+      crossSubDomainCookies: {
+        enabled: true,
+        domain: env.BETTER_AUTH_COOKIE_DOMAIN ?? '.sandchest.com',
+      },
+    },
     database: createPool({
       uri: env.DATABASE_URL,
       waitForConnections: true,

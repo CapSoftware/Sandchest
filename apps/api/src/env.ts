@@ -60,6 +60,7 @@ export function loadEnv() {
 
     // Config
     BETTER_AUTH_BASE_URL: optional('BETTER_AUTH_BASE_URL', 'http://localhost:3001'),
+    BETTER_AUTH_COOKIE_DOMAIN: process.env.BETTER_AUTH_COOKIE_DOMAIN as string | undefined,
     RESEND_FROM_EMAIL: optional('RESEND_FROM_EMAIL', 'Sandchest Auth <noreply@send.sandchest.com>'),
   }
 }

@@ -41,16 +41,11 @@ export default function EmailForm({
     }
     setValidationError('')
 
-    console.log('[email-form] sending OTP', { email: trimmed, otpType, formType: type })
     sendOtp.mutate(
       { email: trimmed, type: otpType },
       {
-        onSuccess(data) {
-          console.log('[email-form] OTP sent, redirecting to verify', { data, type })
+        onSuccess() {
           window.location.href = `/verify?email=${encodeURIComponent(trimmed)}&type=${type}`
-        },
-        onError(err) {
-          console.error('[email-form] OTP send failed', err)
         },
       },
     )

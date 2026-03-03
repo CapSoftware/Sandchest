@@ -3,5 +3,8 @@ import { organizationClient, apiKeyClient, emailOTPClient } from 'better-auth/cl
 
 export const authClient = createAuthClient({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001',
+  fetchOptions: {
+    credentials: 'include',
+  },
   plugins: [organizationClient(), apiKeyClient(), emailOTPClient()],
 })
