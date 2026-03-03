@@ -4,7 +4,8 @@ import { getDb } from '@/lib/db'
 import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
-import { PROVISION_STEPS, resolveCommands, type StepResult } from '@/lib/provisioner'
+import { PROVISION_STEPS, resolveCommands, type StepResult, type ProvisionContext } from '@/lib/provisioner'
+import { generateId, idToBytes, NODE_PREFIX } from '@sandchest/contract'
 
 export async function POST(
   _request: Request,
@@ -64,8 +65,11 @@ export async function POST(
     })
     .where(eq(adminServers.id, serverIdBuf))
 
+  const nodeId = generateId(NODE_PREFIX)
+  const ctx: ProvisionContext = { nodeId }
+
   // Run remaining steps in background
-  retryProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, steps, failedIndex).catch(
+  retryProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, steps, failedIndex, ctx).catch(
     () => {},
   )
 
@@ -80,6 +84,7 @@ async function retryProvisioning(
   privateKey: string,
   stepResults: StepResult[],
   startIndex: number,
+  ctx: ProvisionContext,
 ) {
   const db = getDb()
   const serverIdBuf = Buffer.from(serverId, 'hex') as unknown as Uint8Array
@@ -99,6 +104,29 @@ async function retryProvisioning(
     return
   }
 
+  // Collect system info if missing
+  try {
+    const cpuResult = await execCommand(conn, 'lscpu | grep "Model name" | head -1 | cut -d: -f2 | xargs')
+    const ramResult = await execCommand(conn, 'free -h | awk \'/Mem:/ {print $2}\'')
+    const diskResult = await execCommand(conn, 'df -h / | awk \'NR==2 {print $2}\'')
+    const osResult = await execCommand(conn, 'cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d \'"\'')
+
+    await db
+      .update(adminServers)
+      .set({
+        systemInfo: {
+          cpu: cpuResult.stdout.trim() || undefined,
+          ram: ramResult.stdout.trim() || undefined,
+          disk: diskResult.stdout.trim() || undefined,
+          os: osResult.stdout.trim() || undefined,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(adminServers.id, serverIdBuf))
+  } catch {
+    // Non-fatal
+  }
+
   for (let i = startIndex; i < PROVISION_STEPS.length; i++) {
     const step = PROVISION_STEPS[i]!
 
@@ -112,11 +140,11 @@ async function retryProvisioning(
       })
       .where(eq(adminServers.id, serverIdBuf))
 
-    const commands = await resolveCommands(step)
+    const commands = await resolveCommands(step, ctx)
     const fullCommand = commands.join(' && ')
 
     try {
-      const result = await execCommand(conn, fullCommand)
+      const result = await execCommand(conn, fullCommand, step.timeoutMs)
       const output = result.stdout + (result.stderr ? `\n${result.stderr}` : '')
 
       if (result.code !== 0) {
@@ -183,11 +211,13 @@ async function retryProvisioning(
   }
 
   conn.end()
+  const nodeIdBytes = idToBytes(ctx.nodeId) as unknown as Uint8Array
   await db
     .update(adminServers)
     .set({
       provisionStatus: 'completed',
       provisionSteps: [...stepResults],
+      nodeId: nodeIdBytes,
       updatedAt: new Date(),
     })
     .where(eq(adminServers.id, serverIdBuf))
