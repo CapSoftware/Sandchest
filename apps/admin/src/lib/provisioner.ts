@@ -1,10 +1,15 @@
 import { presignDaemonBinary } from './r2.js'
 
+export interface ProvisionContext {
+  readonly nodeId: string
+}
+
 export interface ProvisionStep {
   readonly id: string
   readonly name: string
-  readonly commands: string[] | (() => string[] | Promise<string[]>)
+  readonly commands: string[] | ((ctx: ProvisionContext) => string[] | Promise<string[]>)
   readonly validate?: string | undefined
+  readonly timeoutMs?: number | undefined
 }
 
 export interface StepResult {
@@ -13,9 +18,9 @@ export interface StepResult {
   readonly output?: string | undefined
 }
 
-export async function resolveCommands(step: ProvisionStep): Promise<string[]> {
+export async function resolveCommands(step: ProvisionStep, ctx: ProvisionContext): Promise<string[]> {
   if (typeof step.commands === 'function') {
-    return step.commands()
+    return step.commands(ctx)
   }
   return step.commands
 }
@@ -109,11 +114,16 @@ export const PROVISION_STEPS: ProvisionStep[] = [
   {
     id: 'deploy-node-daemon',
     name: 'Deploy node daemon',
-    commands: async () => {
+    timeoutMs: 300_000, // 5 min — downloads ~27MB binary
+    commands: async (ctx) => {
       const url = await presignDaemonBinary()
       return [
-        `curl -fsSL '${url}' -o /usr/local/bin/sandchest-node`,
+        'systemctl stop sandchest-node 2>/dev/null || true',
+        'pkill -f sandchest-node 2>/dev/null || true',
+        `curl -fsSL --retry 3 --retry-delay 5 '${url}' -o /usr/local/bin/sandchest-node`,
         'chmod +x /usr/local/bin/sandchest-node',
+        'mkdir -p /etc/sandchest',
+        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\n' > /etc/sandchest/node.env`,
         'printf \'[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n\' > /etc/systemd/system/sandchest-node.service',
         'systemctl daemon-reload',
         'systemctl enable sandchest-node',
@@ -125,9 +135,8 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     id: 'start-services',
     name: 'Start services',
     commands: [
-      'systemctl start sandchest-node || true',
-      'echo "Services started"',
+      'systemctl restart sandchest-node',
     ],
-    validate: 'systemctl is-active sandchest-node || echo "sandchest-node not yet active (binary may not be deployed)"',
+    validate: 'systemctl is-active sandchest-node',
   },
 ]
