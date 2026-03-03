@@ -23,6 +23,7 @@
         "@aws-sdk/s3-request-presigner": "^3.997.0",
         "@sandchest/contract": "workspace:*",
         "@sandchest/db": "workspace:*",
+        "@sandchest/sdk": "workspace:*",
         "@tanstack/react-query": "^5.90.21",
         "cpu-features": "^0.0.10",
         "dotenv": "^17.3.1",
