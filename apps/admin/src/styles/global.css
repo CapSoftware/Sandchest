@@ -680,3 +680,217 @@ textarea.form-input {
   border-color: var(--color-accent);
   color: var(--color-text-strong);
 }
+
+/* --- VM table --- */
+
+.vm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.vm-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--color-border-weak);
+  white-space: nowrap;
+}
+
+.vm-table td {
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--color-border-weak);
+  white-space: nowrap;
+}
+
+.vm-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.vm-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  background-color: var(--color-border-weak);
+  color: var(--color-text);
+}
+
+/* --- Simulate page --- */
+
+.sim-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sim-workspace {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1rem;
+  min-height: 500px;
+}
+
+.sim-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sim-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  border: 1px solid transparent;
+}
+
+.sim-sidebar-item:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-strong);
+}
+
+.sim-sidebar-item[data-active="true"] {
+  background-color: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-strong);
+}
+
+.sim-sidebar-item-id {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-sidebar-item-status {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sim-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border-weak);
+  margin-bottom: 1rem;
+}
+
+.sim-tab {
+  padding: 0.5rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.sim-tab:hover {
+  color: var(--color-text);
+}
+
+.sim-tab[data-active="true"] {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.sim-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sim-status-dot[data-status="running"] {
+  background-color: var(--color-success);
+}
+
+.sim-status-dot[data-status="stopped"] {
+  background-color: var(--color-text-weak);
+}
+
+.sim-status-dot[data-status="queued"],
+.sim-status-dot[data-status="starting"] {
+  background-color: var(--color-warning);
+}
+
+.sim-status-dot[data-status="failed"],
+.sim-status-dot[data-status="deleted"] {
+  background-color: var(--color-danger);
+}
+
+.sim-file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.sim-file-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-weak);
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--color-border-weak);
+}
+
+.sim-file-table td {
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--color-border-weak);
+}
+
+.sim-file-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.sim-file-table tbody tr:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.sim-file-name {
+  cursor: pointer;
+  color: var(--color-text-strong);
+}
+
+.sim-file-name:hover {
+  color: var(--color-accent);
+}
+
+.sim-file-dir {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.sim-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.sim-connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.sim-connection-dot[data-connected="true"] {
+  background-color: var(--color-success);
+}
+
+.sim-connection-dot[data-connected="false"] {
+  background-color: var(--color-text-weak);
+}
