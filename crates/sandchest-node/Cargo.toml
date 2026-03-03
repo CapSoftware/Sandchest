@@ -23,6 +23,7 @@ http = "1"
 hyper-unix-socket = "0.3"
 sha2 = "0.10"
 sysinfo = "0.32"
+rustls = { version = "0.23", features = ["ring"] }
 aws-sdk-s3 = "1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-credential-types = "1"
