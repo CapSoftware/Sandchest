@@ -4,7 +4,8 @@ import { getDb } from '@/lib/db'
 import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
-import { PROVISION_STEPS, resolveCommands, type StepResult } from '@/lib/provisioner'
+import { PROVISION_STEPS, resolveCommands, type StepResult, type ProvisionContext } from '@/lib/provisioner'
+import { generateId, idToBytes, NODE_PREFIX } from '@sandchest/contract'
 
 export async function POST(
   _request: Request,
@@ -53,8 +54,11 @@ export async function POST(
     })
     .where(eq(adminServers.id, Buffer.from(serverId, 'hex') as unknown as Uint8Array))
 
+  // Generate node ID upfront so the deploy step can write it to node.env
+  const nodeId = generateId(NODE_PREFIX)
+
   // Run provisioning in background (fire and forget)
-  runProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, stepResults).catch(
+  runProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, stepResults, { nodeId }).catch(
     () => {},
   )
 
@@ -68,6 +72,7 @@ async function runProvisioning(
   username: string,
   privateKey: string,
   stepResults: StepResult[],
+  ctx: ProvisionContext,
 ) {
   const db = getDb()
   const serverIdBuf = Buffer.from(serverId, 'hex') as unknown as Uint8Array
@@ -125,11 +130,11 @@ async function runProvisioning(
       .where(eq(adminServers.id, serverIdBuf))
 
     // Execute all commands for this step
-    const commands = await resolveCommands(step)
+    const commands = await resolveCommands(step, ctx)
     const fullCommand = commands.join(' && ')
 
     try {
-      const result = await execCommand(conn, fullCommand)
+      const result = await execCommand(conn, fullCommand, step.timeoutMs)
       let output = result.stdout + (result.stderr ? `\n${result.stderr}` : '')
 
       if (result.code !== 0) {
@@ -204,13 +209,15 @@ async function runProvisioning(
       .where(eq(adminServers.id, serverIdBuf))
   }
 
-  // All steps completed
+  // All steps completed — link the node ID to the server record
   conn.end()
+  const nodeIdBytes = idToBytes(ctx.nodeId) as unknown as Uint8Array
   await db
     .update(adminServers)
     .set({
       provisionStatus: 'completed',
       provisionSteps: [...stepResults],
+      nodeId: nodeIdBytes,
       updatedAt: new Date(),
     })
     .where(eq(adminServers.id, serverIdBuf))
