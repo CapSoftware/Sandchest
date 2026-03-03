@@ -84,25 +84,6 @@ jobs:
             "s3://${{ secrets.R2_BUCKET }}/binaries/sandchest-node/latest/sandchest-node" \
             --endpoint-url "${{ secrets.R2_ENDPOINT }}"
 
-      - name: Deploy to Hetzner
-        env:
-          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
-          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$HETZNER_SSH_KEY" > ~/.ssh/hetzner_key
-          chmod 600 ~/.ssh/hetzner_key
-          ssh-keyscan -H "$HETZNER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-
-          scp -i ~/.ssh/hetzner_key \
-            target/release/sandchest-node \
-            "root@${HETZNER_HOST}:/usr/local/bin/sandchest-node.new"
-
-          ssh -i ~/.ssh/hetzner_key "root@${HETZNER_HOST}" << 'DEPLOY'
-            set -euo pipefail
-            mv /usr/local/bin/sandchest-node.new /usr/local/bin/sandchest-node
-            chmod +x /usr/local/bin/sandchest-node
-            systemctl restart sandchest-node
-            sleep 3
-            systemctl is-active sandchest-node
-          DEPLOY
+      # Deployment to individual nodes is handled via the admin app's
+      # "Deploy Daemon" button, which pulls the binary from R2.
+      # No direct SSH needed — scales to any number of servers.
