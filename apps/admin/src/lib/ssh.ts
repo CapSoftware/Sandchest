@@ -126,7 +126,8 @@ export function execCommand(conn: Client, cmd: string, timeoutMs = 120_000): Pro
       })
       stream.on('close', (code: number) => {
         clearTimeout(timer)
-        if (!settled) { settled = true; resolve({ stdout, stderr, code: code ?? 0 }) }
+        // Treat null/undefined exit code (e.g. process killed by signal) as failure, not success
+        if (!settled) { settled = true; resolve({ stdout, stderr, code: code ?? 1 }) }
       })
       stream.on('error', (streamErr: Error) => {
         clearTimeout(timer)
