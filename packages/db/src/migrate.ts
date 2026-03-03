@@ -28,8 +28,54 @@ interface JournalEntry {
 }
 
 /**
- * If Drizzle's journal table is empty but app tables already exist (from db:push),
- * seed the journal with hashes for all existing migration files so Drizzle skips them.
+ * Check whether a single migration's schema changes have already been applied.
+ * Supports CREATE TABLE and ALTER TABLE ADD COLUMN statements.
+ * Returns true only if every statement in the migration is already reflected in the DB.
+ */
+async function isMigrationApplied(pool: mysql.Pool, migrationSql: string): Promise<boolean> {
+  const statements = migrationSql
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  for (const stmt of statements) {
+    // ALTER TABLE `x` ADD `y` ...
+    const addCol = stmt.match(
+      /ALTER\s+TABLE\s+`(\w+)`\s+ADD\s+(?:COLUMN\s+)?`(\w+)`/i,
+    )
+    if (addCol) {
+      const [rows] = await pool.query(
+        'SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+        [addCol[1], addCol[2]],
+      )
+      if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) return false
+      continue
+    }
+
+    // CREATE TABLE `x` ...
+    const createTbl = stmt.match(
+      /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`(\w+)`/i,
+    )
+    if (createTbl) {
+      const [rows] = await pool.query('SHOW TABLES LIKE ?', [createTbl[1]])
+      if ((rows as unknown[]).length === 0) return false
+      continue
+    }
+
+    // Statement type we can't verify — assume not applied
+    return false
+  }
+
+  return statements.length > 0
+}
+
+/**
+ * Ensure the Drizzle journal reflects migrations whose schema changes are
+ * already present in the database (e.g. applied via `db:push`).
+ *
+ * Handles both empty journals and partially populated ones — any migration
+ * whose hash is missing from the journal but whose changes already exist in
+ * the DB will be seeded so Drizzle doesn't try to re-run it.
  */
 async function seedDrizzleJournalIfNeeded(pool: mysql.Pool): Promise<void> {
   // Ensure the journal table exists
@@ -41,13 +87,15 @@ async function seedDrizzleJournalIfNeeded(pool: mysql.Pool): Promise<void> {
     )
   `)
 
-  const [rows] = await pool.query('SELECT COUNT(*) as cnt FROM `__drizzle_migrations`')
-  const count = (rows as Array<{ cnt: number }>)[0]?.cnt ?? 0
-  if (count > 0) return // journal already populated
-
   // Check if app tables exist (canary: sandboxes)
   const [tables] = await pool.query(`SHOW TABLES LIKE 'sandboxes'`)
   if ((tables as unknown[]).length === 0) return // fresh DB, nothing to seed
+
+  // Collect hashes already in the journal
+  const [existingRows] = await pool.query('SELECT `hash` FROM `__drizzle_migrations`')
+  const existingHashes = new Set(
+    (existingRows as Array<{ hash: string }>).map((r) => r.hash),
+  )
 
   // Read the Drizzle journal to find all migration entries
   const journalPath = resolve(__dirname, '..', 'drizzle', 'meta', '_journal.json')
@@ -59,6 +107,13 @@ async function seedDrizzleJournalIfNeeded(pool: mysql.Pool): Promise<void> {
     const sqlPath = resolve(__dirname, '..', 'drizzle', `${entry.tag}.sql`)
     const sql = readFileSync(sqlPath, 'utf-8')
     const hash = createHash('sha256').update(sql).digest('hex')
+
+    if (existingHashes.has(hash)) continue // already recorded
+
+    // Only seed if the migration's changes are already in the DB
+    const applied = await isMigrationApplied(pool, sql)
+    if (!applied) continue
+
     await pool.query(
       'INSERT INTO `__drizzle_migrations` (`hash`, `created_at`) VALUES (?, ?)',
       [hash, entry.when],
