@@ -5,11 +5,13 @@ import ServerCard, { ServerCardSkeleton } from '@/components/ServerCard'
 import AddServerDialog from '@/components/AddServerDialog'
 import { useServers } from '@/hooks/use-servers'
 import { useServersMetrics } from '@/hooks/use-servers-metrics'
+import { useServersSandboxes } from '@/hooks/use-servers-sandboxes'
 
 export default function ServersPage() {
   const { data: servers, isLoading } = useServers()
   const hasProvisioned = servers?.some((s) => s.provision_status === 'completed') ?? false
   const { data: metricsMap } = useServersMetrics(hasProvisioned)
+  const { data: sandboxCounts } = useServersSandboxes(hasProvisioned)
   const [showAdd, setShowAdd] = useState(false)
 
   return (
@@ -35,6 +37,7 @@ export default function ServersPage() {
                 key={server.id}
                 server={server}
                 metricsResult={metricsMap?.[server.id]}
+                vmCount={sandboxCounts?.[server.id]}
               />
             ))}
             <div className="add-server-card" onClick={() => setShowAdd(true)}>

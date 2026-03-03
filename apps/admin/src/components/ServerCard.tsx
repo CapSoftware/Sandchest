@@ -58,9 +58,11 @@ function MetricBarSkeleton() {
 export default function ServerCard({
   server,
   metricsResult,
+  vmCount,
 }: {
   server: ServerSummary
   metricsResult?: MetricsResult | undefined
+  vmCount?: number | undefined
 }) {
   const status = deriveStatus(
     server.provision_status,
@@ -79,7 +81,12 @@ export default function ServerCard({
             <div className="card-title">{server.name}</div>
             <div className="card-subtitle">{server.ip}</div>
           </div>
-          <StatusBadge status={status} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {isProvisioned && vmCount !== undefined && (
+              <span className="vm-count">{vmCount} / {server.slots_total} VMs</span>
+            )}
+            <StatusBadge status={status} />
+          </div>
         </div>
 
         {isProvisioned && (
