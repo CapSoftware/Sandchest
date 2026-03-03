@@ -15,7 +15,7 @@ export async function GET() {
     provision_status: row.provisionStatus,
     node_id: row.nodeId ? Buffer.from(row.nodeId).toString('hex') : null,
     slots_total: row.slotsTotal,
-    system_info: row.systemInfo,
+    system_info: typeof row.systemInfo === 'string' ? JSON.parse(row.systemInfo) : row.systemInfo,
     created_at: row.createdAt.toISOString(),
   }))
 

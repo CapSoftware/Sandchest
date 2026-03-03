@@ -31,7 +31,7 @@ export async function GET(
     provision_error: server.provisionError,
     provision_steps: server.provisionSteps,
     slots_total: server.slotsTotal,
-    system_info: server.systemInfo,
+    system_info: typeof server.systemInfo === 'string' ? JSON.parse(server.systemInfo) : server.systemInfo,
     node_id: server.nodeId ? Buffer.from(server.nodeId).toString('hex') : null,
     created_at: server.createdAt.toISOString(),
     updated_at: server.updatedAt.toISOString(),
