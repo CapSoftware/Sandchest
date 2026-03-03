@@ -272,6 +272,10 @@ use crate::jailer::JailerConfig;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Env-var tests mutate process-global state and must not run in parallel.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn profile_small_resources() {
@@ -549,6 +553,7 @@ mod tests {
 
     #[test]
     fn tls_config_from_env_all_set() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_GRPC_CERT", "/certs/server.pem");
         std::env::set_var("SANDCHEST_GRPC_KEY", "/certs/server.key");
         std::env::set_var("SANDCHEST_GRPC_CA", "/certs/ca.pem");
@@ -565,6 +570,7 @@ mod tests {
 
     #[test]
     fn tls_config_from_env_missing_cert() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("SANDCHEST_GRPC_CERT");
         std::env::set_var("SANDCHEST_GRPC_KEY", "/certs/server.key");
         std::env::set_var("SANDCHEST_GRPC_CA", "/certs/ca.pem");
@@ -577,6 +583,7 @@ mod tests {
 
     #[test]
     fn tls_config_from_env_missing_key() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_GRPC_CERT", "/certs/server.pem");
         std::env::remove_var("SANDCHEST_GRPC_KEY");
         std::env::set_var("SANDCHEST_GRPC_CA", "/certs/ca.pem");
@@ -589,6 +596,7 @@ mod tests {
 
     #[test]
     fn tls_config_from_env_missing_ca() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_GRPC_CERT", "/certs/server.pem");
         std::env::set_var("SANDCHEST_GRPC_KEY", "/certs/server.key");
         std::env::remove_var("SANDCHEST_GRPC_CA");
@@ -614,6 +622,7 @@ mod tests {
 
     #[test]
     fn s3_config_region_defaults_to_auto() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
         std::env::remove_var("SANDCHEST_S3_REGION");
         std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
@@ -627,6 +636,7 @@ mod tests {
 
     #[test]
     fn s3_config_both_credentials_valid() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
         std::env::set_var("SANDCHEST_S3_ACCESS_KEY", "access");
         std::env::set_var("SANDCHEST_S3_SECRET_KEY", "secret");
@@ -643,6 +653,7 @@ mod tests {
 
     #[test]
     fn s3_config_no_credentials_valid() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
         std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
         std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
@@ -656,6 +667,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "SANDCHEST_S3_SECRET_KEY is missing")]
     fn s3_config_access_key_without_secret_panics() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
         std::env::set_var("SANDCHEST_S3_ACCESS_KEY", "access");
         std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
@@ -669,6 +681,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "SANDCHEST_S3_ACCESS_KEY is missing")]
     fn s3_config_secret_key_without_access_panics() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SANDCHEST_S3_BUCKET", "test-bucket");
         std::env::remove_var("SANDCHEST_S3_ACCESS_KEY");
         std::env::set_var("SANDCHEST_S3_SECRET_KEY", "secret");
