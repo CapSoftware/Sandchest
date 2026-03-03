@@ -5,7 +5,7 @@ import { authClient } from '@/lib/auth-client'
 
 interface SendOtpInput {
   email: string
-  type: 'sign-in' | 'email-verification'
+  type: 'sign-in'
 }
 
 export function useSendOtp() {

@@ -29,7 +29,7 @@ export default function EmailForm({
   const [validationError, setValidationError] = useState('')
   const sendOtp = useSendOtp()
 
-  const otpType = type === 'sign-up' ? ('email-verification' as const) : type
+  const otpType = 'sign-in' as const
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()

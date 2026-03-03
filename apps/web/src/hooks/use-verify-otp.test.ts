@@ -23,12 +23,8 @@ describe('useVerifyOtp hook', () => {
     expect(src).toMatch(/export function useVerifyOtp/)
   })
 
-  test('calls authClient.signIn.emailOtp for sign-in', () => {
+  test('calls authClient.signIn.emailOtp', () => {
     expect(src).toMatch(/authClient\.signIn\.emailOtp/)
-  })
-
-  test('calls authClient.emailOtp.verifyEmail for email-verification', () => {
-    expect(src).toMatch(/authClient\.emailOtp\.verifyEmail/)
   })
 
   test('returns a useMutation result', () => {

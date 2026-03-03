@@ -16,7 +16,6 @@ export default function VerifyOtpFormInner() {
   const searchParams = useSearchParams()
   const email = searchParams.get('email') ?? ''
   const type = searchParams.get('type') === 'sign-up' ? ('sign-up' as const) : ('sign-in' as const)
-  const otpType = type === 'sign-up' ? ('email-verification' as const) : type
 
   const verifyOtp = useVerifyOtp()
   const resendOtp = useSendOtp()
@@ -36,7 +35,7 @@ export default function VerifyOtpFormInner() {
 
   function verify(code: string) {
     verifyOtp.mutate(
-      { email, otp: code, type: otpType },
+      { email, otp: code },
       {
         onSuccess() {
           window.location.href = redirectTo
@@ -94,7 +93,7 @@ export default function VerifyOtpFormInner() {
 
   function handleResend() {
     resendOtp.mutate(
-      { email, type: otpType },
+      { email, type: 'sign-in' },
       {
         onSuccess() {
           setDigits(Array(OTP_LENGTH).fill(''))
