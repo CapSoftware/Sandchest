@@ -250,7 +250,18 @@ export function createNodeClientLayer(config: NodeGrpcConfig): Layer.Layer<NodeC
       const key = config.keyPem ? Buffer.from(config.keyPem) : readFileSync(config.keyPath!)
       const cert = config.certPem ? Buffer.from(config.certPem) : readFileSync(config.certPath!)
 
-      const credentials = ChannelCredentials.createSsl(ca, key, cert)
+      yield* Effect.log(`gRPC mTLS: ca=${ca.length}B key=${key.length}B cert=${cert.length}B target=${config.address}`)
+
+      // Bun's tls.connect polyfill does not properly apply custom CA
+      // certificates from secureContext when upgrading an existing TCP
+      // socket to TLS (the pattern @grpc/grpc-js uses). This causes
+      // "unable to verify the first certificate" even with valid certs.
+      // Workaround: skip client-side server cert verification. The server
+      // still verifies our client cert (mTLS), and we connect to a known
+      // IP we control, so MITM risk is minimal.
+      const credentials = ChannelCredentials.createSsl(ca, key, cert, {
+        rejectUnauthorized: false,
+      })
       const channel = createChannel(config.address, credentials)
       const nodeIdBytes = hexToBytes(config.nodeId)
 

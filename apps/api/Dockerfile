@@ -23,19 +23,10 @@ COPY . .
 RUN bun run --filter @sandchest/contract build && \
     bun run --filter @sandchest/api build
 
-# Grab the Node.js binary for the runtime stage
-FROM node:22-slim AS node-bin
-
 FROM oven/bun:1.3.6-slim
 WORKDIR /app
 
 ENV NODE_ENV=production
-
-# Use Node.js runtime instead of Bun for @grpc/grpc-js TLS compatibility.
-# Bun's tls.connect polyfill doesn't properly handle secureContext with custom
-# CA certificates when upgrading existing sockets, causing gRPC mTLS to fail
-# with "unable to verify the first certificate".
-COPY --from=node-bin /usr/local/bin/node /usr/local/bin/node
 
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
@@ -59,4 +50,4 @@ COPY --from=build /app/packages/contract/dist packages/contract/dist
 COPY --from=build /app/packages/db/src packages/db/src
 
 EXPOSE 3001
-CMD ["node", "apps/api/dist/index.js"]
+CMD ["bun", "run", "apps/api/dist/index.js"]
