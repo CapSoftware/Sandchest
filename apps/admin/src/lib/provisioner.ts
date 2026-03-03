@@ -124,13 +124,13 @@ export const PROVISION_STEPS: ProvisionStep[] = [
       const kernelUrl = await presignKernel()
       const rootfsUrl = await presignRootfs()
       return [
-        'mkdir -p /var/sandchest/images',
-        `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/vmlinux-5.10`,
-        `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrl}' -o /var/sandchest/images/rootfs.ext4`,
-        'chmod 644 /var/sandchest/images/vmlinux-5.10 /var/sandchest/images/rootfs.ext4',
+        'mkdir -p /var/sandchest/images/ubuntu-22.04-base',
+        `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/ubuntu-22.04-base/vmlinux`,
+        `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrl}' -o /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4`,
+        'chmod 644 /var/sandchest/images/ubuntu-22.04-base/vmlinux /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4',
       ]
     },
-    validate: 'test -f /var/sandchest/images/vmlinux-5.10 && test -f /var/sandchest/images/rootfs.ext4 && echo "images ok"',
+    validate: 'test -f /var/sandchest/images/ubuntu-22.04-base/vmlinux && test -f /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4 && echo "images ok"',
   },
   {
     id: 'install-certs-mtls',
@@ -214,7 +214,7 @@ nft -f /etc/nftables.conf && systemctl enable nftables`,
         'RestartSec=5',
         'EnvironmentFile=-/etc/sandchest/node.env',
         'Environment=RUST_LOG=info',
-        'Environment=DATA_DIR=/var/sandchest',
+        'Environment=SANDCHEST_DATA_DIR=/var/sandchest',
         '',
         '[Install]',
         'WantedBy=multi-user.target',

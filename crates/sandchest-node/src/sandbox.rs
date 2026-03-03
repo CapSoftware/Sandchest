@@ -203,7 +203,7 @@ impl SandboxManager {
                     return Err(SandboxError::CreateFailed(format!("chroot setup failed: {}", e)));
                 }
             }
-            match disk::clone_disk_to(rootfs_ref, &paths.dir).await {
+            match disk::clone_disk_to(rootfs_ref, &paths.dir, &self.node_config.data_dir).await {
                 Ok(path) => path,
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk to chroot");
@@ -354,7 +354,7 @@ impl SandboxManager {
             }
         }
         let _rootfs_path = if self.node_config.jailer.enabled {
-            match disk::clone_disk_to(&snapshot_rootfs, &paths.dir).await {
+            match disk::clone_disk_to(&snapshot_rootfs, &paths.dir, &self.node_config.data_dir).await {
                 Ok(path) => path,
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
@@ -687,7 +687,7 @@ impl SandboxManager {
 
         // --- Step 3: Clone disk (while source is paused for consistency) ---
         let disk_result = if self.node_config.jailer.enabled {
-            disk::clone_disk_to(&source_rootfs, &fork_sandbox_dir).await
+            disk::clone_disk_to(&source_rootfs, &fork_sandbox_dir, &self.node_config.data_dir).await
         } else {
             disk::clone_disk(&source_rootfs, new_sandbox_id, &self.node_config.data_dir).await
         };
@@ -1089,6 +1089,8 @@ impl SandboxManager {
     ) -> Result<FirecrackerVm, SandboxError> {
         let kernel_path = if kernel_ref.is_empty() {
             self.node_config.kernel_path.clone()
+        } else if std::path::Path::new(kernel_ref).is_relative() {
+            format!("{}/{}", self.node_config.data_dir, kernel_ref)
         } else {
             kernel_ref.to_string()
         };

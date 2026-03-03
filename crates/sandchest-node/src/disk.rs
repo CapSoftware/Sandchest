@@ -11,23 +11,30 @@ pub async fn clone_disk(src_ext4: &str, sandbox_id: &str, data_dir: &str) -> Res
     let sandbox_dir = format!("{}/sandboxes/{}", data_dir, sandbox_id);
     let dest = format!("{}/rootfs.ext4", sandbox_dir);
 
+    // Resolve relative source paths against data_dir
+    let resolved_src = if Path::new(src_ext4).is_relative() {
+        format!("{}/{}", data_dir, src_ext4)
+    } else {
+        src_ext4.to_string()
+    };
+
     // Create sandbox directory
     tokio::fs::create_dir_all(&sandbox_dir).await.map_err(|e| {
         DiskError::Io(format!("failed to create sandbox directory {}: {}", sandbox_dir, e))
     })?;
 
-    if !Path::new(src_ext4).exists() {
-        return Err(DiskError::SourceNotFound(src_ext4.to_string()));
+    if !Path::new(&resolved_src).exists() {
+        return Err(DiskError::SourceNotFound(resolved_src));
     }
 
     info!(
-        src = %src_ext4,
+        src = %resolved_src,
         dest = %dest,
         sandbox_id = %sandbox_id,
         "cloning disk with reflink"
     );
 
-    let src = src_ext4.to_string();
+    let src = resolved_src;
     let dst = dest.clone();
 
     // Use --reflink=auto on Linux for instant CoW clones on XFS/btrfs.
@@ -62,20 +69,27 @@ pub async fn clone_disk(src_ext4: &str, sandbox_id: &str, data_dir: &str) -> Res
 ///
 /// Like `clone_disk` but allows specifying the target directory directly.
 /// The destination directory must already exist.
-pub async fn clone_disk_to(src_ext4: &str, dest_dir: &str) -> Result<String, DiskError> {
+pub async fn clone_disk_to(src_ext4: &str, dest_dir: &str, data_dir: &str) -> Result<String, DiskError> {
     let dest = format!("{}/rootfs.ext4", dest_dir);
 
-    if !Path::new(src_ext4).exists() {
-        return Err(DiskError::SourceNotFound(src_ext4.to_string()));
+    // Resolve relative source paths against data_dir
+    let resolved_src = if Path::new(src_ext4).is_relative() {
+        format!("{}/{}", data_dir, src_ext4)
+    } else {
+        src_ext4.to_string()
+    };
+
+    if !Path::new(&resolved_src).exists() {
+        return Err(DiskError::SourceNotFound(resolved_src));
     }
 
     info!(
-        src = %src_ext4,
+        src = %resolved_src,
         dest = %dest,
         "cloning disk with reflink to target directory"
     );
 
-    let src = src_ext4.to_string();
+    let src = resolved_src;
     let dst = dest.clone();
 
     let output = if cfg!(target_os = "linux") {
@@ -258,7 +272,7 @@ mod tests {
         let dest_dir = tmp.join("target");
         std::fs::create_dir_all(&dest_dir).unwrap();
 
-        let result = clone_disk_to(src_file.to_str().unwrap(), dest_dir.to_str().unwrap()).await;
+        let result = clone_disk_to(src_file.to_str().unwrap(), dest_dir.to_str().unwrap(), tmp.to_str().unwrap()).await;
         assert!(result.is_ok());
 
         let dest = result.unwrap();
@@ -274,7 +288,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("sandchest-disk-to-missing");
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let result = clone_disk_to("/nonexistent/rootfs.ext4", tmp.to_str().unwrap()).await;
+        let result = clone_disk_to("/nonexistent/rootfs.ext4", tmp.to_str().unwrap(), "/tmp").await;
         assert!(matches!(result.unwrap_err(), DiskError::SourceNotFound(_)));
 
         let _ = std::fs::remove_dir_all(&tmp);
