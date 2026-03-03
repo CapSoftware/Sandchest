@@ -46,8 +46,15 @@ export function useCreateSandbox() {
         body: JSON.stringify(params),
       })
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: 'Request failed' }))) as { error: string }
-        throw new Error(data.error)
+        const text = await res.text()
+        let msg = `Request failed (${res.status})`
+        try {
+          const data = JSON.parse(text) as { error?: string }
+          if (data.error) msg = data.error
+        } catch {
+          if (text.length > 0) msg = text.slice(0, 500)
+        }
+        throw new Error(msg)
       }
       return res.json() as Promise<SandboxResult>
     },
