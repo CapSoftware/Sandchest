@@ -40,6 +40,19 @@ if (!databaseUrl) {
   process.exit(1)
 }
 
+// Ensure the app user + database exist and have correct credentials.
+// If the Docker volume predates the current docker-compose env vars,
+// MariaDB will NOT have created the user. Fix via root.
+console.log('Ensuring database credentials...')
+await $`docker exec sandchest-mysql mariadb -uroot -psandchest -e ${`
+  CREATE DATABASE IF NOT EXISTS sandchest;
+  CREATE USER IF NOT EXISTS 'sandchest'@'%' IDENTIFIED BY 'sandchest';
+  ALTER USER 'sandchest'@'%' IDENTIFIED BY 'sandchest';
+  GRANT ALL PRIVILEGES ON sandchest.* TO 'sandchest'@'%';
+  FLUSH PRIVILEGES;
+`}`.quiet()
+console.log('  Ready.')
+
 // Run migrations
 console.log('Running migrations...')
 const { runMigrations } = await import('../packages/db/src/migrate')
