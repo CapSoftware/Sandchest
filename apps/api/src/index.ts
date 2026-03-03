@@ -41,20 +41,25 @@ const db = createDatabase(DATABASE_URL)
 /** Catches Effect defects (unexpected errors) and returns a proper JSON 500 response. */
 const withDefectHandler = HttpMiddleware.make((app) =>
   app.pipe(
-    Effect.catchAllDefect(() =>
-      Effect.succeed(formatApiError(new Error('internal defect'))),
+    Effect.catchAllDefect((defect) =>
+      Effect.gen(function* () {
+        const message = defect instanceof Error ? defect.message : String(defect)
+        yield* Effect.logError(`Unhandled defect: ${message}`)
+        return formatApiError(new Error('internal defect'))
+      }),
     ),
   ),
 )
 
-// Production pipeline: connection drain is outermost so it gates all requests
+// Production pipeline: defect handler is outermost so it catches defects from
+// any middleware layer (auth, rate-limit, etc.), not just the router.
 const AppLive = ApiRouter.pipe(
-  withDefectHandler,
   withConnectionDrain,
   withRateLimit,
   withAuth,
   withRequestId,
   withSecurityHeaders,
+  withDefectHandler,
   HttpServer.serve(),
 )
 

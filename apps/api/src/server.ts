@@ -45,10 +45,14 @@ export const ApiRouter = HttpRouter.empty.pipe(
 /** Catches Effect defects (unexpected errors) and returns a proper JSON 500 response. */
 const withDefectHandler = HttpMiddleware.make((app) =>
   app.pipe(
-    Effect.catchAllDefect(() =>
-      Effect.succeed(formatApiError(new Error('internal defect'))),
+    Effect.catchAllDefect((defect) =>
+      Effect.gen(function* () {
+        const message = defect instanceof Error ? defect.message : String(defect)
+        yield* Effect.logError(`Unhandled defect: ${message}`)
+        return formatApiError(new Error('internal defect'))
+      }),
     ),
   ),
 )
 
-export const AppLive = ApiRouter.pipe(withDefectHandler, withConnectionDrain, withRateLimit, withRequestId, withSecurityHeaders, HttpServer.serve())
+export const AppLive = ApiRouter.pipe(withConnectionDrain, withRateLimit, withRequestId, withSecurityHeaders, withDefectHandler, HttpServer.serve())
