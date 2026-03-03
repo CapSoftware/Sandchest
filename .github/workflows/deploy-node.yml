@@ -43,12 +43,11 @@ jobs:
 
       - run: cargo clippy --workspace -- -D warnings
 
-  build-and-deploy:
-    name: Build & Deploy
+  build-and-upload:
+    name: Build & Upload to R2
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    environment: production
     steps:
       - uses: actions/checkout@v4
 
