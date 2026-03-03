@@ -6,9 +6,11 @@ import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServer } from '@/hooks/use-server'
 import { useServerMetrics } from '@/hooks/use-server-metrics'
+import { useServerSandboxes } from '@/hooks/use-server-sandboxes'
 import { deriveStatus } from '@/lib/derive-status'
 import StatusBadge from '@/components/StatusBadge'
 import ServerMetrics from '@/components/ServerMetrics'
+import SandboxTable from '@/components/SandboxTable'
 import CommandRunner from '@/components/CommandRunner'
 
 function DetailSkeleton() {
@@ -69,6 +71,7 @@ export default function ServerDetailPage({
   const { data: server, isLoading } = useServer(serverId)
   const isProvisioned = server?.provision_status === 'completed'
   const { data: metricsData, isLoading: metricsLoading } = useServerMetrics(serverId, isProvisioned)
+  const { data: sandboxData, isLoading: sandboxLoading } = useServerSandboxes(serverId, isProvisioned)
 
   const status = server
     ? deriveStatus(server.provision_status, server.node_id, metricsData?.daemon_status)
@@ -233,6 +236,16 @@ export default function ServerDetailPage({
             metrics={metricsData?.metrics ?? null}
             loading={metricsLoading}
             reason={metricsData?.reason}
+          />
+        </div>
+      )}
+
+      {/* Live VMs */}
+      {isProvisioned && (
+        <div style={{ marginBottom: '1rem' }}>
+          <SandboxTable
+            sandboxes={sandboxData?.sandboxes ?? []}
+            loading={sandboxLoading}
           />
         </div>
       )}
