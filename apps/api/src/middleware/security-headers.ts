@@ -8,7 +8,7 @@ const ALLOWED_ORIGIN_PATTERNS = [
   /^http:\/\/localhost(:\d+)?$/,
 ]
 
-const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS'
+const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
 const CORS_HEADERS = 'Authorization, Content-Type, X-Request-Id, Idempotency-Key'
 const CORS_EXPOSE =
   'X-Request-Id, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-Replay-Access'
