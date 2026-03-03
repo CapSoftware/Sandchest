@@ -58,7 +58,7 @@ export async function POST(
   const nodeId = generateId(NODE_PREFIX)
 
   // Run provisioning in background (fire and forget)
-  runProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, stepResults, { nodeId }).catch(
+  runProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, stepResults, { nodeId, ip: server.ip }).catch(
     () => {},
   )
 
@@ -160,7 +160,7 @@ async function runProvisioning(
           stepResults[i] = {
             id: step.id,
             status: 'failed',
-            output: `Validation failed: ${valResult.stderr || valResult.stdout}`.trim(),
+            output: `${output}\n---\nValidation failed: ${valResult.stderr || valResult.stdout}`.trim(),
           }
           await db
             .update(adminServers)

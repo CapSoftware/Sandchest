@@ -66,7 +66,7 @@ export async function POST(
     .where(eq(adminServers.id, serverIdBuf))
 
   const nodeId = generateId(NODE_PREFIX)
-  const ctx: ProvisionContext = { nodeId }
+  const ctx: ProvisionContext = { nodeId, ip: server.ip }
 
   // Run remaining steps in background
   retryProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, steps, failedIndex, ctx).catch(
@@ -167,7 +167,7 @@ async function retryProvisioning(
       if (step.validate) {
         const valResult = await execCommand(conn, step.validate)
         if (valResult.code !== 0) {
-          stepResults[i] = { id: step.id, status: 'failed', output: `Validation failed: ${valResult.stderr || valResult.stdout}`.trim() }
+          stepResults[i] = { id: step.id, status: 'failed', output: `${output}\n---\nValidation failed: ${valResult.stderr || valResult.stdout}`.trim() }
           await db
             .update(adminServers)
             .set({
