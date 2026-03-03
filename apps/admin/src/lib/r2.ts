@@ -19,15 +19,28 @@ function getR2Client(): S3Client {
   return client
 }
 
+function presignR2Object(key: string, expiresIn = 3600): Promise<string> {
+  const bucket = process.env.R2_BUCKET
+  if (!bucket) throw new Error('R2_BUCKET is not configured')
+
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key })
+  return getSignedUrl(getR2Client(), command, { expiresIn })
+}
+
 /**
  * Generate a presigned URL for the sandchest-node binary in R2.
  * Defaults to the `latest` build. Pass a git SHA to get a specific version.
  */
 export async function presignDaemonBinary(version = 'latest', expiresIn = 3600): Promise<string> {
-  const bucket = process.env.R2_BUCKET
-  if (!bucket) throw new Error('R2_BUCKET is not configured')
+  return presignR2Object(`binaries/sandchest-node/${version}/sandchest-node`, expiresIn)
+}
 
-  const key = `binaries/sandchest-node/${version}/sandchest-node`
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key })
-  return getSignedUrl(getR2Client(), command, { expiresIn })
+/** Presigned URL for the vmlinux kernel image. */
+export async function presignKernel(version = 'latest', expiresIn = 3600): Promise<string> {
+  return presignR2Object(`binaries/vmlinux/${version}/vmlinux`, expiresIn)
+}
+
+/** Presigned URL for the rootfs ext4 base image. */
+export async function presignRootfs(version = 'latest', expiresIn = 3600): Promise<string> {
+  return presignR2Object(`binaries/rootfs/${version}/rootfs.ext4`, expiresIn)
 }
