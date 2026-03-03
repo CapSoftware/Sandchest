@@ -27,6 +27,7 @@ export async function GET(
     return NextResponse.json({
       metrics: null,
       daemon_status: 'unknown',
+      reason: 'not_provisioned',
       collected_at: new Date().toISOString(),
     })
   }
@@ -34,10 +35,11 @@ export async function GET(
   let sshKey: string
   try {
     sshKey = decrypt(server.sshKeyEncrypted, server.sshKeyIv, server.sshKeyTag)
-  } catch {
+  } catch (e) {
     return NextResponse.json({
       metrics: null,
       daemon_status: 'unknown',
+      reason: `ssh_key_decrypt_failed: ${e instanceof Error ? e.message : String(e)}`,
       collected_at: new Date().toISOString(),
     })
   }
@@ -51,10 +53,11 @@ export async function GET(
       privateKey: sshKey,
       readyTimeout: 5_000,
     })
-  } catch {
+  } catch (e) {
     return NextResponse.json({
       metrics: null,
       daemon_status: 'unreachable',
+      reason: `ssh_connect_failed: ${e instanceof Error ? e.message : String(e)}`,
       collected_at: new Date().toISOString(),
     })
   }
@@ -67,16 +70,18 @@ export async function GET(
       return NextResponse.json({
         metrics: null,
         daemon_status: 'unknown',
+        reason: `command_failed (exit ${result.code}): ${result.stderr.slice(0, 200)}`,
         collected_at: new Date().toISOString(),
       })
     }
 
     return NextResponse.json(parseMetrics(result.stdout))
-  } catch {
+  } catch (e) {
     conn.end()
     return NextResponse.json({
       metrics: null,
       daemon_status: 'unknown',
+      reason: `command_error: ${e instanceof Error ? e.message : String(e)}`,
       collected_at: new Date().toISOString(),
     })
   }

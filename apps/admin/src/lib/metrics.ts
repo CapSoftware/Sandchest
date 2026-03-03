@@ -14,6 +14,7 @@ export interface MetricsData {
 export interface MetricsResult {
   metrics: MetricsData | null
   daemon_status: string
+  reason?: string | undefined
   collected_at: string
 }
 
