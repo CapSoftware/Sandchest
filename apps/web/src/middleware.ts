@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 const AUTH_COOKIE = 'better-auth.session_token'
+const SECURE_AUTH_COOKIE = '__Secure-better-auth.session_token'
 
 const PROTECTED_PREFIXES = ['/dashboard', '/onboarding']
 const AUTH_PAGES = ['/login', '/signup', '/verify']
 
 function hasSessionCookie(request: NextRequest): boolean {
-  return request.cookies.has(AUTH_COOKIE)
+  return request.cookies.has(AUTH_COOKIE) || request.cookies.has(SECURE_AUTH_COOKIE)
 }
 
 export function middleware(request: NextRequest) {

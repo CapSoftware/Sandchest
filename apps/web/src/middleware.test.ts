@@ -12,6 +12,7 @@ function makeRequest(pathname: string, cookies: Record<string, string> = {}): Ne
 }
 
 const SESSION_COOKIE = { 'better-auth.session_token': 'test-session-token' }
+const SECURE_SESSION_COOKIE = { '__Secure-better-auth.session_token': 'test-session-token' }
 
 describe('auth middleware', () => {
   describe('protected routes', () => {
@@ -35,6 +36,11 @@ describe('auth middleware', () => {
 
     test('allows authenticated users to access dashboard', () => {
       const res = middleware(makeRequest('/dashboard', SESSION_COOKIE))
+      expect(res.status).toBe(200)
+    })
+
+    test('allows authenticated users with __Secure- prefixed cookie', () => {
+      const res = middleware(makeRequest('/dashboard', SECURE_SESSION_COOKIE))
       expect(res.status).toBe(200)
     })
 
