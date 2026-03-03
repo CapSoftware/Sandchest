@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     }
 
     const baseUrl = body.baseUrl.replace(/\/$/, '')
+    const url = `${baseUrl}/v1/sandboxes`
     const apiBody: Record<string, unknown> = {
       profile: body.profile || 'small',
       ttl_seconds: body.ttlSeconds || 3600,
@@ -20,23 +21,33 @@ export async function POST(request: Request) {
       apiBody.image = body.image
     }
 
-    const res = await fetch(`${baseUrl}/v1/sandboxes`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${body.apiKey}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(apiBody),
-    })
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${body.apiKey}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(apiBody),
+      })
+    } catch (fetchErr) {
+      const detail = fetchErr instanceof Error ? fetchErr.message : 'Unknown fetch error'
+      return NextResponse.json(
+        { error: `Failed to connect to ${url}: ${detail}` },
+        { status: 502 },
+      )
+    }
 
     const text = await res.text()
     let data: Record<string, unknown>
     try {
       data = JSON.parse(text) as Record<string, unknown>
     } catch {
+      const preview = text.length > 0 ? text.slice(0, 500) : '(empty body)'
       return NextResponse.json(
-        { error: `API returned ${res.status}: ${text.slice(0, 500)}` },
+        { error: `API returned ${res.status} with non-JSON response: ${preview}` },
         { status: res.status || 500 },
       )
     }
