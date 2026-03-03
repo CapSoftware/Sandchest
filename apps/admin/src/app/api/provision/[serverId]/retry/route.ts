@@ -6,6 +6,7 @@ import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
 import { PROVISION_STEPS, resolveCommands, type StepResult, type ProvisionContext } from '@/lib/provisioner'
 import { generateId, idToBytes, NODE_PREFIX } from '@sandchest/contract'
+import { setFlySecrets } from '@/lib/fly'
 
 export async function POST(
   _request: Request,
@@ -208,6 +209,44 @@ async function retryProvisioning(
         updatedAt: new Date(),
       })
       .where(eq(adminServers.id, serverIdBuf))
+  }
+
+  // Link the API to the node via Fly.io secrets
+  const flyToken = process.env.FLY_ACCESS_TOKEN
+  const flyApp = process.env.FLY_APP_NAME || 'sandchest-api'
+
+  if (flyToken) {
+    try {
+      const [caResult, certResult, keyResult] = await Promise.all([
+        execCommand(conn, 'cat /etc/sandchest/certs/ca.pem'),
+        execCommand(conn, 'cat /etc/sandchest/certs/client.pem'),
+        execCommand(conn, 'cat /etc/sandchest/certs/client.key'),
+      ])
+
+      if (caResult.code !== 0 || certResult.code !== 0 || keyResult.code !== 0) {
+        throw new Error('Failed to read mTLS client certificates from server')
+      }
+
+      await setFlySecrets(flyApp, {
+        NODE_GRPC_ADDR: `${ip}:50051`,
+        NODE_GRPC_NODE_ID: ctx.nodeId,
+        MTLS_CA_PEM: caResult.stdout.trim(),
+        MTLS_CLIENT_CERT_PEM: certResult.stdout.trim(),
+        MTLS_CLIENT_KEY_PEM: keyResult.stdout.trim(),
+      }, flyToken)
+    } catch (err) {
+      conn.end()
+      await db
+        .update(adminServers)
+        .set({
+          provisionStatus: 'failed',
+          provisionError: `Provisioning succeeded but API linking failed: ${err instanceof Error ? err.message : String(err)}`,
+          provisionSteps: [...stepResults],
+          updatedAt: new Date(),
+        })
+        .where(eq(adminServers.id, serverIdBuf))
+      return
+    }
   }
 
   conn.end()
