@@ -54,8 +54,8 @@ function BarSkeleton() {
   )
 }
 
-export default function ServerMetrics({ metrics }: { metrics: MetricsData | null }) {
-  if (!metrics) {
+export default function ServerMetrics({ metrics, loading, reason }: { metrics: MetricsData | null; loading: boolean; reason?: string | undefined }) {
+  if (loading) {
     return (
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div className="card-section-title">System Metrics</div>
@@ -66,6 +66,17 @@ export default function ServerMetrics({ metrics }: { metrics: MetricsData | null
           <div className="skeleton skeleton-text" style={{ width: '70%' }} />
           <div className="skeleton skeleton-text" style={{ width: '70%' }} />
           <div className="skeleton skeleton-text" style={{ width: '80%' }} />
+        </div>
+      </div>
+    )
+  }
+
+  if (!metrics) {
+    return (
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="card-section-title">System Metrics</div>
+        <div className="text-weak" style={{ fontSize: '0.75rem' }}>
+          Unable to collect metrics.{reason ? ` (${reason})` : ''}
         </div>
       </div>
     )
