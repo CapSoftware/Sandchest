@@ -98,11 +98,20 @@ export async function generateAndInstallKey(conn: Client): Promise<string> {
   return pkcs8ToOpensshEd25519(privateKey)
 }
 
-export function execCommand(conn: Client, cmd: string): Promise<CommandResult> {
+export function execCommand(conn: Client, cmd: string, timeoutMs = 120_000): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        reject(new Error(`Command timed out after ${timeoutMs / 1000}s`))
+      }
+    }, timeoutMs)
+
     conn.exec(cmd, (err, stream) => {
       if (err) {
-        reject(err)
+        clearTimeout(timer)
+        if (!settled) { settled = true; reject(err) }
         return
       }
 
@@ -116,10 +125,12 @@ export function execCommand(conn: Client, cmd: string): Promise<CommandResult> {
         stderr += data.toString()
       })
       stream.on('close', (code: number) => {
-        resolve({ stdout, stderr, code: code ?? 0 })
+        clearTimeout(timer)
+        if (!settled) { settled = true; resolve({ stdout, stderr, code: code ?? 0 }) }
       })
       stream.on('error', (streamErr: Error) => {
-        reject(streamErr)
+        clearTimeout(timer)
+        if (!settled) { settled = true; reject(streamErr) }
       })
     })
   })
