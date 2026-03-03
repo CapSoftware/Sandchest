@@ -34,13 +34,17 @@ export default function VerifyOtpFormInner() {
   const redirectTo = type === 'sign-up' ? '/onboarding' : '/dashboard'
 
   function verify(code: string) {
+    console.log('[verify-form] verify called', { email, code, type, redirectTo })
     verifyOtp.mutate(
       { email, otp: code },
       {
-        onSuccess() {
+        onSuccess(data) {
+          console.log('[verify-form] onSuccess', { data, redirectTo })
+          console.log('[verify-form] cookies before redirect', document.cookie)
           window.location.href = redirectTo
         },
-        onError() {
+        onError(err) {
+          console.error('[verify-form] onError', err)
           setDigits(Array(OTP_LENGTH).fill(''))
           inputRefs.current[0]?.focus()
         },

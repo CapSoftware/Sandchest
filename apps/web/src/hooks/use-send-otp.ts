@@ -11,11 +11,14 @@ interface SendOtpInput {
 export function useSendOtp() {
   return useMutation({
     mutationFn: async ({ email, type }: SendOtpInput) => {
-      const { error } = await authClient.emailOtp.sendVerificationOtp({
+      console.log('[send-otp] calling sendVerificationOtp', { email, type })
+      const result = await authClient.emailOtp.sendVerificationOtp({
         email,
         type,
       })
-      if (error) throw new Error(error.message ?? 'Failed to send code')
+      console.log('[send-otp] full response', JSON.stringify(result, null, 2))
+      if (result.error) throw new Error(result.error.message ?? 'Failed to send code')
+      return result.data
     },
   })
 }
