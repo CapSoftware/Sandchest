@@ -14,6 +14,7 @@ import { FileRouter } from './routes/files.js'
 import { ArtifactRouter } from './routes/artifacts.js'
 import { NodeRouter } from './routes/nodes.js'
 import { AdminNodeRouter } from './routes/admin-nodes.js'
+import { AdminSandboxRouter } from './routes/admin-sandboxes.js'
 import { AdminStatusRouter } from './routes/admin-status.js'
 import { DocsRouter } from './routes/docs.js'
 
@@ -33,6 +34,7 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(ArtifactRouter),
   HttpRouter.concat(NodeRouter),
   HttpRouter.concat(AdminNodeRouter),
+  HttpRouter.concat(AdminSandboxRouter),
   HttpRouter.concat(AdminStatusRouter),
   HttpRouter.concat(DocsRouter),
   HttpRouter.all('/api/auth/*', handleBetterAuth),
