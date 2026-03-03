@@ -1,6 +1,6 @@
 'use client'
 
-import { use } from 'react'
+import { use, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -138,6 +138,23 @@ export default function ServerDetailPage({
     },
   })
 
+  const [mtlsResult, setMtlsResult] = useState<{ flyCommand: string } | null>(null)
+
+  const mtlsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/setup-mtls`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'mTLS setup failed' })) as { error: string }
+        throw new Error(data.error)
+      }
+      return res.json() as Promise<{ success: boolean; flyCommand: string }>
+    },
+    onSuccess: (data) => {
+      setMtlsResult(data)
+      queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+  })
+
   if (isLoading || !server) {
     return <DetailSkeleton />
   }
@@ -171,9 +188,18 @@ export default function ServerDetailPage({
             </button>
           )}
           {server.provision_status === 'failed' && (
-            <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
-              View Logs
-            </Link>
+            <>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => provisionMutation.mutate()}
+                disabled={provisionMutation.isPending}
+              >
+                {provisionMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Provisioning…</> : 'Re-provision'}
+              </button>
+              <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
+                View Logs
+              </Link>
+            </>
           )}
           {server.provision_status === 'provisioning' && (
             <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
@@ -286,6 +312,53 @@ export default function ServerDetailPage({
               Enable
             </button>
           </div>
+        </div>
+      )}
+
+      {/* mTLS Certificates */}
+      {server.provision_status === 'completed' && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div className="card-section-title" style={{ marginBottom: '0.75rem' }}>
+            mTLS Certificates
+          </div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-weak)', marginBottom: '0.75rem' }}>
+            Generate mTLS certificates for secure API-to-node gRPC communication.
+          </p>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              if (confirm('Generate new mTLS certificates? This will overwrite any existing certs and restart the daemon.')) {
+                mtlsMutation.mutate()
+              }
+            }}
+            disabled={mtlsMutation.isPending}
+          >
+            {mtlsMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Setting up mTLS…</> : 'Setup mTLS'}
+          </button>
+          {mtlsMutation.isError && (
+            <div className="feedback-card feedback-danger" style={{ marginTop: '0.75rem' }}>
+              mTLS setup failed: {mtlsMutation.error.message}
+            </div>
+          )}
+          {mtlsResult && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div className="feedback-card feedback-success" style={{ marginBottom: '0.5rem' }}>
+                mTLS certificates generated and daemon restarted. Set the Fly.io secrets below:
+              </div>
+              <pre style={{
+                fontSize: '0.6875rem',
+                background: 'var(--bg-inset)',
+                padding: '0.75rem',
+                borderRadius: '6px',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                userSelect: 'all',
+              }}>
+                {mtlsResult.flyCommand}
+              </pre>
+            </div>
+          )}
         </div>
       )}
 
