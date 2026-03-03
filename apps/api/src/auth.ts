@@ -26,6 +26,10 @@ function createAuth() {
         enabled: true,
         domain: env.BETTER_AUTH_COOKIE_DOMAIN ?? '.sandchest.com',
       },
+      defaultCookieAttributes: {
+        sameSite: 'none',
+        secure: true,
+      },
     },
     database: createPool({
       uri: env.DATABASE_URL,
