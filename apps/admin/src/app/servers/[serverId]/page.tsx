@@ -68,7 +68,7 @@ export default function ServerDetailPage({
   const queryClient = useQueryClient()
   const { data: server, isLoading } = useServer(serverId)
   const isProvisioned = server?.provision_status === 'completed'
-  const { data: metricsData } = useServerMetrics(serverId, isProvisioned)
+  const { data: metricsData, isLoading: metricsLoading } = useServerMetrics(serverId, isProvisioned)
 
   const status = server
     ? deriveStatus(server.provision_status, server.node_id, metricsData?.daemon_status)
@@ -99,6 +99,19 @@ export default function ServerDetailPage({
       const res = await fetch(`/api/servers/${serverId}/deploy-daemon`, { method: 'POST' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: 'Deploy failed' })) as { error: string }
+        throw new Error(data.error)
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+  })
+
+  const reinstallMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/reinstall`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Reinstall failed' })) as { error: string }
         throw new Error(data.error)
       }
     },
@@ -188,6 +201,18 @@ export default function ServerDetailPage({
         </div>
       )}
 
+      {/* Reinstall feedback */}
+      {reinstallMutation.isError && (
+        <div className="card feedback-card feedback-danger" style={{ marginBottom: '1rem' }}>
+          Reinstall failed: {reinstallMutation.error.message}
+        </div>
+      )}
+      {reinstallMutation.isSuccess && (
+        <div className="card feedback-card feedback-success" style={{ marginBottom: '1rem' }}>
+          OS reinstalled successfully. Click &ldquo;Provision&rdquo; to set up the server.
+        </div>
+      )}
+
       {/* System Info */}
       {server.system_info && (
         <div className="card" style={{ marginBottom: '1rem' }}>
@@ -202,9 +227,15 @@ export default function ServerDetailPage({
       )}
 
       {/* Live Metrics */}
-      <div style={{ marginBottom: '1rem' }}>
-        <ServerMetrics metrics={metricsData?.metrics ?? null} />
-      </div>
+      {isProvisioned && (
+        <div style={{ marginBottom: '1rem' }}>
+          <ServerMetrics
+            metrics={metricsData?.metrics ?? null}
+            loading={metricsLoading}
+            reason={metricsData?.reason}
+          />
+        </div>
+      )}
 
       {/* Command Runner */}
       {server.provision_status === 'completed' && (
@@ -250,17 +281,30 @@ export default function ServerDetailPage({
         <div className="card-section-title danger-title" style={{ marginBottom: '0.75rem' }}>
           Danger Zone
         </div>
-        <button
-          className="btn btn-danger btn-sm"
-          onClick={() => {
-            if (confirm(`Delete server "${server.name}"? This cannot be undone.`)) {
-              deleteMutation.mutate()
-            }
-          }}
-          disabled={deleteMutation.isPending}
-        >
-          Remove Server
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={() => {
+              if (confirm(`Reinstall OS on "${server.name}"? This will wipe all data and install Ubuntu 24.04.`)) {
+                reinstallMutation.mutate()
+              }
+            }}
+            disabled={reinstallMutation.isPending}
+          >
+            {reinstallMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Reinstalling…</> : 'Reinstall OS'}
+          </button>
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={() => {
+              if (confirm(`Delete server "${server.name}"? This cannot be undone.`)) {
+                deleteMutation.mutate()
+              }
+            }}
+            disabled={deleteMutation.isPending}
+          >
+            Remove Server
+          </button>
+        </div>
       </div>
     </div>
   )
