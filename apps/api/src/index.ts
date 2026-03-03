@@ -1,10 +1,11 @@
-import { HttpServer } from '@effect/platform'
+import { HttpMiddleware, HttpServer } from '@effect/platform'
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node'
 import { Duration, Effect, Layer } from 'effect'
 import { createServer } from 'node:http'
 import { createDatabase } from '@sandchest/db/client'
 import { loadEnv } from './env.js'
 import { ApiRouter } from './server.js'
+import { formatApiError } from './errors.js'
 import { withAuth, withRequestId } from './middleware.js'
 import { withConnectionDrain } from './middleware/connection-drain.js'
 import { withRateLimit } from './middleware/rate-limit.js'
@@ -37,8 +38,18 @@ const { PORT, DATABASE_URL, REDIS_URL, REDIS_FAMILY, DRAIN_TIMEOUT_MS, SANDCHEST
 
 const db = createDatabase(DATABASE_URL)
 
+/** Catches Effect defects (unexpected errors) and returns a proper JSON 500 response. */
+const withDefectHandler = HttpMiddleware.make((app) =>
+  app.pipe(
+    Effect.catchAllDefect(() =>
+      Effect.succeed(formatApiError(new Error('internal defect'))),
+    ),
+  ),
+)
+
 // Production pipeline: connection drain is outermost so it gates all requests
 const AppLive = ApiRouter.pipe(
+  withDefectHandler,
   withConnectionDrain,
   withRateLimit,
   withAuth,

@@ -1,19 +1,5 @@
 import { NextResponse } from 'next/server'
-import type { ProfileName } from '@sandchest/contract'
 import { createClient } from '@/lib/simulate-sdk'
-
-function sdkErrorStatus(err: unknown): number {
-  if (typeof err === 'object' && err !== null && 'status' in err) {
-    const s = (err as { status: number }).status
-    if (s >= 400 && s < 600) return s
-  }
-  return 500
-}
-
-function sdkErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return 'Unknown error'
-}
 
 export async function POST(request: Request) {
   try {
@@ -25,24 +11,49 @@ export async function POST(request: Request) {
       ttlSeconds?: number | undefined
     }
 
-    const client = createClient(body.apiKey, body.baseUrl)
-    const sandbox = await client.create({
-      image: body.image || undefined,
-      profile: (body.profile as ProfileName) || undefined,
-      ttlSeconds: body.ttlSeconds || undefined,
-      waitReady: false,
+    const baseUrl = body.baseUrl.replace(/\/$/, '')
+    const apiBody: Record<string, unknown> = {
+      profile: body.profile || 'small',
+      ttl_seconds: body.ttlSeconds || 3600,
+    }
+    if (body.image) {
+      apiBody.image = body.image
+    }
+
+    const res = await fetch(`${baseUrl}/v1/sandboxes`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${body.apiKey}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(apiBody),
     })
 
+    const text = await res.text()
+    let data: Record<string, unknown>
+    try {
+      data = JSON.parse(text) as Record<string, unknown>
+    } catch {
+      return NextResponse.json(
+        { error: `API returned ${res.status}: ${text.slice(0, 500)}` },
+        { status: res.status || 500 },
+      )
+    }
+
+    if (!res.ok) {
+      const msg = (data.message as string) || (data.error as string) || `API ${res.status}`
+      return NextResponse.json({ error: msg }, { status: res.status })
+    }
+
     return NextResponse.json({
-      id: sandbox.id,
-      status: sandbox.status,
-      replayUrl: sandbox.replayUrl,
+      id: data.sandbox_id,
+      status: data.status,
+      replayUrl: data.replay_url,
     })
   } catch (err) {
-    return NextResponse.json(
-      { error: sdkErrorMessage(err) },
-      { status: sdkErrorStatus(err) },
-    )
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
@@ -60,9 +71,7 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json(
-      { error: sdkErrorMessage(err) },
-      { status: sdkErrorStatus(err) },
-    )
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

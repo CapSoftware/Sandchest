@@ -1,0 +1,1 @@
+ALTER TABLE `sandboxes` ADD `image_ref` varchar(1024) DEFAULT '' NOT NULL;
