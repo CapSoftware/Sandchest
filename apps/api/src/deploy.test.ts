@@ -92,11 +92,9 @@ describe('deploy-node.yml', () => {
     expect(workflow).toContain('R2_ENDPOINT')
   })
 
-  test('deploys to Hetzner via SSH', () => {
-    expect(workflow).toContain('Deploy to Hetzner')
-    expect(workflow).toContain('HETZNER_SSH_KEY')
-    expect(workflow).toContain('HETZNER_HOST')
-    expect(workflow).toContain('systemctl restart sandchest-node')
+  test('delegates deployment to admin app (no direct SSH)', () => {
+    expect(workflow).toContain('Deploy Daemon')
+    expect(workflow).not.toContain('HETZNER_SSH_KEY')
   })
 
   test('uses concurrency group to prevent parallel deploys', () => {
