@@ -2,6 +2,19 @@ import { NextResponse } from 'next/server'
 import type { ProfileName } from '@sandchest/contract'
 import { createClient } from '@/lib/simulate-sdk'
 
+function sdkErrorStatus(err: unknown): number {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    const s = (err as { status: number }).status
+    if (s >= 400 && s < 600) return s
+  }
+  return 500
+}
+
+function sdkErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  return 'Unknown error'
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
@@ -17,6 +30,7 @@ export async function POST(request: Request) {
       image: body.image || undefined,
       profile: (body.profile as ProfileName) || undefined,
       ttlSeconds: body.ttlSeconds || undefined,
+      waitReady: false,
     })
 
     return NextResponse.json({
@@ -25,8 +39,10 @@ export async function POST(request: Request) {
       replayUrl: sandbox.replayUrl,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json(
+      { error: sdkErrorMessage(err) },
+      { status: sdkErrorStatus(err) },
+    )
   }
 }
 
@@ -44,7 +60,9 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json(
+      { error: sdkErrorMessage(err) },
+      { status: sdkErrorStatus(err) },
+    )
   }
 }

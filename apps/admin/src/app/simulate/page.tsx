@@ -53,7 +53,7 @@ export default function SimulatePage() {
     setActiveSandboxId(null)
   }
 
-  async function handleCreateSandbox(opts: { image: string; profile: string; ttlSeconds: number }) {
+  async function handleCreateSandbox(opts: { image: string | undefined; profile: string; ttlSeconds: number }) {
     const result = await createSandbox.mutateAsync({
       ...creds,
       image: opts.image,

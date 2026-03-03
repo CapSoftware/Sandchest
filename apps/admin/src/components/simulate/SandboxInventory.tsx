@@ -13,7 +13,7 @@ interface SandboxInventoryProps {
   sandboxes: TrackedSandbox[]
   activeSandboxId: string | null
   onSelect: (id: string) => void
-  onCreateSandbox: (opts: { image: string; profile: string; ttlSeconds: number }) => void
+  onCreateSandbox: (opts: { image: string | undefined; profile: string; ttlSeconds: number }) => void
   onStopSandbox: (id: string) => void
   onDestroySandbox: (id: string) => void
   onForkSandbox: (id: string) => void
@@ -40,7 +40,7 @@ export default function SandboxInventory({
   function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     onCreateSandbox({
-      image: image || 'default',
+      image: image || undefined,
       profile,
       ttlSeconds: parseInt(ttl, 10) || 3600,
     })
@@ -68,7 +68,7 @@ export default function SandboxInventory({
             className="form-input"
             value={image}
             onChange={(e) => setImage(e.target.value)}
-            placeholder="Image (default)"
+            placeholder="Image (ubuntu-22.04)"
             style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
           />
           <select

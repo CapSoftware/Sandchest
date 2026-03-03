@@ -1,4 +1,4 @@
-import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from '@effect/platform'
+import { HttpMiddleware, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from '@effect/platform'
 import { Effect } from 'effect'
 import { auth } from './auth.js'
 import { formatApiError } from './errors.js'
@@ -42,4 +42,13 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.catchAll((error) => Effect.succeed(formatApiError(error))),
 )
 
-export const AppLive = ApiRouter.pipe(withConnectionDrain, withRateLimit, withRequestId, withSecurityHeaders, HttpServer.serve())
+/** Catches Effect defects (unexpected errors) and returns a proper JSON 500 response. */
+const withDefectHandler = HttpMiddleware.make((app) =>
+  app.pipe(
+    Effect.catchAllDefect(() =>
+      Effect.succeed(formatApiError(new Error('internal defect'))),
+    ),
+  ),
+)
+
+export const AppLive = ApiRouter.pipe(withDefectHandler, withConnectionDrain, withRateLimit, withRequestId, withSecurityHeaders, HttpServer.serve())
