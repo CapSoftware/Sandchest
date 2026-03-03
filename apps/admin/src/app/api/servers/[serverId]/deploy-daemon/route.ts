@@ -74,6 +74,8 @@ export async function POST(
       'chmod +x /usr/local/bin/sandchest-node',
       'mkdir -p /etc/sandchest',
       `printf 'SANDCHEST_NODE_ID=${nodeId}\\n' > /etc/sandchest/node.env`,
+      // Append TLS paths if mTLS certs exist on this server
+      `test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true`,
       // Ensure the systemd unit references the env file (idempotent — rewrites the unit)
       `printf '[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/sandchest-node.service`,
       'systemctl daemon-reload',
