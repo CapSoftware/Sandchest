@@ -1,12 +1,16 @@
-diff --git a/bin.cjs b/bin.cjs
-index 327fdfde1aac8ddf7a0db6dc357796757be8986a..f4908ec68633aa2f5388db46197fa466f1d9cbf4 100755
 --- a/bin.cjs
 +++ b/bin.cjs
-@@ -18404,6 +18404,7 @@ AND
-         const constraintValue = checkConstraintRow["CHECK_CLAUSE"];
-         const tableName = checkConstraintRow["TABLE_NAME"];
-         const tableInResult = result[tableName];
-+        if (!tableInResult) continue;
-         tableInResult.checkConstraint[constraintName] = {
-           name: constraintName,
-           value: constraintValue
+@@ -16797,6 +16797,13 @@
+       Module._resolveFilename = function(request, _parent) {
+         const isCoreModule = _module2.builtinModules.includes(request);
+         if (!isCoreModule) {
++          if (request.endsWith('.js')) {
++            const tsRequest = request.replace(/\.js$/, '.ts');
++            try {
++              const modifiedArguments2 = [tsRequest, ...[].slice.call(arguments, 1)];
++              return originalResolveFilename.apply(this, modifiedArguments2);
++            } catch (e) {}
++          }
+           const found = matchPath(request);
+           if (found) {
+             const modifiedArguments = [found, ...[].slice.call(arguments, 1)];
