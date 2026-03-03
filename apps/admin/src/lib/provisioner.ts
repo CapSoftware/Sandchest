@@ -1,7 +1,8 @@
-import { presignDaemonBinary } from './r2.js'
+import { presignDaemonBinary, presignKernel, presignRootfs } from './r2.js'
 
 export interface ProvisionContext {
   readonly nodeId: string
+  readonly ip: string
 }
 
 export interface ProvisionStep {
@@ -16,6 +17,32 @@ export interface StepResult {
   readonly id: string
   readonly status: 'pending' | 'running' | 'completed' | 'failed'
   readonly output?: string | undefined
+}
+
+/** OpenSSL commands to generate a full mTLS PKI (CA + server + client certs). */
+export function mtlsCertCommands(ip: string): string[] {
+  const dir = '/etc/sandchest/certs'
+  return [
+    `mkdir -p ${dir}`,
+    // CA key + self-signed cert (RSA 4096, 10-year validity)
+    `openssl genrsa -out ${dir}/ca.key 4096`,
+    `openssl req -new -x509 -key ${dir}/ca.key -out ${dir}/ca.pem -days 3650 -subj "/CN=sandchest-ca"`,
+    // Server key + CSR + signed cert with SAN=IP
+    `openssl genrsa -out ${dir}/server.key 2048`,
+    `openssl req -new -key ${dir}/server.key -out ${dir}/server.csr -subj "/CN=sandchest-node"`,
+    `printf "[v3_ext]\\nsubjectAltName=IP:${ip}\\nkeyUsage=digitalSignature,keyEncipherment\\nextendedKeyUsage=serverAuth\\n" > ${dir}/server.ext`,
+    `openssl x509 -req -in ${dir}/server.csr -CA ${dir}/ca.pem -CAkey ${dir}/ca.key -CAcreateserial -out ${dir}/server.pem -days 3650 -extfile ${dir}/server.ext -extensions v3_ext`,
+    // Client key + CSR + signed cert
+    `openssl genrsa -out ${dir}/client.key 2048`,
+    `openssl req -new -key ${dir}/client.key -out ${dir}/client.csr -subj "/CN=sandchest-api"`,
+    `printf "[v3_ext]\\nkeyUsage=digitalSignature,keyEncipherment\\nextendedKeyUsage=clientAuth\\n" > ${dir}/client.ext`,
+    `openssl x509 -req -in ${dir}/client.csr -CA ${dir}/ca.pem -CAkey ${dir}/ca.key -CAcreateserial -out ${dir}/client.pem -days 3650 -extfile ${dir}/client.ext -extensions v3_ext`,
+    // Tighten permissions
+    `chmod 600 ${dir}/*.key`,
+    `chmod 644 ${dir}/*.pem`,
+    // Cleanup CSR and ext files
+    `rm -f ${dir}/*.csr ${dir}/*.ext ${dir}/*.srl`,
+  ]
 }
 
 export async function resolveCommands(step: ProvisionStep, ctx: ProvisionContext): Promise<string[]> {
@@ -92,24 +119,82 @@ export const PROVISION_STEPS: ProvisionStep[] = [
   {
     id: 'download-images',
     name: 'Download kernel & rootfs',
-    commands: [
-      'echo "Image download step — configure R2 URLs in production"',
-    ],
+    timeoutMs: 300_000, // 5 min — images can be large
+    commands: async () => {
+      const kernelUrl = await presignKernel()
+      const rootfsUrl = await presignRootfs()
+      return [
+        'mkdir -p /var/sandchest/images',
+        `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/vmlinux-5.10`,
+        `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrl}' -o /var/sandchest/images/rootfs.ext4`,
+        'chmod 644 /var/sandchest/images/vmlinux-5.10 /var/sandchest/images/rootfs.ext4',
+      ]
+    },
+    validate: 'test -f /var/sandchest/images/vmlinux-5.10 && test -f /var/sandchest/images/rootfs.ext4 && echo "images ok"',
   },
   {
     id: 'install-certs-mtls',
     name: 'Configure mTLS certificates',
-    commands: [
-      'mkdir -p /etc/sandchest/certs',
-      'echo "mTLS certificate setup — configure API↔Node mutual TLS in production"',
-    ],
+    commands: (ctx) => mtlsCertCommands(ctx.ip),
+    validate: 'test -f /etc/sandchest/certs/server.pem && test -f /etc/sandchest/certs/client.pem && echo "certs ok"',
   },
   {
     id: 'configure-firewall',
     name: 'Configure firewall',
     commands: [
-      'echo "Firewall — configure via Hetzner Cloud firewall or manually post-provision"',
+      // Write nftables ruleset, apply, and persist (single command to avoid heredoc + && join issues)
+      `cat > /etc/nftables.conf << 'NFTEOF'
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet sandchest {
+  chain input {
+    type filter hook input priority 0; policy drop;
+
+    # Loopback
+    iif lo accept
+
+    # Established / related
+    ct state { established, related } accept
+
+    # SSH
+    tcp dport 22 accept
+
+    # gRPC (mTLS-protected)
+    tcp dport 50051 accept
+
+    # ICMP
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
+  }
+
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+
+    # Established / related return traffic to TAP devices
+    ct state { established, related } accept
+
+    # Sandbox TAP -> outbound
+    iifname "tap*" accept
+  }
+
+  chain output {
+    type filter hook output priority 0; policy accept;
+  }
+}
+
+table ip sandchest_nat {
+  chain postrouting {
+    type nat hook postrouting priority 100; policy accept;
+
+    # Masquerade sandbox traffic (172.16.0.0/16 covers all /30 slots)
+    ip saddr 172.16.0.0/16 masquerade
+  }
+}
+NFTEOF
+nft -f /etc/nftables.conf && systemctl enable nftables`,
     ],
+    validate: 'nft list ruleset | grep sandchest',
   },
   {
     id: 'deploy-node-daemon',
@@ -117,19 +202,38 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     timeoutMs: 300_000, // 5 min — downloads ~27MB binary
     commands: async (ctx) => {
       const url = await presignDaemonBinary()
+      const unitFileContent = [
+        '[Unit]',
+        'Description=Sandchest Node Daemon',
+        'After=network.target',
+        '',
+        '[Service]',
+        'Type=simple',
+        'ExecStart=/usr/local/bin/sandchest-node',
+        'Restart=always',
+        'RestartSec=5',
+        'EnvironmentFile=-/etc/sandchest/node.env',
+        'Environment=RUST_LOG=info',
+        'Environment=DATA_DIR=/var/sandchest',
+        '',
+        '[Install]',
+        'WantedBy=multi-user.target',
+        '', // trailing newline
+      ].join('\n')
+      const unitFileB64 = Buffer.from(unitFileContent).toString('base64')
       return [
-        'systemctl stop sandchest-node 2>/dev/null || true',
-        'pkill -f sandchest-node 2>/dev/null || true',
+        '(systemctl stop sandchest-node 2>/dev/null || true)',
         `curl -fsSL --retry 3 --retry-delay 5 '${url}' -o /usr/local/bin/sandchest-node`,
         'chmod +x /usr/local/bin/sandchest-node',
         'mkdir -p /etc/sandchest',
         `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\n' > /etc/sandchest/node.env`,
-        'printf \'[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n\' > /etc/systemd/system/sandchest-node.service',
+        `(test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true)`,
+        `echo '${unitFileB64}' | base64 -d > /etc/systemd/system/sandchest-node.service`,
         'systemctl daemon-reload',
         'systemctl enable sandchest-node',
       ]
     },
-    validate: '/usr/local/bin/sandchest-node --version || true',
+    validate: 'systemctl cat sandchest-node.service > /dev/null && echo "unit ok"',
   },
   {
     id: 'start-services',
@@ -137,6 +241,6 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     commands: [
       'systemctl restart sandchest-node',
     ],
-    validate: 'systemctl is-active sandchest-node',
+    validate: 'systemctl is-enabled sandchest-node',
   },
 ]
