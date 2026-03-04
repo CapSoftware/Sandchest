@@ -1,49 +1,11 @@
 'use client'
 
 import { useAutumnCustomer } from '@/hooks/use-autumn-customer'
-import type { FeatureUsage } from '@/hooks/use-autumn-customer'
 import { useSandboxes } from '@/hooks/use-sandboxes'
 import { UsageOverviewSkeleton } from './skeletons'
 
-function UsageBar({ feature }: { feature: FeatureUsage }) {
-  if (feature.unlimited) {
-    return (
-      <div className="usage-overview-bar-row">
-        <div className="usage-overview-bar-label">
-          <span className="usage-overview-bar-name">{feature.name}</span>
-          <span className="usage-overview-bar-value">Unlimited</span>
-        </div>
-        <div className="usage-overview-bar-track">
-          <div className="usage-overview-bar-fill unlimited" />
-        </div>
-      </div>
-    )
-  }
-
-  const used = feature.usage ?? 0
-  const included = feature.includedUsage ?? 0
-  const percent = included > 0 ? Math.min((used / included) * 100, 100) : 0
-
-  return (
-    <div className="usage-overview-bar-row">
-      <div className="usage-overview-bar-label">
-        <span className="usage-overview-bar-name">{feature.name}</span>
-        <span className="usage-overview-bar-value">
-          {used.toLocaleString()} / {included > 0 ? included.toLocaleString() : '—'}
-        </span>
-      </div>
-      <div className="usage-overview-bar-track">
-        <div
-          className={`usage-overview-bar-fill${percent >= 90 ? ' warning' : ''}`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
 export default function UsageOverview() {
-  const { planName, featureUsage, isLoading: billingLoading } = useAutumnCustomer()
+  const { planName, creditBalance, isLoading: billingLoading } = useAutumnCustomer()
   const { data, isLoading: sandboxesLoading } = useSandboxes('')
 
   const sandboxes = data?.pages.flatMap((page) => page.sandboxes) ?? []
@@ -57,6 +19,10 @@ export default function UsageOverview() {
     return <UsageOverviewSkeleton />
   }
 
+  const creditPercent = creditBalance && creditBalance.total > 0
+    ? Math.min((creditBalance.used / creditBalance.total) * 100, 100)
+    : 0
+
   return (
     <section className="usage-overview">
       <div className="usage-overview-stats">
@@ -68,23 +34,32 @@ export default function UsageOverview() {
           <span className="usage-overview-stat-label">Active Sandboxes</span>
           <span className="usage-overview-stat-value">{activeSandboxes.length}</span>
         </div>
-        {featureUsage.map((feature) => (
-          <div key={feature.featureId} className="usage-overview-stat">
-            <span className="usage-overview-stat-label">{feature.name}</span>
+        {creditBalance && (
+          <div className="usage-overview-stat">
+            <span className="usage-overview-stat-label">Credits Remaining</span>
             <span className="usage-overview-stat-value">
-              {feature.unlimited
-                ? '∞'
-                : `${(feature.usage ?? 0).toLocaleString()} / ${feature.includedUsage ? feature.includedUsage.toLocaleString() : '—'}`}
+              ${creditBalance.remaining.toFixed(2)}
             </span>
           </div>
-        ))}
+        )}
       </div>
 
-      {featureUsage.length > 0 && (
+      {creditBalance && (
         <div className="usage-overview-bars">
-          {featureUsage.map((feature) => (
-            <UsageBar key={feature.featureId} feature={feature} />
-          ))}
+          <div className="usage-overview-bar-row">
+            <div className="usage-overview-bar-label">
+              <span className="usage-overview-bar-name">Compute Credits</span>
+              <span className="usage-overview-bar-value">
+                ${creditBalance.used.toFixed(2)} / ${creditBalance.total.toFixed(2)}
+              </span>
+            </div>
+            <div className="usage-overview-bar-track">
+              <div
+                className={`usage-overview-bar-fill${creditPercent >= 90 ? ' warning' : ''}`}
+                style={{ width: `${creditPercent}%` }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </section>
