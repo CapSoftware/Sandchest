@@ -41,15 +41,27 @@ export function createSshConnection(config: SshConfig): Promise<Client> {
 export function createPasswordSshConnection(config: PasswordSshConfig): Promise<Client> {
   return new Promise((resolve, reject) => {
     const conn = new Client()
+    const debugLines: string[] = []
     conn
       .on('ready', () => resolve(conn))
-      .on('error', (err) => reject(err))
+      .on('error', (err) => {
+        console.error('[SSH] Connection failed:', err.message)
+        console.error('[SSH] Debug log:\n' + debugLines.filter(l =>
+          l.includes('Auth') || l.includes('auth') || l.includes('Handshake') || l.includes('method')
+        ).join('\n'))
+        reject(err)
+      })
+      .on('keyboard-interactive', (_name, _instructions, _instructionsLang, prompts, finish) => {
+        finish(prompts.map(() => config.password))
+      })
       .connect({
         host: config.host,
         port: config.port,
         username: config.username,
         password: config.password,
+        tryKeyboard: true,
         readyTimeout: 15_000,
+        debug: (msg: string) => { debugLines.push(msg) },
       })
   })
 }
