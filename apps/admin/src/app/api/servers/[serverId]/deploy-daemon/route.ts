@@ -115,6 +115,29 @@ export async function POST(
       .set({ nodeId: nodeIdBytes, updatedAt: new Date() })
       .where(eq(adminServers.id, serverIdBuf))
 
+    // Register/upsert the node in the production API so sandbox queries work
+    const apiUrl = process.env.API_URL ?? 'https://api.sandchest.com'
+    const apiToken = process.env.ADMIN_API_TOKEN
+    try {
+      const registerRes = await fetch(`${apiUrl}/v1/admin/nodes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+        },
+        body: JSON.stringify({
+          id: nodeId,
+          name: server.name ?? server.ip,
+          hostname: server.ip,
+        }),
+      })
+      if (!registerRes.ok) {
+        console.error(`[deploy] failed to register node in API: ${registerRes.status} ${await registerRes.text().catch(() => '')}`)
+      }
+    } catch (err) {
+      console.error(`[deploy] node registration failed:`, err)
+    }
+
     return NextResponse.json({
       success: true,
       node_id: nodeId,
