@@ -1,5 +1,79 @@
 import { presignDaemonBinary, presignKernel, presignRootfs } from './r2.js'
 
+// --- Rootfs patching ---
+// The R2 rootfs image may be missing overlay-init and/or the guest agent
+// systemd unit. These commands mount the ext4, inject the missing files,
+// and unmount — idempotent and safe to re-run.
+
+const OVERLAY_INIT = `#!/bin/bash
+set -euo pipefail
+LOWER=/mnt/lower; UPPER=/mnt/upper; WORK=/mnt/work; MERGED=/mnt/merged
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /mnt
+mkdir -p "$LOWER" "$UPPER" "$WORK" "$MERGED"
+mount --bind / "$LOWER"
+mount -o remount,ro,bind "$LOWER"
+mount -t overlay overlay -o "lowerdir=\${LOWER},upperdir=\${UPPER},workdir=\${WORK}" "$MERGED"
+mkdir -p "\${MERGED}/proc" "\${MERGED}/sys" "\${MERGED}/dev" "\${MERGED}/mnt"
+mount --move /proc "\${MERGED}/proc"
+mount --move /sys "\${MERGED}/sys"
+mount --bind /dev "\${MERGED}/dev"
+cd "$MERGED"; mkdir -p old_root; pivot_root . old_root
+umount -l /old_root 2>/dev/null || true; rmdir /old_root 2>/dev/null || true
+exec /sbin/init "$@"
+`
+
+const GUEST_AGENT_SERVICE = `[Unit]
+Description=Sandchest Guest Agent
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sandchest-guest-agent
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp /var/tmp /home
+PrivateTmp=no
+LimitNOFILE=65536
+LimitNPROC=4096
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sandchest-agent
+
+[Install]
+WantedBy=multi-user.target
+`
+
+const ROOTFS_PATH = '/var/sandchest/images/ubuntu-22.04-base/rootfs.ext4'
+const ROOTFS_MNT = '/tmp/sandchest-rootfs-patch'
+
+/**
+ * Commands to mount the rootfs ext4 image and inject overlay-init + guest
+ * agent systemd unit if they are missing. Idempotent.
+ */
+export function patchRootfsCommands(): string[] {
+  const overlayB64 = Buffer.from(OVERLAY_INIT).toString('base64')
+  const serviceB64 = Buffer.from(GUEST_AGENT_SERVICE).toString('base64')
+  return [
+    `mkdir -p ${ROOTFS_MNT}`,
+    `mount -o loop ${ROOTFS_PATH} ${ROOTFS_MNT}`,
+    // Install overlay-init
+    `echo '${overlayB64}' | base64 -d > ${ROOTFS_MNT}/sbin/overlay-init`,
+    `chmod +x ${ROOTFS_MNT}/sbin/overlay-init`,
+    // Install guest agent systemd service
+    `mkdir -p ${ROOTFS_MNT}/etc/systemd/system/multi-user.target.wants`,
+    `echo '${serviceB64}' | base64 -d > ${ROOTFS_MNT}/etc/systemd/system/sandchest-guest-agent.service`,
+    `ln -sf /etc/systemd/system/sandchest-guest-agent.service ${ROOTFS_MNT}/etc/systemd/system/multi-user.target.wants/sandchest-guest-agent.service`,
+    `umount ${ROOTFS_MNT}`,
+    `rmdir ${ROOTFS_MNT}`,
+  ]
+}
+
 export interface ProvisionContext {
   readonly nodeId: string
   readonly ip: string
@@ -133,6 +207,13 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     validate: 'test -f /var/sandchest/images/ubuntu-22.04-base/vmlinux && test -f /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4 && echo "images ok"',
   },
   {
+    id: 'patch-rootfs',
+    name: 'Patch rootfs (overlay-init + agent service)',
+    timeoutMs: 60_000,
+    commands: () => patchRootfsCommands(),
+    validate: `mount -o loop,ro ${ROOTFS_PATH} ${ROOTFS_MNT} && test -f ${ROOTFS_MNT}/sbin/overlay-init && test -f ${ROOTFS_MNT}/etc/systemd/system/sandchest-guest-agent.service && echo "rootfs patched ok"; umount ${ROOTFS_MNT} 2>/dev/null; rmdir ${ROOTFS_MNT} 2>/dev/null; true`,
+  },
+  {
     id: 'install-certs-mtls',
     name: 'Configure mTLS certificates',
     commands: (ctx) => mtlsCertCommands(ctx.ip),
@@ -203,7 +284,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
         `curl -fsSL --retry 3 --retry-delay 5 '${url}' -o /usr/local/bin/sandchest-node`,
         'chmod +x /usr/local/bin/sandchest-node',
         'mkdir -p /etc/sandchest',
-        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\n' > /etc/sandchest/node.env`,
+        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\n' > /etc/sandchest/node.env`,
         `(test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true)`,
         `echo '${unitFileB64}' | base64 -d > /etc/systemd/system/sandchest-node.service`,
         'systemctl daemon-reload',
