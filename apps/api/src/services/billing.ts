@@ -21,6 +21,24 @@ export interface BillingApi {
     featureId: string,
     value?: number | undefined,
   ) => Effect.Effect<void, never, never>
+
+  /** Track compute usage in dollar amount (deducts from credit balance). */
+  readonly trackCompute: (
+    customerId: string,
+    dollarAmount: number,
+    sandboxId: string,
+  ) => Effect.Effect<void, never, never>
+
+  /** Check whether a customer has sufficient credits for an estimated cost. */
+  readonly checkCredits: (
+    customerId: string,
+    estimatedDollars: number,
+  ) => Effect.Effect<BillingCheckResult, never, never>
+
+  /** Get the billing tier for a customer ('free' or 'max'). */
+  readonly getBillingTier: (
+    customerId: string,
+  ) => Effect.Effect<'free' | 'max', never, never>
 }
 
 export class BillingService extends Context.Tag('BillingService')<BillingService, BillingApi>() {}
