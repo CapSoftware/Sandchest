@@ -138,6 +138,21 @@ export default function ServerDetailPage({
     },
   })
 
+  const destroyAllVmsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/destroy-all-vms`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Failed to destroy VMs' })) as { error: string }
+        throw new Error(data.error)
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+      queryClient.invalidateQueries({ queryKey: ['server-sandboxes', serverId] })
+      queryClient.invalidateQueries({ queryKey: ['server-metrics', serverId] })
+    },
+  })
+
   const [mtlsResult, setMtlsResult] = useState<{ flySecretsSet: boolean; flyCommand?: string; flyError?: string } | null>(null)
 
   const mtlsMutation = useMutation({
@@ -327,7 +342,28 @@ export default function ServerDetailPage({
             >
               Enable
             </button>
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() => {
+                if (confirm('Destroy ALL VMs on this server? This will kill every Firecracker process and clean up all sandbox data.')) {
+                  destroyAllVmsMutation.mutate()
+                }
+              }}
+              disabled={destroyAllVmsMutation.isPending}
+            >
+              {destroyAllVmsMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Destroying…</> : 'Destroy All VMs'}
+            </button>
           </div>
+          {destroyAllVmsMutation.isError && (
+            <div className="feedback-card feedback-danger" style={{ marginTop: '0.75rem' }}>
+              {destroyAllVmsMutation.error.message}
+            </div>
+          )}
+          {destroyAllVmsMutation.isSuccess && (
+            <div className="feedback-card feedback-success" style={{ marginTop: '0.75rem' }}>
+              All VMs destroyed and daemon restarted.
+            </div>
+          )}
         </div>
       )}
 
