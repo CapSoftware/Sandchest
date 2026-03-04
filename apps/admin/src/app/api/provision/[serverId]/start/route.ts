@@ -25,9 +25,7 @@ export async function POST(
     return NextResponse.json({ error: 'Server not found' }, { status: 404 })
   }
 
-  if (server.provisionStatus === 'provisioning') {
-    return NextResponse.json({ error: 'Already provisioning' }, { status: 409 })
-  }
+  // Allow re-provisioning from any state (handles stuck "provisioning" states)
 
   // Decrypt SSH key
   let sshKey: string
