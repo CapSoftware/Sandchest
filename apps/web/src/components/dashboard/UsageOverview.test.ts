@@ -31,19 +31,19 @@ describe('UsageOverview component', () => {
     expect(src).toMatch(/status === 'provisioning'/)
   })
 
-  test('renders feature usage bars', () => {
+  test('renders credit balance bar', () => {
     expect(src).toMatch(/usage-overview-bar-track/)
     expect(src).toMatch(/usage-overview-bar-fill/)
-    expect(src).toMatch(/featureUsage\.map/)
+    expect(src).toMatch(/creditBalance/)
   })
 
-  test('handles unlimited features', () => {
-    expect(src).toContain('Unlimited')
-    expect(src).toMatch(/feature\.unlimited/)
+  test('shows credit remaining amount', () => {
+    expect(src).toMatch(/Credits Remaining/)
+    expect(src).toMatch(/creditBalance\.remaining/)
   })
 
   test('shows warning style when usage is high', () => {
-    expect(src).toMatch(/percent >= 90/)
+    expect(src).toMatch(/creditPercent >= 90/)
     expect(src).toContain('warning')
   })
 

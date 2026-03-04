@@ -19,8 +19,8 @@ describe('useBillingCheck hook', () => {
     expect(src).toMatch(/export function useBillingCheck/)
   })
 
-  test('accepts featureId parameter', () => {
-    expect(src).toMatch(/useBillingCheck\(featureId: string\)/)
+  test('takes no parameters', () => {
+    expect(src).toMatch(/useBillingCheck\(\)/)
   })
 
   test('defines BillingCheckResult type', () => {

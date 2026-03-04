@@ -136,10 +136,9 @@ describe('PlanStep', () => {
     expect(src).toMatch(/onboarding-plans/)
   })
 
-  test('has free, pro, and team plans', () => {
+  test('has free and max plans', () => {
     expect(src).toMatch(/['"]free['"]/)
-    expect(src).toMatch(/['"]pro['"]/)
-    expect(src).toMatch(/['"]team['"]/)
+    expect(src).toMatch(/['"]max['"]/)
   })
 
   test('uses Autumn attach for paid plans', () => {

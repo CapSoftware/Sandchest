@@ -43,15 +43,19 @@ describe('BillingManagement component', () => {
     expect(src).toContain('>Active<')
   })
 
-  test('renders feature usage bars', () => {
-    expect(src).toMatch(/billing-usage-bar/)
-    expect(src).toMatch(/billing-usage-fill/)
-    expect(src).toMatch(/featureUsage\.map/)
+  test('renders credit balance card', () => {
+    expect(src).toMatch(/billing-credits-card/)
+    expect(src).toMatch(/Credit Balance/)
+    expect(src).toMatch(/creditBalance/)
   })
 
-  test('handles unlimited features', () => {
-    expect(src).toContain('Unlimited')
-    expect(src).toMatch(/feature\.unlimited/)
+  test('shows buy credits section with topup options and error handling', () => {
+    expect(src).toContain('Buy Credits')
+    expect(src).toMatch(/credits-topup-10/)
+    expect(src).toMatch(/credits-topup-50/)
+    expect(src).toMatch(/credits-topup-100/)
+    expect(src).toMatch(/setError/)
+    expect(src).toMatch(/billing-topup-error/)
   })
 
   test('shows warning style when usage is high', () => {

@@ -43,7 +43,7 @@ describe('PaywallDialog component', () => {
   })
 
   test('useFeatureGate uses useBillingCheck', () => {
-    expect(src).toMatch(/useBillingCheck\(featureId\)/)
+    expect(src).toMatch(/useBillingCheck\(\)/)
   })
 
   test('useFeatureGate returns a gate function', () => {
