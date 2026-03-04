@@ -60,6 +60,9 @@ export function patchRootfsCommands(): string[] {
   const overlayB64 = Buffer.from(OVERLAY_INIT).toString('base64')
   const serviceB64 = Buffer.from(GUEST_AGENT_SERVICE).toString('base64')
   return [
+    // Clean up stale mounts from previous failed runs
+    `(umount ${ROOTFS_MNT} 2>/dev/null || true)`,
+    `(umount ${ROOTFS_PATH} 2>/dev/null || true)`,
     `mkdir -p ${ROOTFS_MNT}`,
     `mount -o loop ${ROOTFS_PATH} ${ROOTFS_MNT}`,
     // Install overlay-init
