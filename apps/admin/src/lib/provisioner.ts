@@ -59,7 +59,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     commands: [
       'export DEBIAN_FRONTEND=noninteractive',
       'apt-get update -qq',
-      'apt-get install -y -qq curl nftables',
+      'apt-get install -y -qq curl iptables',
     ],
     validate: 'curl --version',
   },
@@ -84,8 +84,8 @@ export const PROVISION_STEPS: ProvisionStep[] = [
       'modprobe kvm',
       'modprobe kvm_amd || modprobe kvm_intel || true',
       'modprobe tun',
-      'echo "kvm" >> /etc/modules-load.d/sandchest.conf',
-      'echo "tun" >> /etc/modules-load.d/sandchest.conf',
+      // Persist modules across reboots
+      'printf "kvm\\ntun\\n" > /etc/modules-load.d/sandchest.conf',
     ],
     validate: 'lsmod | grep kvm',
   },
@@ -142,59 +142,36 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     id: 'configure-firewall',
     name: 'Configure firewall',
     commands: [
-      // Write nftables ruleset, apply, and persist (single command to avoid heredoc + && join issues)
-      `cat > /etc/nftables.conf << 'NFTEOF'
-#!/usr/sbin/nft -f
-flush ruleset
-
-table inet sandchest {
-  chain input {
-    type filter hook input priority 0; policy drop;
-
-    # Loopback
-    iif lo accept
-
-    # Established / related
-    ct state { established, related } accept
-
-    # SSH
-    tcp dport 22 accept
-
-    # gRPC (mTLS-protected)
-    tcp dport 50051 accept
-
-    # ICMP
-    ip protocol icmp accept
-    ip6 nexthdr icmpv6 accept
-  }
-
-  chain forward {
-    type filter hook forward priority 0; policy drop;
-
-    # Established / related return traffic to TAP devices
-    ct state { established, related } accept
-
-    # Sandbox TAP -> outbound
-    iifname "tap*" accept
-  }
-
-  chain output {
-    type filter hook output priority 0; policy accept;
-  }
-}
-
-table ip sandchest_nat {
-  chain postrouting {
-    type nat hook postrouting priority 100; policy accept;
-
-    # Masquerade sandbox traffic (172.16.0.0/16 covers all /30 slots)
-    ip saddr 172.16.0.0/16 masquerade
-  }
-}
-NFTEOF
-nft -f /etc/nftables.conf && systemctl enable nftables`,
+      // Switch to iptables-legacy (the nf_tables backend isn't supported on this kernel)
+      'update-alternatives --set iptables /usr/sbin/iptables-legacy',
+      'update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy',
+      // Flush existing rules
+      'iptables -F',
+      'iptables -X',
+      'iptables -t nat -F',
+      'iptables -t nat -X',
+      // Default policies
+      'iptables -P INPUT DROP',
+      'iptables -P FORWARD DROP',
+      'iptables -P OUTPUT ACCEPT',
+      // INPUT chain
+      'iptables -A INPUT -i lo -j ACCEPT',
+      'iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
+      'iptables -A INPUT -p tcp --dport 22 -j ACCEPT',
+      'iptables -A INPUT -p tcp --dport 50051 -j ACCEPT',
+      'iptables -A INPUT -p icmp -j ACCEPT',
+      // FORWARD chain
+      'iptables -A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
+      'iptables -A FORWARD -i tap+ -j ACCEPT',
+      // NAT for sandbox traffic
+      'iptables -t nat -A POSTROUTING -s 172.16.0.0/16 -j MASQUERADE',
+      // IPv6 ICMP
+      'ip6tables -A INPUT -p icmpv6 -j ACCEPT',
+      // Persist rules across reboots
+      'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent',
+      'netfilter-persistent save',
     ],
-    validate: 'nft list ruleset | grep sandchest',
+    validate: 'iptables -L INPUT -n | grep "50051"',
   },
   {
     id: 'deploy-node-daemon',
