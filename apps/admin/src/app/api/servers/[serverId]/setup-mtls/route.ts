@@ -99,10 +99,56 @@ export async function POST(
     const clientCert = clientCertResult.stdout.trim()
     const clientKey = clientKeyResult.stdout.trim()
 
+    const grpcAddr = `${server.ip}:50051`
+
+    // Try to auto-set Fly secrets if FLY_ACCESS_TOKEN is available
+    const flyToken = process.env.FLY_ACCESS_TOKEN
+    const flyApp = process.env.FLY_APP_NAME ?? 'sandchest-api'
+
+    if (flyToken) {
+      const secrets: Record<string, string> = {
+        NODE_GRPC_ADDR: grpcAddr,
+        MTLS_CA_PEM: ca,
+        MTLS_CLIENT_CERT_PEM: clientCert,
+        MTLS_CLIENT_KEY_PEM: clientKey,
+      }
+
+      const flyRes = await fetch(`https://api.machines.dev/v1/apps/${flyApp}/secrets`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${flyToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(
+          Object.entries(secrets).map(([label, value]) => ({
+            label,
+            value: Buffer.from(value).toString('base64'),
+            type: 'secret',
+          })),
+        ),
+      })
+
+      if (!flyRes.ok) {
+        const flyErr = await flyRes.text()
+        return NextResponse.json({
+          success: true,
+          flySecretsSet: false,
+          flyError: flyErr,
+          flyCommand: `fly secrets set NODE_GRPC_ADDR='${grpcAddr}' MTLS_CA_PEM='${ca}' MTLS_CLIENT_CERT_PEM='${clientCert}' MTLS_CLIENT_KEY_PEM='${clientKey}' -a ${flyApp}`,
+        })
+      }
+
+      return NextResponse.json({
+        success: true,
+        flySecretsSet: true,
+      })
+    }
+
+    // No Fly token — return manual command
     return NextResponse.json({
       success: true,
-      certs: { ca, clientCert, clientKey },
-      flyCommand: `fly secrets set MTLS_CA_PEM='${ca}' MTLS_CLIENT_CERT_PEM='${clientCert}' MTLS_CLIENT_KEY_PEM='${clientKey}' -a sandchest-api`,
+      flySecretsSet: false,
+      flyCommand: `fly secrets set NODE_GRPC_ADDR='${grpcAddr}' MTLS_CA_PEM='${ca}' MTLS_CLIENT_CERT_PEM='${clientCert}' MTLS_CLIENT_KEY_PEM='${clientKey}' -a ${flyApp}`,
     })
   } catch (err) {
     return NextResponse.json(
