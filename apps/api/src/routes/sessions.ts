@@ -159,11 +159,11 @@ const sessionExec = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
-  // Billing: check exec access
-  const billingCheck = yield* billing.check(auth.userId, 'execs')
+  // Billing: check credit balance (org-level, matches trackCompute target)
+  const billingCheck = yield* billing.checkCredits(auth.orgId, 0)
   if (!billingCheck.allowed) {
     return yield* Effect.fail(
-      new BillingLimitError({ message: 'Exec limit reached on your current plan' }),
+      new BillingLimitError({ message: 'Credits depleted on your current plan' }),
     )
   }
 
@@ -243,9 +243,6 @@ const sessionExec = Effect.gen(function* () {
 
   // Async mode
   if (!wait) {
-    // Billing: track exec (fire-and-forget)
-    yield* billing.track(auth.userId, 'execs')
-
     return HttpServerResponse.unsafeJson(
       { exec_id: execIdStr, status: 'queued' },
       { status: 202 },
@@ -307,9 +304,6 @@ const sessionExec = Effect.gen(function* () {
     result.stderr.length > STDOUT_MAX_BYTES
       ? result.stderr.slice(0, STDOUT_MAX_BYTES)
       : result.stderr
-
-  // Billing: track exec (fire-and-forget)
-  yield* billing.track(auth.userId, 'execs')
 
   const response: SessionExecResponse = {
     exec_id: execIdStr,

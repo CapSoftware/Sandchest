@@ -38,6 +38,7 @@ import {
   SandboxNotRunningError,
   ValidationError,
 } from '../errors.js'
+import { meterSandbox } from '../workers/credit-metering.js'
 import { AuthContext } from '../context.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
@@ -122,11 +123,11 @@ const createSandbox = Effect.gen(function* () {
   const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
 
-  // Billing: check sandbox creation access
-  const billingCheck = yield* billing.check(auth.userId, 'sandboxes')
+  // Billing: check credit balance (org-level, matches trackCompute target)
+  const billingCheck = yield* billing.checkCredits(auth.orgId, 0)
   if (!billingCheck.allowed) {
     return yield* Effect.fail(
-      new BillingLimitError({ message: 'Sandbox creation limit reached on your current plan' }),
+      new BillingLimitError({ message: 'Credits depleted on your current plan' }),
     )
   }
 
@@ -225,9 +226,6 @@ const createSandbox = Effect.gen(function* () {
     replay_url: replayUrl(sandboxId),
     created_at: row.createdAt.toISOString(),
   }
-
-  // Billing: track sandbox creation (fire-and-forget)
-  yield* billing.track(auth.userId, 'sandboxes')
 
   const auditLog = yield* AuditLog
   yield* auditLog.append({
@@ -393,6 +391,9 @@ const stopSandbox = Effect.gen(function* () {
     return HttpServerResponse.unsafeJson(response, { status: 202 })
   }
 
+  // Final credit meter before termination (best-effort)
+  yield* meterSandbox(row, new Date()).pipe(Effect.catchAll(() => Effect.void))
+
   // Transition to stopping
   yield* repo.updateStatus(idBytes, auth.orgId, 'stopping', {
     failureReason: 'sandbox_stopped',
@@ -464,6 +465,11 @@ const deleteSandbox = Effect.gen(function* () {
   // Destroy the VM on the node if it's still active (best-effort)
   const isActive = row.status === 'running' || row.status === 'stopping' || row.status === 'queued' || row.status === 'provisioning'
   if (isActive) {
+    // Final credit meter before termination (best-effort)
+    if (row.status === 'running') {
+      yield* meterSandbox(row, new Date()).pipe(Effect.catchAll(() => Effect.void))
+    }
+
     const nodeClient = yield* NodeClient
     yield* nodeClient.destroySandbox({ sandboxId: idBytes }).pipe(
       Effect.catchAll(() => Effect.void),
@@ -500,11 +506,11 @@ const forkSandbox = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
-  // Billing: check sandbox creation access (forks count as sandbox creation)
-  const billingCheck = yield* billing.check(auth.userId, 'sandboxes')
+  // Billing: check credit balance (forks count as sandbox creation, org-level)
+  const billingCheck = yield* billing.checkCredits(auth.orgId, 0)
   if (!billingCheck.allowed) {
     return yield* Effect.fail(
-      new BillingLimitError({ message: 'Sandbox creation limit reached on your current plan' }),
+      new BillingLimitError({ message: 'Credits depleted on your current plan' }),
     )
   }
 
@@ -607,9 +613,6 @@ const forkSandbox = Effect.gen(function* () {
     replay_url: replayUrl(sandboxId),
     created_at: forkRow.createdAt.toISOString(),
   }
-
-  // Billing: track fork as sandbox creation (fire-and-forget)
-  yield* billing.track(auth.userId, 'sandboxes')
 
   const auditLog = yield* AuditLog
   yield* auditLog.append({
