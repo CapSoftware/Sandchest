@@ -1,36 +1,32 @@
 'use client'
 
+import { useState } from 'react'
 import { useAutumnCustomer } from '@/hooks/use-autumn-customer'
-import type { FeatureUsage } from '@/hooks/use-autumn-customer'
+import type { CreditBalance } from '@/hooks/use-autumn-customer'
 import { useCustomer } from 'autumn-js/react'
 import { PricingTable } from 'autumn-js/react'
 import { BillingSkeleton } from './skeletons'
 
-function UsageBar({ feature }: { feature: FeatureUsage }) {
-  if (feature.unlimited) {
-    return (
-      <div className="billing-usage-row">
-        <div className="billing-usage-label">
-          <span className="billing-usage-name">{feature.name}</span>
-          <span className="billing-usage-value">Unlimited</span>
-        </div>
-        <div className="billing-usage-bar">
-          <div className="billing-usage-fill unlimited" />
-        </div>
-      </div>
-    )
-  }
+const TOPUP_OPTIONS = [
+  { label: '$10', productId: 'credits-topup-10' },
+  { label: '$50', productId: 'credits-topup-50' },
+  { label: '$100', productId: 'credits-topup-100' },
+] as const
 
-  const used = feature.usage ?? 0
-  const included = feature.includedUsage ?? 0
-  const percent = included > 0 ? Math.min((used / included) * 100, 100) : 0
+function CreditBalanceCard({ credits }: { credits: CreditBalance }) {
+  const percent = credits.total > 0
+    ? Math.min((credits.used / credits.total) * 100, 100)
+    : 0
 
   return (
-    <div className="billing-usage-row">
-      <div className="billing-usage-label">
-        <span className="billing-usage-name">{feature.name}</span>
-        <span className="billing-usage-value">
-          {used.toLocaleString()} / {included > 0 ? included.toLocaleString() : '—'}
+    <div className="billing-credits-card">
+      <div className="billing-credits-header">
+        <span className="billing-credits-label">Credit Balance</span>
+        <span className="billing-credits-amount">
+          ${credits.remaining.toFixed(2)}
+          {credits.total > 0 && (
+            <span className="billing-credits-total"> / ${credits.total.toFixed(2)}</span>
+          )}
         </span>
       </div>
       <div className="billing-usage-bar">
@@ -39,26 +35,64 @@ function UsageBar({ feature }: { feature: FeatureUsage }) {
           style={{ width: `${percent}%` }}
         />
       </div>
+      <span className="billing-credits-used">
+        ${credits.used.toFixed(2)} used this month
+      </span>
+    </div>
+  )
+}
+
+function BuyCreditsSection() {
+  const { attach } = useCustomer()
+  const [loading, setLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleBuy(productId: string) {
+    setLoading(productId)
+    setError(null)
+    try {
+      await attach({ productId })
+    } catch (e) {
+      // Autumn redirects on success — errors here are real failures
+      const message = e instanceof Error ? e.message : 'Failed to purchase credits'
+      setError(message)
+    }
+    setLoading(null)
+  }
+
+  return (
+    <div className="billing-topup">
+      <span className="billing-topup-label">Buy Credits</span>
+      <div className="billing-topup-buttons">
+        {TOPUP_OPTIONS.map((option) => (
+          <button
+            key={option.productId}
+            className="billing-topup-btn"
+            onClick={() => handleBuy(option.productId)}
+            disabled={loading !== null}
+          >
+            {loading === option.productId ? '...' : option.label}
+          </button>
+        ))}
+      </div>
+      {error && <p className="billing-topup-error" role="alert">{error}</p>}
     </div>
   )
 }
 
 export default function BillingManagement() {
-  const { customer, planName, featureUsage, isLoading } = useAutumnCustomer()
+  const { activePlan, planName, creditBalance, isLoading } = useAutumnCustomer()
   const { openBillingPortal } = useCustomer()
 
   if (isLoading) {
     return <BillingSkeleton />
   }
 
-  const activePlan =
-    customer?.products.find((p) => p.status === 'active' && !p.is_add_on) ?? null
-
   return (
     <div>
       <div className="dash-page-header">
         <h1 className="dash-page-title">Billing</h1>
-        {customer && (
+        {activePlan && (
           <button
             className="dash-primary-btn"
             onClick={() => openBillingPortal()}
@@ -86,15 +120,12 @@ export default function BillingManagement() {
         </div>
       </section>
 
-      {/* Usage */}
-      {featureUsage.length > 0 && (
+      {/* Credit balance */}
+      {creditBalance && (
         <section className="dash-section">
-          <h2 className="dash-section-title">Usage</h2>
-          <div className="billing-usage-list">
-            {featureUsage.map((feature) => (
-              <UsageBar key={feature.featureId} feature={feature} />
-            ))}
-          </div>
+          <h2 className="dash-section-title">Credits</h2>
+          <CreditBalanceCard credits={creditBalance} />
+          <BuyCreditsSection />
         </section>
       )}
 
