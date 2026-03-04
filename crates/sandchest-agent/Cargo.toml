@@ -26,5 +26,5 @@ tonic-build = "0.12"
 tempfile = "3"
 
 [features]
-default = []
+default = ["vsock"]
 vsock = ["tokio-vsock"]
