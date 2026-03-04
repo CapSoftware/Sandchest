@@ -11,6 +11,17 @@ export type FeatureUsage = {
   unlimited: boolean
 }
 
+export type CreditBalance = {
+  /** Credits remaining (balance from Autumn). */
+  remaining: number
+  /** Credits included in the plan (0 for top-up-only users). */
+  included: number
+  /** Credits consumed this period. */
+  used: number
+  /** Total credits available (included + top-ups). Used as denominator for progress bar. */
+  total: number
+}
+
 export function useAutumnCustomer() {
   const result = useCustomer()
   const { customer } = result
@@ -32,10 +43,24 @@ export function useAutumnCustomer() {
       }))
     : []
 
+  // Extract credit balance from the 'credits' feature
+  const creditsFeature = customer?.features['credits']
+  const creditBalance: CreditBalance | null = creditsFeature
+    ? (() => {
+        const remaining = creditsFeature.balance ?? 0
+        const included = creditsFeature.included_usage ?? 0
+        const used = creditsFeature.usage ?? 0
+        // Total = remaining + used (accounts for top-ups beyond included credits)
+        const total = remaining + used
+        return { remaining, included, used, total }
+      })()
+    : null
+
   return {
     ...result,
     activePlan,
     planName,
     featureUsage,
+    creditBalance,
   }
 }
