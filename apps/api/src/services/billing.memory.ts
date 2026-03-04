@@ -5,6 +5,7 @@ export interface TrackedEvent {
   readonly customerId: string
   readonly featureId: string
   readonly value: number
+  readonly sandboxId?: string | undefined
 }
 
 /** In-memory BillingService for testing. All checks pass by default. */
@@ -46,6 +47,21 @@ export function createInMemoryBillingApi(): BillingApi & {
       Effect.sync(() => {
         tracked.push({ customerId, featureId, value: value ?? 1 })
       }),
+
+    trackCompute: (customerId, dollarAmount, sandboxId) =>
+      Effect.sync(() => {
+        tracked.push({ customerId, featureId: 'compute', value: dollarAmount, sandboxId })
+      }),
+
+    checkCredits: (customerId, _estimatedDollars) =>
+      Effect.succeed({
+        allowed: !blocked.has(key(customerId, 'credits')),
+        featureId: 'credits',
+        balance: null,
+        unlimited: undefined,
+      } satisfies BillingCheckResult),
+
+    getBillingTier: () => Effect.succeed('free' as const),
   }
 }
 
