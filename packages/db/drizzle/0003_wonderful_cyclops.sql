@@ -1,0 +1,1 @@
+ALTER TABLE `sandboxes` ADD `last_metered_at` timestamp(6);

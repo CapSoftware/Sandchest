@@ -41,6 +41,7 @@ export const sandboxes = mysqlTable(
     replayBundleRef: varchar('replay_bundle_ref', { length: 1024 }),
     replayExpiresAt: timestampMicro('replay_expires_at'),
     lastActivityAt: timestampMicro('last_activity_at'),
+    lastMeteredAt: timestampMicro('last_metered_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     startedAt: timestampMicro('started_at'),
