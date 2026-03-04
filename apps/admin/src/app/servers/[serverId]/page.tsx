@@ -138,7 +138,7 @@ export default function ServerDetailPage({
     },
   })
 
-  const [mtlsResult, setMtlsResult] = useState<{ flyCommand: string } | null>(null)
+  const [mtlsResult, setMtlsResult] = useState<{ flySecretsSet: boolean; flyCommand?: string; flyError?: string } | null>(null)
 
   const mtlsMutation = useMutation({
     mutationFn: async () => {
@@ -147,7 +147,7 @@ export default function ServerDetailPage({
         const data = await res.json().catch(() => ({ error: 'mTLS setup failed' })) as { error: string }
         throw new Error(data.error)
       }
-      return res.json() as Promise<{ success: boolean; flyCommand: string }>
+      return res.json() as Promise<{ success: boolean; flySecretsSet: boolean; flyCommand?: string; flyError?: string }>
     },
     onSuccess: (data) => {
       setMtlsResult(data)
@@ -235,7 +235,7 @@ export default function ServerDetailPage({
       )}
       {deployMutation.isSuccess && (
         <div className="card feedback-card feedback-success" style={{ marginBottom: '1rem' }}>
-          Daemon deployed successfully. Waiting for heartbeat…
+          Daemon and images updated. Waiting for heartbeat…
         </div>
       )}
 
@@ -300,6 +300,13 @@ export default function ServerDetailPage({
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
+              className="btn btn-primary btn-sm"
+              onClick={() => deployMutation.mutate()}
+              disabled={deployMutation.isPending}
+            >
+              {deployMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Deploying…</> : 'Redeploy Daemon'}
+            </button>
+            <button
               className="btn btn-sm"
               onClick={() => actionMutation.mutate('drain')}
               disabled={actionMutation.isPending}
@@ -351,21 +358,33 @@ export default function ServerDetailPage({
           )}
           {mtlsResult && (
             <div style={{ marginTop: '0.75rem' }}>
-              <div className="feedback-card feedback-success" style={{ marginBottom: '0.5rem' }}>
-                mTLS certificates generated and daemon restarted. Set the Fly.io secrets below:
-              </div>
-              <pre style={{
-                fontSize: '0.6875rem',
-                background: 'var(--bg-inset)',
-                padding: '0.75rem',
-                borderRadius: '6px',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-                userSelect: 'all',
-              }}>
-                {mtlsResult.flyCommand}
-              </pre>
+              {mtlsResult.flySecretsSet ? (
+                <div className="feedback-card feedback-success">
+                  mTLS certificates generated, daemon restarted, and Fly secrets updated.
+                </div>
+              ) : (
+                <>
+                  <div className="feedback-card feedback-warning" style={{ marginBottom: '0.5rem' }}>
+                    {mtlsResult.flyError
+                      ? `mTLS certs generated but Fly secrets failed: ${mtlsResult.flyError}. Set them manually:`
+                      : 'mTLS certs generated. No FLY_ACCESS_TOKEN configured — set Fly secrets manually:'}
+                  </div>
+                  {mtlsResult.flyCommand && (
+                    <pre style={{
+                      fontSize: '0.6875rem',
+                      background: 'var(--bg-inset)',
+                      padding: '0.75rem',
+                      borderRadius: '6px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                      userSelect: 'all',
+                    }}>
+                      {mtlsResult.flyCommand}
+                    </pre>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
