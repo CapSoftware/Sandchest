@@ -61,7 +61,6 @@ export function isBillingLimitError(error: unknown): boolean {
 }
 
 function PaywallDialogContent({
-  featureId,
   featureName,
   dismiss,
 }: {
