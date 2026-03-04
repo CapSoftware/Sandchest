@@ -202,9 +202,18 @@ export default function ServerDetailPage({
             </>
           )}
           {server.provision_status === 'provisioning' && (
-            <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
-              View Progress
-            </Link>
+            <>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => provisionMutation.mutate()}
+                disabled={provisionMutation.isPending}
+              >
+                {provisionMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Provisioning…</> : 'Re-provision'}
+              </button>
+              <Link href={`/servers/${serverId}/provision`} className="btn btn-sm">
+                View Progress
+              </Link>
+            </>
           )}
           {server.provision_status === 'completed' && !server.node_id && (
             <button
@@ -238,7 +247,7 @@ export default function ServerDetailPage({
       )}
       {reinstallMutation.isSuccess && (
         <div className="card feedback-card feedback-success" style={{ marginBottom: '1rem' }}>
-          OS reinstalled successfully. Click &ldquo;Provision&rdquo; to set up the server.
+          Reinstall started. This takes ~10 minutes (rescue → install → reboot → key setup). Refresh the page to check progress.
         </div>
       )}
 
