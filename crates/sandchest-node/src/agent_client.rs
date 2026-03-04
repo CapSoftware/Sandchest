@@ -180,14 +180,33 @@ async fn make_channel(
     }
 }
 
-/// Tower service that connects to a Unix domain socket.
+/// Tower service that connects to a Firecracker vsock UDS.
 ///
-/// Used as a custom tonic connector to reach the Firecracker vsock UDS
-/// proxy. The URI parameter is ignored — all connections go to the
-/// configured socket path.
+/// Firecracker exposes guest vsock ports via a single Unix domain socket
+/// on the host. To reach guest port N, the host must:
+///   1. Connect to the base UDS (e.g. `vsock.sock`)
+///   2. Send `CONNECT N\n`
+///   3. Wait for `OK N\n`
+///
+/// The `path` field is in the format `{base_uds}_{port}` (e.g. `vsock.sock_52`).
+/// This connector parses the port, connects to the base socket, and performs
+/// the CONNECT handshake before handing the stream to tonic.
 #[derive(Clone)]
 struct UdsConnector {
     path: String,
+}
+
+impl UdsConnector {
+    /// Parse `vsock.sock_52` into (`vsock.sock`, 52).
+    fn parse_path_and_port(&self) -> (String, u32) {
+        if let Some(idx) = self.path.rfind('_') {
+            if let Ok(port) = self.path[idx + 1..].parse::<u32>() {
+                return (self.path[..idx].to_string(), port);
+            }
+        }
+        // Fallback: treat the whole path as the socket (shouldn't happen)
+        (self.path.clone(), DEFAULT_AGENT_VSOCK_PORT)
+    }
 }
 
 impl tower::Service<http::Uri> for UdsConnector {
@@ -204,9 +223,28 @@ impl tower::Service<http::Uri> for UdsConnector {
     }
 
     fn call(&mut self, _uri: http::Uri) -> Self::Future {
-        let path = self.path.clone();
+        let (base_path, port) = self.parse_path_and_port();
         Box::pin(async move {
-            let stream = tokio::net::UnixStream::connect(&path).await?;
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            // Connect to the Firecracker vsock UDS
+            let mut stream = tokio::net::UnixStream::connect(&base_path).await?;
+
+            // Perform the CONNECT handshake
+            let connect_cmd = format!("CONNECT {}\n", port);
+            stream.write_all(connect_cmd.as_bytes()).await?;
+
+            // Read the response (e.g. "OK 52\n")
+            let mut buf = [0u8; 64];
+            let n = stream.read(&mut buf).await?;
+            let response = std::str::from_utf8(&buf[..n]).unwrap_or("");
+            if !response.starts_with("OK ") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!("vsock CONNECT handshake failed: {}", response.trim()),
+                ));
+            }
+
             Ok(hyper_util::rt::TokioIo::new(stream))
         })
     }
