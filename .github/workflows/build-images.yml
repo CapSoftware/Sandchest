@@ -71,6 +71,22 @@ jobs:
           sudo make toolchain \
             TOOLCHAIN=${{ github.event.inputs.toolchain }}
 
+      - name: Verify agent inside rootfs has vsock
+        run: |
+          ROOTFS="images/output/ubuntu-22.04/${{ github.event.inputs.toolchain || 'base' }}/rootfs.ext4"
+          MNT=$(mktemp -d)
+          sudo mount -o loop,ro "$ROOTFS" "$MNT"
+          AGENT="$MNT/usr/local/bin/sandchest-guest-agent"
+          echo "Agent binary inside rootfs:"
+          ls -la "$AGENT"
+          VSOCK_COUNT=$(strings "$AGENT" | grep -c vsock || true)
+          echo "vsock string count: $VSOCK_COUNT"
+          sudo umount "$MNT" && rmdir "$MNT"
+          if [ "$VSOCK_COUNT" -lt 10 ]; then
+            echo "ERROR: agent binary inside rootfs is missing vsock support ($VSOCK_COUNT strings)"
+            exit 1
+          fi
+
       - name: Validate image
         working-directory: images
         run: ./scripts/validate-image.sh --output output/ubuntu-22.04/${{ github.event.inputs.toolchain || 'base' }}

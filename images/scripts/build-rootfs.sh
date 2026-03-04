@@ -159,8 +159,11 @@ if [[ -n "$AGENT_BIN" ]]; then
         exit 1
     fi
     echo ">>> Installing guest agent..."
+    echo "    Source: $(ls -la "$AGENT_BIN")"
     cp "$AGENT_BIN" "${MOUNT_POINT}/usr/local/bin/sandchest-guest-agent"
     chmod +x "${MOUNT_POINT}/usr/local/bin/sandchest-guest-agent"
+    echo "    Installed: $(ls -la "${MOUNT_POINT}/usr/local/bin/sandchest-guest-agent")"
+    echo "    vsock strings: $(strings "${MOUNT_POINT}/usr/local/bin/sandchest-guest-agent" | grep -c vsock || echo 0)"
 else
     echo ">>> Skipping guest agent (no --agent-bin provided)"
     echo "    Install manually: cp agent /usr/local/bin/sandchest-guest-agent"
