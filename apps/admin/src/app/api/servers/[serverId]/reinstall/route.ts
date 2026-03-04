@@ -32,36 +32,86 @@ export async function POST(
     return NextResponse.json({ error: 'Server not found' }, { status: 404 })
   }
 
+  // Validate Hetzner credentials synchronously — fail fast if they're wrong
+  let serverNumber: number
+  let rescuePassword: string
   try {
-    // 1. Find Hetzner server number by IP
-    const serverNumber = await getServerNumber(server.ip)
+    console.log('[reinstall] Looking up Hetzner server number for IP:', server.ip)
+    serverNumber = await getServerNumber(server.ip)
+    console.log('[reinstall] Server number:', serverNumber)
 
-    // 2. Activate rescue mode
-    const rescuePassword = await activateRescue(serverNumber)
+    console.log('[reinstall] Activating rescue mode...')
+    rescuePassword = await activateRescue(serverNumber)
+    console.log('[reinstall] Rescue activated, triggering hardware reset...')
 
-    // 3. Hardware reset to boot into rescue
     await hardwareReset(server.ip)
+    console.log('[reinstall] Hardware reset triggered')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[reinstall] Hetzner API failed:', msg)
+    return NextResponse.json({ error: `Hetzner API failed: ${msg}` }, { status: 500 })
+  }
 
-    // 4. Wait for rescue system to come up
-    await waitForSsh(server.ip, rescuePassword, { label: 'Rescue system' })
+  // Mark as reinstalling
+  await db
+    .update(adminServers)
+    .set({
+      provisionStatus: 'provisioning',
+      provisionStep: 'reinstall-os',
+      provisionError: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(adminServers.id, serverIdBuf))
 
-    // 5. Run installimage to install Ubuntu 24.04
-    const output = await runInstallimage(server.ip, rescuePassword)
+  // Run the long part in the background (rescue SSH → install → reboot → key setup)
+  runReinstall(serverId, server.ip, server.sshPort, server.sshUser, serverNumber, rescuePassword).catch((err) => {
+    console.error('[reinstall] Background process crashed:', err)
+  })
 
-    // 6. Deactivate rescue so next boot goes to installed OS
+  return NextResponse.json({ success: true, status: 'reinstalling' })
+}
+
+async function runReinstall(
+  serverId: string,
+  ip: string,
+  sshPort: number,
+  sshUser: string,
+  serverNumber: number,
+  rescuePassword: string,
+) {
+  const db = getDb()
+  const serverIdBuf = Buffer.from(serverId, 'hex') as unknown as Uint8Array
+
+  try {
+    // 1. Wait for rescue system to come up
+    console.log('[reinstall] Waiting for rescue SSH...')
+    await waitForSsh(ip, rescuePassword, { label: 'Rescue system' })
+    console.log('[reinstall] Rescue SSH ready')
+
+    // 2. Run installimage to install Ubuntu 24.04
+    console.log('[reinstall] Running installimage...')
+    await runInstallimage(ip, rescuePassword)
+    console.log('[reinstall] installimage complete')
+
+    // 3. Deactivate rescue so next boot goes to installed OS
+    console.log('[reinstall] Deactivating rescue...')
     await deactivateRescue(serverNumber)
 
-    // 7. Hardware reset to boot into fresh OS
-    await hardwareReset(server.ip)
+    // 4. Hardware reset to boot into fresh OS
+    console.log('[reinstall] Triggering second hardware reset...')
+    await hardwareReset(ip)
 
-    // 8. Wait for fresh OS to boot and verify it's Ubuntu
-    await waitForFreshOs(server.ip, rescuePassword)
+    // 5. Wait for fresh OS to boot and verify it's Ubuntu
+    console.log('[reinstall] Waiting for fresh OS...')
+    await waitForFreshOs(ip, rescuePassword)
+    console.log('[reinstall] Fresh OS is up')
 
-    // 9. Re-install SSH key (installimage wipes authorized_keys)
+    // 6. Re-install SSH key (installimage wipes authorized_keys)
+    console.log('[reinstall] Installing new SSH key...')
     const conn = await createPasswordSshConnection({
-      host: server.ip,
-      port: server.sshPort,
-      username: server.sshUser,
+      host: ip,
+      port: sshPort,
+      username: sshUser,
       password: rescuePassword,
     })
     let sshKeyEncrypted: string
@@ -76,8 +126,9 @@ export async function POST(
     } finally {
       conn.end()
     }
+    console.log('[reinstall] SSH key installed')
 
-    // 10. Reset DB state for fresh provisioning (with new SSH key)
+    // 7. Reset DB state for fresh provisioning (with new SSH key)
     await db
       .update(adminServers)
       .set({
@@ -94,11 +145,17 @@ export async function POST(
       })
       .where(eq(adminServers.id, serverIdBuf))
 
-    return NextResponse.json({ success: true, output })
+    console.log('[reinstall] Done! Server reset to pending.')
   } catch (err) {
-    return NextResponse.json(
-      { error: `Reinstall failed: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 500 },
-    )
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[reinstall] Failed:', msg)
+    await db
+      .update(adminServers)
+      .set({
+        provisionStatus: 'failed',
+        provisionError: `Reinstall failed: ${msg}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(adminServers.id, serverIdBuf))
   }
 }
