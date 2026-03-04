@@ -1,10 +1,12 @@
 import { Effect } from 'effect'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { RedisService } from '../services/redis.js'
+import { BillingService } from '../services/billing.js'
 import { bytesToId, NODE_PREFIX } from '@sandchest/contract'
+import { meterSandbox } from './credit-metering.js'
 import type { WorkerConfig } from './runner.js'
 
-export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService> = {
+export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService | BillingService> = {
   name: 'orphan-reconciliation',
   intervalMs: 60_000,
   handler: Effect.gen(function* () {
@@ -25,9 +27,14 @@ export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService
     if (offlineNodeIds.length === 0) return 0
 
     const orphans = yield* repo.findRunningOnNodes(offlineNodeIds)
+    const now = new Date()
+
     for (const sandbox of orphans) {
+      // Final meter before termination
+      yield* meterSandbox(sandbox, now).pipe(Effect.catchAll(() => Effect.void))
+
       yield* repo.updateStatus(sandbox.id, sandbox.orgId, 'failed', {
-        endedAt: new Date(),
+        endedAt: now,
         failureReason: 'node_lost',
       })
     }
