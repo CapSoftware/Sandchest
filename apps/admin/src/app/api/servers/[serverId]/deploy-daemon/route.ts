@@ -30,12 +30,10 @@ export async function POST(
   let kernelUrl: string
   let rootfsUrl: string
   try {
-    // Pin to the CI-verified commit to avoid R2 stale `latest` path
-    const imageVersion = '7afa25f2933022cc3ef8d457e0f2cd0dbfbc77fc'
     ;[binaryUrl, kernelUrl, rootfsUrl] = await Promise.all([
       presignDaemonBinary(),
       presignKernel(),
-      presignRootfs(imageVersion),
+      presignRootfs(),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -77,8 +75,10 @@ export async function POST(
 
   try {
     const commands = [
-      // Stop daemon before replacing binary + images
+      // Stop daemon and unmount any stale rootfs loop mounts
       '(systemctl stop sandchest-node 2>/dev/null || true)',
+      '(umount /tmp/sandchest-rootfs-patch 2>/dev/null || true)',
+      '(umount /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4 2>/dev/null || true)',
       // Download latest kernel + rootfs images
       'mkdir -p /var/sandchest/images/ubuntu-22.04-base',
       `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/ubuntu-22.04-base/vmlinux`,
