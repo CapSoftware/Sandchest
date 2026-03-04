@@ -45,7 +45,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler musl-tools debootstrap e2fsprogs
 
       - name: Build guest agent (static musl binary)
-        run: cargo build --release --package sandchest-agent --target x86_64-unknown-linux-musl --features vsock
+        run: |
+          cargo clean -p sandchest-agent --target x86_64-unknown-linux-musl --release
+          cargo build --release --package sandchest-agent --target x86_64-unknown-linux-musl --features vsock
+
+      - name: Verify agent has vsock support
+        run: |
+          strings target/x86_64-unknown-linux-musl/release/sandchest-agent | grep -c vsock || { echo "ERROR: agent binary missing vsock support"; exit 1; }
+          ls -la target/x86_64-unknown-linux-musl/release/sandchest-agent
 
       - name: Fetch kernel
         working-directory: images
