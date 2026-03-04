@@ -93,7 +93,7 @@ pub async fn serve_vsock(
     }
 
     // Create incoming stream from VsockListener.
-    let mut listener = VsockListener::bind(port as u64, port)?;
+    let mut listener = VsockListener::bind(libc::VMADDR_CID_ANY, port)?;
     let incoming = async_stream::stream! {
         loop {
             match listener.accept().await {
