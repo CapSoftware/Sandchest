@@ -24,6 +24,7 @@ export interface SandboxRow {
   readonly replayPublic: boolean
   readonly replayExpiresAt: Date | null
   readonly lastActivityAt: Date | null
+  readonly lastMeteredAt: Date | null
   readonly createdAt: Date
   readonly updatedAt: Date
   readonly startedAt: Date | null
@@ -184,6 +185,19 @@ export interface SandboxRepoApi {
   readonly findStoppingBefore: (
     cutoff: Date,
   ) => Effect.Effect<SandboxRow[], never, never>
+
+  /** Find all running sandboxes for credit metering. */
+  readonly findRunningForMetering: () => Effect.Effect<SandboxRow[], never, never>
+
+  /** Atomically read lastMeteredAt for a sandbox (fresh from store). */
+  readonly getLastMeteredAt: (
+    id: Uint8Array,
+  ) => Effect.Effect<Date | null, never, never>
+
+  /** Update lastMeteredAt to now for a sandbox. */
+  readonly touchLastMetered: (
+    id: Uint8Array,
+  ) => Effect.Effect<void, never, never>
 }
 
 export class SandboxRepo extends Context.Tag('SandboxRepo')<SandboxRepo, SandboxRepoApi>() {}

@@ -49,6 +49,7 @@ function toSandboxRow(row: typeof sandboxes.$inferSelect): SandboxRow {
     replayPublic: row.replayPublic,
     replayExpiresAt: row.replayExpiresAt ?? null,
     lastActivityAt: row.lastActivityAt ?? null,
+    lastMeteredAt: row.lastMeteredAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     startedAt: row.startedAt ?? null,
@@ -522,6 +523,39 @@ export function createDrizzleSandboxRepo(db: Database): SandboxRepoApi {
             ),
           )
         return rows.map(toSandboxRow)
+      }),
+
+    findRunningForMetering: () =>
+      Effect.promise(async () => {
+        const rows = await db
+          .select()
+          .from(sandboxes)
+          .where(
+            and(
+              eq(sandboxes.status, 'running'),
+              isNotNull(sandboxes.startedAt),
+            ),
+          )
+        return rows.map(toSandboxRow)
+      }),
+
+    getLastMeteredAt: (id) =>
+      Effect.promise(async () => {
+        const [row] = await db
+          .select({ lastMeteredAt: sandboxes.lastMeteredAt })
+          .from(sandboxes)
+          .where(eq(sandboxes.id, id))
+          .limit(1)
+        return row?.lastMeteredAt ?? null
+      }),
+
+    touchLastMetered: (id) =>
+      Effect.promise(async () => {
+        const now = new Date()
+        await db
+          .update(sandboxes)
+          .set({ lastMeteredAt: now, updatedAt: now })
+          .where(eq(sandboxes.id, id))
       }),
   }
 }

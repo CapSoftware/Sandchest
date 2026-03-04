@@ -75,6 +75,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           replayPublic: false,
           replayExpiresAt: null,
           lastActivityAt: null,
+          lastMeteredAt: null,
           createdAt: now,
           updatedAt: now,
           startedAt: null,
@@ -179,6 +180,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           replayPublic: false,
           replayExpiresAt: null,
           lastActivityAt: now,
+          lastMeteredAt: null,
           createdAt: now,
           updatedAt: now,
           startedAt: now,
@@ -387,6 +389,29 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           (r) => r.status === 'stopping' && r.updatedAt.getTime() < cutoff.getTime(),
         ),
       ),
+
+    findRunningForMetering: () =>
+      Effect.sync(() =>
+        Array.from(store.values()).filter(
+          (r) => r.status === 'running' && r.startedAt !== null,
+        ),
+      ),
+
+    getLastMeteredAt: (id) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        return row?.lastMeteredAt ?? null
+      }),
+
+    touchLastMetered: (id) =>
+      Effect.sync(() => {
+        const key = keyFor(id)
+        const row = store.get(key)
+        if (!row) return
+        const now = new Date()
+        store.set(key, { ...row, lastMeteredAt: now, updatedAt: now })
+      }),
   }
 }
 
