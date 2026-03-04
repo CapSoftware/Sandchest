@@ -37,7 +37,7 @@ export function usePaywall(): PaywallContextValue {
  * opens the paywall dialog and returns false if not.
  */
 export function useFeatureGate(featureId: string, featureName: string) {
-  const billing = useBillingCheck(featureId)
+  const billing = useBillingCheck()
   const { openPaywall } = usePaywall()
 
   const gate = useCallback((): boolean => {
@@ -70,7 +70,7 @@ function PaywallDialogContent({
   dismiss: () => void
 }) {
   const params = useParams<{ orgSlug: string }>()
-  const { balance, usage } = useBillingCheck(featureId)
+  const { balance, usage } = useBillingCheck()
   const overlayRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -107,7 +107,7 @@ function PaywallDialogContent({
     >
       <div className="paywall-dialog">
         <div className="paywall-header">
-          <h2 className="paywall-title">Limit reached</h2>
+          <h2 className="paywall-title">Credits depleted</h2>
           <button className="paywall-close" onClick={dismiss} aria-label="Close">
             <svg
               width="14"
@@ -124,8 +124,8 @@ function PaywallDialogContent({
         </div>
 
         <p className="paywall-message">
-          You&apos;ve reached the limit for <strong>{featureName}</strong> on
-          your current plan.
+          Your compute credits have been depleted. Buy more credits or upgrade
+          your plan to continue using <strong>{featureName}</strong>.
         </p>
 
         {limit != null && (
@@ -143,7 +143,7 @@ function PaywallDialogContent({
         )}
 
         <p className="paywall-sub">
-          Upgrade your plan to unlock more {featureName.toLowerCase()}.
+          Buy credits or upgrade your plan for more compute time.
         </p>
 
         <div className="paywall-actions">
