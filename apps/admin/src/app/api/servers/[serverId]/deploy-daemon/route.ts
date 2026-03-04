@@ -30,10 +30,12 @@ export async function POST(
   let kernelUrl: string
   let rootfsUrl: string
   try {
+    // Pin to the CI-verified commit to avoid R2 stale `latest` path
+    const imageVersion = '7afa25f2933022cc3ef8d457e0f2cd0dbfbc77fc'
     ;[binaryUrl, kernelUrl, rootfsUrl] = await Promise.all([
       presignDaemonBinary(),
       presignKernel(),
-      presignRootfs(),
+      presignRootfs(imageVersion),
     ])
   } catch (err) {
     return NextResponse.json(
