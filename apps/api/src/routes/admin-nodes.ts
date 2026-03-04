@@ -87,12 +87,13 @@ export const AdminNodeRouter = HttpRouter.empty.pipe(
     }),
   ),
 
-  // POST /v1/admin/nodes — register a new node
+  // POST /v1/admin/nodes — register a new node (upsert if id provided)
   HttpRouter.post(
     '/v1/admin/nodes',
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const body = (yield* request.json) as {
+        id?: string
         name?: string
         hostname?: string
         slots_total?: number
@@ -108,8 +109,36 @@ export const AdminNodeRouter = HttpRouter.empty.pipe(
       }
 
       const nodeRepo = yield* NodeRepo
-      const idBytes = generateUUIDv7()
-      const id = bytesToId(NODE_PREFIX, idBytes)
+
+      let idBytes: Uint8Array
+      let id: string
+
+      if (body.id) {
+        // Caller-specified ID — upsert: update if exists, create if not
+        try {
+          idBytes = idToBytes(body.id)
+          id = body.id
+        } catch {
+          return yield* Effect.fail(new ValidationError({ message: 'Invalid node ID format' }))
+        }
+
+        const existing = yield* nodeRepo.findById(idBytes)
+        if (existing) {
+          yield* nodeRepo.update(idBytes, {
+            status: 'online',
+            slotsTotal: body.slots_total,
+            version: body.version,
+            firecrackerVersion: body.firecracker_version,
+          })
+          return HttpServerResponse.unsafeJson(
+            { id, name: body.name, hostname: body.hostname, status: 'online', upserted: true },
+            { status: 200 },
+          )
+        }
+      } else {
+        idBytes = generateUUIDv7()
+        id = bytesToId(NODE_PREFIX, idBytes)
+      }
 
       yield* nodeRepo.create({
         id: idBytes,
