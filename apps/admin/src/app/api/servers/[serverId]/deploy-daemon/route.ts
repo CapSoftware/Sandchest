@@ -4,8 +4,9 @@ import { getDb } from '@/lib/db'
 import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
-import { presignDaemonBinary } from '@/lib/r2'
-import { generateId, idToBytes, NODE_PREFIX } from '@sandchest/contract'
+import { presignDaemonBinary, presignKernel, presignRootfs } from '@/lib/r2'
+import { patchRootfsCommands } from '@/lib/provisioner'
+import { generateId, idToBytes, bytesToId, NODE_PREFIX } from '@sandchest/contract'
 
 export async function POST(
   _request: Request,
@@ -25,16 +26,15 @@ export async function POST(
     return NextResponse.json({ error: 'Server not found' }, { status: 404 })
   }
 
-  if (server.provisionStatus !== 'completed') {
-    return NextResponse.json(
-      { error: 'Server must be fully provisioned before deploying daemon' },
-      { status: 400 },
-    )
-  }
-
   let binaryUrl: string
+  let kernelUrl: string
+  let rootfsUrl: string
   try {
-    binaryUrl = await presignDaemonBinary()
+    ;[binaryUrl, kernelUrl, rootfsUrl] = await Promise.all([
+      presignDaemonBinary(),
+      presignKernel(),
+      presignRootfs(),
+    ])
   } catch (err) {
     return NextResponse.json(
       { error: `R2 presign failed: ${err instanceof Error ? err.message : String(err)}` },
@@ -64,25 +64,40 @@ export async function POST(
     )
   }
 
-  // Generate a stable node ID so we can link the daemon back to this server
-  const nodeId = generateId(NODE_PREFIX)
-  const nodeIdBytes = idToBytes(nodeId) as unknown as Uint8Array
+  // Reuse existing node ID on redeploy, generate new one for first deploy
+  const isRedeploy = server.nodeId != null
+  const nodeId = isRedeploy
+    ? bytesToId(NODE_PREFIX, server.nodeId as unknown as Uint8Array)
+    : generateId(NODE_PREFIX)
+  const nodeIdBytes = isRedeploy
+    ? server.nodeId as unknown as Uint8Array
+    : idToBytes(nodeId) as unknown as Uint8Array
 
   try {
     const commands = [
-      `curl -fsSL '${binaryUrl}' -o /usr/local/bin/sandchest-node`,
+      // Stop daemon before replacing binary + images
+      '(systemctl stop sandchest-node 2>/dev/null || true)',
+      // Download latest kernel + rootfs images
+      'mkdir -p /var/sandchest/images/ubuntu-22.04-base',
+      `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/ubuntu-22.04-base/vmlinux`,
+      `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrl}' -o /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4`,
+      'chmod 644 /var/sandchest/images/ubuntu-22.04-base/vmlinux /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4',
+      // Patch rootfs with overlay-init + guest agent systemd unit
+      ...patchRootfsCommands(),
+      // Download latest daemon binary
+      `curl -fsSL --retry 3 --retry-delay 5 '${binaryUrl}' -o /usr/local/bin/sandchest-node`,
       'chmod +x /usr/local/bin/sandchest-node',
       'mkdir -p /etc/sandchest',
-      `printf 'SANDCHEST_NODE_ID=${nodeId}\\n' > /etc/sandchest/node.env`,
+      `printf 'SANDCHEST_NODE_ID=${nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\n' > /etc/sandchest/node.env`,
       // Append TLS paths if mTLS certs exist on this server
       `test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true`,
       // Ensure the systemd unit references the env file (idempotent — rewrites the unit)
-      `printf '[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/sandchest-node.service`,
+      `printf '[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=SANDCHEST_DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/sandchest-node.service`,
       'systemctl daemon-reload',
       'systemctl restart sandchest-node',
     ]
 
-    const result = await execCommand(conn, commands.join(' && '))
+    const result = await execCommand(conn, commands.join(' && '), 300_000)
 
     if (result.code !== 0) {
       const output = (result.stdout + '\n' + result.stderr).trim()
