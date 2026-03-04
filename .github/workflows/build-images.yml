@@ -102,29 +102,5 @@ jobs:
             images/output/ubuntu-22.04/*/rootfs.sha256
           retention-days: 30
 
-      - name: Deploy images to Hetzner
-        env:
-          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
-          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$HETZNER_SSH_KEY" > ~/.ssh/hetzner_key
-          chmod 600 ~/.ssh/hetzner_key
-          ssh-keyscan -H "$HETZNER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-
-          TOOLCHAIN=${{ github.event.inputs.toolchain || 'base' }}
-
-          scp -i ~/.ssh/hetzner_key \
-            images/kernel/vmlinux-5.10 \
-            "root@${HETZNER_HOST}:/var/sandchest/images/vmlinux-5.10"
-
-          scp -i ~/.ssh/hetzner_key \
-            "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
-            "root@${HETZNER_HOST}:/var/sandchest/images/rootfs.ext4"
-
-          ssh -i ~/.ssh/hetzner_key "root@${HETZNER_HOST}" << 'DEPLOY'
-            chmod 644 /var/sandchest/images/vmlinux-5.10
-            chmod 644 /var/sandchest/images/rootfs.ext4
-            echo "Images deployed:"
-            ls -lh /var/sandchest/images/
-          DEPLOY
+      # Images are deployed to servers via the admin "Redeploy Daemon" button,
+      # which pulls from R2 and patches the rootfs in-place. No direct SSH needed.
