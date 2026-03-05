@@ -2,7 +2,7 @@ export default function CodeExample() {
   return (
     <section id="code" className="section">
       <div className="section-header">
-        <h3 className="section-title">See it in action</h3>
+        <h3 className="section-title">How it works</h3>
         <p className="text-[13px] text-text-weak" style={{ lineHeight: 1.5 }}>
           A few lines of TypeScript. That&apos;s it.
         </p>
