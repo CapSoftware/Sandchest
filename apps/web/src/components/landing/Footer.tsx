@@ -2,7 +2,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 
 const productLinks = [
-  { label: 'Features', href: '/#features' },
+  { label: 'What is Sandchest?', href: '/what-is-sandchest' },
   { label: 'Pricing', href: '/pricing' },
   { label: 'Compare', href: '/compare' },
   { label: 'Dashboard', href: '/dashboard' },
@@ -78,7 +78,7 @@ export default function Footer() {
             />
           </Link>
           <p className="footer-tagline">
-            Linux sandboxes for AI agents.<br />
+            Bare metal sandboxes for AI agents.<br />
             Fork fast. Iterate faster.
           </p>
         </div>
