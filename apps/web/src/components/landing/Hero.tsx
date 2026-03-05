@@ -8,7 +8,7 @@ export default function Hero() {
       </h1>
 
       <p className="hero-reveal hero-reveal-delay-2 text-text" style={{ marginBottom: 32, maxWidth: '82%' }}>
-        Sandchest gives your agent isolated Linux VMs that fork in under 100ms. It tries ideas in parallel, backtracks bad paths instantly, and iterates faster than any human could.
+        Every sandbox runs on bare metal. Firecracker microVMs that fork in under 100ms — your agent tries ideas in parallel, backtracks instantly, and iterates faster than any human could.
       </p>
 
       <InstallCommand />

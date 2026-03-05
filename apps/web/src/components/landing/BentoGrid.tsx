@@ -15,7 +15,7 @@ export default function BentoGrid() {
       <div className="section-header">
         <h3 className="section-title">What is Sandchest?</h3>
         <p className="text-text">
-          A sandbox platform for AI agent code execution. Every sandbox is a Firecracker microVM with VM-grade isolation, sub-second fork capability, and a permanent session replay URL.
+          Every sandbox is a Firecracker microVM on bare metal. VM-grade isolation, sub-second forking, and a permanent session replay URL.
         </p>
       </div>
 
