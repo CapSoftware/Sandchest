@@ -119,7 +119,7 @@ describe('landing page server/client component boundaries', () => {
     test('Nav contains static nav links', () => {
       const src = read('Nav.tsx')
       expect(src).toContain('What is Sandchest?')
-      expect(src).toContain('See it in action')
+      expect(src).toContain('How it works')
       expect(src).toContain('Pricing')
       expect(src).toContain('Star on GitHub')
     })
