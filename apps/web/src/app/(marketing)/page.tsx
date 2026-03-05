@@ -6,9 +6,9 @@ import Cta from '@/components/landing/Cta'
 import ScrollReveal from '@/components/landing/ScrollReveal'
 
 export const metadata: Metadata = {
-  title: 'Sandchest — Linux Sandboxes for AI Agents',
+  title: 'Sandchest — The Sandbox Platform for AI Agents',
   description:
-    'Firecracker microVM sandboxes with sub-second fork, VM-grade isolation, and permanent session replay for AI agent code execution.',
+    'Bare metal Firecracker microVM sandboxes with sub-second forking, VM-grade isolation, and permanent session replay.',
 }
 
 export default function HomePage() {
