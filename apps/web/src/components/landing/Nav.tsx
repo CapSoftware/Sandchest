@@ -14,14 +14,14 @@ export default function Nav() {
 
         <ul className="hidden items-center lg:flex" style={{ gap: 48 }}>
           <li>
-            <a href="/#features" className="text-text-weak transition-colors hover:text-text-strong">
+            <Link href="/what-is-sandchest" className="text-text-weak transition-colors hover:text-text-strong">
               What is Sandchest?
-            </a>
+            </Link>
           </li>
           <li>
-            <a href="/#code" className="text-text-weak transition-colors hover:text-text-strong">
-              See it in action
-            </a>
+            <Link href="/how-it-works" className="text-text-weak transition-colors hover:text-text-strong">
+              How it works
+            </Link>
           </li>
           <li>
             <Link href="/pricing" className="text-text-weak transition-colors hover:text-text-strong">

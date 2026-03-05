@@ -42,12 +42,12 @@ export default function MobileMenu() {
           style={{ top: 80, borderBottom: '1px solid var(--color-border-weak)', padding: '16px var(--padding) 24px' }}
         >
           <div className="flex flex-col" style={{ gap: 20 }}>
-            <a href="/#features" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
+            <Link href="/what-is-sandchest" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
               What is Sandchest?
-            </a>
-            <a href="/#code" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
-              See it in action
-            </a>
+            </Link>
+            <Link href="/how-it-works" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
+              How it works
+            </Link>
             <Link href="/pricing" onClick={closeMenu} className="nav-mobile-link text-text-weak transition-colors hover:text-text-strong">
               Pricing
             </Link>
