@@ -17,7 +17,7 @@ export default function MobileMenu() {
   return (
     <>
       <button
-        className="nav-mobile-toggle flex items-center justify-center sm:hidden"
+        className="nav-mobile-toggle flex items-center justify-center lg:hidden"
         aria-label="Toggle menu"
         aria-expanded={isOpen}
         onClick={toggleMenu}
@@ -38,7 +38,7 @@ export default function MobileMenu() {
 
       {isOpen && (
         <div
-          className="fixed left-0 right-0 z-[9] bg-background sm:hidden"
+          className="fixed left-0 right-0 z-[9] bg-background lg:hidden"
           style={{ top: 80, borderBottom: '1px solid var(--color-border-weak)', padding: '16px var(--padding) 24px' }}
         >
           <div className="flex flex-col" style={{ gap: 20 }}>

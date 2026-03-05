@@ -2275,13 +2275,13 @@ nav ul {
   margin: 0;
 }
 
-@media (max-width: 55rem) {
-  nav ul { gap: 32px !important; }
-  .star-item { display: none; }
+nav ul li a {
+  white-space: nowrap;
 }
 
-@media (max-width: 48rem) {
-  nav ul { gap: 24px !important; }
+@media (max-width: 72rem) {
+  nav ul { gap: 28px !important; }
+  .star-item { display: none; }
 }
 
 /* ── Hero ── */
