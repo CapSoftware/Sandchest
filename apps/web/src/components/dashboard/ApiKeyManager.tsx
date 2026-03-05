@@ -17,17 +17,19 @@ export default function ApiKeyManager() {
   const { openPaywall } = usePaywall()
 
   const [newKeyName, setNewKeyName] = useState('')
+  const [expiresIn, setExpiresIn] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
 
   function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    createKey.mutate(newKeyName.trim() || undefined, {
+    createKey.mutate({ name: newKeyName.trim() || undefined, expiresIn }, {
       onSuccess: (data) => {
         if (data?.key) {
           setNewKeyValue(data.key)
         }
         setNewKeyName('')
+        setExpiresIn(null)
       },
       onError: (err) => {
         if (err instanceof ApiError && err.status === 403) {
@@ -111,6 +113,22 @@ export default function ApiKeyManager() {
             className="dash-input"
             disabled={createKey.isPending}
           />
+          <label htmlFor="key-expiry" className="dash-label">
+            Expiry
+          </label>
+          <select
+            id="key-expiry"
+            className="dash-select"
+            value={expiresIn ?? ''}
+            onChange={(e) => setExpiresIn(e.target.value ? Number(e.target.value) : null)}
+            disabled={createKey.isPending}
+          >
+            <option value="">No expiry</option>
+            <option value="604800">7 days</option>
+            <option value="2592000">30 days</option>
+            <option value="5184000">60 days</option>
+            <option value="7776000">90 days</option>
+          </select>
           <button
             type="submit"
             className="dash-primary-btn"
@@ -130,6 +148,7 @@ export default function ApiKeyManager() {
               <tr>
                 <th>Name</th>
                 <th>Key</th>
+                <th>Expires</th>
                 <th>Created</th>
                 <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
@@ -142,6 +161,9 @@ export default function ApiKeyManager() {
                   </td>
                   <td>
                     <code className="dash-key-prefix">{key.start ?? '???'}...</code>
+                  </td>
+                  <td className="dash-text-weak">
+                    {key.expiresAt ? formatShortDate(key.expiresAt) : 'Never'}
                   </td>
                   <td className="dash-text-weak">{formatShortDate(key.createdAt)}</td>
                   <td>

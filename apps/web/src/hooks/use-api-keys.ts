@@ -7,6 +7,7 @@ interface ApiKey {
   id: string
   name: string | null
   start: string | null
+  expiresAt: Date | null
   createdAt: Date
 }
 
@@ -30,9 +31,10 @@ export function useCreateApiKey() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (name: string | undefined) => {
+    mutationFn: async ({ name, expiresIn }: { name?: string | undefined; expiresIn?: number | null }) => {
       const { data, error } = await authClient.apiKey.create({
         name: name || undefined,
+        ...(expiresIn != null ? { expiresIn } : {}),
       })
       if (error) throw new Error(error.message ?? 'Failed to create API key')
       return data as { key: string } | null
