@@ -1,9 +1,13 @@
 import 'server-only'
 
+import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+
+const AUTH_COOKIE = 'better-auth.session_token'
+const SECURE_AUTH_COOKIE = '__Secure-better-auth.session_token'
 
 export interface ServerSession {
   session: {
@@ -27,6 +31,11 @@ export interface ServerOrg {
   slug: string
 }
 
+async function hasSessionCookie(): Promise<boolean> {
+  const cookieStore = await cookies()
+  return cookieStore.has(AUTH_COOKIE) || cookieStore.has(SECURE_AUTH_COOKIE)
+}
+
 async function authFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   const cookieStore = await cookies()
   const cookieHeader = cookieStore
@@ -48,14 +57,16 @@ async function authFetch<T>(path: string, init?: RequestInit): Promise<T | null>
   return res.json() as Promise<T>
 }
 
-export async function getSession(): Promise<ServerSession | null> {
+export const getSession = cache(async (): Promise<ServerSession | null> => {
+  if (!(await hasSessionCookie())) return null
   return authFetch<ServerSession>('/api/auth/get-session')
-}
+})
 
-export async function getOrgs(): Promise<ServerOrg[]> {
+export const getOrgs = cache(async (): Promise<ServerOrg[]> => {
+  if (!(await hasSessionCookie())) return []
   const data = await authFetch<ServerOrg[]>('/api/auth/organization/list')
   return data ?? []
-}
+})
 
 async function setActiveOrgServer(organizationId: string): Promise<void> {
   await authFetch('/api/auth/organization/set-active', {

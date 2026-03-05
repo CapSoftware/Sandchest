@@ -21,6 +21,12 @@ function createAuth() {
       'https://sandchest.com',
       'https://*.sandchest.com',
     ],
+    session: {
+      cookieCache: {
+        enabled: true,
+        maxAge: 5 * 60, // 5 minutes — avoids DB read on every getSession()
+      },
+    },
     advanced: {
       crossSubDomainCookies: {
         enabled: true,

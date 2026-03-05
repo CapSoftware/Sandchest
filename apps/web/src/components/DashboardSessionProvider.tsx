@@ -36,14 +36,42 @@ export default function DashboardSessionProvider({
   const router = useRouter()
 
   // Check session validity every 5 minutes — external system sync (valid useEffect)
+  // Pauses when tab is hidden to avoid unnecessary API+DB calls.
   useEffect(() => {
-    const interval = setInterval(async () => {
-      const { data } = await authClient.getSession()
-      if (!data) {
-        window.location.href = '/login'
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    function startPolling() {
+      if (interval) return
+      interval = setInterval(async () => {
+        const { data } = await authClient.getSession()
+        if (!data) {
+          window.location.href = '/login'
+        }
+      }, 5 * 60 * 1000)
+    }
+
+    function stopPolling() {
+      if (interval) {
+        clearInterval(interval)
+        interval = null
       }
-    }, 5 * 60 * 1000)
-    return () => clearInterval(interval)
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        stopPolling()
+      } else {
+        startPolling()
+      }
+    }
+
+    startPolling()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      stopPolling()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [])
 
   return (

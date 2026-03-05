@@ -67,37 +67,18 @@ describe('auth middleware', () => {
   })
 
   describe('auth pages', () => {
-    test('redirects authenticated users from /login to /dashboard', () => {
-      const res = middleware(makeRequest('/login', SESSION_COOKIE))
-      expect(res.status).toBe(307)
-      expect(new URL(res.headers.get('location')!).pathname).toBe('/dashboard')
-    })
+    test('does not redirect from auth pages — pages handle their own auth logic', () => {
+      // Auth pages (/login, /signup, /verify) validate sessions server-side
+      // via getSession() instead of relying on cookie existence checks.
+      // This prevents redirect loops when cookies outlive sessions.
+      const loginRes = middleware(makeRequest('/login', SESSION_COOKIE))
+      expect(loginRes.status).toBe(200)
 
-    test('redirects authenticated users from /signup to /dashboard', () => {
-      const res = middleware(makeRequest('/signup', SESSION_COOKIE))
-      expect(res.status).toBe(307)
-      expect(new URL(res.headers.get('location')!).pathname).toBe('/dashboard')
-    })
+      const signupRes = middleware(makeRequest('/signup', SESSION_COOKIE))
+      expect(signupRes.status).toBe(200)
 
-    test('redirects authenticated users from /verify to /dashboard', () => {
-      const res = middleware(makeRequest('/verify', SESSION_COOKIE))
-      expect(res.status).toBe(307)
-      expect(new URL(res.headers.get('location')!).pathname).toBe('/dashboard')
-    })
-
-    test('allows unauthenticated users to access /login', () => {
-      const res = middleware(makeRequest('/login'))
-      expect(res.status).toBe(200)
-    })
-
-    test('allows unauthenticated users to access /signup', () => {
-      const res = middleware(makeRequest('/signup'))
-      expect(res.status).toBe(200)
-    })
-
-    test('allows unauthenticated users to access /verify', () => {
-      const res = middleware(makeRequest('/verify'))
-      expect(res.status).toBe(200)
+      const verifyRes = middleware(makeRequest('/verify', SESSION_COOKIE))
+      expect(verifyRes.status).toBe(200)
     })
   })
 
@@ -110,10 +91,10 @@ describe('auth middleware', () => {
       expect(config.matcher).toContain('/onboarding')
     })
 
-    test('includes auth pages', () => {
-      expect(config.matcher).toContain('/login')
-      expect(config.matcher).toContain('/signup')
-      expect(config.matcher).toContain('/verify')
+    test('does not include auth pages — they handle auth server-side', () => {
+      expect(config.matcher).not.toContain('/login')
+      expect(config.matcher).not.toContain('/signup')
+      expect(config.matcher).not.toContain('/verify')
     })
   })
 })
