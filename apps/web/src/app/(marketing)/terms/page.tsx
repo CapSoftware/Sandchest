@@ -72,10 +72,18 @@ export default function TermsPage() {
           the account you create to access the Service.
         </p>
         <p>
+          <strong className="text-text-strong">&quot;Confidential Information&quot;</strong>{' '}
+          means any non-public information disclosed by one party to the other
+          in connection with these Terms, including but not limited to technical
+          data, trade secrets, product plans, Customer Content, business
+          strategies, pricing, and security architecture.
+        </p>
+        <p>
           <strong className="text-text-strong">&quot;Customer Content&quot;</strong>{' '}
           means any code, data, files, artifacts, memory snapshots, and other
           materials that you or your AI agents upload, create, or store within
-          the Service.
+          the Service, as well as Session Replay data generated from your
+          Sandbox sessions.
         </p>
         <p>
           <strong className="text-text-strong">&quot;Sandbox&quot;</strong> means
@@ -87,12 +95,17 @@ export default function TermsPage() {
           <strong className="text-text-strong">&quot;Session Replay&quot;</strong>{' '}
           means the recorded log of commands, outputs, and events within a
           Sandbox session, accessible via a shareable URL subject to the
-          retention policies described in Section 7.
+          retention policies described in Section 8.
         </p>
         <p>
           <strong className="text-text-strong">&quot;AI Agent&quot;</strong>{' '}
           means any automated software agent, AI model, or autonomous system
           that accesses the Service using your API keys or Account credentials.
+        </p>
+        <p>
+          <strong className="text-text-strong">&quot;Updates&quot;</strong>{' '}
+          means patches, bug fixes, feature enhancements, and other changes
+          that Sandchest deploys to the Service.
         </p>
       </Section>
 
@@ -108,6 +121,17 @@ export default function TermsPage() {
           The Service is subject to rate limits and usage quotas as documented on
           the Site. Sandchest may throttle or temporarily restrict access if
           usage exceeds applicable limits.
+        </p>
+        <p>
+          Sandchest may deliver Updates automatically. For any material reduction
+          of a feature that is generally available and actively used in your
+          Account, Sandchest intends to provide at least thirty (30) days&apos;
+          notice unless doing so would create a security risk, violate law, or
+          be technically infeasible. Sandchest will use commercially reasonable
+          efforts to maintain backwards compatibility for twelve (12) months
+          after an Update is released, except where doing so would introduce a
+          security vulnerability, infringe third-party rights, or be technically
+          impracticable.
         </p>
       </Section>
 
@@ -135,7 +159,44 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="6. AI Agent Use">
+      <Section title="6. License Grant and Restrictions">
+        <p>
+          Subject to your compliance with these Terms, Sandchest grants you a
+          limited, non-exclusive, non-transferable right to access and use the
+          Service solely for your internal business purposes during the term.
+          You may not and may not permit any third party to:
+        </p>
+        <ul>
+          <li>
+            Copy, modify, or create derivative works of the Service.
+          </li>
+          <li>
+            Distribute, resell, lease, or sublicense the Service to any third
+            party or otherwise commercialize the Service in any way.
+          </li>
+          <li>
+            Reverse engineer, decompile, or attempt to discover the source code
+            or underlying algorithms of the Service, except to the extent such
+            restriction is prohibited by law.
+          </li>
+          <li>
+            Interfere with or disrupt the security, integrity, or performance
+            of the Service.
+          </li>
+          <li>
+            Access the Service for the purpose of building, promoting, or
+            otherwise in relation to a competitive product or service.
+          </li>
+        </ul>
+        <p>
+          You obtain no right or license to use the Service or any part thereof
+          except as expressly set forth in these Terms. Sandchest reserves all
+          rights in and to the Service not expressly granted herein.
+        </p>
+      </Section>
+
+      {/* ------------------------------------------------------------------ */}
+      <Section title="7. AI Agent Use">
         <p>
           The Service is designed for use by AI Agents operating autonomously.
           You acknowledge and agree that:
@@ -147,8 +208,10 @@ export default function TermsPage() {
             access, and resource consumption.
           </li>
           <li>
-            Sandchest does not monitor, review, or validate code executed by AI
-            Agents within Sandboxes.
+            Sandchest does not review or validate the content of code executed
+            by AI Agents within Sandboxes, but may monitor system-level behavior
+            patterns (such as resource usage, network activity, and process
+            behavior) to detect abuse and protect the Service.
           </li>
           <li>
             You must implement appropriate safeguards, supervision, and
@@ -159,14 +222,14 @@ export default function TermsPage() {
             caused by AI-generated or AI-executed code within Sandboxes.
           </li>
           <li>
-            Sandchest may suspend Sandboxes that exhibit harmful or abusive
-            automated behavior without prior notice.
+            Sandchest may suspend Sandboxes if it reasonably believes they
+            exhibit harmful or abusive automated behavior, without prior notice.
           </li>
         </ul>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="7. Session Replay and Recording">
+      <Section title="8. Session Replay and Recording">
         <p>
           All Sandbox sessions are recorded and may be replayed via shareable
           URLs as part of the Session Replay feature. Session Replay data is
@@ -184,7 +247,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="8. Sandbox Forking and Snapshots">
+      <Section title="9. Sandbox Forking and Snapshots">
         <p>
           The Service supports sub-second forking of Sandboxes via memory
           snapshots. Memory snapshots contain the full in-memory state of the
@@ -199,7 +262,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="9. Acceptable Use">
+      <Section title="10. Acceptable Use">
         <p>You agree not to use the Service to:</p>
         <ul>
           <li>
@@ -231,6 +294,10 @@ export default function TermsPage() {
             Store, process, or transmit content that is illegal, harmful, or
             infringes third-party intellectual property rights.
           </li>
+          <li>
+            Probe, scan, or test the vulnerability of any Sandchest system
+            without prior written permission.
+          </li>
         </ul>
         <p>
           You are responsible for all network activity originating from your
@@ -246,7 +313,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="10. Customer Content">
+      <Section title="11. Customer Content">
         <p>
           You retain all rights in your Customer Content. You grant Sandchest a
           limited, non-exclusive license to host, store, and transmit your
@@ -259,12 +326,21 @@ export default function TermsPage() {
           You are solely responsible for the legality, accuracy, and
           appropriateness of your Customer Content. Artifacts stored via the
           Service are retained for the duration of your active Account and
-          deleted in accordance with Section 17 upon termination.
+          deleted in accordance with Section 19 upon termination.
+        </p>
+        <p>
+          If you provide suggestions, ideas, comments, or other information
+          related to the functions or features of the Service
+          (&quot;Feedback&quot;), Sandchest may use such Feedback to develop or
+          improve the Service or other products and services without
+          restriction. Sandchest will own any such developments or improvements
+          and will have no obligation to reimburse you or any third party for
+          such Feedback.
         </p>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="11. Pricing and Payment">
+      <Section title="12. Pricing and Payment">
         <p>
           Current fees for the Service are listed on the Site or in a mutually
           agreed written order form. Fees are credit-based: each Account
@@ -280,7 +356,7 @@ export default function TermsPage() {
           overage beyond your credit allowance. All fees are non-refundable
           except as expressly stated in
           these Terms or required by applicable law. Refunds for termination
-          without cause are described in Section 17.
+          without cause are described in Section 19.
         </p>
         <p>
           We may change our pricing upon thirty (30) days&apos; prior written
@@ -296,7 +372,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="12. Free Tier and Credits">
+      <Section title="13. Free Tier and Credits">
         <p>
           Sandchest may offer a free tier or promotional credits at its
           discretion. Free-tier usage is subject to the same Terms. We reserve
@@ -306,7 +382,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="13. Beta and Preview Services">
+      <Section title="14. Beta and Preview Services">
         <p>
           Sandchest may offer beta, preview, or early-access features
           (&quot;Beta Services&quot;). Beta Services are provided &quot;as
@@ -318,7 +394,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="14. Intellectual Property">
+      <Section title="15. Intellectual Property">
         <p>
           Sandchest and its licensors retain all right, title, and interest in
           the Service, including all software, APIs, SDKs, documentation,
@@ -333,7 +409,30 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="15. Copyright Infringement (DMCA)">
+      <Section title="16. Confidentiality">
+        <p>
+          Each party acknowledges that it may have access to certain
+          Confidential Information of the other party. Each party agrees to hold
+          and maintain all Confidential Information in confidence and not to (i)
+          disclose such Confidential Information to third parties or (ii) use
+          such Confidential Information except to exercise rights or perform
+          obligations under these Terms, without the prior written consent of
+          the disclosing party.
+        </p>
+        <p>
+          These obligations shall not apply to information that: (a) is or
+          becomes publicly available through no breach of these Terms; (b) is
+          rightfully received by the receiving party from a third party without
+          restriction; (c) is independently developed without use of
+          Confidential Information; or (d) is required to be disclosed by law or
+          court order, provided that the receiving party gives reasonable
+          advance notice, unless prohibited by applicable law or court order, to
+          allow the disclosing party to seek protection.
+        </p>
+      </Section>
+
+      {/* ------------------------------------------------------------------ */}
+      <Section title="17. Copyright Infringement (DMCA)">
         <p>
           Sandchest respects intellectual property rights. If you believe that
           content hosted on the Service infringes your copyright, you may submit
@@ -358,7 +457,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="16. Data Security and Privacy">
+      <Section title="18. Data Security and Privacy">
         <p>
           Sandchest implements commercially reasonable technical and
           organizational measures designed to protect Customer Content against
@@ -384,18 +483,21 @@ export default function TermsPage() {
           <Link href="/privacy" className="text-accent">
             Privacy Policy
           </Link>
-          , which is incorporated into these Terms by reference. For customers
-          subject to data protection laws (such as GDPR or CCPA), Sandchest
-          will enter into a Data Processing Agreement upon request. Contact{' '}
-          <a href="mailto:legal@sandchest.com" className="text-accent">
-            legal@sandchest.com
-          </a>{' '}
-          to request a DPA.
+          , which is incorporated into these Terms by reference. Customer shall
+          ensure that any Customer Content containing personal data is collected,
+          processed, and transferred in compliance with applicable data
+          protection laws, and that Customer has obtained all necessary
+          authorizations and consents from data subjects. To the extent
+          Sandchest processes personal data on your behalf, the{' '}
+          <Link href="/dpa" className="text-accent">
+            Data Processing Agreement
+          </Link>{' '}
+          is incorporated by reference into these Terms.
         </p>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="17. Suspension and Termination">
+      <Section title="19. Suspension and Termination">
         <p>
           <strong className="text-text-strong">By you.</strong> You may
           terminate your Account at any time by contacting us or through the
@@ -427,7 +529,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="18. Service Availability">
+      <Section title="20. Service Availability">
         <p>
           Sandchest will use commercially reasonable efforts to make the Service
           available, but does not guarantee uninterrupted or error-free
@@ -441,7 +543,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="19. Third-Party Services">
+      <Section title="21. Third-Party Services">
         <p>
           The Service may integrate with or enable access to third-party
           services, APIs, AI providers, or tools. Sandchest does not control and
@@ -453,7 +555,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="20. Export Compliance">
+      <Section title="22. Export Compliance">
         <p>
           The Service is subject to United States export control and trade
           sanctions laws, including the Export Administration Regulations (EAR)
@@ -467,7 +569,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="21. Disclaimer of Warranties">
+      <Section title="23. Disclaimer of Warranties">
         <p>
           THE SERVICE IS PROVIDED &quot;AS IS&quot; AND &quot;AS
           AVAILABLE.&quot; TO THE MAXIMUM EXTENT PERMITTED BY LAW, SANDCHEST
@@ -482,7 +584,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="22. Limitation of Liability">
+      <Section title="24. Limitation of Liability">
         <p>
           TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL SANDCHEST,
           ITS AFFILIATES, OFFICERS, DIRECTORS, EMPLOYEES, OR AGENTS BE LIABLE
@@ -500,7 +602,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="23. Indemnification">
+      <Section title="25. Indemnification">
         <p>
           You agree to indemnify, defend, and hold harmless Sandchest and its
           affiliates, officers, directors, employees, and agents from and
@@ -513,7 +615,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="24. Dispute Resolution">
+      <Section title="26. Dispute Resolution">
         <p>
           <strong className="text-text-strong">Informal Resolution.</strong>{' '}
           Before initiating any formal proceeding, you agree to contact us at{' '}
@@ -548,7 +650,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="25. Governing Law">
+      <Section title="27. Governing Law">
         <p>
           These Terms are governed by and construed in accordance with the laws
           of the State of Delaware, United States, without regard to its
@@ -557,7 +659,7 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="26. Modifications to Terms">
+      <Section title="28. Modifications to Terms">
         <p>
           We may update these Terms from time to time. We will notify you of
           material changes by emailing the address associated with your Account
@@ -569,10 +671,16 @@ export default function TermsPage() {
           If you do not agree to the updated Terms, you must stop using the
           Service before the changes take effect.
         </p>
+        <p>
+          For certain products, services, or offerings, supplemental terms and
+          conditions may apply and, to the extent they conflict with these
+          Terms, the supplemental terms will take precedence for the applicable
+          product or service.
+        </p>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="27. Modifications to Service">
+      <Section title="29. Modifications to Service">
         <p>
           Sandchest may modify, update, or discontinue any part of the Service
           at any time. We will use reasonable efforts to provide advance notice
@@ -582,30 +690,36 @@ export default function TermsPage() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="28. Notices">
+      <Section title="30. Notices">
         <p>
           Notices to you will be sent to the email address associated with your
-          Account and are deemed received when sent. Notices to Sandchest must
-          be sent to{' '}
+          Account. Notices to Sandchest must be sent to{' '}
           <a href="mailto:legal@sandchest.com" className="text-accent">
             legal@sandchest.com
-          </a>{' '}
-          and are deemed received upon confirmed delivery.
+          </a>
+          . All notices are deemed received three (3) business days after
+          sending.
         </p>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="29. General">
+      <Section title="31. General">
         <p>
           <strong className="text-text-strong">Entire Agreement.</strong> These
-          Terms, together with the Privacy Policy, any Data Processing
+          Terms, together with the Privacy Policy, the Data Processing
           Agreement, and any order forms, constitute the entire agreement
-          between you and Sandchest regarding the Service.
+          between you and Sandchest regarding the Service. In the event of a
+          conflict, the order of precedence is: (1) any Data Processing
+          Agreement; (2) any mutually executed order form; (3) these Terms; (4)
+          the Privacy Policy.
         </p>
         <p>
           <strong className="text-text-strong">Severability.</strong> If any
-          provision of these Terms is held invalid or unenforceable, the
-          remaining provisions shall remain in full force and effect.
+          provision of these Terms is held invalid or unenforceable, such
+          provision shall be severable and the remaining provisions shall remain
+          in full force and effect. In lieu of such invalid provision, there
+          shall be added automatically a provision as similar as possible that
+          is legal, valid, and enforceable.
         </p>
         <p>
           <strong className="text-text-strong">Waiver.</strong> Failure to
@@ -623,21 +737,25 @@ export default function TermsPage() {
           party shall be liable for delays or failures in performance resulting
           from causes beyond its reasonable control, including acts of God,
           natural disasters, war, terrorism, labor disputes, or internet service
-          disruptions.
+          disruptions. Force majeure does not excuse payment obligations.
         </p>
         <p>
-          <strong className="text-text-strong">Survival.</strong> Sections 2
-          (Definitions), 6 (AI Agent Use), 10 (Customer Content), 11 (Pricing
-          and Payment), 14 (Intellectual Property), 15 (DMCA), 16 (Data
-          Security and Privacy), 20 (Export Compliance), 21 (Disclaimer of
-          Warranties), 22 (Limitation of Liability), 23 (Indemnification), 24
-          (Dispute Resolution), 25 (Governing Law), and this Section 29 shall
-          survive any termination or expiration of these Terms.
+          <strong className="text-text-strong">Independent Contractors.</strong>{' '}
+          The parties are independent contractors. These Terms do not create an
+          agency, partnership, or joint venture.
+        </p>
+        <p>
+          <strong className="text-text-strong">Survival.</strong> Upon
+          termination or expiration of these Terms, sections that by their
+          nature should survive will continue, including payment obligations,
+          confidentiality, disclaimers, limitations of liability,
+          indemnification, dispute resolution, the post-termination export
+          window described in Section 19, and this Section 31.
         </p>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="30. Contact">
+      <Section title="32. Contact">
         <p>
           If you have questions about these Terms, contact us at{' '}
           <a href="mailto:legal@sandchest.com" className="text-accent">
