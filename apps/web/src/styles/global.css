@@ -3601,3 +3601,286 @@ nav ul li a {
     gap: 16px;
   }
 }
+
+/* ── What is Sandchest page ── */
+
+/* Problem cards */
+.what-problem-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-border-weak);
+}
+
+.what-problem-card {
+  background: var(--color-surface);
+  padding: 28px;
+  transition: background 0.3s ease;
+}
+
+.what-problem-card:hover {
+  background: var(--color-surface-hover);
+}
+
+@media (max-width: 60rem) {
+  .what-problem-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Three pillars */
+.what-pillar-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-border-weak);
+}
+
+.what-pillar {
+  background: var(--color-surface);
+  padding: 32px;
+  display: grid;
+  grid-template-columns: 200px 1fr 1fr;
+  align-items: start;
+  gap: 32px;
+  transition: background 0.3s ease;
+}
+
+.what-pillar:hover {
+  background: var(--color-surface-hover);
+}
+
+.what-pillar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.what-pillar-code {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  background: var(--color-background);
+  border-radius: 6px;
+  border: 1px solid var(--color-border-weak);
+  align-self: center;
+}
+
+.what-pillar-code code {
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+@media (max-width: 60rem) {
+  .what-pillar {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .what-pillar-code {
+    align-self: stretch;
+  }
+}
+
+/* Use cases */
+.what-usecase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-border-weak);
+}
+
+.what-usecase-card {
+  background: var(--color-surface);
+  padding: 28px;
+  transition: background 0.3s ease;
+}
+
+.what-usecase-card:hover {
+  background: var(--color-surface-hover);
+}
+
+@media (max-width: 50rem) {
+  .what-usecase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Architecture layout */
+.what-arch-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: start;
+}
+
+.what-arch-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.what-arch-layer {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  transition: background 0.2s;
+}
+
+.what-arch-layer:hover {
+  background: var(--color-surface-hover);
+}
+
+.what-arch-integrations {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.what-arch-integration {
+  padding: 16px;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  transition: border-color 0.2s;
+}
+
+.what-arch-integration:hover {
+  border-color: var(--color-border);
+}
+
+@media (max-width: 60rem) {
+  .what-arch-layout {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+}
+
+/* CTA box */
+.what-cta-box {
+  padding: 40px;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.what-cta-code {
+  padding: 12px 16px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 6px;
+  display: inline-block;
+}
+
+@media (max-width: 36rem) {
+  .what-cta-box {
+    padding: 24px;
+  }
+}
+
+/* ── How it works page ── */
+
+/* Steps grid */
+.how-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--color-border-weak);
+}
+
+.how-step-card {
+  background: var(--color-surface);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: background 0.3s ease;
+}
+
+.how-step-card:hover {
+  background: var(--color-surface-hover);
+}
+
+.how-step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.how-step-code {
+  padding: 10px 14px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border-weak);
+  border-radius: 4px;
+  margin-top: auto;
+}
+
+@media (max-width: 50rem) {
+  .how-steps-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Workflow grid */
+.how-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--color-border-weak);
+}
+
+.how-workflow-card {
+  background: var(--color-surface);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  transition: background 0.3s ease;
+}
+
+.how-workflow-card:hover {
+  background: var(--color-surface-hover);
+}
+
+@media (max-width: 60rem) {
+  .how-workflow-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Terms of Service */
+.terms-body p {
+  margin-bottom: 12px;
+}
+
+.terms-body p:last-child {
+  margin-bottom: 0;
+}
+
+.terms-body ul {
+  list-style: disc;
+  padding-left: 24px;
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.terms-body ul li {
+  line-height: 1.8;
+}
