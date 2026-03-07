@@ -131,9 +131,14 @@ async function seedDrizzleJournalIfNeeded(pool: mysql.Pool): Promise<void> {
  */
 export async function runMigrations(options: MigrateOptions): Promise<MigrateResult> {
   const { databaseUrl, betterAuth = true } = options
+  const trimmedDatabaseUrl = databaseUrl.trim()
+
+  if (trimmedDatabaseUrl === '') {
+    throw new Error('databaseUrl is required')
+  }
 
   const pool = mysql.createPool({
-    uri: databaseUrl,
+    uri: trimmedDatabaseUrl,
     waitForConnections: true,
     connectionLimit: 2,
     multipleStatements: true,
