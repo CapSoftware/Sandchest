@@ -6,6 +6,9 @@ config({ path: '../../.env' })
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@sandchest/contract', '@sandchest/db'],
+  experimental: {
+    externalDir: true,
+  },
   serverExternalPackages: ['ssh2', 'cpu-features'],
   webpack: (config) => {
     config.resolve.extensionAlias = {
