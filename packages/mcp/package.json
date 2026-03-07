@@ -40,5 +40,8 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@sandchest/sdk": "workspace:*",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0"
   }
 }

@@ -1,8 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { createServer } from './server.js'
 import type { Sandchest, Sandbox, ExecResult } from '@sandchest/sdk'
+
+const TEXT_ENCODER = new TextEncoder()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mockSandbox(overrides?: Record<string, any>): Sandbox {
@@ -15,12 +21,16 @@ function mockSandbox(overrides?: Record<string, any>): Sandbox {
       upload: mock(async () => {}),
       uploadDir: mock(async () => {}),
       download: mock(async () => new Uint8Array([104, 101, 108, 108, 111])),
+      downloadDir: mock(async () => new Uint8Array([1, 2, 3])),
       ls: mock(async () => []),
       rm: mock(async () => {}),
     },
     artifacts: {
       register: mock(async () => ({ registered: 0, total: 0 })),
       list: mock(async () => []),
+    },
+    git: {
+      clone: mock(async () => mockExecResult()),
     },
     session: {
       create: mock(async () => ({
@@ -85,8 +95,13 @@ describe('MCP Server', () => {
   let sandchest: Sandchest
   let client: Client
   let cleanup: () => Promise<void>
+  let tempDir: string
+  let originalAllowedPaths: string | undefined
 
   beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'sandchest-mcp-test-'))
+    originalAllowedPaths = process.env['SANDCHEST_MCP_ALLOWED_PATHS']
+    delete process.env['SANDCHEST_MCP_ALLOWED_PATHS']
     sandchest = mockClient()
     const pair = await setupTestPair(sandchest)
     client = pair.client
@@ -95,19 +110,29 @@ describe('MCP Server', () => {
 
   afterEach(async () => {
     await cleanup()
+    rmSync(tempDir, { recursive: true, force: true })
+    if (originalAllowedPaths === undefined) {
+      delete process.env['SANDCHEST_MCP_ALLOWED_PATHS']
+    } else {
+      process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = originalAllowedPaths
+    }
   })
 
-  test('lists all 14 tools', async () => {
+  test('lists all 19 tools', async () => {
     const result = await client.listTools()
     const toolNames = result.tools.map((t) => t.name).sort()
     expect(toolNames).toEqual([
+      'sandbox_apply_patch',
       'sandbox_artifacts_list',
       'sandbox_create',
       'sandbox_destroy',
+      'sandbox_diff',
       'sandbox_download',
+      'sandbox_download_dir',
       'sandbox_exec',
       'sandbox_file_list',
       'sandbox_fork',
+      'sandbox_git_clone',
       'sandbox_list',
       'sandbox_replay',
       'sandbox_session_create',
@@ -115,6 +140,7 @@ describe('MCP Server', () => {
       'sandbox_session_exec',
       'sandbox_stop',
       'sandbox_upload',
+      'sandbox_upload_dir',
     ])
   })
 
@@ -128,8 +154,424 @@ describe('MCP Server', () => {
   test('server includes agent instructions', () => {
     const instructions = client.getInstructions()
     expect(instructions).toContain('Sandchest')
+    expect(instructions).toContain('sandbox_diff')
+    expect(instructions).toContain('sandbox_git_clone')
     expect(instructions).toContain('FORKING')
     expect(instructions).toContain('WORKFLOW PATTERN')
+    expect(instructions).toContain('sandchest skill')
+    expect(instructions).toContain('checkpoint and fork patterns')
+    expect(instructions).toContain('results extraction')
+  })
+
+  test('sandbox_diff returns a review diff with untracked files', async () => {
+    const sb = mockSandbox()
+    ;(sb.exec as ReturnType<typeof mock>)
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_1',
+        exitCode: 0,
+        stdout: 'true\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_2',
+        exitCode: 0,
+        stdout: '/work/repo\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_3',
+        exitCode: 0,
+        stdout: 'src/\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_4',
+        exitCode: 0,
+        stdout: 'deadbeef\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_5',
+        exitCode: 0,
+        stdout: 'diff --git a/src/app.ts b/src/app.ts\n+hello\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_6',
+        exitCode: 0,
+        stdout: 'src/new.ts\0',
+        stderr: '',
+        durationMs: 1,
+      }))
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_diff',
+      arguments: { sandbox_id: 'sb_test123', path: '/work/repo/src' },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      patch_safe: boolean
+      untracked_files: string[]
+      diff: string
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.patch_safe).toBe(false)
+    expect(data.untracked_files).toEqual(['src/new.ts'])
+    expect(data.diff).toContain('diff --git')
+  })
+
+  test('sandbox_diff returns structured error for non-git directories', async () => {
+    const sb = mockSandbox({
+      exec: mock(async () => ({
+        execId: 'ex_fail',
+        exitCode: 1,
+        stdout: '',
+        stderr: 'not a repo',
+        durationMs: 1,
+      })),
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_diff',
+      arguments: { sandbox_id: 'sb_test123' },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      error: string
+    }
+
+    expect(data.ok).toBe(false)
+    expect(data.error).toContain('Not a git repository')
+  })
+
+  test('sandbox_diff patch mode returns a patch-safe repo-root diff', async () => {
+    const patch = [
+      'diff --git a/src/new.ts b/src/new.ts',
+      'new file mode 100644',
+      'index 0000000..ce01362',
+      '--- /dev/null',
+      '+++ b/src/new.ts',
+      '@@ -0,0 +1 @@',
+      '+hello',
+      '',
+    ].join('\n')
+    const sb = mockSandbox({
+      fs: {
+        ...mockSandbox().fs,
+        download: mock(async () => new TextEncoder().encode(patch)),
+      },
+    })
+    ;(sb.exec as ReturnType<typeof mock>)
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_1',
+        exitCode: 0,
+        stdout: 'true\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_2',
+        exitCode: 0,
+        stdout: '/work/repo\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_3',
+        exitCode: 0,
+        stdout: 'src/\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_4',
+        exitCode: 0,
+        stdout: 'deadbeef\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_5',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_6',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_7',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_8',
+        exitCode: 0,
+        stdout: `${patch.length}\n`,
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_9',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_diff',
+      arguments: { sandbox_id: 'sb_test123', path: '/work/repo/src', mode: 'patch' },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      patch_safe: boolean
+      diff: string
+      total_bytes: number
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.patch_safe).toBe(true)
+    expect(data.diff).toContain('diff --git a/src/new.ts b/src/new.ts')
+    expect(data.total_bytes).toBe(patch.length)
+  })
+
+  test('sandbox_apply_patch uploads the patch, applies it, and cleans up', async () => {
+    const sb = mockSandbox()
+    ;(sb.exec as ReturnType<typeof mock>)
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_1',
+        exitCode: 0,
+        stdout: 'true\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_2',
+        exitCode: 0,
+        stdout: '/work/repo\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_3',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_4',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_5',
+        exitCode: 0,
+        stdout: 'Applied patch\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_6',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_apply_patch',
+      arguments: { sandbox_id: 'sb_test123', patch: 'diff --git a/a b/a\n' },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      method: string
+      stdout: string
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.method).toBe('git-apply')
+    expect(data.stdout).toContain('Applied patch')
+
+    const uploadCall = (sb.fs.upload as ReturnType<typeof mock>).mock.calls[0] as [string, Uint8Array]
+    expect(uploadCall[0]).toMatch(/^\/tmp\/\.sandchest-patch-/)
+    expect(new TextDecoder().decode(uploadCall[1])).toContain('diff --git')
+
+    const cleanupCall = (sb.exec as ReturnType<typeof mock>).mock.calls.at(-1) as
+      | [string[], { timeout: number }]
+      | undefined
+    expect(cleanupCall?.[0]).toEqual([
+      'rm',
+      '-f',
+      expect.stringMatching(/^\/tmp\/\.sandchest-patch-/),
+    ])
+  })
+
+  test('sandbox_apply_patch normalizes repo-root absolute paths before upload', async () => {
+    const sb = mockSandbox()
+    ;(sb.exec as ReturnType<typeof mock>)
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_1',
+        exitCode: 0,
+        stdout: 'true\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_2',
+        exitCode: 0,
+        stdout: '/work/repo\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_3',
+        exitCode: 0,
+        stdout: 'src/\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_4',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_5',
+        exitCode: 0,
+        stdout: 'Applied patch\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_6',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_apply_patch',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        path: '/work/repo/src',
+        patch: [
+          'diff --git a//work/repo/src/app.ts b//work/repo/src/app.ts',
+          '--- a//work/repo/src/app.ts',
+          '+++ b//work/repo/src/app.ts',
+          '@@ -1 +1 @@',
+          '-hello',
+          '+hi',
+          '',
+        ].join('\n'),
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      method: string
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.method).toBe('git-apply')
+
+    const uploadCall = (sb.fs.upload as ReturnType<typeof mock>).mock.calls[0] as [string, Uint8Array]
+    const uploadedPatch = new TextDecoder().decode(uploadCall[1])
+    expect(uploadedPatch).toContain('diff --git a/src/app.ts b/src/app.ts')
+    expect(uploadedPatch).not.toContain('/work/repo/src/app.ts')
+  })
+
+  test('sandbox_apply_patch rejects paths outside the requested scope', async () => {
+    const sb = mockSandbox()
+    ;(sb.exec as ReturnType<typeof mock>)
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_1',
+        exitCode: 0,
+        stdout: 'true\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_2',
+        exitCode: 0,
+        stdout: '/work/repo\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_3',
+        exitCode: 0,
+        stdout: 'src/\n',
+        stderr: '',
+        durationMs: 1,
+      }))
+      .mockImplementationOnce(async () => ({
+        execId: 'ex_4',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+      }))
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_apply_patch',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        path: '/work/repo/src',
+        patch: [
+          'diff --git a/other.ts b/other.ts',
+          '--- a/other.ts',
+          '+++ b/other.ts',
+          '@@ -1 +1 @@',
+          '-hello',
+          '+hi',
+          '',
+        ].join('\n'),
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      error: string
+      method: string
+    }
+
+    expect(data.ok).toBe(false)
+    expect(data.method).toBe('git-apply')
+    expect(data.error).toContain('outside the requested scope')
+    expect(sb.fs.upload).not.toHaveBeenCalled()
+
+    const cleanupCall = (sb.exec as ReturnType<typeof mock>).mock.calls.at(-1) as
+      | [string[], { timeout: number }]
+      | undefined
+    expect(cleanupCall?.[0]).toEqual([
+      'rm',
+      '-f',
+      expect.stringMatching(/^\/tmp\/\.sandchest-patch-/),
+    ])
   })
 
   test('sandbox_create calls SDK and returns sandbox_id + replay_url', async () => {
@@ -348,6 +790,7 @@ describe('MCP Server', () => {
         upload: mock(async () => {}),
         uploadDir: mock(async () => {}),
         download: mock(async () => new Uint8Array()),
+        downloadDir: mock(async () => new Uint8Array([1, 2, 3])),
         ls: mock(async () => [
           { name: 'src', path: '/work/src', type: 'directory', size_bytes: null },
           { name: 'package.json', path: '/work/package.json', type: 'file', size_bytes: 512 },
@@ -378,6 +821,238 @@ describe('MCP Server', () => {
       size_bytes: 512,
     })
     expect(sb.fs.ls).toHaveBeenCalledWith('/work')
+  })
+
+  test('sandbox_upload_dir fails closed when allowed paths are unset', async () => {
+    const result = await client.callTool({
+      name: 'sandbox_upload_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        local_path: tempDir,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; error: string }
+
+    expect(data.ok).toBe(false)
+    expect(data.error).toContain('SANDCHEST_MCP_ALLOWED_PATHS')
+  })
+
+  test('sandbox_upload_dir packages a git repo, respects .gitignore, and uploads it', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+
+    const repoDir = join(tempDir, 'repo')
+    rmSync(repoDir, { recursive: true, force: true })
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' })
+    writeFileSync(join(repoDir, '.gitignore'), 'ignored.txt\n')
+    writeFileSync(join(repoDir, 'tracked.txt'), 'tracked')
+    writeFileSync(join(repoDir, 'untracked.txt'), 'untracked')
+    writeFileSync(join(repoDir, 'ignored.txt'), 'ignored')
+    execFileSync('git', ['-C', repoDir, 'add', '.gitignore', 'tracked.txt'], { stdio: 'pipe' })
+
+    let capturedTarball: Uint8Array | undefined
+    const uploadDir = mock(async (_remotePath: string, tarball: Uint8Array) => {
+      capturedTarball = tarball
+    })
+    const sb = mockSandbox({
+      fs: {
+        ...mockSandbox().fs,
+        uploadDir,
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_upload_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        local_path: repoDir,
+        remote_path: '/work/repo',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      method: string
+      remote_path: string
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.method).toBe('git-ls-files')
+    expect(data.remote_path).toBe('/work/repo')
+    expect(uploadDir).toHaveBeenCalledTimes(1)
+    expect(capturedTarball).toBeDefined()
+
+    const inspectDir = join(tempDir, 'inspect-upload')
+    mkdirSync(inspectDir)
+    const archivePath = join(inspectDir, 'archive.tar.gz')
+    writeFileSync(archivePath, capturedTarball!)
+    execFileSync('tar', ['xzf', archivePath, '-C', inspectDir], { stdio: 'pipe' })
+
+    expect(readFileSync(join(inspectDir, 'tracked.txt'), 'utf-8')).toBe('tracked')
+    expect(readFileSync(join(inspectDir, 'untracked.txt'), 'utf-8')).toBe('untracked')
+    expect(existsSync(join(inspectDir, 'ignored.txt'))).toBe(false)
+  })
+
+  test('sandbox_upload_dir rejects git-tracked symbolic links before upload', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+
+    const repoDir = join(tempDir, 'repo-with-link')
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' })
+    writeFileSync(join(repoDir, 'tracked.txt'), 'tracked')
+    symlinkSync('tracked.txt', join(repoDir, 'linked.txt'))
+    execFileSync('git', ['-C', repoDir, 'add', 'tracked.txt', 'linked.txt'], { stdio: 'pipe' })
+
+    const result = await client.callTool({
+      name: 'sandbox_upload_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        local_path: repoDir,
+        remote_path: '/work/repo',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; error: string }
+
+    expect(data.ok).toBe(false)
+    expect(data.error).toContain('does not support symbolic links')
+  })
+
+  test('sandbox_download_dir extracts a sandbox archive into a new local directory', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+
+    const sourceDir = join(tempDir, 'download-source')
+    mkdirSync(sourceDir)
+    writeFileSync(join(sourceDir, 'result.txt'), 'payload')
+    const archivePath = join(tempDir, 'download.tar.gz')
+    execFileSync('tar', ['czf', archivePath, '-C', sourceDir, '.'], { stdio: 'pipe' })
+    const tarball = new Uint8Array(readFileSync(archivePath))
+
+    const downloadDir = mock(async () => tarball)
+    const sb = mockSandbox({
+      fs: {
+        ...mockSandbox().fs,
+        downloadDir,
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const destination = join(tempDir, 'downloaded')
+    const result = await client.callTool({
+      name: 'sandbox_download_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        remote_path: '/work/result',
+        local_path: destination,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; local_path: string }
+
+    expect(data.ok).toBe(true)
+    expect(data.local_path.endsWith('/downloaded')).toBe(true)
+    expect(downloadDir).toHaveBeenCalledWith('/work/result')
+    expect(readFileSync(join(destination, 'result.txt'), 'utf-8')).toBe('payload')
+  })
+
+  test('sandbox_download_dir rejects an existing destination', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+
+    const destination = join(tempDir, 'existing')
+    mkdirSync(destination)
+
+    const result = await client.callTool({
+      name: 'sandbox_download_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        remote_path: '/work/result',
+        local_path: destination,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; error: string }
+
+    expect(data.ok).toBe(false)
+    expect(data.error).toContain('Destination already exists')
+  })
+
+  test('sandbox_git_clone uses sandbox.git.clone and returns exec metadata', async () => {
+    const clone = mock(async () => ({
+      execId: 'ex_clone123',
+      exitCode: 0,
+      stdout: 'cloned\n',
+      stderr: '',
+      durationMs: 88,
+    }))
+    const sb = mockSandbox({
+      git: {
+        clone,
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_git_clone',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        url: 'https://github.com/sandchest/sandchest.git',
+        dest: '/work/repo',
+        branch: 'main',
+        depth: 1,
+        single_branch: false,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      exec_id: string
+      exit_code: number
+      stdout: string
+      stderr: string
+      duration_ms: number
+    }
+
+    expect(clone).toHaveBeenCalledWith('https://github.com/sandchest/sandchest.git', {
+      dest: '/work/repo',
+      branch: 'main',
+      depth: 1,
+      singleBranch: false,
+    })
+    expect(data).toEqual({
+      ok: true,
+      exec_id: 'ex_clone123',
+      exit_code: 0,
+      stdout: 'cloned\n',
+      stderr: '',
+      duration_ms: 88,
+    })
+  })
+
+  test('sandbox_git_clone rejects non-https URLs by default', async () => {
+    const result = await client.callTool({
+      name: 'sandbox_git_clone',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        url: 'git@github.com:sandchest/sandchest.git',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; error: string }
+
+    expect(data.ok).toBe(false)
+    expect(data.error).toContain('Only HTTPS URLs are allowed by default')
+  })
+
+  test('sandbox_git_clone returns a structured invalid_url error for malformed URLs', async () => {
+    const result = await client.callTool({
+      name: 'sandbox_git_clone',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        url: 'https://',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      error: string
+      code: string
+    }
+
+    expect(data.ok).toBe(false)
+    expect(data.code).toBe('invalid_url')
+    expect(data.error).toContain('Invalid git URL')
   })
 
   test('sandbox_session_destroy calls session.destroy', async () => {
