@@ -49,23 +49,26 @@ export function sshCommand(): Command {
             prompt: '$ ',
           })
 
-          rl.prompt()
-
-          for await (const line of rl) {
-            if (line.trim() === 'exit') break
-
-            try {
-              const result = await session.exec(line)
-              if (result.stdout) process.stdout.write(result.stdout)
-              if (result.stderr) process.stderr.write(result.stderr)
-            } catch (err) {
-              error(err instanceof Error ? err.message : String(err))
-            }
-
+          try {
             rl.prompt()
-          }
 
-          await session.destroy()
+            for await (const line of rl) {
+              if (line.trim() === 'exit') break
+
+              try {
+                const result = await session.exec(line)
+                if (result.stdout) process.stdout.write(result.stdout)
+                if (result.stderr) process.stderr.write(result.stderr)
+              } catch (err) {
+                error(err instanceof Error ? err.message : String(err))
+              }
+
+              rl.prompt()
+            }
+          } finally {
+            rl.close()
+            await session.destroy()
+          }
           success('Session ended')
         } catch (err) {
           handleError(err)
