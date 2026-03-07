@@ -112,4 +112,14 @@ describe('OpenAPI spec', () => {
     expect(paths).toContain('/v1/sandboxes/{id}/files')
     expect(paths).toContain('/v1/sandboxes/{id}/artifacts')
   })
+
+  test('file upload endpoint documents raw batch semantics', () => {
+    const upload = spec.paths['/v1/sandboxes/{id}/files'].put
+    expect(upload.description).toContain('does not unpack tarballs')
+
+    const batchParam = upload.parameters.find((param) => {
+      return typeof param === 'object' && param !== null && 'name' in param && param.name === 'batch'
+    }) as { description: string }
+    expect(batchParam.description).toContain('written verbatim')
+  })
 })

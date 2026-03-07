@@ -478,10 +478,12 @@ export const spec = {
         operationId: 'uploadFile',
         tags: ['Files'],
         summary: 'Upload a file',
+        description:
+          'Writes the raw request body to `path`. `batch=true` only increases the size limit; it does not unpack tarballs or perform directory extraction.',
         parameters: [
           { $ref: '#/components/parameters/SandboxId' },
           { name: 'path', in: 'query', required: true, schema: { type: 'string' }, description: 'Absolute path inside the sandbox' },
-          { name: 'batch', in: 'query', schema: { type: 'boolean' }, description: 'Enable batch mode (10 GB limit instead of 5 GB)' },
+          { name: 'batch', in: 'query', schema: { type: 'boolean' }, description: 'Enable batch mode (10 GB limit instead of 5 GB). The payload is still written verbatim.' },
         ],
         requestBody: {
           required: true,
