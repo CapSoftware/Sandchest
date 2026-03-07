@@ -29,6 +29,7 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_billing'
 const TEST_USER = 'user_test_billing'
@@ -94,7 +95,7 @@ function createRunningSandbox(
 // Billing check — sandbox creation (credits)
 // ---------------------------------------------------------------------------
 
-describe('Billing check — sandbox creation', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Billing check — sandbox creation', () => {
   test('blocks sandbox creation when credits depleted', async () => {
     const env = createTestEnv()
     env.billingApi.blockFeature(TEST_ORG, 'credits')
@@ -159,7 +160,7 @@ describe('Billing check — sandbox creation', () => {
 // Billing check — fork (credits)
 // ---------------------------------------------------------------------------
 
-describe('Billing check — fork', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Billing check — fork', () => {
   test('blocks fork when credits depleted', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -209,7 +210,7 @@ describe('Billing check — fork', () => {
 // Billing check — exec (credits)
 // ---------------------------------------------------------------------------
 
-describe('Billing check — exec', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Billing check — exec', () => {
   test('blocks exec when credits depleted', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -280,7 +281,7 @@ describe('Billing check — exec', () => {
 // Billing check — session exec (credits)
 // ---------------------------------------------------------------------------
 
-describe('Billing check — session exec', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Billing check — session exec', () => {
   test('blocks session exec when credits depleted', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -554,7 +555,7 @@ describe('meterSandbox', () => {
     const env = createMeteringEnv()
 
     const startedAt = new Date(Date.now() - 60 * 60_000) // 60 minutes ago
-    const { id, row } = await createRunningTestSandbox(env, startedAt)
+    const { row } = await createRunningTestSandbox(env, startedAt)
     const now = new Date()
 
     await env.run(meterSandbox(row, now, 'free'))
@@ -619,7 +620,7 @@ describe('meterSandbox', () => {
     const env = createMeteringEnv()
 
     const startedAt = new Date(Date.now() - 120 * 60_000) // 120 min ago
-    const { id, row } = await createRunningTestSandbox(env, startedAt)
+    const { row } = await createRunningTestSandbox(env, startedAt)
 
     // First metering: should bill from startedAt (120 min of compute)
     const now = new Date()

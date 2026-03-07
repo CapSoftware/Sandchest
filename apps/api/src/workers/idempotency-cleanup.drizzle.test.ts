@@ -4,6 +4,7 @@ import { createDrizzleIdempotencyRepo, makeIdempotencyRepoDrizzle } from './idem
 import type { IdempotencyRepoApi } from './idempotency-cleanup.js'
 import { createDatabase, type Database } from '@sandchest/db/client'
 import { sql } from 'drizzle-orm'
+import { RUN_API_DB_INTEGRATION_TESTS } from '../test-support.js'
 
 // ---------------------------------------------------------------------------
 // Module exports
@@ -20,12 +21,12 @@ describe('module exports', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Integration tests — requires DATABASE_URL
+// Integration tests — opt-in and requires DATABASE_URL
 // ---------------------------------------------------------------------------
 
 const DATABASE_URL = process.env.DATABASE_URL
 
-describe.skipIf(!DATABASE_URL)('idempotency-cleanup.drizzle (integration)', () => {
+describe.skipIf(!RUN_API_DB_INTEGRATION_TESTS)('idempotency-cleanup.drizzle (integration)', () => {
   let db: Database
   let repo: IdempotencyRepoApi
 

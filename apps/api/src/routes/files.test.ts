@@ -25,6 +25,7 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -86,7 +87,7 @@ function createRunningSandbox(
 // Upload file
 // ---------------------------------------------------------------------------
 
-describe('PUT /v1/sandboxes/:id/files — upload file', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('PUT /v1/sandboxes/:id/files — upload file', () => {
   test('uploads a file and returns bytes written', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -236,7 +237,7 @@ describe('PUT /v1/sandboxes/:id/files — upload file', () => {
 // Download file
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/files — download file', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/files — download file', () => {
   test('downloads a previously uploaded file', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -300,7 +301,7 @@ describe('GET /v1/sandboxes/:id/files — download file', () => {
 // List files
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/files?list=true — list files', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/files?list=true — list files', () => {
   test('returns file listing after upload', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -363,7 +364,7 @@ describe('GET /v1/sandboxes/:id/files?list=true — list files', () => {
 // Delete file
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/sandboxes/:id/files — delete file', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('DELETE /v1/sandboxes/:id/files — delete file', () => {
   test('deletes a file', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)

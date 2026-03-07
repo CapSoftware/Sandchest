@@ -38,6 +38,7 @@ import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 import type { SandboxRepoApi } from './services/sandbox-repo.js'
 import type { QuotaApi } from './services/quota.js'
+import { RUN_API_INTEGRATION_TESTS } from './test-support.js'
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -79,6 +80,10 @@ let baseUrl: string
 let sandboxRepo: SandboxRepoApi
 
 beforeAll(async () => {
+  if (!RUN_API_INTEGRATION_TESTS) {
+    return
+  }
+
   const nodeServer = createServer()
   sandboxRepo = createInMemorySandboxRepo()
   const quotaApi = createInMemoryQuotaApi() as QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, number>) => void }
@@ -119,10 +124,14 @@ beforeAll(async () => {
   await Effect.runPromise(Layer.buildWithScope(FullLayer, scope))
 
   const addr = nodeServer.address() as AddressInfo
-  baseUrl = `http://localhost:${addr.port}`
+  baseUrl = `http://127.0.0.1:${addr.port}`
 })
 
 afterAll(async () => {
+  if (!RUN_API_INTEGRATION_TESTS) {
+    return
+  }
+
   await Effect.runPromise(Scope.close(scope, Exit.void))
 })
 
@@ -141,7 +150,7 @@ async function createRunningSandbox(): Promise<string> {
 // Health endpoints — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: health', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: health', () => {
   test('GET /health returns 200', async () => {
     const res = await fetch(`${baseUrl}/health`)
     expect(res.status).toBe(200)
@@ -169,7 +178,7 @@ describe('HTTP E2E: health', () => {
 // Middleware pipeline headers — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: middleware pipeline', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: middleware pipeline', () => {
   test('responses include x-request-id', async () => {
     const res = await fetch(`${baseUrl}/health`)
     expect(res.headers.get('x-request-id')).toBeTruthy()
@@ -237,7 +246,7 @@ describe('HTTP E2E: middleware pipeline', () => {
 // Sandbox CRUD — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: sandbox CRUD', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: sandbox CRUD', () => {
   test('create sandbox returns 201 with sandbox_id', async () => {
     const res = await fetch(`${baseUrl}/v1/sandboxes`, {
       method: 'POST',
@@ -330,7 +339,7 @@ describe('HTTP E2E: sandbox CRUD', () => {
 // Exec — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: exec', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: exec', () => {
   test('exec on running sandbox returns result', async () => {
     const id = await createRunningSandbox()
     const res = await fetch(`${baseUrl}/v1/sandboxes/${id}/exec`, {
@@ -361,7 +370,7 @@ describe('HTTP E2E: exec', () => {
 // Fork — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: fork', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: fork', () => {
   test('fork creates new sandbox linked to parent', async () => {
     const parentId = await createRunningSandbox()
     const res = await fetch(`${baseUrl}/v1/sandboxes/${parentId}/fork`, {
@@ -386,7 +395,7 @@ describe('HTTP E2E: fork', () => {
 // Replay — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: replay', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: replay', () => {
   test('replay bundle includes version and fork tree', async () => {
     const id = await createRunningSandbox()
     const res = await fetch(`${baseUrl}/v1/sandboxes/${id}/replay`)
@@ -417,7 +426,7 @@ describe('HTTP E2E: replay', () => {
 // Full lifecycle — real HTTP
 // ---------------------------------------------------------------------------
 
-describe('HTTP E2E: full lifecycle', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HTTP E2E: full lifecycle', () => {
   test('create → exec → fork → stop → delete', async () => {
     // 1. Create
     const createRes = await fetch(`${baseUrl}/v1/sandboxes`, {

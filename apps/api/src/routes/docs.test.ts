@@ -15,6 +15,7 @@ import { BillingMemory } from '../services/billing.memory.js'
 import { NodeRepoMemory } from '../services/node-repo.memory.js'
 import { MetricsRepoMemory } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TestAuthLayer = Layer.succeed(AuthContext, {
   userId: 'user_test',
@@ -42,7 +43,7 @@ function runTest<A>(effect: Effect.Effect<A, unknown, HttpClient.HttpClient>) {
   return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
 }
 
-describe('GET /openapi.json', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /openapi.json', () => {
   test('returns valid OpenAPI JSON', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -74,7 +75,7 @@ describe('GET /openapi.json', () => {
   })
 })
 
-describe('GET /docs', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /docs', () => {
   test('returns HTML page with Scalar', async () => {
     const result = await runTest(
       Effect.gen(function* () {

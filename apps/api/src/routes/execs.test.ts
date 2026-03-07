@@ -27,6 +27,7 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -91,7 +92,7 @@ function createRunningSandbox(
 // Execute command (sync / async)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/exec — execute command', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/exec — execute command', () => {
   test('sync exec returns result with exit code', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -293,7 +294,7 @@ describe('POST /v1/sandboxes/:id/exec — execute command', () => {
 // Get exec
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/exec/:execId — get exec', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/exec/:execId — get exec', () => {
   test('returns exec details after sync execution', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -405,7 +406,7 @@ describe('GET /v1/sandboxes/:id/exec/:execId — get exec', () => {
 // List execs
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/execs — list execs', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/execs — list execs', () => {
   test('returns empty list when no execs exist', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -534,7 +535,7 @@ describe('GET /v1/sandboxes/:id/execs — list execs', () => {
 // Stream exec output (SSE)
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/exec/:execId/stream — SSE stream', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/exec/:execId/stream — SSE stream', () => {
   test('returns valid SSE events after sync exec', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -674,7 +675,7 @@ describe('GET /v1/sandboxes/:id/exec/:execId/stream — SSE stream', () => {
 // Exec status transitions
 // ---------------------------------------------------------------------------
 
-describe('Exec status transitions', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Exec status transitions', () => {
   test('sync exec transitions: queued → running → done', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -745,7 +746,7 @@ describe('Exec status transitions', () => {
 // Quota enforcement — exec timeout
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/exec — quota enforcement', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/exec — quota enforcement', () => {
   test('rejects exec when timeout exceeds org maxExecTimeoutSeconds', async () => {
     const env = createTestEnv()
     env.quotaApi.setOrgQuota(TEST_ORG, { maxExecTimeoutSeconds: 60 })

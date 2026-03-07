@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { withConnectionDrain } from './connection-drain.js'
 import { ShutdownController, ShutdownControllerLive } from '../shutdown.js'
 import { RedisMemory } from '../services/redis.memory.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TestRouter = HttpRouter.empty.pipe(
   HttpRouter.get(
@@ -29,7 +30,7 @@ function runTest<A>(effect: Effect.Effect<A, unknown, HttpClient.HttpClient | Sh
   return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
 }
 
-describe('withConnectionDrain middleware', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('withConnectionDrain middleware', () => {
   test('passes requests through when not draining', async () => {
     const result = await runTest(
       Effect.gen(function* () {

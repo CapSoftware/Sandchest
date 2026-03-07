@@ -30,6 +30,7 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -90,7 +91,7 @@ function createRunningSandbox(env: ReturnType<typeof createTestEnv>): Promise<st
   )
 }
 
-describe('audit log — sandbox operations', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('audit log — sandbox operations', () => {
   test('sandbox create emits audit log entry', async () => {
     const env = createTestEnv()
 

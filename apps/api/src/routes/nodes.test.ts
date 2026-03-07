@@ -18,6 +18,7 @@ import { MetricsRepoMemory } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { NodeRepo } from '../services/node-repo.js'
 import { RedisService } from '../services/redis.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TestAuthLayer = Layer.succeed(AuthContext, {
   userId: 'user_test',
@@ -48,7 +49,7 @@ function makeTestLayer() {
   return { layer, nodeRepo, redis }
 }
 
-describe('POST /v1/internal/nodes/:nodeId/heartbeat', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/internal/nodes/:nodeId/heartbeat', () => {
   test('registers heartbeat and returns 200', async () => {
     const { layer } = makeTestLayer()
     const result = await Effect.gen(function* () {

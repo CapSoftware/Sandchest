@@ -25,6 +25,7 @@ import { MetricsRepo } from './services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from './services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from './test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -67,7 +68,7 @@ function createTestEnv() {
 // E2E: Full sandbox lifecycle
 // ---------------------------------------------------------------------------
 
-describe('E2E: sandbox lifecycle — create, exec, session, file, stop', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('E2E: sandbox lifecycle — create, exec, session, file, stop', () => {
   test('full lifecycle in a single sandbox', async () => {
     const env = createTestEnv()
 

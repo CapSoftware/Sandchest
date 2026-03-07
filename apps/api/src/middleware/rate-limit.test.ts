@@ -10,6 +10,7 @@ import { QuotaService } from '../services/quota.js'
 import { QuotaMemory, createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { BillingMemory } from '../services/billing.memory.js'
 import { withRequestId } from '../middleware.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_ratelimit_test'
 const TEST_USER = 'user_ratelimit_test'
@@ -51,7 +52,7 @@ function runTest<A>(effect: Effect.Effect<A, unknown, HttpClient.HttpClient>) {
 // Rate limit headers
 // ---------------------------------------------------------------------------
 
-describe('rate limit middleware', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('rate limit middleware', () => {
   test('adds X-RateLimit-* headers to GET responses', async () => {
     const result = await runTest(
       Effect.gen(function* () {

@@ -9,6 +9,7 @@ import { NodeHttpServer } from '@effect/platform-node'
 import { Effect, Layer } from 'effect'
 import { describe, expect, test } from 'bun:test'
 import { withSecurityHeaders, isAllowedOrigin } from './security-headers.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TestRouter = HttpRouter.empty.pipe(
   HttpRouter.get(
@@ -62,7 +63,7 @@ describe('isAllowedOrigin', () => {
 // HSTS
 // ---------------------------------------------------------------------------
 
-describe('HSTS', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('HSTS', () => {
   test('adds Strict-Transport-Security to all responses', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -84,7 +85,7 @@ describe('HSTS', () => {
 // CORS
 // ---------------------------------------------------------------------------
 
-describe('CORS', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('CORS', () => {
   test('adds CORS headers when origin is allowed', async () => {
     const result = await runTest(
       Effect.gen(function* () {

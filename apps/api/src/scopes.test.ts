@@ -30,6 +30,7 @@ import { createInMemoryMetricsRepo } from './services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from './shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 import type { ApiKeyScope } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from './test-support.js'
 
 const TEST_ORG = 'org_scope_test'
 const TEST_USER = 'user_scope_test'
@@ -95,7 +96,7 @@ function createRunningSandbox(
 // Full access (null scopes) — backward compatibility
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — null scopes (full access)', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — null scopes (full access)', () => {
   test('null scopes allow sandbox creation', async () => {
     const env = createTestEnv(null)
     const result = await env.runTest(
@@ -131,7 +132,7 @@ describe('scope enforcement — null scopes (full access)', () => {
 // Scoped API key — sandbox operations
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — sandbox scopes', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — sandbox scopes', () => {
   test('sandbox:read allows GET /v1/sandboxes', async () => {
     const env = createTestEnv(['sandbox:read'])
     const result = await env.runTest(
@@ -221,7 +222,7 @@ describe('scope enforcement — sandbox scopes', () => {
 // Scoped API key — exec operations
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — exec scopes', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — exec scopes', () => {
   test('exec:create allows POST /v1/sandboxes/:id/exec', async () => {
     const env = createTestEnv(['sandbox:create', 'exec:create'])
     const sandboxId = await createRunningSandbox(env)
@@ -265,7 +266,7 @@ describe('scope enforcement — exec scopes', () => {
 // Scoped API key — file operations
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — file scopes', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — file scopes', () => {
   test('missing file:read rejects GET /v1/sandboxes/:id/files', async () => {
     const env = createTestEnv(['sandbox:create', 'file:write'])
     const sandboxId = await createRunningSandbox(env)
@@ -289,7 +290,7 @@ describe('scope enforcement — file scopes', () => {
 // Scoped API key — session operations
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — session scopes', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — session scopes', () => {
   test('session:create allows POST /v1/sandboxes/:id/sessions', async () => {
     const env = createTestEnv(['sandbox:create', 'session:create'])
     const sandboxId = await createRunningSandbox(env)
@@ -333,7 +334,7 @@ describe('scope enforcement — session scopes', () => {
 // Scoped API key — artifact operations
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — artifact scopes', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — artifact scopes', () => {
   test('missing artifact:write rejects POST /v1/sandboxes/:id/artifacts', async () => {
     const env = createTestEnv(['sandbox:create', 'artifact:read'])
     const sandboxId = await createRunningSandbox(env)
@@ -359,7 +360,7 @@ describe('scope enforcement — artifact scopes', () => {
 // Empty scopes array — should deny everything
 // ---------------------------------------------------------------------------
 
-describe('scope enforcement — empty scopes array', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('scope enforcement — empty scopes array', () => {
   test('empty scopes array rejects all operations', async () => {
     const env = createTestEnv([])
     const result = await env.runTest(

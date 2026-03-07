@@ -39,6 +39,7 @@ import type { RedisApi, BufferedEvent } from './services/redis.js'
 import type { ObjectStorageApi } from './services/object-storage.js'
 import type { NodeClientApi } from './services/node-client.js'
 import type { QuotaApi } from './services/quota.js'
+import { RUN_API_INTEGRATION_TESTS } from './test-support.js'
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -284,7 +285,7 @@ describe('smoke: node client gRPC operations', () => {
 // 13. API Health Endpoints — Full HTTP Stack
 // ---------------------------------------------------------------------------
 
-describe('smoke: API health endpoints (full HTTP stack)', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('smoke: API health endpoints (full HTTP stack)', () => {
   let scope: Scope.CloseableScope
   let baseUrl: string
 
@@ -310,6 +311,10 @@ describe('smoke: API health endpoints (full HTTP stack)', () => {
   )
 
   beforeAll(async () => {
+    if (!RUN_API_INTEGRATION_TESTS) {
+      return
+    }
+
     const nodeServer = createServer()
     const quotaApi = createInMemoryQuotaApi() as QuotaApi & {
       setOrgQuota: (orgId: string, quota: Record<string, number>) => void
@@ -350,10 +355,14 @@ describe('smoke: API health endpoints (full HTTP stack)', () => {
     await Effect.runPromise(Layer.buildWithScope(FullLayer, scope))
 
     const addr = nodeServer.address() as AddressInfo
-    baseUrl = `http://localhost:${addr.port}`
+    baseUrl = `http://127.0.0.1:${addr.port}`
   })
 
   afterAll(async () => {
+    if (!RUN_API_INTEGRATION_TESTS) {
+      return
+    }
+
     await Effect.runPromise(Scope.close(scope, Exit.void))
   })
 

@@ -18,6 +18,7 @@ import { AuditLogMemory } from './services/audit-log.memory.js'
 import { NodeRepoMemory } from './services/node-repo.memory.js'
 import { MetricsRepoMemory } from './services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from './shutdown.js'
+import { RUN_API_INTEGRATION_TESTS } from './test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -49,11 +50,13 @@ function runTest<A>(effect: Effect.Effect<A, unknown, HttpClient.HttpClient>) {
   return effect.pipe(Effect.provide(TestLayer), Effect.scoped, Effect.runPromise)
 }
 
+const describeHttp = describe.skipIf(!RUN_API_INTEGRATION_TESTS)
+
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
 
-describe('Health endpoint', () => {
+describeHttp('Health endpoint', () => {
   test('GET /health returns 200 with status ok', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -87,7 +90,7 @@ describe('Health endpoint', () => {
 // Healthz (liveness)
 // ---------------------------------------------------------------------------
 
-describe('Healthz endpoint', () => {
+describeHttp('Healthz endpoint', () => {
   test('GET /healthz returns 200 with status ok', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -119,7 +122,7 @@ describe('Healthz endpoint', () => {
 // Readyz (readiness)
 // ---------------------------------------------------------------------------
 
-describe('Readyz endpoint', () => {
+describeHttp('Readyz endpoint', () => {
   test('GET /readyz returns 200 when Redis is healthy', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -155,7 +158,7 @@ describe('Readyz endpoint', () => {
 // Request ID propagation
 // ---------------------------------------------------------------------------
 
-describe('Request ID propagation', () => {
+describeHttp('Request ID propagation', () => {
   test('echoes back provided X-Request-Id', async () => {
     const customId = 'req_test_12345'
     const result = await runTest(
@@ -178,7 +181,7 @@ describe('Request ID propagation', () => {
 // Create sandbox
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes — create sandbox', () => {
+describeHttp('POST /v1/sandboxes — create sandbox', () => {
   test('creates a sandbox with defaults', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -288,7 +291,7 @@ describe('POST /v1/sandboxes — create sandbox', () => {
 // Get sandbox
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id — get sandbox', () => {
+describeHttp('GET /v1/sandboxes/:id — get sandbox', () => {
   test('returns sandbox details after creation', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -360,7 +363,7 @@ describe('GET /v1/sandboxes/:id — get sandbox', () => {
 // List sandboxes
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes — list sandboxes', () => {
+describeHttp('GET /v1/sandboxes — list sandboxes', () => {
   test('returns empty list when no sandboxes exist', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -456,7 +459,7 @@ describe('GET /v1/sandboxes — list sandboxes', () => {
 // Stop sandbox
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/stop — stop sandbox', () => {
+describeHttp('POST /v1/sandboxes/:id/stop — stop sandbox', () => {
   test('transitions sandbox to stopping', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -533,7 +536,7 @@ describe('POST /v1/sandboxes/:id/stop — stop sandbox', () => {
 // Delete sandbox
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/sandboxes/:id — delete sandbox', () => {
+describeHttp('DELETE /v1/sandboxes/:id — delete sandbox', () => {
   test('soft-deletes a sandbox', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -642,7 +645,7 @@ describe('DELETE /v1/sandboxes/:id — delete sandbox', () => {
 // Fork sandbox
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/fork — fork sandbox', () => {
+describeHttp('POST /v1/sandboxes/:id/fork — fork sandbox', () => {
   /** Helper: create a sandbox and transition it to running via repo. */
   function createRunningSandbox() {
     return Effect.gen(function* () {
@@ -843,7 +846,7 @@ describe('POST /v1/sandboxes/:id/fork — fork sandbox', () => {
 // Get fork tree
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/forks — get fork tree', () => {
+describeHttp('GET /v1/sandboxes/:id/forks — get fork tree', () => {
   test('returns tree for sandbox with no forks', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -931,7 +934,7 @@ describe('GET /v1/sandboxes/:id/forks — get fork tree', () => {
 // Session routes
 // ---------------------------------------------------------------------------
 
-describe('Session routes', () => {
+describeHttp('Session routes', () => {
   test('POST /v1/sandboxes/:id/sessions returns 404 for unknown sandbox', async () => {
     const result = await runTest(
       Effect.gen(function* () {
@@ -951,7 +954,7 @@ describe('Session routes', () => {
 // Error response format
 // ---------------------------------------------------------------------------
 
-describe('Error response format', () => {
+describeHttp('Error response format', () => {
   test('error responses include standard envelope fields', async () => {
     const result = await runTest(
       Effect.gen(function* () {

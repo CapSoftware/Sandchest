@@ -31,6 +31,7 @@ import type {
   RegisterArtifactsResponse,
   ListArtifactsResponse,
 } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -94,7 +95,7 @@ function createRunningSandbox(
 // POST /v1/sandboxes/:id/artifacts — register artifact paths
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/artifacts — register artifact paths', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/artifacts — register artifact paths', () => {
   test('registers artifact paths successfully', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -245,7 +246,7 @@ describe('POST /v1/sandboxes/:id/artifacts — register artifact paths', () => {
 // GET /v1/sandboxes/:id/artifacts — list artifacts
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/artifacts — list artifacts', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/artifacts — list artifacts', () => {
   test('returns empty list when no artifacts collected', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -333,7 +334,7 @@ describe('GET /v1/sandboxes/:id/artifacts — list artifacts', () => {
 // Graceful shutdown — artifact collection during stop
 // ---------------------------------------------------------------------------
 
-describe('Stop sandbox — artifact collection integration', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Stop sandbox — artifact collection integration', () => {
   test('collects registered artifacts when stopping a sandbox', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)

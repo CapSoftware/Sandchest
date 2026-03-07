@@ -25,6 +25,7 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -86,7 +87,7 @@ function createRunningSandbox(
 // Create session
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/sessions — create session', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/sessions — create session', () => {
   test('creates a session with default shell', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -226,7 +227,7 @@ describe('POST /v1/sandboxes/:id/sessions — create session', () => {
 // Session exec
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/sessions/:sessionId/exec — session exec', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/sessions/:sessionId/exec — session exec', () => {
   test('sync session exec returns result', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -357,7 +358,7 @@ describe('POST /v1/sandboxes/:id/sessions/:sessionId/exec — session exec', () 
 // Session input
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/sessions/:sessionId/input — session input', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/sessions/:sessionId/input — session input', () => {
   test('sends input to session', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -425,7 +426,7 @@ describe('POST /v1/sandboxes/:id/sessions/:sessionId/input — session input', (
 // List sessions
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/sessions — list sessions', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/sessions — list sessions', () => {
   test('returns empty list when no sessions exist', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -506,7 +507,7 @@ describe('GET /v1/sandboxes/:id/sessions — list sessions', () => {
 // Destroy session
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/sandboxes/:id/sessions/:sessionId — destroy session', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('DELETE /v1/sandboxes/:id/sessions/:sessionId — destroy session', () => {
   test('destroys an existing session', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)

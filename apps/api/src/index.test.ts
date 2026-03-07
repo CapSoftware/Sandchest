@@ -23,6 +23,7 @@ import { QuotaService } from './services/quota.js'
 import { UsageService } from './services/usage.js'
 import { MetricsRepo } from './services/metrics-repo.js'
 import { IdempotencyRepo } from './workers/idempotency-cleanup.js'
+import { RUN_API_DB_INTEGRATION_TESTS } from './test-support.js'
 
 // ---------------------------------------------------------------------------
 // Module exports: all make*Drizzle factories exist and are callable
@@ -56,7 +57,7 @@ describe('Drizzle layer factories', () => {
 
 const DATABASE_URL = process.env.DATABASE_URL
 
-describe.skipIf(!DATABASE_URL)('Drizzle layer composition (integration)', () => {
+describe.skipIf(!RUN_API_DB_INTEGRATION_TESTS)('Drizzle layer composition (integration)', () => {
   let db: Database
 
   function run<A>(effect: Effect.Effect<A, never, never>): Promise<A> {

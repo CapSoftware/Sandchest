@@ -32,6 +32,7 @@ import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 import type { CreateSandboxResponse, GetSandboxResponse, ReplayBundle } from '@sandchest/contract'
 import type { BufferedEvent } from '../services/redis.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
@@ -97,7 +98,7 @@ function createRunningSandbox(
 // GET /v1/sandboxes/:id/replay
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
   test('returns replay bundle for a running sandbox', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
@@ -455,7 +456,7 @@ describe('GET /v1/sandboxes/:id/replay — get replay bundle', () => {
 // POST /v1/sandboxes — node daemon integration
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes — node daemon integration', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes — node daemon integration', () => {
   test('sandbox is running after creation (node daemon called inline)', async () => {
     const env = createTestEnv()
 
@@ -562,7 +563,7 @@ describe('POST /v1/sandboxes — node daemon integration', () => {
 // Quota enforcement — create sandbox
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes — quota enforcement', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes — quota enforcement', () => {
   test('rejects creation when TTL exceeds org maxTtlSeconds', async () => {
     const env = createTestEnv()
     env.quotaApi.setOrgQuota(TEST_ORG, { maxTtlSeconds: 600 })
@@ -649,7 +650,7 @@ describe('POST /v1/sandboxes — quota enforcement', () => {
 // Quota enforcement — fork sandbox
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/sandboxes/:id/fork — quota enforcement', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/fork — quota enforcement', () => {
   test('rejects fork when depth exceeds org maxForkDepth', async () => {
     const env = createTestEnv()
     env.quotaApi.setOrgQuota(TEST_ORG, { maxForkDepth: 1 })
@@ -780,7 +781,7 @@ describe('POST /v1/sandboxes/:id/fork — quota enforcement', () => {
 // GET /v1/sandboxes/:id/stream — sandbox-level SSE
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/sandboxes/:id/stream — sandbox event stream', () => {
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/stream — sandbox event stream', () => {
   test('returns SSE content-type with empty body when no events', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
