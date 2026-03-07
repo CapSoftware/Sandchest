@@ -1,13 +1,15 @@
 import { Effect } from 'effect'
-import { describe, expect, test, beforeEach } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { generateUUIDv7 } from '@sandchest/contract'
 import { createInMemorySessionRepo } from './session-repo.memory.js'
 import type { SessionRepoApi } from './session-repo.js'
 
-let repo: SessionRepoApi
-
 function run<A>(effect: Effect.Effect<A, never, never>): Promise<A> {
   return Effect.runPromise(effect)
+}
+
+function makeRepo(): SessionRepoApi {
+  return createInMemorySessionRepo()
 }
 
 const ORG = 'org_session_test'
@@ -23,16 +25,13 @@ function makeSession(sandboxId: Uint8Array = SANDBOX_A, shell: string = '/bin/ba
   }
 }
 
-beforeEach(() => {
-  repo = createInMemorySessionRepo()
-})
-
 // ---------------------------------------------------------------------------
 // create
 // ---------------------------------------------------------------------------
 
 describe('create', () => {
   test('creates a session with status running', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     const row = await run(repo.create(params))
     expect(row.status).toBe('running')
@@ -43,6 +42,7 @@ describe('create', () => {
   })
 
   test('stores custom shell', async () => {
+    const repo = makeRepo()
     const params = makeSession(SANDBOX_A, '/bin/sh')
     const row = await run(repo.create(params))
     expect(row.shell).toBe('/bin/sh')
@@ -55,6 +55,7 @@ describe('create', () => {
 
 describe('findById', () => {
   test('returns created session', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     await run(repo.create(params))
     const row = await run(repo.findById(params.id, SANDBOX_A, ORG))
@@ -63,11 +64,13 @@ describe('findById', () => {
   })
 
   test('returns null for unknown id', async () => {
+    const repo = makeRepo()
     const row = await run(repo.findById(generateUUIDv7(), SANDBOX_A, ORG))
     expect(row).toBeNull()
   })
 
   test('returns null when sandboxId does not match', async () => {
+    const repo = makeRepo()
     const params = makeSession(SANDBOX_A)
     await run(repo.create(params))
     const row = await run(repo.findById(params.id, SANDBOX_B, ORG))
@@ -75,6 +78,7 @@ describe('findById', () => {
   })
 
   test('returns null when orgId does not match', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     await run(repo.create(params))
     const row = await run(repo.findById(params.id, SANDBOX_A, 'org_wrong'))
@@ -88,11 +92,13 @@ describe('findById', () => {
 
 describe('list', () => {
   test('returns empty list initially', async () => {
+    const repo = makeRepo()
     const rows = await run(repo.list(SANDBOX_A, ORG))
     expect(rows).toEqual([])
   })
 
   test('returns sessions for the correct sandbox', async () => {
+    const repo = makeRepo()
     await run(repo.create(makeSession(SANDBOX_A)))
     await run(repo.create(makeSession(SANDBOX_B)))
 
@@ -103,6 +109,7 @@ describe('list', () => {
   })
 
   test('includes destroyed sessions', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     await run(repo.create(params))
     await run(repo.destroy(params.id, SANDBOX_A, ORG))
@@ -113,6 +120,7 @@ describe('list', () => {
   })
 
   test('respects orgId scoping', async () => {
+    const repo = makeRepo()
     await run(repo.create(makeSession()))
     const rows = await run(repo.list(SANDBOX_A, 'org_wrong'))
     expect(rows).toEqual([])
@@ -125,11 +133,13 @@ describe('list', () => {
 
 describe('countActive', () => {
   test('returns 0 initially', async () => {
+    const repo = makeRepo()
     const count = await run(repo.countActive(SANDBOX_A))
     expect(count).toBe(0)
   })
 
   test('counts only running sessions', async () => {
+    const repo = makeRepo()
     const p1 = makeSession()
     const p2 = makeSession()
     const p3 = makeSession()
@@ -143,6 +153,7 @@ describe('countActive', () => {
   })
 
   test('scoped to sandbox', async () => {
+    const repo = makeRepo()
     await run(repo.create(makeSession(SANDBOX_A)))
     await run(repo.create(makeSession(SANDBOX_B)))
 
@@ -159,6 +170,7 @@ describe('countActive', () => {
 
 describe('destroy', () => {
   test('marks session as destroyed', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     await run(repo.create(params))
     const destroyed = await run(repo.destroy(params.id, SANDBOX_A, ORG))
@@ -168,19 +180,22 @@ describe('destroy', () => {
   })
 
   test('updates updatedAt', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     const created = await run(repo.create(params))
-    await new Promise((r) => setTimeout(r, 2))
+    await new Promise((r) => setTimeout(r, 10))
     const destroyed = await run(repo.destroy(params.id, SANDBOX_A, ORG))
-    expect(destroyed!.updatedAt.getTime()).toBeGreaterThanOrEqual(created.updatedAt.getTime())
+    expect(destroyed!.updatedAt.getTime()).toBeGreaterThan(created.updatedAt.getTime())
   })
 
   test('returns null for unknown session', async () => {
+    const repo = makeRepo()
     const result = await run(repo.destroy(generateUUIDv7(), SANDBOX_A, ORG))
     expect(result).toBeNull()
   })
 
   test('returns null when sandboxId does not match', async () => {
+    const repo = makeRepo()
     const params = makeSession(SANDBOX_A)
     await run(repo.create(params))
     const result = await run(repo.destroy(params.id, SANDBOX_B, ORG))
@@ -188,6 +203,7 @@ describe('destroy', () => {
   })
 
   test('returns null when orgId does not match', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     await run(repo.create(params))
     const result = await run(repo.destroy(params.id, SANDBOX_A, 'org_wrong'))
@@ -195,6 +211,7 @@ describe('destroy', () => {
   })
 
   test('destroyed session decrements countActive', async () => {
+    const repo = makeRepo()
     const p1 = makeSession()
     const p2 = makeSession()
     await run(repo.create(p1))
@@ -206,6 +223,7 @@ describe('destroy', () => {
   })
 
   test('destroyed session is still findable', async () => {
+    const repo = makeRepo()
     const params = makeSession()
     await run(repo.create(params))
     await run(repo.destroy(params.id, SANDBOX_A, ORG))
