@@ -1,8 +1,10 @@
 import { describe, test, expect } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const contentDir = join(import.meta.dirname, '../../content/docs')
+const apiReferenceDir = join(contentDir, 'api-reference')
+const repoRoot = join(import.meta.dirname, '../../../..')
 
 describe('docs content', () => {
   test('content directory exists', () => {
@@ -89,5 +91,36 @@ describe('openapi spec generation', () => {
     expect(tagNames).toContain('Files')
     expect(tagNames).toContain('Artifacts')
     expect(tagNames).toContain('Replay')
+  })
+
+  test('openapi.json artifact is generated from the live openapi spec', async () => {
+    const { spec } = await import('../../../api/src/openapi.js')
+    const specPath = join(apiReferenceDir, 'openapi.json')
+
+    expect(existsSync(specPath)).toBe(true)
+    expect(JSON.parse(readFileSync(specPath, 'utf8'))).toEqual(spec)
+  })
+
+  test('generated api pages live under the canonical docs tree without absolute path leakage', () => {
+    const generatedPagePath = join(apiReferenceDir, 'health/get-health.mdx')
+    const leakedOutputRoot = join(import.meta.dirname, '../../Users')
+
+    expect(existsSync(generatedPagePath)).toBe(true)
+    expect(existsSync(leakedOutputRoot)).toBe(false)
+
+    const content = readFileSync(generatedPagePath, 'utf8')
+    expect(content).toContain('<APIPage document={"content/docs/api-reference/openapi.json"}')
+    expect(content.includes(repoRoot)).toBe(false)
+  })
+
+  test('llms artifacts are generated from the live openapi spec', async () => {
+    const { generateLlmsDocuments } = await import('../../../api/src/llms.js')
+    const publicDir = join(import.meta.dirname, '../../public')
+
+    for (const [filename, content] of Object.entries(generateLlmsDocuments())) {
+      const filePath = join(publicDir, filename)
+      expect(existsSync(filePath)).toBe(true)
+      expect(readFileSync(filePath, 'utf8')).toBe(content)
+    }
   })
 })

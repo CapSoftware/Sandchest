@@ -13,6 +13,7 @@
     "test": "turbo test",
     "test:e2e": "turbo test:e2e",
     "dev": "turbo run dev",
+    "docs:generate": "bun run --filter @sandchest/docs generate:api",
     "db:up": "bun run scripts/db-up.ts",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && bun run db:up",
