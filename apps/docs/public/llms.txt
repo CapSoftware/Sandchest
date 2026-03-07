@@ -1,0 +1,23 @@
+# Sandchest API
+
+> Compact API index for language models. Generated from the live OpenAPI 3.1 specification.
+
+- Base URL: https://api.sandchest.com
+- OpenAPI: https://api.sandchest.com/openapi.json
+- API reference: https://docs.sandchest.com/docs/api-reference
+- Full LLM reference: https://docs.sandchest.com/llms-full.txt
+- Operations: 29
+
+## Authentication
+
+Use `Authorization: Bearer <api_key>` for authenticated endpoints. Health probes and the public replay endpoint do not require authentication.
+
+## Endpoint Groups
+
+- [Health](https://docs.sandchest.com/llms-full.txt#health): Health and readiness probes (3 operations)
+- [Sandboxes](https://docs.sandchest.com/llms-full.txt#sandboxes): Create, manage, fork, and stop sandboxes (8 operations)
+- [Exec](https://docs.sandchest.com/llms-full.txt#exec): Execute commands in sandboxes (4 operations)
+- [Sessions](https://docs.sandchest.com/llms-full.txt#sessions): Interactive terminal sessions (6 operations)
+- [Files](https://docs.sandchest.com/llms-full.txt#files): File upload, download, and listing (3 operations)
+- [Artifacts](https://docs.sandchest.com/llms-full.txt#artifacts): Register and retrieve build artifacts (2 operations)
+- [Replay](https://docs.sandchest.com/llms-full.txt#replay): Replay bundles and visibility (3 operations)

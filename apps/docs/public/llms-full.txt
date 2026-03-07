@@ -1,0 +1,484 @@
+# Sandchest API
+
+> Expanded API reference for language models. Generated from the live OpenAPI 3.1 specification.
+
+- Version: 0.1.0
+- Base URL: https://api.sandchest.com
+- OpenAPI: https://api.sandchest.com/openapi.json
+- API reference: https://docs.sandchest.com/docs/api-reference
+
+## Authentication
+
+Use `Authorization: Bearer <api_key>` on authenticated endpoints. Operations that set `security: []` in the OpenAPI spec are public.
+
+## Health
+
+Health and readiness probes
+
+### GET /health
+
+- Summary: Basic health check
+- Operation ID: getHealth
+- Authentication: None
+- Parameters: none
+- Request body: none
+- Responses:
+  - `200`: Server is healthy (application/json: HealthResponse)
+
+### GET /healthz
+
+- Summary: Basic health check (alias)
+- Operation ID: getHealthz
+- Authentication: None
+- Parameters: none
+- Request body: none
+- Responses:
+  - `200`: Server is healthy (application/json: HealthResponse)
+
+### GET /readyz
+
+- Summary: Readiness check
+- Operation ID: getReadyz
+- Authentication: None
+- Description: Returns 503 if Redis is unavailable or server is draining connections.
+- Parameters: none
+- Request body: none
+- Responses:
+  - `200`: All subsystems ready (application/json: ReadyResponse)
+  - `503`: One or more subsystems degraded (application/json: ReadyResponse)
+
+## Sandboxes
+
+Create, manage, fork, and stop sandboxes
+
+### POST /v1/sandboxes
+
+- Summary: Create a sandbox
+- Operation ID: createSandbox
+- Authentication: Bearer token in `Authorization` header
+- Parameters: none
+- Request body:
+  - application/json: CreateSandboxRequest
+- Responses:
+  - `201`: Sandbox queued (application/json: CreateSandboxResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `429`: Rate limited (application/json: ErrorResponse)
+
+### GET /v1/sandboxes
+
+- Summary: List sandboxes
+- Operation ID: listSandboxes
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `status` (query, optional) - SandboxStatus.
+  - `forked_from` (query, optional) - string. Filter by parent sandbox ID
+  - `cursor` (query, optional) - string.
+  - `limit` (query, optional) - integer.
+- Request body: none
+- Responses:
+  - `200`: Sandbox list (application/json: ListSandboxesResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}
+
+- Summary: Get sandbox details
+- Operation ID: getSandbox
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `200`: Sandbox details (application/json: Sandbox)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### DELETE /v1/sandboxes/{id}
+
+- Summary: Delete a sandbox
+- Operation ID: deleteSandbox
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `200`: Sandbox deleted (application/json: SandboxStatusResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### POST /v1/sandboxes/{id}/fork
+
+- Summary: Fork a running sandbox
+- Operation ID: forkSandbox
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body:
+  - application/json: ForkSandboxRequest
+- Responses:
+  - `201`: Fork created (application/json: ForkSandboxResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+  - `422`: Fork depth or count limit exceeded (application/json: ErrorResponse)
+  - `429`: Rate limited (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/forks
+
+- Summary: Get fork tree
+- Operation ID: getForkTree
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `200`: Fork tree (application/json: ForkTreeResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### POST /v1/sandboxes/{id}/stop
+
+- Summary: Stop a sandbox
+- Operation ID: stopSandbox
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `202`: Stop initiated (application/json: SandboxStatusResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/stream
+
+- Summary: Stream sandbox events (SSE)
+- Operation ID: streamSandboxEvents
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `Last-Event-ID` (header, optional) - string. Reconnect from this event ID
+- Request body: none
+- Responses:
+  - `200`: SSE event stream (text/event-stream: string)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+## Exec
+
+Execute commands in sandboxes
+
+### POST /v1/sandboxes/{id}/exec
+
+- Summary: Execute a command
+- Operation ID: execCommand
+- Authentication: Bearer token in `Authorization` header
+- Description: Runs a command in the sandbox. Set `wait: false` for async execution.
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body:
+  - application/json: ExecRequest
+- Responses:
+  - `200`: Sync result (application/json: ExecSyncResponse)
+  - `202`: Async exec accepted (application/json: ExecAsyncResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/exec/{execId}
+
+- Summary: Get exec status
+- Operation ID: getExec
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `execId` (path, required) - string. Exec ID (prefixed, e.g. `ex_...`)
+- Request body: none
+- Responses:
+  - `200`: Exec details (application/json: ExecDetail)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/execs
+
+- Summary: List execs
+- Operation ID: listExecs
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `status` (query, optional) - ExecStatus.
+  - `session_id` (query, optional) - string.
+  - `cursor` (query, optional) - string.
+  - `limit` (query, optional) - integer.
+- Request body: none
+- Responses:
+  - `200`: Exec list (application/json: ListExecsResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/exec/{execId}/stream
+
+- Summary: Stream exec output (SSE)
+- Operation ID: streamExecOutput
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `execId` (path, required) - string. Exec ID (prefixed, e.g. `ex_...`)
+  - `Last-Event-ID` (header, optional) - string. Reconnect from this event ID
+- Request body: none
+- Responses:
+  - `200`: SSE event stream (text/event-stream: string)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+## Sessions
+
+Interactive terminal sessions
+
+### POST /v1/sandboxes/{id}/sessions
+
+- Summary: Create an interactive session
+- Operation ID: createSession
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body:
+  - application/json: CreateSessionRequest
+- Responses:
+  - `201`: Session created (application/json: CreateSessionResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/sessions
+
+- Summary: List sessions
+- Operation ID: listSessions
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `200`: Session list (application/json: ListSessionsResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### DELETE /v1/sandboxes/{id}/sessions/{sessionId}
+
+- Summary: Destroy a session
+- Operation ID: destroySession
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `sessionId` (path, required) - string. Session ID (prefixed, e.g. `sess_...`)
+- Request body: none
+- Responses:
+  - `200`: Session destroyed (application/json: OkResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### POST /v1/sandboxes/{id}/sessions/{sessionId}/exec
+
+- Summary: Execute command in session
+- Operation ID: sessionExec
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `sessionId` (path, required) - string. Session ID (prefixed, e.g. `sess_...`)
+- Request body:
+  - application/json: SessionExecRequest
+- Responses:
+  - `200`: Sync result (application/json: ExecSyncResponse)
+  - `202`: Async exec accepted (application/json: ExecAsyncResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+### POST /v1/sandboxes/{id}/sessions/{sessionId}/input
+
+- Summary: Send input to session stdin
+- Operation ID: sendSessionInput
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `sessionId` (path, required) - string. Session ID (prefixed, e.g. `sess_...`)
+- Request body:
+  - application/json: object
+- Responses:
+  - `200`: Input sent (application/json: OkResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/sessions/{sessionId}/stream
+
+- Summary: Stream session output (SSE)
+- Operation ID: streamSessionOutput
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `sessionId` (path, required) - string. Session ID (prefixed, e.g. `sess_...`)
+  - `Last-Event-ID` (header, optional) - string. Reconnect from this event ID
+- Request body: none
+- Responses:
+  - `200`: SSE event stream (text/event-stream: string)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+## Files
+
+File upload, download, and listing
+
+### PUT /v1/sandboxes/{id}/files
+
+- Summary: Upload a file
+- Operation ID: uploadFile
+- Authentication: Bearer token in `Authorization` header
+- Description: Writes the raw request body to `path`. `batch=true` only increases the size limit; it does not unpack tarballs or perform directory extraction.
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `path` (query, required) - string. Absolute path inside the sandbox
+  - `batch` (query, optional) - boolean. Enable batch mode (10 GB limit instead of 5 GB). The payload is still written verbatim.
+- Request body:
+  - application/octet-stream: string (binary)
+- Responses:
+  - `200`: File written (application/json: object)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/files
+
+- Summary: Download or list files
+- Operation ID: getFile
+- Authentication: Bearer token in `Authorization` header
+- Description: Set `list=true` to list directory contents, otherwise downloads the file at `path`.
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `path` (query, required) - string. Absolute path inside the sandbox
+  - `list` (query, optional) - boolean. List directory instead of downloading
+  - `limit` (query, optional) - integer. Items per page (directory listing)
+  - `cursor` (query, optional) - string.
+- Request body: none
+- Responses:
+  - `200`: File data or directory listing (application/octet-stream: string (binary); application/json: ListFilesResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+### DELETE /v1/sandboxes/{id}/files
+
+- Summary: Delete a file
+- Operation ID: deleteFile
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `path` (query, required) - string. Absolute path inside the sandbox
+- Request body: none
+- Responses:
+  - `200`: File deleted (application/json: OkResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `409`: State conflict (application/json: ErrorResponse)
+
+## Artifacts
+
+Register and retrieve build artifacts
+
+### POST /v1/sandboxes/{id}/artifacts
+
+- Summary: Register artifact paths
+- Operation ID: registerArtifacts
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body:
+  - application/json: object
+- Responses:
+  - `200`: Artifacts registered (application/json: object)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `413`: Too many artifact paths (application/json: ErrorResponse)
+
+### GET /v1/sandboxes/{id}/artifacts
+
+- Summary: List collected artifacts
+- Operation ID: listArtifacts
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+  - `cursor` (query, optional) - string.
+  - `limit` (query, optional) - integer.
+- Request body: none
+- Responses:
+  - `200`: Artifact list (application/json: ListArtifactsResponse)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+## Replay
+
+Replay bundles and visibility
+
+### GET /v1/sandboxes/{id}/replay
+
+- Summary: Get replay bundle
+- Operation ID: getReplay
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `200`: Replay bundle (application/json: ReplayBundle)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `410`: Replay expired (application/json: ErrorResponse)
+
+### PATCH /v1/sandboxes/{id}/replay
+
+- Summary: Set replay visibility
+- Operation ID: setReplayVisibility
+- Authentication: Bearer token in `Authorization` header
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body:
+  - application/json: object
+- Responses:
+  - `200`: Visibility updated (application/json: object)
+  - `400`: Validation error (application/json: ErrorResponse)
+  - `401`: Authentication required (application/json: ErrorResponse)
+  - `404`: Resource not found (application/json: ErrorResponse)
+
+### GET /v1/public/replay/{id}
+
+- Summary: Get public replay bundle (no auth)
+- Operation ID: getPublicReplay
+- Authentication: None
+- Parameters:
+  - `id` (path, required) - string. Sandbox ID (prefixed, e.g. `sb_...`)
+- Request body: none
+- Responses:
+  - `200`: Replay bundle (application/json: ReplayBundle)
+  - `404`: Resource not found (application/json: ErrorResponse)
+  - `410`: Replay expired (application/json: ErrorResponse)
