@@ -1,0 +1,55 @@
+name: Export Skill
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: Target repository for the published skill export
+        required: true
+        default: sandchest/agent-skills
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - skills/sandchest/**
+      - .github/workflows/export-skill.yml
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare exported skill bundle
+        run: |
+          rm -rf export
+          mkdir -p export/sandchest
+          cp -R skills/sandchest/. export/sandchest/
+
+      - name: Check out target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.target_repo || 'sandchest/agent-skills' }}
+          token: ${{ secrets.SKILL_EXPORT_TOKEN }}
+          path: target-repo
+
+      - name: Sync exported skill
+        run: |
+          rm -rf target-repo/sandchest
+          mkdir -p target-repo/sandchest
+          cp -R export/sandchest/. target-repo/sandchest/
+
+      - name: Commit and push export
+        run: |
+          cd target-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -z "$(git status --short)" ]; then
+            echo "No export changes to publish"
+            exit 0
+          fi
+          git add sandchest
+          git commit -m "chore: export sandchest skill"
+          git push
