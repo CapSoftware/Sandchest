@@ -14,7 +14,16 @@ export type SdkErrorCode =
   | 'connection_error'
 
 /** Base error for all Sandchest SDK errors. */
-export class SandchestError extends Error {
+export class SandchestBaseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = new.target.name
+    Object.setPrototypeOf(this, new.target.prototype)
+  }
+}
+
+/** Base error for HTTP API failures surfaced by the Sandchest control plane. */
+export class SandchestError extends SandchestBaseError {
   readonly code: SdkErrorCode
   readonly status: number
   readonly requestId: string
@@ -120,5 +129,20 @@ export class ConnectionError extends SandchestError {
     if (opts.cause) {
       this.cause = opts.cause
     }
+  }
+}
+
+/** In-sandbox command execution failure (non-zero exit code). */
+export class ExecFailedError extends SandchestBaseError {
+  readonly operation: string
+  readonly exitCode: number
+  readonly stderr: string
+
+  constructor(opts: { operation: string; exitCode: number; stderr: string }) {
+    super(`${opts.operation} failed (exit ${opts.exitCode}): ${opts.stderr}`)
+    this.name = 'ExecFailedError'
+    this.operation = opts.operation
+    this.exitCode = opts.exitCode
+    this.stderr = opts.stderr
   }
 }

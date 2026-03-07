@@ -1,6 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 import {
+  SandchestBaseError,
   SandchestError,
+  ExecFailedError,
   NotFoundError,
   RateLimitError,
   SandboxNotRunningError,
@@ -26,13 +28,14 @@ describe('SandchestError', () => {
     expect(err.name).toBe('SandchestError')
   })
 
-  test('extends Error', () => {
+  test('extends SandchestBaseError', () => {
     const err = new SandchestError({
       code: 'internal_error',
       message: 'fail',
       status: 500,
       requestId: 'req_1',
     })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(Error)
   })
 })
@@ -48,6 +51,7 @@ describe('NotFoundError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new NotFoundError({ message: 'gone', requestId: 'req_3' })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
     expect(err).toBeInstanceOf(Error)
   })
@@ -68,6 +72,7 @@ describe('RateLimitError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new RateLimitError({ message: 'slow down', requestId: 'req_5', retryAfter: 1 })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
   })
 })
@@ -85,6 +90,7 @@ describe('SandboxNotRunningError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new SandboxNotRunningError({ message: 'not running', requestId: 'req_7' })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
   })
 })
@@ -99,6 +105,7 @@ describe('ValidationError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new ValidationError({ message: 'bad', requestId: 'req_9' })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
   })
 })
@@ -113,6 +120,7 @@ describe('AuthenticationError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new AuthenticationError({ message: 'unauthed', requestId: 'req_11' })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
   })
 })
@@ -129,6 +137,7 @@ describe('TimeoutError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new TimeoutError({ message: 'timed out', timeoutMs: 1000 })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
     expect(err).toBeInstanceOf(Error)
   })
@@ -151,7 +160,43 @@ describe('ConnectionError', () => {
 
   test('is instanceof SandchestError', () => {
     const err = new ConnectionError({ message: 'fail' })
+    expect(err).toBeInstanceOf(SandchestBaseError)
     expect(err).toBeInstanceOf(SandchestError)
     expect(err).toBeInstanceOf(Error)
+  })
+})
+
+describe('SandchestBaseError', () => {
+  test('extends Error and preserves the subclass name', () => {
+    const err = new SandchestBaseError('base')
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('SandchestBaseError')
+  })
+})
+
+describe('ExecFailedError', () => {
+  test('stores operation, exit code, and stderr', () => {
+    const err = new ExecFailedError({
+      operation: 'uploadDir:extract',
+      exitCode: 2,
+      stderr: 'tar failed',
+    })
+
+    expect(err.name).toBe('ExecFailedError')
+    expect(err.operation).toBe('uploadDir:extract')
+    expect(err.exitCode).toBe(2)
+    expect(err.stderr).toBe('tar failed')
+    expect(err.message).toContain('uploadDir:extract failed')
+  })
+
+  test('is SandchestBaseError but not SandchestError', () => {
+    const err = new ExecFailedError({
+      operation: 'downloadDir:archive',
+      exitCode: 1,
+      stderr: 'missing path',
+    })
+
+    expect(err).toBeInstanceOf(SandchestBaseError)
+    expect(err).not.toBeInstanceOf(SandchestError)
   })
 })
