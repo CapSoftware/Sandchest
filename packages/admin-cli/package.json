@@ -16,11 +16,13 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "echo 'No tests yet'"
+    "test": "bun test",
+    "test:live": "bun test --timeout 180000 src/sandbox-smoke.live.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
+    "@sandchest/sdk": "workspace:*",
     "chalk": "^5.4.1",
     "commander": "^12.1.0",
     "ssh2": "^1.16.0"

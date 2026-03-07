@@ -21,6 +21,7 @@ import { dnsShowCommand } from './commands/dns/show.js'
 import { verifyCommand } from './commands/verify.js'
 import { setupCommand } from './commands/setup.js'
 import { preflightCommand } from './commands/preflight.js'
+import { sandboxSmokeCommand } from './commands/sandbox/smoke.js'
 
 const program = new Command()
   .name('sandchest-admin')
@@ -70,6 +71,11 @@ program.addCommand(db)
 const dns = new Command('dns').description('DNS management')
 dns.addCommand(dnsShowCommand())
 program.addCommand(dns)
+
+// sandbox subcommands
+const sandbox = new Command('sandbox').description('Sandbox operations')
+sandbox.addCommand(sandboxSmokeCommand())
+program.addCommand(sandbox)
 
 program.parseAsync().catch(() => {
   process.exit(2)
