@@ -12,6 +12,10 @@ import { watchCommand } from './commands/watch.js'
 import { uploadCommand } from './commands/upload.js'
 import { downloadCommand } from './commands/download.js'
 import { logsCommand } from './commands/logs.js'
+import { copyCommand } from './commands/copy.js'
+import { gitCommand } from './commands/git.js'
+import { mcpInitCommand } from './commands/mcp-init.js'
+import { skillInstallCommand } from './commands/skill-install.js'
 
 const program = new Command()
   .name('sandchest')
@@ -31,6 +35,16 @@ program.addCommand(watchCommand())
 program.addCommand(uploadCommand())
 program.addCommand(downloadCommand())
 program.addCommand(logsCommand())
+program.addCommand(copyCommand())
+program.addCommand(gitCommand())
+
+const mcpGroup = new Command('mcp').description('MCP server management')
+mcpGroup.addCommand(mcpInitCommand())
+program.addCommand(mcpGroup)
+
+const skillGroup = new Command('skill').description('Skill installation and management')
+skillGroup.addCommand(skillInstallCommand())
+program.addCommand(skillGroup)
 
 program.parseAsync().catch(() => {
   process.exit(2)

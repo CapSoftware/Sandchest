@@ -6,7 +6,7 @@
   "bin": {
     "sandchest": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": ["dist", "skills/sandchest"],
   "keywords": ["sandchest", "cli", "sandbox", "firecracker", "code-execution"],
   "license": "MIT",
   "repository": {
