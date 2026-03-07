@@ -3,7 +3,9 @@ export { Sandbox } from './sandbox.js'
 export { Session } from './session.js'
 export { ExecStream } from './stream.js'
 export {
+  SandchestBaseError,
   SandchestError,
+  ExecFailedError,
   NotFoundError,
   RateLimitError,
   SandboxNotRunningError,
@@ -19,13 +21,19 @@ export type {
   ExecOptions,
   StreamExecOptions,
   ForkOptions,
+  GitCloneOptions,
   ListSandboxesOptions,
   CreateSessionOptions,
   SessionExecOptions,
   ExecResult,
   ForkTree,
+  FindOptions,
+  ReplaceOptions,
+  ReplaceResult,
   FileOperations,
   ArtifactOperations,
+  GitOperations,
   SessionManager,
+  ToolOperations,
 } from './types.js'
 export type { ExecStreamEvent } from '@sandchest/contract'

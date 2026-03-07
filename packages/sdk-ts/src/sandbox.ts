@@ -23,15 +23,136 @@ import type {
   ForkTree,
   FileOperations,
   ArtifactOperations,
+  GitCloneOptions,
+  GitOperations,
+  FindOptions,
+  ReplaceOptions,
+  ReplaceResult,
   SessionManager,
+  ToolOperations,
   CreateSessionOptions,
 } from './types.js'
 import { Session } from './session.js'
-import { TimeoutError } from './errors.js'
+import { ExecFailedError, TimeoutError } from './errors.js'
 import { parseSSE, ExecStream } from './stream.js'
 
 const WAIT_READY_DEFAULT_TIMEOUT = 120_000
 const WAIT_READY_POLL_INTERVAL = 1_000
+const TEXT_ENCODER = new TextEncoder()
+const TEXT_DECODER = new TextDecoder()
+const VALIDATE_TAR_SCRIPT = `
+import posixpath
+import sys
+import tarfile
+
+archive = sys.argv[1]
+bad = []
+
+with tarfile.open(archive, 'r:gz') as tf:
+    for member in tf.getmembers():
+        normalized = posixpath.normpath(member.name)
+        if member.name.startswith('/'):
+            bad.append(f"absolute path: {member.name}")
+            continue
+        if normalized == '.':
+            if not member.isdir():
+                bad.append(f"non-directory root entry: {member.name}")
+            continue
+        if normalized == '..' or normalized.startswith('../'):
+            bad.append(f"path traversal: {member.name}")
+            continue
+        if not (member.isfile() or member.isdir()):
+            bad.append(f"unsupported type: {member.name} ({member.type!r})")
+            continue
+        if member.issym() or member.islnk():
+            bad.append(f"link entry: {member.name}")
+            continue
+
+if bad:
+    sys.stderr.write('Tarball contains unsafe entries: ' + ', '.join(bad[:5]))
+    sys.exit(1)
+`.trim()
+const REPLACE_SCRIPT = `
+import fnmatch
+import os
+import sys
+
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+search_file, replace_file, root = sys.argv[1], sys.argv[2], sys.argv[3]
+glob_pat = sys.argv[4] if len(sys.argv) > 4 else None
+with open(search_file) as f:
+    search = f.read()
+with open(replace_file) as f:
+    repl = f.read()
+real_root = os.path.realpath(root)
+root_prefix = real_root if real_root.endswith(os.sep) else real_root + os.sep
+count = 0
+
+for dirpath, _, files in os.walk(root, followlinks=False):
+    for name in files:
+        fp = os.path.join(dirpath, name)
+        if glob_pat and not fnmatch.fnmatch(name, glob_pat):
+            continue
+        try:
+            if os.path.islink(fp):
+                continue
+            resolved = os.path.realpath(fp)
+            if resolved != real_root and not resolved.startswith(root_prefix):
+                continue
+            if os.path.getsize(resolved) > MAX_FILE_SIZE:
+                continue
+            with open(resolved) as f:
+                data = f.read()
+            if search in data:
+                with open(resolved, 'w') as f:
+                    f.write(data.replace(search, repl))
+                count += 1
+                print(resolved, end='\\0')
+        except (UnicodeDecodeError, PermissionError, OSError):
+            pass
+
+print(f'Replaced in {count} file(s)', file=sys.stderr)
+`.trim()
+
+function isScpStyleGitUrl(value: string): boolean {
+  return /^[^@\s]+@[^:\s]+:.+$/.test(value)
+}
+
+function validateGitCloneUrl(rawUrl: string): { ok: true; url: string } | { ok: false; error: string } {
+  const url = rawUrl.trim()
+  if (url === '') {
+    return { ok: false, error: 'Git URL must not be empty.' }
+  }
+
+  if (isScpStyleGitUrl(url)) {
+    return { ok: true, url }
+  }
+
+  if (!url.includes('://')) {
+    return {
+      ok: false,
+      error: `Invalid git URL: ${url}. Use an HTTPS URL or an SSH-style URL such as git@github.com:org/repo.git.`,
+    }
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { ok: false, error: `Invalid git URL: ${url}.` }
+  }
+
+  if (parsed.username || parsed.password) {
+    return {
+      ok: false,
+      error:
+        'URLs with embedded credentials (user:pass@host) are not allowed. Private-repo auth is intentionally deferred until Sandchest can inject credentials outside the guest boundary.',
+    }
+  }
+
+  return { ok: true, url }
+}
 
 /**
  * A Sandchest sandbox — an isolated Firecracker microVM.
@@ -50,8 +171,14 @@ export class Sandbox {
   /** Artifact operations. */
   readonly artifacts: ArtifactOperations
 
+  /** Git operations. */
+  readonly git: GitOperations
+
   /** Session manager. */
   readonly session: SessionManager
+
+  /** Exec-based helper tools. */
+  readonly tools: ToolOperations
 
   /** @internal — Use `sandchest.create()` or `sandchest.get()` instead. */
   constructor(id: string, status: SandboxStatus, replayUrl: string, http: HttpClient) {
@@ -70,14 +197,68 @@ export class Sandbox {
           headers: { 'Content-Type': 'application/octet-stream' },
         })
       },
+      write: async (path: string, content: string): Promise<void> => {
+        await this.fs.upload(path, TEXT_ENCODER.encode(content))
+      },
       uploadDir: async (path: string, tarball: Uint8Array): Promise<void> => {
+        const tmpPath = `/tmp/.sandchest-upload-${crypto.randomUUID()}.tar.gz`
         await this._http.requestRaw({
           method: 'PUT',
           path: `/v1/sandboxes/${this.id}/files`,
-          query: { path, batch: true },
+          query: { path: tmpPath, batch: true },
           body: tarball,
           headers: { 'Content-Type': 'application/octet-stream' },
         })
+        try {
+          const mkdirResult = await this._execSync(['mkdir', '-p', path], {
+            operation: 'uploadDir:mkdir',
+          })
+          if (mkdirResult.exit_code !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:mkdir',
+              exitCode: mkdirResult.exit_code,
+              stderr: mkdirResult.stderr,
+            })
+          }
+
+          const validateResult = await this._execSync([
+            'python3',
+            '-c',
+            VALIDATE_TAR_SCRIPT,
+            tmpPath,
+          ], {
+            operation: 'uploadDir:verify',
+          })
+          if (validateResult.exit_code !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:verify',
+              exitCode: validateResult.exit_code,
+              stderr: validateResult.stderr,
+            })
+          }
+
+          const extractResult = await this._execSync([
+            'tar',
+            'xzf',
+            tmpPath,
+            '--no-same-owner',
+            '-C',
+            path,
+          ], {
+            operation: 'uploadDir:extract',
+          })
+          if (extractResult.exit_code !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:extract',
+              exitCode: extractResult.exit_code,
+              stderr: extractResult.stderr,
+            })
+          }
+        } finally {
+          await this._execSync(['rm', '-f', tmpPath], {
+            operation: 'uploadDir:cleanup',
+          }).catch(() => {})
+        }
       },
       download: async (path: string): Promise<Uint8Array> => {
         const res = await this._http.requestRaw({
@@ -86,6 +267,30 @@ export class Sandbox {
           query: { path },
         })
         return new Uint8Array(await res.arrayBuffer())
+      },
+      read: async (path: string): Promise<string> => {
+        return TEXT_DECODER.decode(await this.fs.download(path))
+      },
+      downloadDir: async (path: string): Promise<Uint8Array> => {
+        const tmpPath = `/tmp/.sandchest-download-${crypto.randomUUID()}.tar.gz`
+        try {
+          const archiveResult = await this._execSync(['tar', 'czf', tmpPath, '-C', path, '.'], {
+            operation: 'downloadDir:archive',
+          })
+          if (archiveResult.exit_code !== 0) {
+            throw new ExecFailedError({
+              operation: 'downloadDir:archive',
+              exitCode: archiveResult.exit_code,
+              stderr: archiveResult.stderr,
+            })
+          }
+
+          return await this.fs.download(tmpPath)
+        } finally {
+          await this._execSync(['rm', '-f', tmpPath], {
+            operation: 'downloadDir:cleanup',
+          }).catch(() => {})
+        }
       },
       ls: async (path: string): Promise<FileEntry[]> => {
         const res = await this._http.request<ListFilesResponse>({
@@ -122,6 +327,68 @@ export class Sandbox {
       },
     }
 
+    this.git = {
+      clone: async (url: string, options?: GitCloneOptions): Promise<ExecResult> => {
+        const validated = validateGitCloneUrl(url)
+        if (!validated.ok) {
+          throw new ExecFailedError({
+            operation: 'git.clone',
+            exitCode: 1,
+            stderr: validated.error,
+          })
+        }
+
+        const dest = options?.dest ?? '/work'
+        const cmd: string[] = ['git', 'clone']
+
+        if (options?.branch) {
+          if (options.branch.startsWith('-')) {
+            throw new ExecFailedError({
+              operation: 'git.clone',
+              exitCode: 1,
+              stderr: `Invalid branch name: '${options.branch}' — branch names must not start with '-'`,
+            })
+          }
+          cmd.push('--branch', options.branch)
+        }
+
+        if (options?.depth !== undefined) {
+          cmd.push('--depth', String(options.depth))
+        }
+
+        if (options?.singleBranch !== false) {
+          cmd.push('--single-branch')
+        }
+
+        cmd.push('--', validated.url, dest)
+
+        const result = await this._execSync(cmd, {
+          operation: 'git.clone',
+          timeout: options?.timeout ?? 120,
+          env: {
+            GIT_TERMINAL_PROMPT: '0',
+            ...options?.env,
+          },
+        })
+
+        if (result.exit_code !== 0) {
+          throw new ExecFailedError({
+            operation: 'git.clone',
+            exitCode: result.exit_code,
+            stderr: result.stderr,
+          })
+        }
+
+        return {
+          execId: result.exec_id,
+          exitCode: result.exit_code,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          durationMs: result.duration_ms,
+        }
+      },
+    }
+
     this.session = {
       create: async (options?: CreateSessionOptions): Promise<Session> => {
         const res = await this._http.request<CreateSessionResponse>({
@@ -133,6 +400,81 @@ export class Sandbox {
           },
         })
         return new Session(res.session_id, this.id, this._http)
+      },
+    }
+
+    this.tools = {
+      find: async (path: string, pattern: string, options?: FindOptions): Promise<string[]> => {
+        const cmd = ['find', '--', path]
+        if (options?.maxDepth !== undefined) {
+          cmd.push('-maxdepth', String(options.maxDepth))
+        }
+        if (options?.type) {
+          cmd.push('-type', options.type)
+        }
+        cmd.push('-name', pattern)
+
+        const result = await this._execSync(cmd, { operation: 'tools.find' })
+        if (result.exit_code !== 0) {
+          return []
+        }
+        return result.stdout.trim().split('\n').filter(Boolean)
+      },
+      replace: async (
+        path: string,
+        search: string,
+        replacement: string,
+        options?: ReplaceOptions,
+      ): Promise<ReplaceResult> => {
+        if (search.length === 0) {
+          throw new ExecFailedError({
+            operation: 'replace',
+            exitCode: 1,
+            stderr: 'search string must not be empty',
+          })
+        }
+
+        const id = crypto.randomUUID()
+        const searchPath = `/tmp/.sandchest-search-${id}`
+        const replacePath = `/tmp/.sandchest-replace-${id}`
+
+        try {
+          await this.fs.upload(searchPath, TEXT_ENCODER.encode(search))
+          await this.fs.upload(replacePath, TEXT_ENCODER.encode(replacement))
+
+          const result = await this._execSync(
+            [
+              'python3',
+              '-c',
+              REPLACE_SCRIPT,
+              searchPath,
+              replacePath,
+              path,
+              ...(options?.glob ? [options.glob] : []),
+            ],
+            { operation: 'replace' },
+          )
+
+          if (result.exit_code !== 0) {
+            throw new ExecFailedError({
+              operation: 'replace',
+              exitCode: result.exit_code,
+              stderr: result.stderr,
+            })
+          }
+
+          const changedPaths = result.stdout.split('\0').filter(Boolean)
+          return {
+            filesChanged: changedPaths.length,
+            changedPaths,
+          }
+        } finally {
+          for (const tempPath of [searchPath, replacePath]) {
+            await this._execSync(['rm', '-f', tempPath], {
+              operation: 'replace:cleanup',
+            }).catch(() => {})
+          }
+        }
       },
     }
   }
@@ -255,6 +597,36 @@ export class Sandbox {
       stderr: res.stderr,
       durationMs: res.duration_ms,
     }
+  }
+
+  private async _execSync(
+    cmd: string[],
+    options?: {
+      operation?: string | undefined
+      timeout?: number | undefined
+      env?: Record<string, string> | undefined
+    },
+  ): Promise<ExecSyncResponse> {
+    const result = await this._http.request<ExecSyncResponse>({
+      method: 'POST',
+      path: `/v1/sandboxes/${this.id}/exec`,
+      body: {
+        cmd,
+        env: options?.env,
+        timeout_seconds: options?.timeout ?? 30,
+        wait: true,
+      },
+    })
+
+    if (result.status !== 'done') {
+      throw new ExecFailedError({
+        operation: options?.operation ?? 'exec',
+        exitCode: result.exit_code,
+        stderr: result.stderr || `Command failed with status: ${result.status}`,
+      })
+    }
+
+    return result
   }
 
   private async _execWithCallbacks(

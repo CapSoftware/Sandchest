@@ -52,6 +52,22 @@ interface MockFile {
   content: Uint8Array
 }
 
+function canBindLocalHttpServer(): boolean {
+  try {
+    const probe = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 10_000 + Math.floor(Math.random() * 50_000),
+      fetch() {
+        return new Response('ok')
+      },
+    })
+    probe.stop()
+    return true
+  } catch {
+    return false
+  }
+}
+
 function createMockServer() {
   const sandboxes = new Map<string, MockSandbox>()
   const execs = new Map<string, MockExec>()
@@ -88,9 +104,7 @@ function createMockServer() {
     return null
   }
 
-  const server = Bun.serve({
-    port: 0,
-    async fetch(req) {
+  const fetch = async (req: Request) => {
       const url = new URL(req.url)
       const path = url.pathname
       const method = req.method
@@ -448,8 +462,30 @@ function createMockServer() {
       }
 
       return errorJson(404, 'not_found', `No route: ${method} ${path}`)
-    },
-  })
+    }
+
+  let server: ReturnType<typeof Bun.serve> | undefined
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = 10_000 + Math.floor(Math.random() * 50_000)
+    try {
+      server = Bun.serve({
+        hostname: '127.0.0.1',
+        port,
+        fetch,
+      })
+      break
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  if (!server) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Failed to start SDK E2E mock server after multiple port attempts')
+  }
 
   return { server, sandboxes, execs, sessions, files, artifacts }
 }
@@ -458,22 +494,25 @@ function createMockServer() {
 // E2E tests using the real SDK against the mock server
 // ---------------------------------------------------------------------------
 
-let mock: ReturnType<typeof createMockServer>
-let client: Sandchest
+const describeE2E = describe.skipIf(!canBindLocalHttpServer())
 
-beforeAll(() => {
-  mock = createMockServer()
-  client = new Sandchest({
-    apiKey: 'sk_test_e2e',
-    baseUrl: `http://localhost:${mock.server.port}`,
-    retries: 0,
-    timeout: 5000,
+describeE2E('SDK E2E', () => {
+  let mock: ReturnType<typeof createMockServer>
+  let client: Sandchest
+
+  beforeAll(() => {
+    mock = createMockServer()
+    client = new Sandchest({
+      apiKey: 'sk_test_e2e',
+      baseUrl: `http://127.0.0.1:${mock.server.port}`,
+      retries: 0,
+      timeout: 5000,
+    })
   })
-})
 
-afterAll(() => {
-  mock.server.stop()
-})
+  afterAll(() => {
+    mock.server.stop()
+  })
 
 describe('SDK E2E: full sandbox lifecycle', () => {
   test('create sandbox and verify it returns a running Sandbox instance', async () => {
@@ -764,7 +803,7 @@ describe('SDK E2E: error handling', () => {
   test('invalid API key throws AuthenticationError', async () => {
     const badClient = new Sandchest({
       apiKey: 'sk_invalid',
-      baseUrl: `http://localhost:${mock.server.port}`,
+      baseUrl: `http://127.0.0.1:${mock.server.port}`,
       retries: 0,
     })
 
@@ -816,4 +855,5 @@ describe('SDK E2E: full workflow integration', () => {
     await sandbox.stop()
     expect(sandbox.status).toBe('stopping')
   })
+})
 })

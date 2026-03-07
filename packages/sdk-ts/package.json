@@ -36,7 +36,7 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "bun test --ignore='src/e2e.test.ts'",
+    "test": "bun test src/client.test.ts src/errors.test.ts src/http.test.ts src/sandbox.test.ts src/session.test.ts src/stream.test.ts",
     "test:e2e": "bun test src/e2e.test.ts"
   },
   "dependencies": {
