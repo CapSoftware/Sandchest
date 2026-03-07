@@ -52,6 +52,17 @@ export interface ForkOptions {
   ttlSeconds?: number | undefined
 }
 
+export interface GitCloneOptions {
+  dest?: string | undefined
+  branch?: string | undefined
+  depth?: number | undefined
+  /** Default: true (unlike git's default of false). Set to false to clone all branches. */
+  singleBranch?: boolean | undefined
+  env?: Record<string, string> | undefined
+  /** Timeout in seconds (default: 120 for git clone). */
+  timeout?: number | undefined
+}
+
 export interface ListSandboxesOptions {
   status?: SandboxStatus | undefined
   image?: string | undefined
@@ -91,14 +102,34 @@ export interface ForkTree {
   tree: ForkTreeNode[]
 }
 
+export interface FindOptions {
+  type?: 'f' | 'd' | undefined
+  maxDepth?: number | undefined
+}
+
+export interface ReplaceOptions {
+  glob?: string | undefined
+}
+
+export interface ReplaceResult {
+  filesChanged: number
+  changedPaths: string[]
+}
+
 // ---------------------------------------------------------------------------
 // Sub-resource operation interfaces
 // ---------------------------------------------------------------------------
 
 export interface FileOperations {
   upload(path: string, content: Uint8Array): Promise<void>
+  /** Write a UTF-8 text file. */
+  write(path: string, content: string): Promise<void>
   uploadDir(path: string, tarball: Uint8Array): Promise<void>
   download(path: string): Promise<Uint8Array>
+  /** Read a UTF-8 text file. */
+  read(path: string): Promise<string>
+  /** Download a directory as a gzipped tarball. */
+  downloadDir(path: string): Promise<Uint8Array>
   ls(path: string): Promise<FileEntry[]>
   rm(path: string): Promise<void>
 }
@@ -108,6 +139,20 @@ export interface ArtifactOperations {
   list(): Promise<Artifact[]>
 }
 
+export interface GitOperations {
+  clone(url: string, options?: GitCloneOptions): Promise<ExecResult>
+}
+
 export interface SessionManager {
   create(options?: CreateSessionOptions): Promise<Session>
+}
+
+export interface ToolOperations {
+  find(path: string, pattern: string, options?: FindOptions): Promise<string[]>
+  replace(
+    path: string,
+    search: string,
+    replacement: string,
+    options?: ReplaceOptions,
+  ): Promise<ReplaceResult>
 }
