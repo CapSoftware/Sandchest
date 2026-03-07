@@ -336,6 +336,7 @@ Valid stages: `dev`, `production`. If the stage is unspecified or ambiguous, ask
 
 | Situation | Skill |
 |-----------|-------|
+| Using Sandchest sandboxes for code execution in this repo | `sandchest` |
 | Writing/reviewing React or Next.js code | `vercel-react-best-practices` |
 | Designing reusable component APIs | `vercel-composition-patterns` |
 | React Native / Expo (if mobile surfaces added) | `vercel-react-native-skills` |
