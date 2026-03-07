@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import { Effect } from 'effect'
-import { createServer, createChannel, type Server } from 'nice-grpc'
-import { nodeRpc } from '@sandchest/contract'
-import { bytesToHex, createLiveNodeClient } from './node-client.live.js'
 import type { NodeClientApi } from './node-client.js'
+import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
+import type { Server } from 'nice-grpc'
+import { bytesToHex } from './node-client.shared.js'
 
 describe('bytesToHex', () => {
   test('converts 16-byte array to 32-char hex string', () => {
@@ -22,15 +22,24 @@ describe('bytesToHex', () => {
   })
 })
 
-describe('createLiveNodeClient (integration)', () => {
-  let server: Server
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('createLiveNodeClient (integration)', () => {
+  let server: Server | undefined
   let nodeClient: NodeClientApi
+  let channel: { close(): void } | undefined
   let receivedSandboxIds: string[] = []
 
   const testSandboxId = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10])
   const expectedHex = '0102030405060708090a0b0c0d0e0f10'
 
   beforeAll(async () => {
+    if (!RUN_API_INTEGRATION_TESTS) {
+      return
+    }
+
+    const { createServer, createChannel } = await import('nice-grpc')
+    const { nodeRpc } = await import('@sandchest/contract')
+    const { createLiveNodeClient } = await import('./node-client.live.js')
+
     receivedSandboxIds = []
 
     server = createServer()
@@ -120,13 +129,18 @@ describe('createLiveNodeClient (integration)', () => {
       destroySandbox: async () => ({}),
     })
 
-    const port = await server.listen('localhost:0')
-    const channel = createChannel(`localhost:${port}`)
+    const port = await server.listen('127.0.0.1:0')
+    channel = createChannel(`127.0.0.1:${port}`)
     nodeClient = createLiveNodeClient(channel)
   })
 
   afterAll(async () => {
-    await server.shutdown()
+    if (!RUN_API_INTEGRATION_TESTS) {
+      return
+    }
+
+    channel?.close()
+    await server?.shutdown()
   })
 
   test('exec collects streaming output into final result', async () => {

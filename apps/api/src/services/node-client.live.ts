@@ -5,14 +5,10 @@ import { readFileSync } from 'node:fs'
 import { nodeRpc } from '@sandchest/contract'
 import type { NodeClientApi, NodeFileEntry, CollectedArtifact } from './node-client.js'
 import { NodeClient } from './node-client.js'
+import { bytesToHex } from './node-client.shared.js'
 
 /** Max chunk size for file streaming (64 KB). */
 const CHUNK_SIZE = 64 * 1024
-
-/** Convert 16-byte UUID to hex string for gRPC wire format. */
-export function bytesToHex(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('hex')
-}
 
 export interface NodeGrpcConfig {
   /** gRPC address, e.g. "node1.sandchest.com:50051". */
