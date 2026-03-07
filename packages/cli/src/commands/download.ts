@@ -4,9 +4,12 @@ import { basename } from 'node:path'
 import { getClient } from '../config.js'
 import { success, printJson, handleError } from '../output.js'
 
-export function downloadCommand(): Command {
-  return new Command('download')
-    .description('Download a file from a sandbox')
+export function createDownloadCommand(
+  name = 'download',
+  description = 'Download a file from a sandbox',
+): Command {
+  return new Command(name)
+    .description(description)
     .argument('<sandbox_id>', 'Sandbox ID')
     .argument('<remote_path>', 'File path in the sandbox')
     .argument('[local_path]', 'Local destination (defaults to filename from remote path)')
@@ -41,4 +44,8 @@ export function downloadCommand(): Command {
         }
       },
     )
+}
+
+export function downloadCommand(): Command {
+  return createDownloadCommand()
 }

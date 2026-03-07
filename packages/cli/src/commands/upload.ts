@@ -3,9 +3,12 @@ import { readFileSync } from 'node:fs'
 import { getClient } from '../config.js'
 import { success, printJson, handleError } from '../output.js'
 
-export function uploadCommand(): Command {
-  return new Command('upload')
-    .description('Upload a local file to a sandbox')
+export function createUploadCommand(
+  name = 'upload',
+  description = 'Upload a local file to a sandbox',
+): Command {
+  return new Command(name)
+    .description(description)
     .argument('<sandbox_id>', 'Sandbox ID')
     .argument('<local_path>', 'Local file path')
     .argument('<remote_path>', 'Destination path in the sandbox')
@@ -39,4 +42,8 @@ export function uploadCommand(): Command {
         }
       },
     )
+}
+
+export function uploadCommand(): Command {
+  return createUploadCommand()
 }
