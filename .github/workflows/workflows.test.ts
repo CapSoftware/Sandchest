@@ -56,8 +56,11 @@ describe("deploy-api workflow", () => {
     const runs = steps
       .filter((s) => s.run)
       .map((s) => s.run as string);
-    expect(runs).toContain("bun run typecheck");
-    expect(runs).toContain("bun test");
+    expect(runs).toContain(
+      "bun run --filter @sandchest/contract build && bun run --filter @sandchest/db build",
+    );
+    expect(runs).toContain("bun run --filter @sandchest/api typecheck");
+    expect(runs).toContain("bun run --filter @sandchest/api test");
   });
 
   test("has migrate job before deploy", () => {
@@ -131,10 +134,10 @@ describe("deploy-node workflow", () => {
     expect(concurrency["cancel-in-progress"]).toBe(false);
   });
 
-  test("has check job that gates build-and-deploy", () => {
+  test("has check job that gates build-and-upload", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
     expect(jobs.check).toBeDefined();
-    expect(jobs["build-and-deploy"].needs).toContain("check");
+    expect(jobs["build-and-upload"].needs).toContain("check");
   });
 
   test("check job runs cargo test and clippy", () => {
@@ -149,7 +152,7 @@ describe("deploy-node workflow", () => {
 
   test("uses Rust toolchain and cache", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
     const rustStep = steps.find((s) =>
@@ -164,7 +167,7 @@ describe("deploy-node workflow", () => {
 
   test("installs protobuf compiler", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
     const protoStep = steps.find((s) =>
@@ -173,14 +176,14 @@ describe("deploy-node workflow", () => {
     expect(protoStep).toBeDefined();
   });
 
-  test("builds sandchest-node in release mode", () => {
+  test("builds sandchest-node as a static musl release binary", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
     const buildStep = steps.find((s) =>
       (s.run as string | undefined)?.includes(
-        "cargo build --release --package sandchest-node",
+        "cargo build --release --package sandchest-node --target x86_64-unknown-linux-musl",
       ),
     );
     expect(buildStep).toBeDefined();
@@ -188,7 +191,7 @@ describe("deploy-node workflow", () => {
 
   test("uploads binary as GitHub artifact", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
     const uploadStep = steps.find((s) =>
@@ -201,7 +204,7 @@ describe("deploy-node workflow", () => {
 
   test("uploads binary to R2", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
     const r2Step = steps.find((s) =>
@@ -212,39 +215,25 @@ describe("deploy-node workflow", () => {
     expect(r2Step!.run as string).toContain("R2_ENDPOINT");
   });
 
-  test("deploys to Hetzner via SSH", () => {
+  test("no longer deploys to Hetzner directly from CI", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
     const deployStep = steps.find((s) => s.name === "Deploy to Hetzner");
-    expect(deployStep).toBeDefined();
-    const run = deployStep!.run as string;
-    expect(run).toContain("scp");
-    expect(run).toContain("HETZNER_SSH_KEY");
-    expect(run).toContain("HETZNER_HOST");
-    expect(run).toContain("systemctl restart sandchest-node");
+    expect(deployStep).toBeUndefined();
   });
 
-  test("Hetzner deploy uses atomic binary replacement", () => {
+  test("documents that deployment is handled by the admin app after upload", () => {
     const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
+    const steps = jobs["build-and-upload"].steps as Array<
       Record<string, unknown>
     >;
-    const deployStep = steps.find((s) => s.name === "Deploy to Hetzner");
-    const run = deployStep!.run as string;
-    expect(run).toContain("sandchest-node.new");
-    expect(run).toContain("mv ");
-  });
-
-  test("Hetzner deploy verifies service is active after restart", () => {
-    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
-    const steps = jobs["build-and-deploy"].steps as Array<
-      Record<string, unknown>
-    >;
-    const deployStep = steps.find((s) => s.name === "Deploy to Hetzner");
-    const run = deployStep!.run as string;
-    expect(run).toContain("systemctl is-active sandchest-node");
+    const lastStep = steps[steps.length - 1];
+    expect(lastStep.name).toBe("Upload binary to R2");
+    expect(readFileSync(resolve(__dirname, "deploy-node.yml"), "utf-8")).toContain(
+      "Deployment to individual nodes is handled via the admin app's",
+    );
   });
 });
 
@@ -298,5 +287,51 @@ describe("migrate workflow", () => {
     );
     expect(bunStep).toBeDefined();
     expect(installStep).toBeDefined();
+  });
+});
+
+describe("export-skill workflow", () => {
+  const wf = loadWorkflow("export-skill.yml");
+
+  test("triggers on workflow_dispatch and skill path changes on main", () => {
+    const on = wf.on as Record<string, Record<string, unknown>>;
+    expect(on.workflow_dispatch).toBeDefined();
+    const push = on.push as Record<string, unknown>;
+    expect(push.branches).toEqual(["main"]);
+    const paths = push.paths as string[];
+    expect(paths).toContain("skills/sandchest/**");
+    expect(paths).toContain(".github/workflows/export-skill.yml");
+  });
+
+  test("lets operators choose the target export repository", () => {
+    const on = wf.on as Record<string, Record<string, unknown>>;
+    const inputs = on.workflow_dispatch.inputs as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(inputs.target_repo).toBeDefined();
+    expect(inputs.target_repo.default).toBe("sandchest/agent-skills");
+  });
+
+  test("copies the tracked skill bundle into a publishable sandchest directory", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs.export.steps as Array<Record<string, unknown>>;
+    const prepareStep = steps.find((step) => step.name === "Prepare exported skill bundle");
+    const syncStep = steps.find((step) => step.name === "Sync exported skill");
+    expect(prepareStep).toBeDefined();
+    expect(syncStep).toBeDefined();
+    expect(prepareStep!.run as string).toContain("cp -R skills/sandchest/. export/sandchest/");
+    expect(syncStep!.run as string).toContain("cp -R export/sandchest/. target-repo/sandchest/");
+  });
+
+  test("publishes changes with a dedicated export commit", () => {
+    const jobs = wf.jobs as Record<string, Record<string, unknown>>;
+    const steps = jobs.export.steps as Array<Record<string, unknown>>;
+    const publishStep = steps.find((step) => step.name === "Commit and push export");
+    expect(publishStep).toBeDefined();
+    const run = publishStep!.run as string;
+    expect(run).toContain('git add sandchest');
+    expect(run).toContain('git commit -m "chore: export sandchest skill"');
+    expect(run).toContain("git push");
   });
 });
