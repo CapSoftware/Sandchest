@@ -57,5 +57,13 @@ next-env.d.ts
 DEPLOYMENT.md
 .source/
 
-skills
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/sandchest
+/skills/*
+!/skills/sandchest/
+!/skills/sandchest/**
+.claude/skills/*
+!.claude/skills/sandchest
 .ralphy
