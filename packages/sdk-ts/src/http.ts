@@ -109,51 +109,53 @@ export class HttpClient {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-        const fetchInit: RequestInit = {
-          method: options.method,
-          headers,
-          signal: controller.signal,
-        }
-
-        if (options.body !== undefined) {
-          fetchInit.body = JSON.stringify(options.body)
-        }
-
-        const response = await fetch(url, fetchInit)
-
-        clearTimeout(timer)
-
-        if (response.ok) {
-          if (response.status === 204) {
-            return undefined as T
+        try {
+          const fetchInit: RequestInit = {
+            method: options.method,
+            headers,
+            signal: controller.signal,
           }
-          return (await response.json()) as T
+
+          if (options.body !== undefined) {
+            fetchInit.body = JSON.stringify(options.body)
+          }
+
+          const response = await fetch(url, fetchInit)
+
+          if (response.ok) {
+            if (response.status === 204) {
+              return undefined as T
+            }
+            return (await response.json()) as T
+          }
+
+          const errorBody = (await response.json().catch(() => null)) as ApiErrorBody | null
+          const requestId = errorBody?.request_id ?? response.headers.get('x-request-id') ?? ''
+          const message = errorBody?.message ?? `HTTP ${response.status}`
+
+          if (response.status === 429 && attempt < this.retries) {
+            lastError = new RateLimitError({
+              message,
+              requestId,
+              retryAfter: errorBody?.retry_after ?? 1,
+            })
+            continue
+          }
+
+          if (response.status >= 500 && attempt < this.retries) {
+            lastError = new SandchestError({
+              code: 'internal_error',
+              message,
+              status: response.status,
+              requestId,
+            })
+            continue
+          }
+
+          throw this.parseErrorResponse(response.status, message, requestId, errorBody)
+        } finally {
+          clearTimeout(timer)
         }
-
-        const errorBody = (await response.json().catch(() => null)) as ApiErrorBody | null
-        const requestId = errorBody?.request_id ?? response.headers.get('x-request-id') ?? ''
-        const message = errorBody?.message ?? `HTTP ${response.status}`
-
-        if (response.status === 429 && attempt < this.retries) {
-          lastError = new RateLimitError({
-            message,
-            requestId,
-            retryAfter: errorBody?.retry_after ?? 1,
-          })
-          continue
-        }
-
-        if (response.status >= 500 && attempt < this.retries) {
-          lastError = new SandchestError({
-            code: 'internal_error',
-            message,
-            status: response.status,
-            requestId,
-          })
-          continue
-        }
-
-        throw this.parseErrorResponse(response.status, message, requestId, errorBody)
       } catch (error) {
         if (error instanceof SandchestError) {
           if (error instanceof RateLimitError && attempt < this.retries) {
