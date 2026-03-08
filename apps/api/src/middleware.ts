@@ -17,8 +17,36 @@ type BetterAuthErrorShape = {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function collectErrorCandidates(error: unknown): BetterAuthErrorShape[] {
+  const queue: unknown[] = [error]
+  const seen = new Set<unknown>()
+  const candidates: BetterAuthErrorShape[] = []
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!isRecord(current) || seen.has(current)) {
+      continue
+    }
+    seen.add(current)
+    candidates.push(current as BetterAuthErrorShape)
+
+    for (const key of ['cause', 'body', 'response', 'error']) {
+      const next = current[key]
+      if (next !== undefined) {
+        queue.push(next)
+      }
+    }
+  }
+
+  return candidates
+}
+
 function extractRetryAfterSeconds(error: BetterAuthErrorShape): number {
-  const headerValue = error.headers?.['retry-after']
+  const headerValue = error.headers?.['retry-after'] ?? error.headers?.['Retry-After']
   const headerSeconds = headerValue ? Number(headerValue) : NaN
   if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
     return headerSeconds
@@ -41,14 +69,30 @@ function extractRetryAfterSeconds(error: BetterAuthErrorShape): number {
 }
 
 export function normalizeApiKeyVerificationError(error: unknown) {
-  const candidate = error as BetterAuthErrorShape | undefined
-  const code = candidate?.body?.code
-  const message = candidate?.body?.message
+  const messageText = error instanceof Error ? error.message : String(error ?? '')
+  const candidates = collectErrorCandidates(error)
 
-  if (code === 'RATE_LIMITED') {
+  for (const candidate of candidates) {
+    const code = candidate.body?.code
+    const message = candidate.body?.message
+    const status = candidate.statusCode
+
+    if (
+      code === 'RATE_LIMITED' ||
+      (typeof message === 'string' && /rate limit exceeded/i.test(message)) ||
+      (status === 429 && typeof message === 'string')
+    ) {
+      return new RateLimitedError({
+        message: message ?? 'Rate limit exceeded.',
+        retryAfter: extractRetryAfterSeconds(candidate),
+      })
+    }
+  }
+
+  if (/rate limit exceeded/i.test(messageText)) {
     return new RateLimitedError({
-      message: message ?? 'Rate limit exceeded.',
-      retryAfter: extractRetryAfterSeconds(candidate ?? {}),
+      message: 'Rate limit exceeded.',
+      retryAfter: 60,
     })
   }
 
