@@ -26,10 +26,7 @@ function getSmokeConfig() {
 
   return {
     apiKey,
-    baseUrl:
-      process.env['SANDCHEST_SMOKE_BASE_URL']?.trim() ||
-      process.env['SANDCHEST_BASE_URL']?.trim() ||
-      DEFAULT_BASE_URL,
+    baseUrl: DEFAULT_BASE_URL,
     image: process.env['SANDCHEST_SMOKE_IMAGE']?.trim() || undefined,
     profile: (process.env['SANDCHEST_SMOKE_PROFILE']?.trim() || undefined) as
       | SmokeProfile
@@ -38,12 +35,33 @@ function getSmokeConfig() {
   }
 }
 
+function errorMessages(error: unknown): string[] {
+  if (error instanceof AggregateError) {
+    return error.errors.flatMap((entry) => errorMessages(entry))
+  }
+  if (error instanceof Error) {
+    const messages = [error.message]
+    if (error.cause instanceof Error && error.cause.message !== error.message) {
+      messages.push(error.cause.message)
+    }
+    return messages
+  }
+  return [String(error)]
+}
+
 export async function POST() {
   try {
     const result = await runSandboxSmokeTest(getSmokeConfig())
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('Admin smoke failed', error)
+    const details = errorMessages(error)
+    return NextResponse.json(
+      {
+        error: details[0] ?? 'Unknown error',
+        details: details.length > 1 ? details.slice(1) : [],
+      },
+      { status: 500 },
+    )
   }
 }

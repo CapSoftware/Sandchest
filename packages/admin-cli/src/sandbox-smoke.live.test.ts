@@ -13,7 +13,7 @@ describe.skipIf(!RUN_ADMIN_SANDBOX_SMOKE_TESTS)('sandbox smoke (live)', () => {
       baseUrl: process.env['SANDCHEST_BASE_URL'] ?? config.api?.baseUrl,
     })
 
-    expect(result.checks.length).toBeGreaterThanOrEqual(8)
+    expect(result.checks.length).toBeGreaterThanOrEqual(9)
     expect(result.rootSandboxId.startsWith('sb_')).toBe(true)
     expect(result.forkSandboxId.startsWith('sb_')).toBe(true)
   })

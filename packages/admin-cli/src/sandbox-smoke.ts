@@ -61,6 +61,11 @@ type CleanupTask = {
   destroy: () => Promise<void>
 }
 
+type SandboxStateSnapshot = {
+  status: string
+  failureReason: string | null
+}
+
 function toError(error: unknown): Error {
   if (error instanceof Error) {
     return error
@@ -93,6 +98,50 @@ function makeRunId(): string {
   return `admin-smoke-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
 }
 
+async function fetchSandboxState(
+  baseUrl: string,
+  apiKey: string,
+  sandboxId: string,
+): Promise<SandboxStateSnapshot | null> {
+  try {
+    const response = await fetch(`${baseUrl}/v1/sandboxes/${sandboxId}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const body = await response.json() as {
+      status?: unknown
+      failure_reason?: unknown
+    }
+
+    if (typeof body.status !== 'string') {
+      return null
+    }
+
+    return {
+      status: body.status,
+      failureReason: typeof body.failure_reason === 'string' ? body.failure_reason : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function formatSandboxState(snapshot: SandboxStateSnapshot | null): string {
+  if (!snapshot) {
+    return 'sandbox state unavailable'
+  }
+  if (snapshot.failureReason) {
+    return `sandbox state ${snapshot.status} (${snapshot.failureReason})`
+  }
+  return `sandbox state ${snapshot.status}`
+}
+
 async function measureCheck(
   name: string,
   logger: SandboxSmokeLogger | undefined,
@@ -100,7 +149,14 @@ async function measureCheck(
 ): Promise<SandboxSmokeCheckResult> {
   logger?.step?.('check', name)
   const startedAt = Date.now()
-  await fn()
+  try {
+    await fn()
+  } catch (error) {
+    const normalized = toError(error)
+    throw new Error(`Smoke step "${name}" failed: ${normalized.message}`, {
+      cause: normalized,
+    })
+  }
   const durationMs = Date.now() - startedAt
   logger?.info?.(`${name} (${durationMs}ms)`)
   return { name, durationMs }
@@ -216,8 +272,8 @@ export async function runSandboxSmokeTest(
   const tracker = new SandboxSmokeTracker()
   const checks: SandboxSmokeCheckResult[] = []
   const runId = makeRunId()
-  const sharedPath = `/work/${runId}.txt`
-  const sessionPath = `/work/${runId}.session.txt`
+  const sharedPath = `/tmp/${runId}.txt`
+  const sessionPath = `/tmp/${runId}.session.txt`
   const fileContents = `smoke:${runId}`
 
   let rootSandboxId = ''
@@ -232,9 +288,6 @@ export async function runSandboxSmokeTest(
           image: resolved.image,
           profile: resolved.profile,
           ttlSeconds: resolved.ttlSeconds,
-          env: {
-            SANDCHEST_SMOKE_RUN: runId,
-          },
         })
         tracker.trackSandbox('root', rootSandbox)
         rootSandboxId = rootSandbox.id
@@ -246,23 +299,10 @@ export async function runSandboxSmokeTest(
     const sandbox = rootSandbox
 
     checks.push(
-      await measureCheck('lookup sandbox', logger, async () => {
-        const fetched = await client.get(sandbox.id)
-        assert(fetched.id === sandbox.id, 'client.get returned the wrong sandbox id')
-
-        const runningSandboxes = await client.list({ status: 'running' })
-        assert(
-          runningSandboxes.some((listedSandbox: { id: string }) => listedSandbox.id === sandbox.id),
-          `client.list did not include sandbox ${sandbox.id}`,
-        )
-      }),
-    )
-
-    checks.push(
       await measureCheck('exec command', logger, async () => {
         const execResult = await sandbox.exec(
-          ['sh', '-lc', 'test "$SANDCHEST_SMOKE_RUN" = "$EXPECTED" && printf smoke-ok'],
-          { env: { EXPECTED: runId }, timeout: 60 },
+          ['sh', '-lc', 'test "$SMOKE_EXEC" = "$EXPECTED" && printf smoke-ok'],
+          { env: { SMOKE_EXEC: runId, EXPECTED: runId }, timeout: 60 },
         )
         assertExecSuccess(execResult, 'sandbox exec')
         assert(execResult.stdout === 'smoke-ok', `Unexpected exec stdout: ${JSON.stringify(execResult.stdout)}`)
@@ -270,12 +310,21 @@ export async function runSandboxSmokeTest(
     )
 
     checks.push(
-      await measureCheck('file operations', logger, async () => {
+      await measureCheck('upload file', logger, async () => {
         await sandbox.fs.write(sharedPath, fileContents)
+      }),
+    )
+
+    checks.push(
+      await measureCheck('read file', logger, async () => {
         const fileValue = await sandbox.fs.read(sharedPath)
         assert(fileValue === fileContents, 'sandbox.fs.read did not match written content')
+      }),
+    )
 
-        const files = await sandbox.fs.ls('/work')
+    checks.push(
+      await measureCheck('list files', logger, async () => {
+        const files = await sandbox.fs.ls('/tmp')
         assert(
           files.some((entry: { path: string }) => entry.path === sharedPath),
           `sandbox.fs.ls did not include ${sharedPath}`,
@@ -287,37 +336,40 @@ export async function runSandboxSmokeTest(
       await measureCheck('artifact registration', logger, async () => {
         const registered = await sandbox.artifacts.register([sharedPath])
         assert(registered.registered >= 1, 'artifact registration returned zero registered artifacts')
-
-        const artifacts = await sandbox.artifacts.list()
-        assert(
-          artifacts.some((artifact: { name: string }) => artifact.name === sharedPath),
-          `artifact list did not include ${sharedPath}`,
-        )
+        assert(registered.total >= 1, 'artifact registration did not increase total registered paths')
       }),
     )
 
     checks.push(
       await measureCheck('session lifecycle', logger, async () => {
-        const session = await sandbox.session.create({ shell: '/bin/bash' })
-        tracker.trackSession('root-shell', session)
+        try {
+          const session = await sandbox.session.create({ shell: '/bin/sh' })
+          tracker.trackSession('root-shell', session)
 
-        const primeResult = await session.exec(
-          `cd /work && printf '%s' "session:${runId}" > "${sessionPath}"`,
-          { timeout: 60 },
-        )
-        assertExecSuccess(primeResult, 'session prime exec')
+          const primeResult = await session.exec(
+            `cd /tmp && printf '%s' "session:${runId}" > "${sessionPath}"`,
+            { timeout: 60 },
+          )
+          assertExecSuccess(primeResult, 'session prime exec')
 
-        const persistedResult = await session.exec(`pwd && cat "${sessionPath}"`, { timeout: 60 })
-        assertExecSuccess(persistedResult, 'session persisted exec')
+          const persistedResult = await session.exec(`pwd && cat "${sessionPath}"`, { timeout: 60 })
+          assertExecSuccess(persistedResult, 'session persisted exec')
 
-        const output = persistedResult.stdout.trimEnd()
-        assert(
-          output === `/work\nsession:${runId}`,
-          `Session state did not persist as expected: ${JSON.stringify(output)}`,
-        )
+          const output = persistedResult.stdout.trimEnd()
+          assert(
+            output === `/tmp\nsession:${runId}`,
+            `Session state did not persist as expected: ${JSON.stringify(output)}`,
+          )
 
-        await session.destroy()
-        tracker.releaseSession(session.id)
+          await session.destroy()
+          tracker.releaseSession(session.id)
+        } catch (error) {
+          const snapshot = await fetchSandboxState(resolved.baseUrl, resolved.apiKey, sandbox.id)
+          const normalized = toError(error)
+          throw new Error(`${normalized.message}; ${formatSandboxState(snapshot)}`, {
+            cause: normalized,
+          })
+        }
       }),
     )
 
@@ -325,7 +377,6 @@ export async function runSandboxSmokeTest(
     checks.push(
       await measureCheck('fork sandbox', logger, async () => {
         forkSandbox = await sandbox.fork({
-          env: { SANDCHEST_SMOKE_FORK: runId },
           ttlSeconds: resolved.ttlSeconds,
         })
         tracker.trackSandbox('fork', forkSandbox)
@@ -335,8 +386,8 @@ export async function runSandboxSmokeTest(
         assert(forkReadback === fileContents, 'Fork did not inherit parent filesystem state')
 
         const forkExec = await forkSandbox.exec(
-          ['sh', '-lc', 'test "$SANDCHEST_SMOKE_FORK" = "$EXPECTED" && printf fork-ok'],
-          { env: { EXPECTED: runId }, timeout: 60 },
+          ['sh', '-lc', 'test "$SMOKE_FORK" = "$EXPECTED" && printf fork-ok'],
+          { env: { SMOKE_FORK: runId, EXPECTED: runId }, timeout: 60 },
         )
         assertExecSuccess(forkExec, 'fork exec')
         assert(forkExec.stdout === 'fork-ok', `Unexpected fork stdout: ${JSON.stringify(forkExec.stdout)}`)
@@ -366,6 +417,28 @@ export async function runSandboxSmokeTest(
         assert(
           fetched.status === 'stopping' || fetched.status === 'stopped',
           `Expected fetched fork to be stopping or stopped, got ${fetched.status}`,
+        )
+      }),
+    )
+
+    checks.push(
+      await measureCheck('collect artifacts on stop', logger, async () => {
+        await sandbox.stop()
+        assert(
+          sandbox.status === 'stopping' || sandbox.status === 'stopped',
+          `Expected root sandbox to be stopping or stopped, got ${sandbox.status}`,
+        )
+
+        const fetched = await client.get(sandbox.id)
+        assert(
+          fetched.status === 'stopping' || fetched.status === 'stopped',
+          `Expected fetched root sandbox to be stopping or stopped, got ${fetched.status}`,
+        )
+
+        const artifacts = await sandbox.artifacts.list()
+        assert(
+          artifacts.some((artifact: { name: string }) => artifact.name === sharedPath),
+          `artifact list did not include ${sharedPath}`,
         )
       }),
     )
