@@ -118,10 +118,11 @@ impl SessionManager {
             let result = file.write_all(&data);
             // Prevent File from closing the fd on drop — we don't own it here.
             std::mem::forget(file);
-            result.map_err(|e| Status::internal(format!("failed to write to session: {e}")))
+            result
         })
         .await
         .map_err(|e| Status::internal(format!("spawn_blocking failed: {e}")))?
+        .map_err(|e| Status::internal(format!("failed to write to session: {e}")))
     }
 
     pub async fn destroy_session(&self, session_id: &str) -> Result<(), Status> {
