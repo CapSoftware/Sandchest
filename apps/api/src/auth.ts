@@ -46,6 +46,9 @@ function createAuth() {
       organization(),
       apiKey({
         enableMetadata: true,
+        rateLimit: {
+          enabled: false,
+        },
       }),
       emailOTP({
         otpLength: 6,

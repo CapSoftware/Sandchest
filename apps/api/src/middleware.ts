@@ -99,6 +99,28 @@ export function normalizeApiKeyVerificationError(error: unknown) {
   return new UnauthorizedError({ message: 'Invalid API key' })
 }
 
+type ApiKeyVerificationResult = {
+  valid?: boolean
+  error?: {
+    code?: string
+    message?: string
+  } | null
+}
+
+export function normalizeApiKeyVerificationResult(result: ApiKeyVerificationResult) {
+  const code = result.error?.code
+  const message = result.error?.message
+
+  if (code === 'RATE_LIMITED' || code === 'USAGE_EXCEEDED') {
+    return new RateLimitedError({
+      message: message ?? 'Rate limit exceeded.',
+      retryAfter: 60,
+    })
+  }
+
+  return new UnauthorizedError({ message: 'Invalid API key' })
+}
+
 /**
  * Generates a request ID (or propagates from X-Request-Id header)
  * and attaches it to the response.
@@ -163,7 +185,9 @@ export const withAuth = HttpMiddleware.make((app) =>
       const result = verification.right
 
       if (!result?.valid) {
-        return formatApiError(new UnauthorizedError({ message: 'Invalid API key' }))
+        return formatApiError(
+          normalizeApiKeyVerificationResult(result as ApiKeyVerificationResult),
+        )
       }
 
       const metadata = (result as { metadata?: { orgId?: string; scopes?: string[] } }).metadata

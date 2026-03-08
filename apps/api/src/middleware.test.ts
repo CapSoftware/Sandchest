@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { normalizeApiKeyVerificationError } from './middleware.js'
+import {
+  normalizeApiKeyVerificationError,
+  normalizeApiKeyVerificationResult,
+} from './middleware.js'
 
 describe('normalizeApiKeyVerificationError', () => {
   test('maps Better Auth rate limit errors to RateLimitedError', () => {
@@ -64,5 +67,47 @@ describe('normalizeApiKeyVerificationError', () => {
     expect(error._tag).toBe('RateLimitedError')
     expect(error.message).toBe('Rate limit exceeded.')
     expect('retryAfter' in error ? error.retryAfter : null).toBe(60)
+  })
+})
+
+describe('normalizeApiKeyVerificationResult', () => {
+  test('maps returned Better Auth rate limit results to RateLimitedError', () => {
+    const error = normalizeApiKeyVerificationResult({
+      valid: false,
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded.',
+      },
+    })
+
+    expect(error._tag).toBe('RateLimitedError')
+    expect(error.message).toBe('Rate limit exceeded.')
+    expect('retryAfter' in error ? error.retryAfter : null).toBe(60)
+  })
+
+  test('maps usage exhausted results to RateLimitedError', () => {
+    const error = normalizeApiKeyVerificationResult({
+      valid: false,
+      error: {
+        code: 'USAGE_EXCEEDED',
+        message: 'Usage limit exceeded.',
+      },
+    })
+
+    expect(error._tag).toBe('RateLimitedError')
+    expect(error.message).toBe('Usage limit exceeded.')
+  })
+
+  test('falls back to UnauthorizedError for invalid-key results', () => {
+    const error = normalizeApiKeyVerificationResult({
+      valid: false,
+      error: {
+        code: 'KEY_NOT_FOUND',
+        message: 'Invalid API key',
+      },
+    })
+
+    expect(error._tag).toBe('UnauthorizedError')
+    expect(error.message).toBe('Invalid API key')
   })
 })
