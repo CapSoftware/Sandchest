@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::{info, warn};
@@ -11,34 +12,56 @@ const HEARTBEAT_INTERVAL_SECS: u64 = 1;
 const STALE_THRESHOLD_SECS: u64 = 5;
 #[cfg(target_os = "linux")]
 const URANDOM_SEED_BYTES: usize = 256;
+static LAST_USER_ACTIVITY_SECS: AtomicU64 = AtomicU64::new(0);
+
+fn current_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+pub fn init_activity_clock() {
+    note_user_activity();
+}
+
+pub fn note_user_activity() {
+    LAST_USER_ACTIVITY_SECS.store(current_unix_secs(), Ordering::Relaxed);
+}
+
+fn last_user_activity_secs() -> u64 {
+    LAST_USER_ACTIVITY_SECS.load(Ordering::Relaxed)
+}
+
+fn read_heartbeat_timestamp(path: &Path) -> Option<u64> {
+    if !path.exists() {
+        return None;
+    }
+
+    let contents = std::fs::read_to_string(path).ok()?;
+    contents.trim().parse().ok()
+}
+
+fn heartbeat_is_stale(file_ts: u64, now: u64) -> bool {
+    now > file_ts && (now - file_ts) > STALE_THRESHOLD_SECS
+}
+
+fn should_perform_fork_recovery(file_ts: u64, now: u64, last_activity: u64) -> bool {
+    heartbeat_is_stale(file_ts, now) && last_activity <= file_ts
+}
 
 /// Check if a heartbeat file at the given path is stale (indicating snapshot restore).
 fn is_heartbeat_stale(path: &Path) -> bool {
-    if !path.exists() {
-        return false;
-    }
+    if let Some(file_ts) = read_heartbeat_timestamp(path) {
+        let now = current_unix_secs();
 
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    let file_ts: u64 = match contents.trim().parse() {
-        Ok(ts) => ts,
-        Err(_) => return false,
-    };
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    if now > file_ts && (now - file_ts) > STALE_THRESHOLD_SECS {
-        info!(
-            stale_secs = now - file_ts,
-            "Stale heartbeat detected — snapshot restore likely"
-        );
-        return true;
+        if heartbeat_is_stale(file_ts, now) {
+            info!(
+                stale_secs = now - file_ts,
+                "Stale heartbeat detected — snapshot restore likely"
+            );
+            return true;
+        }
     }
 
     false
@@ -230,8 +253,25 @@ pub fn start_snapshot_watcher(session_manager: Arc<SessionManager>) {
     tokio::spawn(async move {
         loop {
             // Check for stale heartbeat BEFORE writing a fresh one
-            if is_heartbeat_stale(Path::new(HEARTBEAT_PATH)) {
-                perform_fork_recovery(&session_manager).await;
+            let heartbeat_path = Path::new(HEARTBEAT_PATH);
+            if let Some(file_ts) = read_heartbeat_timestamp(heartbeat_path) {
+                let now = current_unix_secs();
+                let last_activity = last_user_activity_secs();
+
+                if should_perform_fork_recovery(file_ts, now, last_activity) {
+                    info!(
+                        stale_secs = now - file_ts,
+                        "Stale heartbeat detected — snapshot restore likely"
+                    );
+                    perform_fork_recovery(&session_manager).await;
+                } else if heartbeat_is_stale(file_ts, now) {
+                    warn!(
+                        stale_secs = now - file_ts,
+                        last_activity_secs = last_activity,
+                        heartbeat_secs = file_ts,
+                        "Skipping fork recovery because the agent has already served post-resume traffic"
+                    );
+                }
             }
 
             write_heartbeat().await;
@@ -333,6 +373,15 @@ mod tests {
         // Timestamp in the future should not be stale
         std::fs::write(&path, (now + 100).to_string()).unwrap();
         assert!(!is_heartbeat_stale(&path));
+    }
+
+    #[test]
+    fn fork_recovery_requires_no_post_resume_activity() {
+        assert!(should_perform_fork_recovery(100, 110, 100));
+        assert!(should_perform_fork_recovery(100, 110, 95));
+        assert!(!should_perform_fork_recovery(100, 110, 101));
+        assert!(!should_perform_fork_recovery(100, 110, 120));
+        assert!(!should_perform_fork_recovery(100, 103, 100));
     }
 
     // ---- fork recovery tests ----

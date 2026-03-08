@@ -9,6 +9,7 @@ use crate::proto::{
     GetFileRequest, HealthResponse, ListFilesRequest, ListFilesResponse, PutFileResponse,
     SessionExecRequest, SessionInputRequest, SessionResponse,
 };
+use crate::snapshot;
 use crate::session::SessionManager;
 
 pub struct GuestAgentService {
@@ -46,6 +47,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<ExecRequest>,
     ) -> Result<Response<Self::ExecStream>, Status> {
+        snapshot::note_user_activity();
         let stream = crate::exec::spawn_exec(request.into_inner());
         Ok(Response::new(stream))
     }
@@ -54,6 +56,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<CreateSessionRequest>,
     ) -> Result<Response<SessionResponse>, Status> {
+        snapshot::note_user_activity();
         let req = request.into_inner();
         let session_id = self
             .session_manager
@@ -68,6 +71,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<SessionExecRequest>,
     ) -> Result<Response<Self::SessionExecStream>, Status> {
+        snapshot::note_user_activity();
         let req = request.into_inner();
         let stream = self
             .session_manager
@@ -80,6 +84,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<SessionInputRequest>,
     ) -> Result<Response<()>, Status> {
+        snapshot::note_user_activity();
         let req = request.into_inner();
         self.session_manager
             .session_input(&req.session_id, &req.data)
@@ -91,6 +96,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<DestroySessionRequest>,
     ) -> Result<Response<()>, Status> {
+        snapshot::note_user_activity();
         let req = request.into_inner();
         self.session_manager
             .destroy_session(&req.session_id)
@@ -102,6 +108,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<Streaming<FileChunk>>,
     ) -> Result<Response<PutFileResponse>, Status> {
+        snapshot::note_user_activity();
         let response = crate::files::put_file(request.into_inner()).await?;
         Ok(Response::new(response))
     }
@@ -112,6 +119,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<GetFileRequest>,
     ) -> Result<Response<Self::GetFileStream>, Status> {
+        snapshot::note_user_activity();
         let stream = crate::files::spawn_get_file(request.into_inner());
         Ok(Response::new(stream))
     }
@@ -120,6 +128,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<ListFilesRequest>,
     ) -> Result<Response<ListFilesResponse>, Status> {
+        snapshot::note_user_activity();
         let response = crate::files::list_files(request.into_inner()).await?;
         Ok(Response::new(response))
     }

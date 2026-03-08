@@ -22,6 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
+    snapshot::init_activity_clock();
+
     // Create service first so we have access to the session manager
     let service = service::GuestAgentService::new();
     let session_manager = service.session_manager();

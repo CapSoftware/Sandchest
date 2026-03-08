@@ -343,7 +343,7 @@ export async function runSandboxSmokeTest(
     checks.push(
       await measureCheck('session lifecycle', logger, async () => {
         try {
-          const session = await sandbox.session.create({ shell: '/bin/sh' })
+          const session = await sandbox.session.create()
           tracker.trackSession('root-shell', session)
 
           const primeResult = await session.exec(
