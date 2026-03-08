@@ -1,11 +1,59 @@
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform'
-import { Effect } from 'effect'
+import { Effect, Either } from 'effect'
 import { timingSafeEqual } from 'node:crypto'
 import { parseScopes } from '@sandchest/contract'
-import { UnauthorizedError, formatApiError } from './errors.js'
+import { RateLimitedError, UnauthorizedError, formatApiError } from './errors.js'
 import { AuthContext } from './context.js'
 import { auth } from './auth.js'
 import { loadEnv } from './env.js'
+
+type BetterAuthErrorShape = {
+  statusCode?: number
+  headers?: Record<string, string>
+  body?: {
+    code?: string
+    message?: string
+    details?: Record<string, unknown>
+  }
+}
+
+function extractRetryAfterSeconds(error: BetterAuthErrorShape): number {
+  const headerValue = error.headers?.['retry-after']
+  const headerSeconds = headerValue ? Number(headerValue) : NaN
+  if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
+    return headerSeconds
+  }
+
+  const details = error.body?.details
+  const candidates = [
+    details?.['retryAfter'],
+    details?.['retry_after'],
+  ]
+
+  for (const value of candidates) {
+    const seconds = typeof value === 'number' ? value : Number(value)
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return seconds
+    }
+  }
+
+  return 60
+}
+
+export function normalizeApiKeyVerificationError(error: unknown) {
+  const candidate = error as BetterAuthErrorShape | undefined
+  const code = candidate?.body?.code
+  const message = candidate?.body?.message
+
+  if (code === 'RATE_LIMITED') {
+    return new RateLimitedError({
+      message: message ?? 'Rate limit exceeded.',
+      retryAfter: extractRetryAfterSeconds(candidate ?? {}),
+    })
+  }
+
+  return new UnauthorizedError({ message: 'Invalid API key' })
+}
 
 /**
  * Generates a request ID (or propagates from X-Request-Id header)
@@ -59,12 +107,16 @@ export const withAuth = HttpMiddleware.make((app) =>
     const authHeader = request.headers['authorization']
     if (authHeader?.startsWith('Bearer ')) {
       const key = authHeader.slice(7)
-      const result = yield* Effect.tryPromise({
+      const verification = yield* Effect.either(Effect.tryPromise({
         try: () => auth.api.verifyApiKey({ body: { key } }),
-        catch: () => new UnauthorizedError({ message: 'Invalid API key' }),
-      }).pipe(
-        Effect.catchAll(() => Effect.succeed(null)),
-      )
+        catch: normalizeApiKeyVerificationError,
+      }))
+
+      if (Either.isLeft(verification)) {
+        return formatApiError(verification.left)
+      }
+
+      const result = verification.right
 
       if (!result?.valid) {
         return formatApiError(new UnauthorizedError({ message: 'Invalid API key' }))
