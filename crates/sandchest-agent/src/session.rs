@@ -57,6 +57,7 @@ impl SessionManager {
 
     pub async fn create_session(
         &self,
+        requested_session_id: &str,
         shell: &str,
         env: &HashMap<String, String>,
     ) -> Result<String, Status> {
@@ -71,8 +72,12 @@ impl SessionManager {
         let shell = if shell.is_empty() { "/bin/bash" } else { shell };
         let (master_fd, child_pid) = spawn_shell(shell, env)?;
 
-        let id_num = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let session_id = format!("sess_{id_num:04}");
+        let session_id = if requested_session_id.is_empty() {
+            let id_num = self.next_id.fetch_add(1, Ordering::Relaxed);
+            format!("sess_{id_num:04}")
+        } else {
+            requested_session_id.to_string()
+        };
 
         let session = Arc::new(Session {
             master_fd: RawFdWrapper { fd: master_fd },
@@ -80,10 +85,12 @@ impl SessionManager {
             exec_lock: Mutex::new(()),
         });
 
-        self.sessions
-            .write()
-            .await
-            .insert(session_id.clone(), session);
+        let replaced = self.sessions.write().await.insert(session_id.clone(), session);
+        if replaced.is_some() {
+            return Err(Status::already_exists(format!(
+                "session {session_id} already exists"
+            )));
+        }
 
         debug!(session_id, child_pid, shell, "created session");
         Ok(session_id)
@@ -668,7 +675,10 @@ mod tests {
     async fn session_manager_create_and_destroy() {
         let manager = SessionManager::new();
         let env = HashMap::new();
-        let session_id = manager.create_session("/bin/sh", &env).await.unwrap();
+        let session_id = manager
+            .create_session("sess_test_1", "/bin/sh", &env)
+            .await
+            .unwrap();
         assert!(session_id.starts_with("sess_"));
 
         // Session should be accessible
@@ -686,8 +696,14 @@ mod tests {
         let manager = SessionManager::new();
         let env = HashMap::new();
 
-        let id1 = manager.create_session("/bin/sh", &env).await.unwrap();
-        let id2 = manager.create_session("/bin/sh", &env).await.unwrap();
+        let id1 = manager
+            .create_session("sess_test_1", "/bin/sh", &env)
+            .await
+            .unwrap();
+        let id2 = manager
+            .create_session("sess_test_2", "/bin/sh", &env)
+            .await
+            .unwrap();
         assert_ne!(id1, id2);
 
         manager.destroy_session(&id1).await.unwrap();
@@ -701,12 +717,15 @@ mod tests {
 
         let mut ids = Vec::new();
         for _ in 0..MAX_SESSIONS {
-            let id = manager.create_session("/bin/sh", &env).await.unwrap();
+            let id = manager
+                .create_session("", "/bin/sh", &env)
+                .await
+                .unwrap();
             ids.push(id);
         }
 
         // Next session should fail with resource exhausted
-        let result = manager.create_session("/bin/sh", &env).await;
+        let result = manager.create_session("", "/bin/sh", &env).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::ResourceExhausted);
 
@@ -721,7 +740,7 @@ mod tests {
         let manager = SessionManager::new();
         let env = HashMap::new();
         // Empty shell should default to /bin/bash
-        let id = manager.create_session("", &env).await.unwrap();
+        let id = manager.create_session("", "", &env).await.unwrap();
         assert!(id.starts_with("sess_"));
         manager.destroy_session(&id).await.unwrap();
     }
@@ -731,8 +750,8 @@ mod tests {
         let manager = SessionManager::new();
         let env = HashMap::new();
 
-        manager.create_session("/bin/sh", &env).await.unwrap();
-        manager.create_session("/bin/sh", &env).await.unwrap();
+        manager.create_session("sess_test_1", "/bin/sh", &env).await.unwrap();
+        manager.create_session("sess_test_2", "/bin/sh", &env).await.unwrap();
 
         manager.destroy_all().await;
 
@@ -746,7 +765,7 @@ mod tests {
         let manager = SessionManager::new();
         let env = HashMap::new();
         let result = manager
-            .create_session("/nonexistent/shell", &env)
+            .create_session("", "/nonexistent/shell", &env)
             .await;
         assert!(result.is_err());
     }

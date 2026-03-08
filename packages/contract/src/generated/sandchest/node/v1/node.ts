@@ -255,6 +255,20 @@ export interface Heartbeat {
   slotsTotal: number;
   slotsUsed: number;
   snapshotIds: string[];
+  metrics: NodeMetrics | undefined;
+}
+
+export interface NodeMetrics {
+  cpuPercent: number;
+  memoryUsedBytes: number;
+  memoryTotalBytes: number;
+  diskUsedBytes: number;
+  diskTotalBytes: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  loadAvg1: number;
+  loadAvg5: number;
+  loadAvg15: number;
 }
 
 export interface ExecOutput {
@@ -3368,7 +3382,7 @@ export const ControlToNode: MessageFns<ControlToNode> = {
 };
 
 function createBaseHeartbeat(): Heartbeat {
-  return { nodeId: "", activeSandboxIds: [], slotsTotal: 0, slotsUsed: 0, snapshotIds: [] };
+  return { nodeId: "", activeSandboxIds: [], slotsTotal: 0, slotsUsed: 0, snapshotIds: [], metrics: undefined };
 }
 
 export const Heartbeat: MessageFns<Heartbeat> = {
@@ -3387,6 +3401,9 @@ export const Heartbeat: MessageFns<Heartbeat> = {
     }
     for (const v of message.snapshotIds) {
       writer.uint32(42).string(v!);
+    }
+    if (message.metrics !== undefined) {
+      NodeMetrics.encode(message.metrics, writer.uint32(50).fork()).join();
     }
     return writer;
   },
@@ -3438,6 +3455,14 @@ export const Heartbeat: MessageFns<Heartbeat> = {
           message.snapshotIds.push(reader.string());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.metrics = NodeMetrics.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3474,6 +3499,7 @@ export const Heartbeat: MessageFns<Heartbeat> = {
         : globalThis.Array.isArray(object?.snapshot_ids)
         ? object.snapshot_ids.map((e: any) => globalThis.String(e))
         : [],
+      metrics: isSet(object.metrics) ? NodeMetrics.fromJSON(object.metrics) : undefined,
     };
   },
 
@@ -3494,6 +3520,9 @@ export const Heartbeat: MessageFns<Heartbeat> = {
     if (message.snapshotIds?.length) {
       obj.snapshotIds = message.snapshotIds;
     }
+    if (message.metrics !== undefined) {
+      obj.metrics = NodeMetrics.toJSON(message.metrics);
+    }
     return obj;
   },
 
@@ -3507,6 +3536,264 @@ export const Heartbeat: MessageFns<Heartbeat> = {
     message.slotsTotal = object.slotsTotal ?? 0;
     message.slotsUsed = object.slotsUsed ?? 0;
     message.snapshotIds = object.snapshotIds?.map((e) => e) || [];
+    message.metrics = (object.metrics !== undefined && object.metrics !== null)
+      ? NodeMetrics.fromPartial(object.metrics)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseNodeMetrics(): NodeMetrics {
+  return {
+    cpuPercent: 0,
+    memoryUsedBytes: 0,
+    memoryTotalBytes: 0,
+    diskUsedBytes: 0,
+    diskTotalBytes: 0,
+    networkRxBytes: 0,
+    networkTxBytes: 0,
+    loadAvg1: 0,
+    loadAvg5: 0,
+    loadAvg15: 0,
+  };
+}
+
+export const NodeMetrics: MessageFns<NodeMetrics> = {
+  encode(message: NodeMetrics, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.cpuPercent !== 0) {
+      writer.uint32(13).float(message.cpuPercent);
+    }
+    if (message.memoryUsedBytes !== 0) {
+      writer.uint32(16).uint64(message.memoryUsedBytes);
+    }
+    if (message.memoryTotalBytes !== 0) {
+      writer.uint32(24).uint64(message.memoryTotalBytes);
+    }
+    if (message.diskUsedBytes !== 0) {
+      writer.uint32(32).uint64(message.diskUsedBytes);
+    }
+    if (message.diskTotalBytes !== 0) {
+      writer.uint32(40).uint64(message.diskTotalBytes);
+    }
+    if (message.networkRxBytes !== 0) {
+      writer.uint32(48).uint64(message.networkRxBytes);
+    }
+    if (message.networkTxBytes !== 0) {
+      writer.uint32(56).uint64(message.networkTxBytes);
+    }
+    if (message.loadAvg1 !== 0) {
+      writer.uint32(69).float(message.loadAvg1);
+    }
+    if (message.loadAvg5 !== 0) {
+      writer.uint32(77).float(message.loadAvg5);
+    }
+    if (message.loadAvg15 !== 0) {
+      writer.uint32(85).float(message.loadAvg15);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): NodeMetrics {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNodeMetrics();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 13) {
+            break;
+          }
+
+          message.cpuPercent = reader.float();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.memoryUsedBytes = longToNumber(reader.uint64());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.memoryTotalBytes = longToNumber(reader.uint64());
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.diskUsedBytes = longToNumber(reader.uint64());
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.diskTotalBytes = longToNumber(reader.uint64());
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.networkRxBytes = longToNumber(reader.uint64());
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.networkTxBytes = longToNumber(reader.uint64());
+          continue;
+        }
+        case 8: {
+          if (tag !== 69) {
+            break;
+          }
+
+          message.loadAvg1 = reader.float();
+          continue;
+        }
+        case 9: {
+          if (tag !== 77) {
+            break;
+          }
+
+          message.loadAvg5 = reader.float();
+          continue;
+        }
+        case 10: {
+          if (tag !== 85) {
+            break;
+          }
+
+          message.loadAvg15 = reader.float();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NodeMetrics {
+    return {
+      cpuPercent: isSet(object.cpuPercent)
+        ? globalThis.Number(object.cpuPercent)
+        : isSet(object.cpu_percent)
+        ? globalThis.Number(object.cpu_percent)
+        : 0,
+      memoryUsedBytes: isSet(object.memoryUsedBytes)
+        ? globalThis.Number(object.memoryUsedBytes)
+        : isSet(object.memory_used_bytes)
+        ? globalThis.Number(object.memory_used_bytes)
+        : 0,
+      memoryTotalBytes: isSet(object.memoryTotalBytes)
+        ? globalThis.Number(object.memoryTotalBytes)
+        : isSet(object.memory_total_bytes)
+        ? globalThis.Number(object.memory_total_bytes)
+        : 0,
+      diskUsedBytes: isSet(object.diskUsedBytes)
+        ? globalThis.Number(object.diskUsedBytes)
+        : isSet(object.disk_used_bytes)
+        ? globalThis.Number(object.disk_used_bytes)
+        : 0,
+      diskTotalBytes: isSet(object.diskTotalBytes)
+        ? globalThis.Number(object.diskTotalBytes)
+        : isSet(object.disk_total_bytes)
+        ? globalThis.Number(object.disk_total_bytes)
+        : 0,
+      networkRxBytes: isSet(object.networkRxBytes)
+        ? globalThis.Number(object.networkRxBytes)
+        : isSet(object.network_rx_bytes)
+        ? globalThis.Number(object.network_rx_bytes)
+        : 0,
+      networkTxBytes: isSet(object.networkTxBytes)
+        ? globalThis.Number(object.networkTxBytes)
+        : isSet(object.network_tx_bytes)
+        ? globalThis.Number(object.network_tx_bytes)
+        : 0,
+      loadAvg1: isSet(object.loadAvg1)
+        ? globalThis.Number(object.loadAvg1)
+        : isSet(object.load_avg_1)
+        ? globalThis.Number(object.load_avg_1)
+        : 0,
+      loadAvg5: isSet(object.loadAvg5)
+        ? globalThis.Number(object.loadAvg5)
+        : isSet(object.load_avg_5)
+        ? globalThis.Number(object.load_avg_5)
+        : 0,
+      loadAvg15: isSet(object.loadAvg15)
+        ? globalThis.Number(object.loadAvg15)
+        : isSet(object.load_avg_15)
+        ? globalThis.Number(object.load_avg_15)
+        : 0,
+    };
+  },
+
+  toJSON(message: NodeMetrics): unknown {
+    const obj: any = {};
+    if (message.cpuPercent !== 0) {
+      obj.cpuPercent = message.cpuPercent;
+    }
+    if (message.memoryUsedBytes !== 0) {
+      obj.memoryUsedBytes = Math.round(message.memoryUsedBytes);
+    }
+    if (message.memoryTotalBytes !== 0) {
+      obj.memoryTotalBytes = Math.round(message.memoryTotalBytes);
+    }
+    if (message.diskUsedBytes !== 0) {
+      obj.diskUsedBytes = Math.round(message.diskUsedBytes);
+    }
+    if (message.diskTotalBytes !== 0) {
+      obj.diskTotalBytes = Math.round(message.diskTotalBytes);
+    }
+    if (message.networkRxBytes !== 0) {
+      obj.networkRxBytes = Math.round(message.networkRxBytes);
+    }
+    if (message.networkTxBytes !== 0) {
+      obj.networkTxBytes = Math.round(message.networkTxBytes);
+    }
+    if (message.loadAvg1 !== 0) {
+      obj.loadAvg1 = message.loadAvg1;
+    }
+    if (message.loadAvg5 !== 0) {
+      obj.loadAvg5 = message.loadAvg5;
+    }
+    if (message.loadAvg15 !== 0) {
+      obj.loadAvg15 = message.loadAvg15;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<NodeMetrics>): NodeMetrics {
+    return NodeMetrics.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<NodeMetrics>): NodeMetrics {
+    const message = createBaseNodeMetrics();
+    message.cpuPercent = object.cpuPercent ?? 0;
+    message.memoryUsedBytes = object.memoryUsedBytes ?? 0;
+    message.memoryTotalBytes = object.memoryTotalBytes ?? 0;
+    message.diskUsedBytes = object.diskUsedBytes ?? 0;
+    message.diskTotalBytes = object.diskTotalBytes ?? 0;
+    message.networkRxBytes = object.networkRxBytes ?? 0;
+    message.networkTxBytes = object.networkTxBytes ?? 0;
+    message.loadAvg1 = object.loadAvg1 ?? 0;
+    message.loadAvg5 = object.loadAvg5 ?? 0;
+    message.loadAvg15 = object.loadAvg15 ?? 0;
     return message;
   },
 };

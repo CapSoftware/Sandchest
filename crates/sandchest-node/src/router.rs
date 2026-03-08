@@ -94,6 +94,7 @@ pub fn to_agent_exec_request(req: proto::NodeExecRequest) -> agent_proto::ExecRe
 
 pub fn to_agent_create_session(req: proto::NodeCreateSessionRequest) -> agent_proto::CreateSessionRequest {
     agent_proto::CreateSessionRequest {
+        session_id: req.session_id,
         shell: req.shell,
         env: req.env,
     }
@@ -280,6 +281,7 @@ mod tests {
         };
 
         let agent_req = to_agent_create_session(node_req);
+        assert_eq!(agent_req.session_id, "sess_abc");
         assert_eq!(agent_req.shell, "/bin/bash");
         assert_eq!(agent_req.env.get("TERM").unwrap(), "xterm");
     }

@@ -343,8 +343,14 @@ mod tests {
         let env = HashMap::new();
 
         // Create some sessions
-        let id1 = manager.create_session("/bin/sh", &env).await.unwrap();
-        let id2 = manager.create_session("/bin/sh", &env).await.unwrap();
+        let id1 = manager
+            .create_session("sess_test_1", "/bin/sh", &env)
+            .await
+            .unwrap();
+        let id2 = manager
+            .create_session("sess_test_2", "/bin/sh", &env)
+            .await
+            .unwrap();
         assert!(manager.session_count().await > 0);
 
         // Run fork recovery

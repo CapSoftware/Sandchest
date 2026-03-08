@@ -43,6 +43,7 @@ export interface ExitEvent {
 }
 
 export interface CreateSessionRequest {
+  sessionId: string;
   shell: string;
   env: { [key: string]: string };
 }
@@ -643,16 +644,19 @@ export const ExitEvent: MessageFns<ExitEvent> = {
 };
 
 function createBaseCreateSessionRequest(): CreateSessionRequest {
-  return { shell: "", env: {} };
+  return { sessionId: "", shell: "", env: {} };
 }
 
 export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   encode(message: CreateSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
     if (message.shell !== "") {
-      writer.uint32(10).string(message.shell);
+      writer.uint32(18).string(message.shell);
     }
     globalThis.Object.entries(message.env).forEach(([key, value]: [string, string]) => {
-      CreateSessionRequest_EnvEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).join();
+      CreateSessionRequest_EnvEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).join();
     });
     return writer;
   },
@@ -669,7 +673,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
             break;
           }
 
-          message.shell = reader.string();
+          message.sessionId = reader.string();
           continue;
         }
         case 2: {
@@ -677,9 +681,17 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
             break;
           }
 
-          const entry2 = CreateSessionRequest_EnvEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.env[entry2.key] = entry2.value;
+          message.shell = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          const entry3 = CreateSessionRequest_EnvEntry.decode(reader, reader.uint32());
+          if (entry3.value !== undefined) {
+            message.env[entry3.key] = entry3.value;
           }
           continue;
         }
@@ -694,6 +706,11 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
 
   fromJSON(object: any): CreateSessionRequest {
     return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
       shell: isSet(object.shell) ? globalThis.String(object.shell) : "",
       env: isObject(object.env)
         ? (globalThis.Object.entries(object.env) as [string, any][]).reduce(
@@ -709,6 +726,9 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
 
   toJSON(message: CreateSessionRequest): unknown {
     const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
     if (message.shell !== "") {
       obj.shell = message.shell;
     }
@@ -729,6 +749,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   },
   fromPartial(object: DeepPartial<CreateSessionRequest>): CreateSessionRequest {
     const message = createBaseCreateSessionRequest();
+    message.sessionId = object.sessionId ?? "";
     message.shell = object.shell ?? "";
     message.env = (globalThis.Object.entries(object.env ?? {}) as [string, string][]).reduce(
       (acc: { [key: string]: string }, [key, value]: [string, string]) => {

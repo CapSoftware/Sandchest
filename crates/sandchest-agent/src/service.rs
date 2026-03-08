@@ -57,7 +57,7 @@ impl GuestAgent for GuestAgentService {
         let req = request.into_inner();
         let session_id = self
             .session_manager
-            .create_session(&req.shell, &req.env)
+            .create_session(&req.session_id, &req.shell, &req.env)
             .await?;
         Ok(Response::new(SessionResponse { session_id }))
     }
