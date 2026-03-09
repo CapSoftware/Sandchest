@@ -4,6 +4,7 @@ import { createSshConnection, execCommand, scpFile, execCommandStreaming, sshCon
 import { presignDaemonBinary } from '../../r2.js'
 import { exec } from '../../shell.js'
 import { success, step, error, info, handleError } from '../../output.js'
+import { firecrackerInstallCommands } from '../../provisioner.js'
 
 export function nodeDeployCommand(): Command {
   return new Command('deploy')
@@ -20,11 +21,11 @@ export function nodeDeployCommand(): Command {
 
         try {
           if (opts.local) {
-            step('[1/3]', `Uploading local binary ${opts.local}...`)
+            step('[1/4]', `Uploading local binary ${opts.local}...`)
             await scpFile(conn, opts.local, '/usr/local/bin/sandchest-node')
           } else {
             if (!opts.skipBuild) {
-              step('[1/3]', 'Building sandchest-node (cargo build --release)...')
+              step('[1/4]', 'Building sandchest-node (cargo build --release)...')
               const buildResult = await exec('cargo', ['build', '--release', '-p', 'sandchest-node'], {
                 cwd: process.cwd(),
               })
@@ -34,10 +35,10 @@ export function nodeDeployCommand(): Command {
               }
               info('Build successful')
             } else {
-              step('[1/3]', 'Skipping build...')
+              step('[1/4]', 'Skipping build...')
             }
 
-            step('[2/3]', `Downloading binary from R2 (${opts.version})...`)
+            step('[2/4]', `Downloading binary from R2 (${opts.version})...`)
             const url = await presignDaemonBinary(config, opts.version)
             const dlResult = await execCommand(conn, `curl -fsSL '${url}' -o /usr/local/bin/sandchest-node && chmod +x /usr/local/bin/sandchest-node`)
             if (dlResult.code !== 0) {
@@ -46,7 +47,14 @@ export function nodeDeployCommand(): Command {
             }
           }
 
-          step('[3/3]', 'Restarting sandchest-node service...')
+          step('[3/4]', 'Upgrading Firecracker runtime if needed...')
+          const runtimeResult = await execCommand(conn, firecrackerInstallCommands().join(' && '))
+          if (runtimeResult.code !== 0) {
+            error(`Failed to upgrade Firecracker runtime: ${runtimeResult.stderr}`)
+            process.exit(1)
+          }
+
+          step('[4/4]', 'Restarting sandchest-node service...')
           const restartCode = await execCommandStreaming(
             conn,
             'systemctl restart sandchest-node && sleep 2 && systemctl status sandchest-node --no-pager',

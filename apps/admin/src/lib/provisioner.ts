@@ -96,6 +96,17 @@ export interface StepResult {
   readonly output?: string | undefined
 }
 
+export const FIRECRACKER_VERSION = '1.12.0'
+
+export function firecrackerInstallCommands(): string[] {
+  return [
+    `FC_VERSION=${FIRECRACKER_VERSION}`,
+    'CURRENT_FC="$(firecracker --version 2>/dev/null | awk \'{print $2}\' || true)"',
+    'CURRENT_JL="$(jailer --version 2>/dev/null | awk \'{print $2}\' || true)"',
+    'if [ "$CURRENT_FC" != "v${FC_VERSION}" ] || [ "$CURRENT_JL" != "v${FC_VERSION}" ]; then curl -fsSL --retry 3 --retry-delay 5 "https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/firecracker-v${FC_VERSION}-x86_64.tgz" -o /tmp/fc.tgz && tar -xzf /tmp/fc.tgz -C /tmp && install -m 0755 "/tmp/release-v${FC_VERSION}-x86_64/firecracker-v${FC_VERSION}-x86_64" /usr/local/bin/firecracker && install -m 0755 "/tmp/release-v${FC_VERSION}-x86_64/jailer-v${FC_VERSION}-x86_64" /usr/local/bin/jailer && rm -rf /tmp/fc.tgz "/tmp/release-v${FC_VERSION}-x86_64"; fi',
+  ]
+}
+
 /** OpenSSL commands to generate a full mTLS PKI (CA + server + client certs). */
 export function mtlsCertCommands(ip: string): string[] {
   const dir = '/etc/sandchest/certs'
@@ -144,13 +155,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     id: 'install-firecracker',
     name: 'Install Firecracker',
     commands: [
-      'FC_VERSION=1.12.0',
-      'curl -sSL https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/firecracker-v${FC_VERSION}-x86_64.tgz -o /tmp/fc.tgz',
-      'tar -xzf /tmp/fc.tgz -C /tmp',
-      'mv /tmp/release-v${FC_VERSION}-x86_64/firecracker-v${FC_VERSION}-x86_64 /usr/local/bin/firecracker',
-      'mv /tmp/release-v${FC_VERSION}-x86_64/jailer-v${FC_VERSION}-x86_64 /usr/local/bin/jailer',
-      'chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer',
-      'rm -rf /tmp/fc.tgz /tmp/release-v${FC_VERSION}-x86_64',
+      ...firecrackerInstallCommands(),
     ],
     validate: 'firecracker --version',
   },
@@ -287,7 +292,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
         `curl -fsSL --retry 3 --retry-delay 5 '${url}' -o /usr/local/bin/sandchest-node`,
         'chmod +x /usr/local/bin/sandchest-node',
         'mkdir -p /etc/sandchest',
-        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\n' > /etc/sandchest/node.env`,
+        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\nSANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
         `(test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true)`,
         `echo '${unitFileB64}' | base64 -d > /etc/systemd/system/sandchest-node.service`,
         'systemctl daemon-reload',

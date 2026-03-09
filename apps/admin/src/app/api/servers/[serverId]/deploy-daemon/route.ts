@@ -5,7 +5,7 @@ import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
 import { presignDaemonBinary, presignKernel, presignRootfs } from '@/lib/r2'
-import { patchRootfsCommands } from '@/lib/provisioner'
+import { firecrackerInstallCommands, patchRootfsCommands } from '@/lib/provisioner'
 import { generateId, idToBytes, bytesToId, NODE_PREFIX } from '@sandchest/contract'
 
 export async function POST(
@@ -86,11 +86,13 @@ export async function POST(
       'chmod 644 /var/sandchest/images/ubuntu-22.04-base/vmlinux /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4',
       // Patch rootfs with overlay-init + guest agent systemd unit
       ...patchRootfsCommands(),
+      // Keep the host Firecracker/Jailer version aligned with the node binary expectations.
+      ...firecrackerInstallCommands(),
       // Download latest daemon binary
       `curl -fsSL --retry 3 --retry-delay 5 '${binaryUrl}' -o /usr/local/bin/sandchest-node`,
       'chmod +x /usr/local/bin/sandchest-node',
       'mkdir -p /etc/sandchest',
-      `printf 'SANDCHEST_NODE_ID=${nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\n' > /etc/sandchest/node.env`,
+      `printf 'SANDCHEST_NODE_ID=${nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\nSANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
       // Append TLS paths if mTLS certs exist on this server
       `test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true`,
       // Ensure the systemd unit references the env file (idempotent — rewrites the unit)

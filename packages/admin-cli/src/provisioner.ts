@@ -14,6 +14,17 @@ export interface StepResult {
   readonly output?: string | undefined
 }
 
+export const FIRECRACKER_VERSION = '1.12.0'
+
+export function firecrackerInstallCommands(): string[] {
+  return [
+    `FC_VERSION=${FIRECRACKER_VERSION}`,
+    'CURRENT_FC="$(firecracker --version 2>/dev/null | awk \'{print $2}\' || true)"',
+    'CURRENT_JL="$(jailer --version 2>/dev/null | awk \'{print $2}\' || true)"',
+    'if [ "$CURRENT_FC" != "v${FC_VERSION}" ] || [ "$CURRENT_JL" != "v${FC_VERSION}" ]; then curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/firecracker-v${FC_VERSION}-x86_64.tgz" -o /tmp/fc.tgz && tar -xzf /tmp/fc.tgz -C /tmp && install -m 0755 "/tmp/release-v${FC_VERSION}-x86_64/firecracker-v${FC_VERSION}-x86_64" /usr/local/bin/firecracker && install -m 0755 "/tmp/release-v${FC_VERSION}-x86_64/jailer-v${FC_VERSION}-x86_64" /usr/local/bin/jailer && rm -rf /tmp/fc.tgz "/tmp/release-v${FC_VERSION}-x86_64"; fi',
+  ]
+}
+
 export async function resolveCommands(step: ProvisionStep, config: AdminConfig): Promise<string[]> {
   if (typeof step.commands === 'function') {
     return step.commands(config)
@@ -36,13 +47,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     id: 'install-firecracker',
     name: 'Install Firecracker',
     commands: [
-      'FC_VERSION=1.12.0',
-      'curl -sSL https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/firecracker-v${FC_VERSION}-x86_64.tgz -o /tmp/fc.tgz',
-      'tar -xzf /tmp/fc.tgz -C /tmp',
-      'mv /tmp/release-v${FC_VERSION}-x86_64/firecracker-v${FC_VERSION}-x86_64 /usr/local/bin/firecracker',
-      'mv /tmp/release-v${FC_VERSION}-x86_64/jailer-v${FC_VERSION}-x86_64 /usr/local/bin/jailer',
-      'chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer',
-      'rm -rf /tmp/fc.tgz /tmp/release-v${FC_VERSION}-x86_64',
+      ...firecrackerInstallCommands(),
     ],
     validate: 'firecracker --version',
   },
@@ -154,6 +159,11 @@ export const PROVISION_STEPS: ProvisionStep[] = [
       return [
         `curl -fsSL '${url}' -o /usr/local/bin/sandchest-node`,
         'chmod +x /usr/local/bin/sandchest-node',
+        `mkdir -p /etc/sandchest`,
+        `test -f /etc/sandchest/node.env || printf 'SANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
+        `grep -q '^SANDCHEST_JAILER_ENABLED=' /etc/sandchest/node.env || printf 'SANDCHEST_JAILER_ENABLED=1\\n' >> /etc/sandchest/node.env`,
+        `grep -q '^SANDCHEST_JAILER_BINARY=' /etc/sandchest/node.env || printf 'SANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\n' >> /etc/sandchest/node.env`,
+        `grep -q '^SANDCHEST_FIRECRACKER_BINARY=' /etc/sandchest/node.env || printf 'SANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' >> /etc/sandchest/node.env`,
         `printf '[Unit]\\nDescription=Sandchest Node Daemon\\nAfter=network.target\\n\\n[Service]\\nType=simple\\nExecStart=/usr/local/bin/sandchest-node\\nRestart=always\\nRestartSec=5\\nEnvironmentFile=-/etc/sandchest/node.env\\nEnvironment=RUST_LOG=info\\nEnvironment=DATA_DIR=/var/sandchest\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/sandchest-node.service`,
         'systemctl daemon-reload',
         'systemctl enable sandchest-node',
