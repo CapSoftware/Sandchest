@@ -7,6 +7,9 @@ import {
 
 const DEFAULT_BASE_URL = 'https://api.sandchest.com'
 const DEFAULT_TTL_SECONDS = 600
+const DEFAULT_TIMEOUT_MS = 120_000
+const DEFAULT_STOP_SETTLE_TIMEOUT_MS = 30_000
+const DEFAULT_ARTIFACT_SETTLE_TIMEOUT_MS = 30_000
 const VALID_PROFILES = ['small', 'medium', 'large'] as const
 
 export type SmokeProfile = (typeof VALID_PROFILES)[number]
@@ -23,6 +26,7 @@ export interface SandboxSmokeOptions {
   image?: string | undefined
   profile?: SmokeProfile | undefined
   ttlSeconds?: number | undefined
+  timeoutMs?: number | undefined
   logger?: SandboxSmokeLogger | undefined
 }
 
@@ -32,6 +36,7 @@ export interface ResolvedSandboxSmokeOptions {
   image?: string | undefined
   profile: SmokeProfile
   ttlSeconds: number
+  timeoutMs: number
 }
 
 export interface SandboxSmokeCheckResult {
@@ -150,18 +155,40 @@ async function waitForArtifact(
   sandbox: Sandbox,
   expectedName: string,
   timeoutMs: number,
-): Promise<boolean> {
+): Promise<{ found: boolean; artifactNames: string[] }> {
   const deadline = Date.now() + timeoutMs
+  let artifactNames: string[] = []
 
   while (Date.now() < deadline) {
     const artifacts = await sandbox.artifacts.list()
-    if (artifacts.some((artifact: { name: string }) => artifact.name === expectedName)) {
-      return true
+    artifactNames = artifacts.map((artifact: { name: string }) => artifact.name)
+    if (artifactNames.includes(expectedName)) {
+      return { found: true, artifactNames }
     }
     await sleep(250)
   }
 
-  return false
+  return { found: false, artifactNames }
+}
+
+async function waitForSandboxStatus(
+  baseUrl: string,
+  apiKey: string,
+  sandboxId: string,
+  expectedStatuses: string[],
+  timeoutMs: number,
+): Promise<SandboxStateSnapshot | null> {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const snapshot = await fetchSandboxState(baseUrl, apiKey, sandboxId)
+    if (snapshot && expectedStatuses.includes(snapshot.status)) {
+      return snapshot
+    }
+    await sleep(500)
+  }
+
+  return fetchSandboxState(baseUrl, apiKey, sandboxId)
 }
 
 async function measureCheck(
@@ -206,6 +233,14 @@ function normalizeTtlSeconds(ttlSeconds: number | undefined): number {
   return value
 }
 
+function normalizeTimeoutMs(timeoutMs: number | undefined): number {
+  const value = timeoutMs ?? DEFAULT_TIMEOUT_MS
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error('timeoutMs must be a positive integer')
+  }
+  return value
+}
+
 export function resolveSandboxSmokeOptions(
   options: Partial<SandboxSmokeOptions>,
   defaults?: { baseUrl?: string | undefined },
@@ -221,6 +256,7 @@ export function resolveSandboxSmokeOptions(
     image: options.image,
     profile: normalizeProfile(options.profile),
     ttlSeconds: normalizeTtlSeconds(options.ttlSeconds),
+    timeoutMs: normalizeTimeoutMs(options.timeoutMs),
   }
 }
 
@@ -288,13 +324,14 @@ export async function runSandboxSmokeTest(
   const client = new Sandchest({
     apiKey: resolved.apiKey,
     baseUrl: resolved.baseUrl,
-    timeout: 60_000,
+    timeout: resolved.timeoutMs,
     retries: 1,
   })
   const tracker = new SandboxSmokeTracker()
   const checks: SandboxSmokeCheckResult[] = []
   const runId = makeRunId()
   const sharedPath = `/tmp/${runId}.txt`
+  const artifactPath = `/tmp/${runId}.artifact.txt`
   const sessionPath = `/tmp/${runId}.session.txt`
   const fileContents = `smoke:${runId}`
 
@@ -452,33 +489,92 @@ export async function runSandboxSmokeTest(
           fetched.status === 'stopping' || fetched.status === 'stopped',
           `Expected fetched fork to be stopping or stopped, got ${fetched.status}`,
         )
+
+        const settled = await waitForSandboxStatus(
+          resolved.baseUrl,
+          resolved.apiKey,
+          fork.id,
+          ['stopped'],
+          DEFAULT_STOP_SETTLE_TIMEOUT_MS,
+        )
+        assert(
+          settled?.status === 'stopped',
+          `Expected fork to reach stopped before continuing, got ${formatSandboxState(settled)}`,
+        )
       }),
     )
 
     checks.push(
-      await measureCheck('collect artifacts on stop', logger, async () => {
-        await sandbox.fs.write(sharedPath, fileContents)
-        const artifactReadback = await sandbox.fs.read(sharedPath)
-        assert(
-          artifactReadback === fileContents,
-          'artifact file could not be refreshed before stop',
-        )
-
+      await measureCheck('stop root', logger, async () => {
         await sandbox.stop()
         assert(
           sandbox.status === 'stopping' || sandbox.status === 'stopped',
           `Expected root sandbox to be stopping or stopped, got ${sandbox.status}`,
         )
 
-        const fetched = await client.get(sandbox.id)
+        const settled = await fetchSandboxState(
+          resolved.baseUrl,
+          resolved.apiKey,
+          sandbox.id,
+        )
         assert(
-          fetched.status === 'stopping' || fetched.status === 'stopped',
-          `Expected fetched root sandbox to be stopping or stopped, got ${fetched.status}`,
+          settled?.status === 'stopping' || settled?.status === 'stopped',
+          `Expected root sandbox to be stopping or stopped, got ${formatSandboxState(settled)}`,
+        )
+      }),
+    )
+
+    checks.push(
+      await measureCheck('collect artifacts on stop', logger, async () => {
+        const artifactSandbox = await client.create({
+          image: resolved.image,
+          profile: resolved.profile,
+          ttlSeconds: resolved.ttlSeconds,
+        })
+        tracker.trackSandbox('artifact-stop', artifactSandbox)
+
+        await artifactSandbox.fs.write(artifactPath, fileContents)
+        const registered = await artifactSandbox.artifacts.register([artifactPath])
+        assert(registered.registered >= 1, 'artifact-stop sandbox registration returned zero artifacts')
+
+        await artifactSandbox.stop()
+        assert(
+          artifactSandbox.status === 'stopping' || artifactSandbox.status === 'stopped',
+          `Expected artifact sandbox to be stopping or stopped, got ${artifactSandbox.status}`,
         )
 
-        const expectedArtifactName = sharedPath.split('/').filter(Boolean).pop() ?? sharedPath
-        const foundArtifact = await waitForArtifact(sandbox, expectedArtifactName, 15_000)
-        assert(foundArtifact, `artifact list did not include ${expectedArtifactName}`)
+        const settled = await waitForSandboxStatus(
+          resolved.baseUrl,
+          resolved.apiKey,
+          artifactSandbox.id,
+          ['stopped'],
+          DEFAULT_STOP_SETTLE_TIMEOUT_MS,
+        )
+        assert(
+          settled?.status === 'stopped',
+          `Expected artifact sandbox to reach stopped, got ${formatSandboxState(settled)}`,
+        )
+
+        const expectedArtifactName = artifactPath.split('/').filter(Boolean).pop() ?? artifactPath
+        const artifactResult = await waitForArtifact(
+          artifactSandbox,
+          expectedArtifactName,
+          DEFAULT_ARTIFACT_SETTLE_TIMEOUT_MS,
+        )
+        if (!artifactResult.found) {
+          const snapshot = await fetchSandboxState(
+            resolved.baseUrl,
+            resolved.apiKey,
+            artifactSandbox.id,
+          )
+          const visibleArtifacts =
+            artifactResult.artifactNames.length > 0
+              ? artifactResult.artifactNames.join(', ')
+              : 'none'
+          throw new Error(
+            `artifact list did not include ${expectedArtifactName}; visible artifacts: ${visibleArtifacts}; ${formatSandboxState(snapshot)}`,
+          )
+        }
       }),
     )
   } catch (error) {

@@ -13,6 +13,7 @@ describe('resolveSandboxSmokeOptions', () => {
       expect(resolved.baseUrl).toBe('https://admin.example.com')
       expect(resolved.profile).toBe('small')
       expect(resolved.ttlSeconds).toBe(600)
+      expect(resolved.timeoutMs).toBe(120_000)
     } finally {
       if (originalApiKey === undefined) {
         delete process.env['SANDCHEST_API_KEY']
@@ -26,6 +27,17 @@ describe('resolveSandboxSmokeOptions', () => {
     expect(() =>
       resolveSandboxSmokeOptions({ apiKey: 'sk_test', profile: 'xlarge' as never }),
     ).toThrow("Invalid profile 'xlarge'")
+  })
+
+  test('uses explicit timeout override', () => {
+    const resolved = resolveSandboxSmokeOptions({ apiKey: 'sk_test', timeoutMs: 45_000 })
+    expect(resolved.timeoutMs).toBe(45_000)
+  })
+
+  test('rejects invalid timeout values', () => {
+    expect(() => resolveSandboxSmokeOptions({ apiKey: 'sk_test', timeoutMs: 0 })).toThrow(
+      'timeoutMs must be a positive integer',
+    )
   })
 })
 
