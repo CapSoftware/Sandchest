@@ -368,6 +368,45 @@ const collectArtifactsOnStop = (
     ),
   )
 
+const finalizeSandboxStop = (
+  sandboxId: string,
+  idBytes: Uint8Array,
+  orgId: string,
+  actorId: string,
+) =>
+  Effect.gen(function* () {
+    // Collect artifacts before fully stopping (best-effort)
+    yield* collectArtifactsOnStop(sandboxId, idBytes, orgId)
+
+    // Tell the node daemon to stop the VM (best-effort)
+    const nodeClient = yield* NodeClient
+    yield* nodeClient.stopSandbox({ sandboxId: idBytes }).pipe(
+      Effect.catchAll(() => Effect.void),
+    )
+
+    // Transition to stopped
+    yield* SandboxRepo.pipe(
+      Effect.flatMap((repo) =>
+        repo.updateStatus(idBytes, orgId, 'stopped', {
+          endedAt: new Date(),
+        }),
+      ),
+    )
+
+    const auditLog = yield* AuditLog
+    yield* auditLog.append({
+      orgId,
+      actorId,
+      action: 'sandbox.stop',
+      resourceType: 'sandbox',
+      resourceId: sandboxId,
+    })
+  }).pipe(
+    Effect.catchAllCause((cause) =>
+      Effect.logError(`Sandbox stop finalization failed for ${sandboxId}: ${Cause.pretty(cause)}`),
+    ),
+  )
+
 const stopSandbox = Effect.gen(function* () {
   yield* requireScope('sandbox:write')
   const auth = yield* AuthContext
@@ -417,32 +456,11 @@ const stopSandbox = Effect.gen(function* () {
     failureReason: 'sandbox_stopped',
   })
 
-  // Collect artifacts before fully stopping (best-effort)
-  yield* collectArtifactsOnStop(id, idBytes, auth.orgId)
-
-  // Tell the node daemon to stop the VM (best-effort)
-  const nodeClient = yield* NodeClient
-  yield* nodeClient.stopSandbox({ sandboxId: idBytes }).pipe(
-    Effect.catchAll(() => Effect.void),
-  )
-
-  // Transition to stopped
-  const stopped = yield* repo.updateStatus(idBytes, auth.orgId, 'stopped', {
-    endedAt: new Date(),
-  })
-
-  const auditLog = yield* AuditLog
-  yield* auditLog.append({
-    orgId: auth.orgId,
-    actorId: auth.userId,
-    action: 'sandbox.stop',
-    resourceType: 'sandbox',
-    resourceId: id,
-  })
+  yield* Effect.forkDaemon(finalizeSandboxStop(id, idBytes, auth.orgId, auth.userId))
 
   const response: StopSandboxResponse = {
     sandbox_id: id,
-    status: stopped?.status ?? 'stopped',
+    status: 'stopping',
   }
 
   return HttpServerResponse.unsafeJson(response, { status: 202 })

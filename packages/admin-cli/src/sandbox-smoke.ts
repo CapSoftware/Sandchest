@@ -477,7 +477,7 @@ export async function runSandboxSmokeTest(
         )
 
         const expectedArtifactName = sharedPath.split('/').filter(Boolean).pop() ?? sharedPath
-        const foundArtifact = await waitForArtifact(sandbox, expectedArtifactName, 5_000)
+        const foundArtifact = await waitForArtifact(sandbox, expectedArtifactName, 15_000)
         assert(foundArtifact, `artifact list did not include ${expectedArtifactName}`)
       }),
     )
