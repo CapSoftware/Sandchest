@@ -333,6 +333,19 @@ const collectArtifactsOnStop = (
       paths,
     })
 
+    if (collected.length === 0) {
+      yield* Effect.logWarning(
+        `Stop-time artifact collection returned zero artifacts for sandbox ${sandboxId} with ${paths.length} registered path(s): ${paths.join(', ')}`,
+      )
+      return
+    }
+
+    if (collected.length < paths.length) {
+      yield* Effect.logWarning(
+        `Stop-time artifact collection returned ${collected.length}/${paths.length} artifacts for sandbox ${sandboxId}`,
+      )
+    }
+
     for (const artifact of collected) {
       const artifactId = generateUUIDv7()
       yield* artifactRepo.create({
@@ -347,7 +360,11 @@ const collectArtifactsOnStop = (
       })
     }
   }).pipe(
-    Effect.catchAll(() => Effect.void),
+    Effect.catchAll((error) =>
+      Effect.logWarning(
+        `Stop-time artifact collection failed for sandbox ${sandboxId}: ${String(error)}`,
+      ),
+    ),
   )
 
 const stopSandbox = Effect.gen(function* () {
