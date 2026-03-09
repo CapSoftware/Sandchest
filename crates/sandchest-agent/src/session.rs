@@ -520,6 +520,17 @@ fn extract_sentinel(buf: &[u8], sentinel_marker: &str) -> Option<(Vec<u8>, i32)>
 fn strip_command_echo(output: &[u8], cmd: &str) -> Vec<u8> {
     let output_str = String::from_utf8_lossy(output);
 
+    // Some shells/PTYs mangle long echoed wrapper lines, so fall back to dropping the
+    // first line when it still clearly contains our internal sentinel plumbing.
+    if let Some(nl) = output.iter().position(|byte| *byte == b'\n') {
+        let first_line = String::from_utf8_lossy(&output[..nl]);
+        if first_line.contains("sc_exit=$?;")
+            || (first_line.contains("__sc_exit") && first_line.contains(SENTINEL_PREFIX))
+        {
+            return output[nl + 1..].to_vec();
+        }
+    }
+
     // The PTY echoes the full wrapped command. Try to find and skip past it.
     // Look for the first newline after the command echo.
     if let Some(pos) = output_str.find("__sc_exit=$?;") {
@@ -693,6 +704,18 @@ mod tests {
         // No newline to split on, so output stays
         let result = strip_command_echo(output, cmd);
         assert_eq!(result, output);
+    }
+
+    #[test]
+    fn strip_echo_truncated_wrapped_command_line() {
+        let output =
+            b"<sc_exit=$?; echo \"__SC_SENTINEL_218_${__sc_exit}__\"\n/tmp\nsession:admin-smoke\n";
+        let cmd = "pwd && cat \"/tmp/admin-smoke.session.txt\"";
+        let result = strip_command_echo(output, cmd);
+        assert_eq!(
+            String::from_utf8_lossy(&result),
+            "/tmp\nsession:admin-smoke\n"
+        );
     }
 
     // ---- SessionManager unit tests ----
