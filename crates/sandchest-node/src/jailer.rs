@@ -258,6 +258,9 @@ pub fn build_jailer_command(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
+    #[cfg(unix)]
+    cmd.process_group(0);
+
     cmd
 }
 

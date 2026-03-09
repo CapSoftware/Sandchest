@@ -594,6 +594,7 @@ impl SandboxManager {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
+                .process_group(0)
                 .spawn()
                 .map_err(|e| {
                     SandboxError::CreateFailed(format!("failed to spawn firecracker: {}", e))
@@ -1080,6 +1081,7 @@ impl SandboxManager {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
+                .process_group(0)
                 .spawn()
             {
                 Ok(c) => c,
@@ -1214,6 +1216,7 @@ impl SandboxManager {
         info!(sandbox_id = %sandbox_id, "destroying sandbox");
 
         self.set_status(sandbox_id, SandboxStatus::Stopping).await;
+        let paths = self.sandbox_paths(sandbox_id);
 
         // Get the network slot before removing sandbox info
         let network_slot = {
@@ -1226,6 +1229,18 @@ impl SandboxManager {
         if let Some(vm) = vm {
             if let Err(e) = vm.destroy().await {
                 error!(sandbox_id = %sandbox_id, error = %e, "error destroying VM");
+            }
+        }
+
+        // Best-effort filesystem cleanup even if the VM handle was missing.
+        if Path::new(&paths.data_dir).exists() {
+            if let Err(e) = tokio::fs::remove_dir_all(&paths.data_dir).await {
+                error!(
+                    sandbox_id = %sandbox_id,
+                    dir = %paths.data_dir,
+                    error = %e,
+                    "failed to clean up sandbox data directory"
+                );
             }
         }
 
@@ -1870,6 +1885,21 @@ mod tests {
         // because the sandbox info won't be found for network slot
         let result = manager.destroy_sandbox("sb_ghost").await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn destroy_sandbox_cleans_up_orphaned_disk_without_vm_handle() {
+        let manager = SandboxManager::new(test_node_config());
+        let sandbox_dir = std::path::Path::new("/tmp/sandchest-test")
+            .join("sandboxes")
+            .join("sb_orphaned");
+        let _ = std::fs::remove_dir_all(&sandbox_dir);
+        std::fs::create_dir_all(&sandbox_dir).unwrap();
+        std::fs::write(sandbox_dir.join("rootfs.ext4"), b"orphaned").unwrap();
+
+        let result = manager.destroy_sandbox("sb_orphaned").await;
+        assert!(result.is_ok());
+        assert!(!sandbox_dir.exists());
     }
 
     #[tokio::test]

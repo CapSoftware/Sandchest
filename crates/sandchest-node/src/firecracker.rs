@@ -106,6 +106,7 @@ impl FirecrackerVm {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
+            .process_group(0)
             .spawn()
             .map_err(|e| FirecrackerError::Spawn(format!("failed to spawn firecracker: {}", e)))?;
 
@@ -217,7 +218,7 @@ impl FirecrackerVm {
         #[cfg(unix)]
         if let Some(pid) = self.child.id() {
             unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
+                libc::kill(-(pid as i32), libc::SIGTERM);
             }
 
             // Wait up to 5 seconds for graceful exit
@@ -226,7 +227,10 @@ impl FirecrackerVm {
 
             if graceful.is_err() {
                 warn!(sandbox_id = %self.sandbox_id, "Firecracker did not exit gracefully, sending SIGKILL");
-                let _ = self.child.kill().await;
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+                let _ = self.child.wait().await;
             }
         }
 
