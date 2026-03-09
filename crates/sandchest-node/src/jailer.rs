@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -258,6 +259,39 @@ pub async fn hardlink_or_copy(src: &str, dst: &Path) -> Result<(), JailerError> 
             Ok(())
         }
     }
+}
+
+/// Ensure a jailed Firecracker resource is owned by the jailer uid/gid.
+///
+/// This is required for writable resources like the sandbox rootfs, because the
+/// Firecracker process drops privileges before opening them inside the jail.
+pub async fn chown_to_jailer(config: &JailerConfig, path: &Path) -> Result<(), JailerError> {
+    let path = path.to_path_buf();
+    let uid = config.uid;
+    let gid = config.gid;
+
+    tokio::task::spawn_blocking(move || {
+        let path_cstr = CString::new(
+            path.to_str()
+                .ok_or_else(|| JailerError::Setup("invalid non-utf8 path".to_string()))?,
+        )
+        .map_err(|e| JailerError::Setup(format!("invalid path for chown: {}", e)))?;
+
+        let rc = unsafe { libc::chown(path_cstr.as_ptr(), uid, gid) };
+        if rc != 0 {
+            return Err(JailerError::Setup(format!(
+                "failed to chown {} to {}:{}: {}",
+                path.display(),
+                uid,
+                gid,
+                std::io::Error::last_os_error()
+            )));
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| JailerError::Setup(format!("spawn_blocking failed: {}", e)))?
 }
 
 /// Clean up the jail directory for a sandbox.

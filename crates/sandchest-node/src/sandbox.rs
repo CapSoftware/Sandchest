@@ -216,7 +216,30 @@ impl SandboxManager {
                 }
             }
             match disk::clone_disk_to(rootfs_ref, &paths.dir, &self.node_config.data_dir).await {
-                Ok(path) => path,
+                Ok(path) => {
+                    if let Err(e) = jailer::chown_to_jailer(
+                        &self.node_config.jailer,
+                        std::path::Path::new(&path),
+                    )
+                    .await
+                    {
+                        error!(sandbox_id = %sandbox_id, error = %e, "failed to chown jailed rootfs");
+                        self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                        self.report_event(events::sandbox_event(
+                            sandbox_id,
+                            proto::SandboxEventType::Failed,
+                            &format!("rootfs ownership setup failed: {}", e),
+                        ));
+                        network::teardown_network(sandbox_id, slot).await;
+                        self.slot_manager.release(slot);
+                        jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
+                        return Err(SandboxError::CreateFailed(format!(
+                            "rootfs ownership setup failed: {}",
+                            e
+                        )));
+                    }
+                    path
+                }
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk to chroot");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
@@ -419,7 +442,29 @@ impl SandboxManager {
             match disk::clone_disk_to(&snapshot_rootfs, &paths.dir, &self.node_config.data_dir)
                 .await
             {
-                Ok(path) => path,
+                Ok(path) => {
+                    if let Err(e) = jailer::chown_to_jailer(
+                        &self.node_config.jailer,
+                        std::path::Path::new(&path),
+                    )
+                    .await
+                    {
+                        self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                        self.report_event(events::sandbox_event(
+                            sandbox_id,
+                            proto::SandboxEventType::Failed,
+                            &format!("rootfs ownership setup failed: {}", e),
+                        ));
+                        network::teardown_network(sandbox_id, slot).await;
+                        self.slot_manager.release(slot);
+                        jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
+                        return Err(SandboxError::CreateFailed(format!(
+                            "rootfs ownership setup failed: {}",
+                            e
+                        )));
+                    }
+                    path
+                }
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
@@ -804,12 +849,27 @@ impl SandboxManager {
 
         // --- Step 3: Clone disk (while source is paused for consistency) ---
         let disk_result = if self.node_config.jailer.enabled {
-            disk::clone_disk_to(
+            match disk::clone_disk_to(
                 &source_rootfs,
                 &fork_sandbox_dir,
                 &self.node_config.data_dir,
             )
             .await
+            {
+                Ok(path) => {
+                    if let Err(e) = jailer::chown_to_jailer(
+                        &self.node_config.jailer,
+                        std::path::Path::new(&path),
+                    )
+                    .await
+                    {
+                        Err(disk::DiskError::Io(e.to_string()))
+                    } else {
+                        Ok(path)
+                    }
+                }
+                Err(e) => Err(e),
+            }
         } else {
             disk::clone_disk(&source_rootfs, new_sandbox_id, &self.node_config.data_dir).await
         };
