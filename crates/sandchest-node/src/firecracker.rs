@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Stdio;
 
+use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tracing::{error, info, warn};
 
@@ -142,20 +143,10 @@ impl FirecrackerVm {
         let api_socket_path = jailer_config.host_api_socket_path(sandbox_id);
         let vsock_path = jailer_config.host_vsock_path(sandbox_id);
 
-        // Ensure chroot directory exists
-        jailer::prepare_chroot(jailer_config, sandbox_id)
+        // Ensure chroot directory exists and the kernel is available inside it.
+        jailer::prepare_chroot_with_kernel(jailer_config, sandbox_id, &vm_config.kernel_path)
             .await
             .map_err(|e| FirecrackerError::Setup(e.to_string()))?;
-
-        // Hard-link kernel into chroot
-        let chroot_kernel = chroot_root.join("vmlinux");
-        if !chroot_kernel.exists() {
-            jailer::hardlink_or_copy(&vm_config.kernel_path, &chroot_kernel)
-                .await
-                .map_err(|e| {
-                    FirecrackerError::Setup(format!("failed to link kernel into chroot: {}", e))
-                })?;
-        }
 
         // Write Firecracker config with chroot-relative paths
         let jailed_vm_config = VmConfig {
@@ -268,6 +259,44 @@ impl FirecrackerVm {
     /// Check if the Firecracker process is still running.
     pub fn is_running(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Collect startup diagnostics if the child process exited before becoming ready.
+    pub async fn startup_failure_details(&mut self) -> Option<String> {
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => status,
+            Ok(None) => return None,
+            Err(error) => {
+                return Some(format!("failed to inspect child status: {}", error));
+            }
+        };
+
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+
+        if let Some(mut child_stdout) = self.child.stdout.take() {
+            let mut buf = Vec::new();
+            if child_stdout.read_to_end(&mut buf).await.is_ok() {
+                stdout = String::from_utf8_lossy(&buf).trim().to_string();
+            }
+        }
+
+        if let Some(mut child_stderr) = self.child.stderr.take() {
+            let mut buf = Vec::new();
+            if child_stderr.read_to_end(&mut buf).await.is_ok() {
+                stderr = String::from_utf8_lossy(&buf).trim().to_string();
+            }
+        }
+
+        let mut details = format!("child exited before ready with status {}", status);
+        if !stdout.is_empty() {
+            details.push_str(&format!("; stdout: {}", stdout));
+        }
+        if !stderr.is_empty() {
+            details.push_str(&format!("; stderr: {}", stderr));
+        }
+
+        Some(details)
     }
 }
 

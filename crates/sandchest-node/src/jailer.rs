@@ -184,6 +184,24 @@ pub async fn prepare_chroot(
     Ok(chroot_root)
 }
 
+/// Create the chroot directory structure and stage the kernel inside it.
+pub async fn prepare_chroot_with_kernel(
+    config: &JailerConfig,
+    sandbox_id: &str,
+    kernel_path: &str,
+) -> Result<PathBuf, JailerError> {
+    let chroot_root = prepare_chroot(config, sandbox_id).await?;
+    let chroot_kernel = chroot_root.join("vmlinux");
+
+    if !chroot_kernel.exists() {
+        hardlink_or_copy(kernel_path, &chroot_kernel)
+            .await
+            .map_err(|e| JailerError::Setup(format!("failed to link kernel into chroot: {}", e)))?;
+    }
+
+    Ok(chroot_root)
+}
+
 /// Build the jailer `Command` for launching a jailed Firecracker VM.
 ///
 /// When `with_config_file` is true, includes `--config-file config.json` for cold boot.

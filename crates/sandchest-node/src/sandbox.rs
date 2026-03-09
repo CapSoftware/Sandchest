@@ -422,8 +422,14 @@ impl SandboxManager {
         // Step 1b: Clone snapshot's disk state
         let paths = self.sandbox_paths(sandbox_id);
         if self.node_config.jailer.enabled {
-            // Prepare chroot directory first
-            if let Err(e) = jailer::prepare_chroot(&self.node_config.jailer, sandbox_id).await {
+            // Prepare chroot directory and stage the kernel for jailed snapshot boot.
+            if let Err(e) = jailer::prepare_chroot_with_kernel(
+                &self.node_config.jailer,
+                sandbox_id,
+                &self.node_config.kernel_path,
+            )
+            .await
+            {
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
                 self.report_event(events::sandbox_event(
                     sandbox_id,
@@ -537,15 +543,37 @@ impl SandboxManager {
                 e
             )));
         }
+        if self.node_config.jailer.enabled {
+            for path in [&local_mem, &local_snapshot] {
+                if let Err(e) =
+                    jailer::chown_to_jailer(&self.node_config.jailer, std::path::Path::new(path))
+                        .await
+                {
+                    self.set_status(sandbox_id, SandboxStatus::Failed).await;
+                    self.report_event(events::sandbox_event(
+                        sandbox_id,
+                        proto::SandboxEventType::Failed,
+                        &format!("snapshot artifact ownership setup failed: {}", e),
+                    ));
+                    network::teardown_network(sandbox_id, slot).await;
+                    self.slot_manager.release(slot);
+                    jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
+                    return Err(SandboxError::CreateFailed(format!(
+                        "snapshot artifact ownership setup failed: {}",
+                        e
+                    )));
+                }
+            }
+        }
 
         // Start Firecracker (jailed or direct, without config-file for snapshot mode)
-        let vm = if self.node_config.jailer.enabled {
+        let mut vm = if self.node_config.jailer.enabled {
             let child = jailer::build_jailer_command(
                 &self.node_config.jailer,
                 sandbox_id,
                 false,
-                None,
-                None,
+                Some(profile.vcpu_count()),
+                Some(profile.mem_size_mib()),
             )
             .spawn()
             .map_err(|e| SandboxError::CreateFailed(format!("failed to spawn jailer: {}", e)))?;
@@ -583,18 +611,23 @@ impl SandboxManager {
         // Step 3: Wait for Firecracker API socket, then load snapshot
         let fc_api = FirecrackerApi::new(&api_socket_path);
         if let Err(e) = fc_api.wait_for_ready(Duration::from_secs(5)).await {
+            let detail = vm
+                .startup_failure_details()
+                .await
+                .map(|text| format!("; {}", text))
+                .unwrap_or_default();
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
             self.report_event(events::sandbox_event(
                 sandbox_id,
                 proto::SandboxEventType::Failed,
-                &format!("firecracker API not ready: {}", e),
+                &format!("firecracker API not ready: {}{}", e, detail),
             ));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
             return Err(SandboxError::CreateFailed(format!(
-                "firecracker API not ready: {}",
-                e
+                "firecracker API not ready: {}{}",
+                e, detail
             )));
         }
 
@@ -777,7 +810,27 @@ impl SandboxManager {
         // Create fork sandbox directory (needed before Firecracker writes snapshot files)
         let fork_paths = self.sandbox_paths(new_sandbox_id);
         let fork_sandbox_dir = fork_paths.dir.clone();
-        if let Err(e) = tokio::fs::create_dir_all(&fork_sandbox_dir).await {
+        if self.node_config.jailer.enabled {
+            if let Err(e) = jailer::prepare_chroot_with_kernel(
+                &self.node_config.jailer,
+                new_sandbox_id,
+                &self.node_config.kernel_path,
+            )
+            .await
+            {
+                self.cleanup_fork_failure(
+                    new_sandbox_id,
+                    slot,
+                    None,
+                    &format!("chroot setup failed: {}", e),
+                )
+                .await;
+                return Err(SandboxError::ForkFailed(format!(
+                    "failed to prepare fork chroot: {}",
+                    e
+                )));
+            }
+        } else if let Err(e) = tokio::fs::create_dir_all(&fork_sandbox_dir).await {
             self.cleanup_fork_failure(new_sandbox_id, slot, None, &format!("mkdir failed: {}", e))
                 .await;
             return Err(SandboxError::ForkFailed(format!(
@@ -935,18 +988,40 @@ impl SandboxManager {
             // Clean up temp files from source chroot
             let _ = tokio::fs::remove_file(&host_snapshot_path).await;
             let _ = tokio::fs::remove_file(&host_mem_path).await;
+            if self.node_config.jailer.enabled {
+                for path in [&fork_snap, &fork_mem] {
+                    if let Err(e) = jailer::chown_to_jailer(
+                        &self.node_config.jailer,
+                        std::path::Path::new(path),
+                    )
+                    .await
+                    {
+                        self.cleanup_fork_failure(
+                            new_sandbox_id,
+                            slot,
+                            None,
+                            &format!("snapshot artifact ownership setup failed: {}", e),
+                        )
+                        .await;
+                        return Err(SandboxError::ForkFailed(format!(
+                            "snapshot artifact ownership setup failed: {}",
+                            e
+                        )));
+                    }
+                }
+            }
         }
 
         // --- Step 5: Boot fork from snapshot ---
         let api_socket_path = fork_paths.api_socket.clone();
 
-        let vm = if self.node_config.jailer.enabled {
+        let mut vm = if self.node_config.jailer.enabled {
             let child = match jailer::build_jailer_command(
                 &self.node_config.jailer,
                 new_sandbox_id,
                 false,
-                None,
-                None,
+                Some(profile.vcpu_count()),
+                Some(profile.mem_size_mib()),
             )
             .spawn()
             {
@@ -1011,16 +1086,21 @@ impl SandboxManager {
         // Wait for Firecracker API socket
         let fork_fc_api = FirecrackerApi::new(&api_socket_path);
         if let Err(e) = fork_fc_api.wait_for_ready(Duration::from_secs(5)).await {
+            let detail = vm
+                .startup_failure_details()
+                .await
+                .map(|text| format!("; {}", text))
+                .unwrap_or_default();
             self.cleanup_fork_failure(
                 new_sandbox_id,
                 slot,
                 Some(vm),
-                &format!("fork API not ready: {}", e),
+                &format!("fork API not ready: {}{}", e, detail),
             )
             .await;
             return Err(SandboxError::ForkFailed(format!(
-                "fork API not ready: {}",
-                e
+                "fork API not ready: {}{}",
+                e, detail
             )));
         }
 
