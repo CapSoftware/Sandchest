@@ -1434,6 +1434,54 @@ describe('vm-teardown', () => {
     expect(updated!.endedAt).toBeInstanceOf(Date)
   })
 
+  test('keeps sandbox stopping when node teardown fails', async () => {
+    nodeClientApi = {
+      ...nodeClientApi,
+      destroySandbox: () => Effect.die(new Error('simulated teardown failure')),
+    }
+    testLayer = Layer.mergeAll(
+      Layer.succeed(RedisService, redis),
+      Layer.succeed(SandboxRepo, sandboxRepo),
+      Layer.succeed(ExecRepo, execRepo),
+      Layer.succeed(SessionRepo, sessionRepo),
+      Layer.succeed(ArtifactRepo, artifactRepo),
+      Layer.succeed(ObjectStorage, objectStorage),
+      Layer.succeed(EventRecorder, eventRecorder),
+      Layer.succeed(OrgRepo, orgRepo),
+      Layer.succeed(IdempotencyRepo, idempotencyApi),
+      Layer.succeed(QuotaService, quotaApi),
+      Layer.succeed(BillingService, createInMemoryBillingApi()),
+      Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
+      Layer.succeed(NodeClient, nodeClientApi),
+      Layer.succeed(NodeRepo, nodeRepo),
+    )
+
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
+
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
+
+    const count = await run(runWorkerTick(vmTeardownWorker, 'inst-1'))
+    expect(count).toBe(0)
+
+    const updated = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(updated!.status).toBe('stopping')
+    expect(updated!.endedAt).toBeNull()
+  })
+
   test('ignores sandboxes in other states', async () => {
     for (const status of ['queued', 'running', 'stopped', 'failed', 'deleted'] as const) {
       const id = generateUUIDv7()

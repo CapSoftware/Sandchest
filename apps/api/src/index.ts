@@ -67,14 +67,16 @@ const isProduction = env.NODE_ENV === 'production'
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL, { family: REDIS_FAMILY }) : RedisMemory
 
-const { NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM } = env
+const { NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, NODE_GRPC_INSECURE, MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM } = env
 const hasPemContent = MTLS_CA_PEM && MTLS_CLIENT_CERT_PEM && MTLS_CLIENT_KEY_PEM
 const hasFilePaths = NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH
+const hasNodeGrpcConfig = NODE_GRPC_ADDR && NODE_GRPC_NODE_ID && (NODE_GRPC_INSECURE || hasPemContent || hasFilePaths)
 const NodeClientLive =
-  NODE_GRPC_ADDR && NODE_GRPC_NODE_ID && (hasPemContent || hasFilePaths)
+  hasNodeGrpcConfig
     ? createNodeClientLayer({
-        address: NODE_GRPC_ADDR,
-        nodeId: NODE_GRPC_NODE_ID,
+        address: NODE_GRPC_ADDR!,
+        nodeId: NODE_GRPC_NODE_ID!,
+        insecure: NODE_GRPC_INSECURE,
         // Prefer PEM content (Fly.io secrets) over file paths (local dev)
         caPem: MTLS_CA_PEM,
         certPem: MTLS_CLIENT_CERT_PEM,
@@ -156,10 +158,10 @@ const ProductionFallbackWarnings = Layer.scopedDiscard(
       )
     }
 
-    const hasNodeClient = NODE_GRPC_ADDR && NODE_GRPC_NODE_ID && (hasPemContent || hasFilePaths)
+    const hasNodeClient = hasNodeGrpcConfig
     if (!hasNodeClient) {
       yield* Effect.logWarning(
-        'Node gRPC client is not configured — using in-memory stub. Sandbox creation, exec, and session operations will return mock data. Fix: set NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, and mTLS credentials',
+        'Node gRPC client is not configured — using in-memory stub. Sandbox creation, exec, and session operations will return mock data. Fix: set NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, and either NODE_GRPC_INSECURE=1 for localhost or mTLS credentials',
       )
     }
   }),

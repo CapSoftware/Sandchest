@@ -559,6 +559,51 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes — node daemon 
     expect(result.status).toBe(201)
     expect(result.body.status).toBe('running')
   })
+
+  test('marks sandbox failed when node create times out', async () => {
+    const env = createTestEnv({
+      nodeClient: {
+        ...createInMemoryNodeClient(),
+        createSandbox: () => Effect.never,
+      },
+    })
+    const originalTimeout = process.env.NODE_CREATE_TIMEOUT_MS
+    process.env.NODE_CREATE_TIMEOUT_MS = '10'
+
+    try {
+      const result = await env.runTest(
+        Effect.gen(function* () {
+          const client = yield* HttpClient.HttpClient
+          const response = yield* client.execute(
+            HttpClientRequest.post('/v1/sandboxes').pipe(
+              HttpClientRequest.bodyUnsafeJson({}),
+            ),
+          )
+          const body = yield* response.json
+          return {
+            status: response.status,
+            body: body as { error: string; message: string },
+          }
+        }),
+      )
+
+      expect(result.status).toBe(500)
+      expect(result.body.error).toBe('internal_error')
+      expect(result.body.message).toContain('Node createSandbox timed out after 10ms')
+
+      const listed = await Effect.runPromise(env.sandboxRepo.list(TEST_ORG, {}))
+      expect(listed.rows).toHaveLength(1)
+      expect(listed.rows[0]?.status).toBe('failed')
+      expect(listed.rows[0]?.failureReason).toBe('provision_failed')
+      expect(listed.rows[0]?.endedAt).toBeInstanceOf(Date)
+    } finally {
+      if (originalTimeout === undefined) {
+        delete process.env.NODE_CREATE_TIMEOUT_MS
+      } else {
+        process.env.NODE_CREATE_TIMEOUT_MS = originalTimeout
+      }
+    }
+  })
 })
 
 describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/stop', () => {
@@ -588,6 +633,120 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/stop', () =>
     expect(result.status).toBe(202)
     expect(result.body.sandbox_id).toBe(sandboxId)
     expect(result.body.status).toBe('stopping')
+  })
+
+  test('finishes stop finalization when node collectArtifacts times out', async () => {
+    const env = createTestEnv({
+      nodeClient: {
+        ...createInMemoryNodeClient(),
+        collectArtifacts: () => Effect.never,
+      },
+    })
+    const sandboxId = await createRunningSandbox(env)
+    const originalTimeout = process.env.NODE_COLLECT_ARTIFACTS_TIMEOUT_MS
+    process.env.NODE_COLLECT_ARTIFACTS_TIMEOUT_MS = '10'
+
+    try {
+      await Effect.runPromise(env.redis.addArtifactPaths(sandboxId, ['/tmp/output.txt']))
+
+      const result = await env.runTest(
+        Effect.gen(function* () {
+          const client = yield* HttpClient.HttpClient
+          const response = yield* client.execute(
+            HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/stop`),
+          )
+          const body = yield* response.json
+          return { status: response.status, body: body as { sandbox_id: string; status: string } }
+        }),
+      )
+
+      expect(result.status).toBe(202)
+      expect(result.body.status).toBe('stopping')
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const row = await Effect.runPromise(
+        env.sandboxRepo.findById(idToBytes(sandboxId), TEST_ORG),
+      )
+      expect(row?.status).toBe('stopped')
+      expect(row?.endedAt).toBeInstanceOf(Date)
+    } finally {
+      if (originalTimeout === undefined) {
+        delete process.env.NODE_COLLECT_ARTIFACTS_TIMEOUT_MS
+      } else {
+        process.env.NODE_COLLECT_ARTIFACTS_TIMEOUT_MS = originalTimeout
+      }
+    }
+  })
+
+  test('leaves sandbox stopping when node stop fails', async () => {
+    const env = createTestEnv({
+      nodeClient: {
+        ...createInMemoryNodeClient(),
+        stopSandbox: () => Effect.die(new Error('simulated stop failure')),
+      },
+    })
+    const sandboxId = await createRunningSandbox(env)
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/stop`),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { sandbox_id: string; status: string } }
+      }),
+    )
+
+    expect(result.status).toBe(202)
+    expect(result.body.status).toBe('stopping')
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const row = await Effect.runPromise(
+      env.sandboxRepo.findById(idToBytes(sandboxId), TEST_ORG),
+    )
+    expect(row?.status).toBe('stopping')
+    expect(row?.endedAt).toBeNull()
+  })
+})
+
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('DELETE /v1/sandboxes/:id', () => {
+  test('retries node teardown for stopped sandboxes before soft-delete', async () => {
+    let destroyCalls = 0
+    const env = createTestEnv({
+      nodeClient: {
+        ...createInMemoryNodeClient(),
+        destroySandbox: () =>
+          Effect.sync(() => {
+            destroyCalls += 1
+          }),
+      },
+    })
+    const sandboxId = await createRunningSandbox(env)
+    const idBytes = idToBytes(sandboxId)
+
+    await Effect.runPromise(
+      env.sandboxRepo.updateStatus(idBytes, TEST_ORG, 'stopped', {
+        endedAt: new Date(),
+      }),
+    )
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.del(`/v1/sandboxes/${sandboxId}`),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { sandbox_id: string; status: string } }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.body.status).toBe('deleted')
+    expect(destroyCalls).toBe(1)
   })
 })
 

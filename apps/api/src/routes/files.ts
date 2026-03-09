@@ -1,8 +1,9 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from '@effect/platform'
-import { Effect } from 'effect'
+import { Cause, Effect } from 'effect'
 import { idToBytes } from '@sandchest/contract'
 import type { FileEntry, ListFilesResponse } from '@sandchest/contract'
 import {
+  InternalError,
   NotFoundError,
   SandboxNotRunningError,
   ValidationError,
@@ -15,6 +16,7 @@ import { NodeClient } from '../services/node-client.js'
 const MAX_SINGLE_FILE = 5 * 1024 * 1024 * 1024 // 5 GB
 const MAX_BATCH_FILE = 10 * 1024 * 1024 * 1024 // 10 GB
 const DEFAULT_LIST_LIMIT = 200
+const DEFAULT_NODE_FILE_TIMEOUT_MS = 30_000
 
 function parseSandboxId(idStr: string | undefined) {
   if (!idStr) {
@@ -25,6 +27,40 @@ function parseSandboxId(idStr: string | undefined) {
   } catch {
     return Effect.fail(new ValidationError({ message: `Invalid sandbox ID: ${idStr}` }))
   }
+}
+
+function resolveNodeFileTimeoutMs(): number {
+  const raw = process.env['NODE_FILE_TIMEOUT_MS']
+  if (!raw) {
+    return DEFAULT_NODE_FILE_TIMEOUT_MS
+  }
+
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_NODE_FILE_TIMEOUT_MS
+}
+
+function withNodeFileTimeout<A>(
+  operation: string,
+  effect: Effect.Effect<A, never, never>,
+): Effect.Effect<A, InternalError, never> {
+  const timeoutMs = resolveNodeFileTimeoutMs()
+
+  return effect.pipe(
+    Effect.timeoutFail({
+      duration: `${timeoutMs} millis`,
+      onTimeout: () =>
+        new InternalError({
+          message: `Node ${operation} timed out after ${timeoutMs}ms`,
+        }),
+    }),
+    Effect.catchAllCause((cause) =>
+      Effect.fail(
+        new InternalError({
+          message: `Node ${operation} failed: ${Cause.pretty(cause)}`,
+        }),
+      ),
+    ),
+  )
 }
 
 // -- Upload file -------------------------------------------------------------
@@ -77,11 +113,14 @@ const uploadFile = Effect.gen(function* () {
     )
   }
 
-  const result = yield* nodeClient.putFile({
-    sandboxId: sandboxIdBytes,
-    path,
-    data,
-  })
+  const result = yield* withNodeFileTimeout(
+    'putFile',
+    nodeClient.putFile({
+      sandboxId: sandboxIdBytes,
+      path,
+      data,
+    }),
+  )
 
   return HttpServerResponse.unsafeJson({
     path,
@@ -136,10 +175,13 @@ const downloadOrListFiles = Effect.gen(function* () {
       )
     }
 
-    const entries = yield* nodeClient.listFiles({
-      sandboxId: sandboxIdBytes,
-      path,
-    })
+    const entries = yield* withNodeFileTimeout(
+      'listFiles',
+      nodeClient.listFiles({
+        sandboxId: sandboxIdBytes,
+        path,
+      }),
+    )
 
     // Apply cursor-based pagination
     let startIdx = 0
@@ -167,10 +209,13 @@ const downloadOrListFiles = Effect.gen(function* () {
   }
 
   // File download
-  const data = yield* nodeClient.getFile({
-    sandboxId: sandboxIdBytes,
-    path,
-  })
+  const data = yield* withNodeFileTimeout(
+    'getFile',
+    nodeClient.getFile({
+      sandboxId: sandboxIdBytes,
+      path,
+    }),
+  )
 
   return HttpServerResponse.uint8Array(data, {
     contentType: 'application/octet-stream',
@@ -216,10 +261,13 @@ const deleteFile = Effect.gen(function* () {
     return yield* Effect.fail(new ValidationError({ message: 'path query parameter is required' }))
   }
 
-  yield* nodeClient.deleteFile({
-    sandboxId: sandboxIdBytes,
-    path,
-  })
+  yield* withNodeFileTimeout(
+    'deleteFile',
+    nodeClient.deleteFile({
+      sandboxId: sandboxIdBytes,
+      path,
+    }),
+  )
 
   return HttpServerResponse.unsafeJson({ ok: true })
 })

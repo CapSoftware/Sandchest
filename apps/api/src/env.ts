@@ -50,6 +50,7 @@ export function loadEnv() {
     NODE_GRPC_CERT_PATH: process.env.NODE_GRPC_CERT_PATH as string | undefined,
     NODE_GRPC_KEY_PATH: process.env.NODE_GRPC_KEY_PATH as string | undefined,
     NODE_GRPC_CA_PATH: process.env.NODE_GRPC_CA_PATH as string | undefined,
+    NODE_GRPC_INSECURE: process.env.NODE_GRPC_INSECURE === '1',
     // mTLS via PEM content (Fly.io secrets — preferred in production)
     MTLS_CA_PEM: process.env.MTLS_CA_PEM as string | undefined,
     MTLS_CLIENT_CERT_PEM: process.env.MTLS_CLIENT_CERT_PEM as string | undefined,

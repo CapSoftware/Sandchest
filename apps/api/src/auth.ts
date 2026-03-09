@@ -13,6 +13,10 @@ function getResend(resendApiKey: string) {
 
 function createAuth() {
   const env = loadEnv()
+  const authBaseUrl = new URL(env.BETTER_AUTH_BASE_URL)
+  const isLocalAuth =
+    authBaseUrl.hostname === 'localhost' || authBaseUrl.hostname === '127.0.0.1'
+
   return betterAuth({
     baseURL: env.BETTER_AUTH_BASE_URL,
     secret: env.BETTER_AUTH_SECRET,
@@ -28,13 +32,17 @@ function createAuth() {
       },
     },
     advanced: {
-      crossSubDomainCookies: {
-        enabled: true,
-        domain: env.BETTER_AUTH_COOKIE_DOMAIN ?? '.sandchest.com',
-      },
+      ...(isLocalAuth
+        ? {}
+        : {
+            crossSubDomainCookies: {
+              enabled: true,
+              domain: env.BETTER_AUTH_COOKIE_DOMAIN ?? '.sandchest.com',
+            },
+          }),
       defaultCookieAttributes: {
-        sameSite: 'none',
-        secure: true,
+        sameSite: isLocalAuth ? 'lax' : 'none',
+        secure: isLocalAuth ? false : true,
       },
     },
     database: createPool({

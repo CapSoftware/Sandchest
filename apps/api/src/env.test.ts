@@ -66,6 +66,17 @@ describe('loadEnv', () => {
     expect(env.REDIS_URL).toBe('redis://localhost:6379')
   })
 
+  test('NODE_GRPC_INSECURE defaults to false when unset', () => {
+    const env = loadEnv()
+    expect(env.NODE_GRPC_INSECURE).toBe(false)
+  })
+
+  test('reads NODE_GRPC_INSECURE from env when set to 1', () => {
+    process.env.NODE_GRPC_INSECURE = '1'
+    const env = loadEnv()
+    expect(env.NODE_GRPC_INSECURE).toBe(true)
+  })
+
   test('returns undefined for ARTIFACT_BUCKET_NAME when unset', () => {
     const env = loadEnv()
     expect(env.ARTIFACT_BUCKET_NAME).toBeUndefined()

@@ -21,19 +21,25 @@ export const vmTeardownWorker: WorkerConfig<SandboxRepo | NodeClient | BillingSe
     const cutoff = new Date(Date.now() - STOPPING_GRACE_SECONDS * 1000)
     const stuck = yield* repo.findStoppingBefore(cutoff)
     const now = new Date()
+    let tornDown = 0
 
     for (const sandbox of stuck) {
       // Final meter before termination
       yield* meterSandbox(sandbox, now).pipe(Effect.catchAll(() => Effect.void))
 
-      yield* nodeClient.destroySandbox({ sandboxId: sandbox.id }).pipe(
-        Effect.catchAll(() => Effect.void),
+      const destroyed = yield* nodeClient.destroySandbox({ sandboxId: sandbox.id }).pipe(
+        Effect.as(true),
+        Effect.catchAllCause(() => Effect.succeed(false)),
       )
+      if (!destroyed) {
+        continue
+      }
       yield* repo.updateStatus(sandbox.id, sandbox.orgId, 'stopped', {
         endedAt: now,
       })
+      tornDown += 1
     }
 
-    return stuck.length
+    return tornDown
   }),
 }

@@ -68,10 +68,34 @@ const VALID_STATUSES: SandboxStatus[] = [
 const DEFAULT_IMAGE = 'ubuntu-22.04'
 const DEFAULT_PROFILE: ProfileName = 'small'
 const DEFAULT_TTL = 3600
+const DEFAULT_NODE_CREATE_TIMEOUT_MS = 30_000
+const DEFAULT_NODE_COLLECT_ARTIFACTS_TIMEOUT_MS = 30_000
 const REPLAY_BASE_URL = 'https://sandchest.com/s'
 
 function replayUrl(sandboxId: string): string {
   return `${REPLAY_BASE_URL}/${sandboxId}`
+}
+
+function resolveNodeCreateTimeoutMs(): number {
+  const raw = process.env['NODE_CREATE_TIMEOUT_MS']
+  if (!raw) {
+    return DEFAULT_NODE_CREATE_TIMEOUT_MS
+  }
+
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_NODE_CREATE_TIMEOUT_MS
+}
+
+function resolveNodeCollectArtifactsTimeoutMs(): number {
+  const raw = process.env['NODE_COLLECT_ARTIFACTS_TIMEOUT_MS']
+  if (!raw) {
+    return DEFAULT_NODE_COLLECT_ARTIFACTS_TIMEOUT_MS
+  }
+
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_NODE_COLLECT_ARTIFACTS_TIMEOUT_MS
 }
 
 /** Tag a response with a header warning that the included replay URL is publicly accessible. */
@@ -203,6 +227,8 @@ const createSandbox = Effect.gen(function* () {
     imageRef: image.ref,
   })
 
+  const nodeCreateTimeoutMs = resolveNodeCreateTimeoutMs()
+
   // Tell the node daemon to create the VM
   yield* nodeClient.createSandbox({
     sandboxId: id,
@@ -213,7 +239,29 @@ const createSandbox = Effect.gen(function* () {
     diskGb: profile.diskGb,
     env: body.env ?? {},
     ttlSeconds,
-  })
+  }).pipe(
+    Effect.timeoutFail({
+      duration: `${nodeCreateTimeoutMs} millis`,
+      onTimeout: () =>
+        new InternalError({
+          message: `Node createSandbox timed out after ${nodeCreateTimeoutMs}ms`,
+        }),
+    }),
+    Effect.catchAllCause((cause) =>
+      Effect.gen(function* () {
+        yield* repo.updateStatus(id, auth.orgId, 'failed', {
+          endedAt: new Date(),
+          failureReason: 'provision_failed',
+        })
+
+        return yield* Effect.fail(
+          new InternalError({
+            message: `Sandbox create failed on node: ${Cause.pretty(cause)}`,
+          }),
+        )
+      }),
+    ),
+  )
 
   // Transition to running and assign to the node
   const assigned = yield* repo.assignNode(id, auth.orgId, nodeClient.nodeId)
@@ -325,6 +373,7 @@ const collectArtifactsOnStop = (
     const redis = yield* RedisService
     const nodeClient = yield* NodeClient
     const artifactRepo = yield* ArtifactRepo
+    const nodeCollectArtifactsTimeoutMs = resolveNodeCollectArtifactsTimeoutMs()
 
     const paths = yield* redis.getArtifactPaths(sandboxId)
     if (paths.length === 0) return
@@ -332,7 +381,15 @@ const collectArtifactsOnStop = (
     const collected = yield* nodeClient.collectArtifacts({
       sandboxId: idBytes,
       paths,
-    })
+    }).pipe(
+      Effect.timeoutFail({
+        duration: `${nodeCollectArtifactsTimeoutMs} millis`,
+        onTimeout: () =>
+          new InternalError({
+            message: `Node collectArtifacts timed out after ${nodeCollectArtifactsTimeoutMs}ms`,
+          }),
+      }),
+    )
 
     if (collected.length === 0) {
       yield* Effect.logWarning(
@@ -361,9 +418,9 @@ const collectArtifactsOnStop = (
       })
     }
   }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catchAllCause((cause) =>
       Effect.logWarning(
-        `Stop-time artifact collection failed for sandbox ${sandboxId}: ${String(error)}`,
+        `Stop-time artifact collection failed for sandbox ${sandboxId}: ${Cause.pretty(cause)}`,
       ),
     ),
   )
@@ -386,11 +443,10 @@ const finalizeSandboxStop = (
     // Collect artifacts before fully stopping (best-effort)
     yield* collectArtifactsOnStop(sandboxId, idBytes, orgId)
 
-    // Tell the node daemon to stop the VM (best-effort)
+    // Tell the node daemon to stop the VM. If this fails, leave the sandbox
+    // in `stopping` so follow-up teardown can retry instead of claiming success.
     const nodeClient = yield* NodeClient
-    yield* nodeClient.stopSandbox({ sandboxId: idBytes }).pipe(
-      Effect.catchAll(() => Effect.void),
-    )
+    yield* nodeClient.stopSandbox({ sandboxId: idBytes })
 
     // Transition to stopped
     yield* SandboxRepo.pipe(
@@ -504,8 +560,14 @@ const deleteSandbox = Effect.gen(function* () {
   }
 
   // Destroy the VM on the node if it's still active (best-effort)
-  const isActive = row.status === 'running' || row.status === 'stopping' || row.status === 'queued' || row.status === 'provisioning'
-  if (isActive) {
+  const shouldDestroyOnNode =
+    row.status === 'running' ||
+    row.status === 'stopping' ||
+    row.status === 'stopped' ||
+    row.status === 'queued' ||
+    row.status === 'provisioning'
+
+  if (shouldDestroyOnNode) {
     // Final credit meter before termination (best-effort)
     if (row.status === 'running') {
       yield* meterSandbox(row, new Date()).pipe(Effect.catchAll(() => Effect.void))

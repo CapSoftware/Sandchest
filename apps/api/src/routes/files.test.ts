@@ -26,15 +26,16 @@ import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { ShutdownControllerLive } from '../shutdown.js'
 import { idToBytes } from '@sandchest/contract'
 import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
+import type { NodeClientApi } from '../services/node-client.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
 
-function createTestEnv() {
+function createTestEnv(overrides?: { nodeClient?: NodeClientApi }) {
   const sandboxRepo = createInMemorySandboxRepo()
   const execRepo = createInMemoryExecRepo()
   const sessionRepo = createInMemorySessionRepo()
-  const nodeClient = createInMemoryNodeClient()
+  const nodeClient = overrides?.nodeClient ?? createInMemoryNodeClient()
   const redis = createInMemoryRedisApi()
   const artifactRepo = createInMemoryArtifactRepo()
 
@@ -230,6 +231,48 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('PUT /v1/sandboxes/:id/files — upl
     )
 
     expect(result.status).toBe(409)
+  })
+
+  test('returns 500 when node putFile times out', async () => {
+    const env = createTestEnv({
+      nodeClient: {
+        ...createInMemoryNodeClient(),
+        putFile: () => Effect.never,
+      },
+    })
+    const sandboxId = await createRunningSandbox(env)
+    const originalTimeout = process.env.NODE_FILE_TIMEOUT_MS
+    process.env.NODE_FILE_TIMEOUT_MS = '10'
+
+    try {
+      const result = await env.runTest(
+        Effect.gen(function* () {
+          const client = yield* HttpClient.HttpClient
+          const response = yield* client.execute(
+            HttpClientRequest.put(
+              `/v1/sandboxes/${sandboxId}/files?path=/work/test.txt`,
+            ).pipe(
+              HttpClientRequest.bodyUint8Array(
+                new TextEncoder().encode('data'),
+                'application/octet-stream',
+              ),
+            ),
+          )
+          const body = yield* response.json
+          return { status: response.status, body: body as { error: string; message: string } }
+        }),
+      )
+
+      expect(result.status).toBe(500)
+      expect(result.body.error).toBe('internal_error')
+      expect(result.body.message).toContain('Node putFile timed out after 10ms')
+    } finally {
+      if (originalTimeout === undefined) {
+        delete process.env.NODE_FILE_TIMEOUT_MS
+      } else {
+        process.env.NODE_FILE_TIMEOUT_MS = originalTimeout
+      }
+    }
   })
 })
 
