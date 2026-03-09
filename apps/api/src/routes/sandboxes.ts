@@ -375,6 +375,14 @@ const finalizeSandboxStop = (
   actorId: string,
 ) =>
   Effect.gen(function* () {
+    const repo = yield* SandboxRepo
+    const row = yield* repo.findById(idBytes, orgId)
+
+    if (row) {
+      // Final credit meter before termination (best-effort).
+      yield* meterSandbox(row, new Date()).pipe(Effect.catchAll(() => Effect.void))
+    }
+
     // Collect artifacts before fully stopping (best-effort)
     yield* collectArtifactsOnStop(sandboxId, idBytes, orgId)
 
@@ -447,9 +455,6 @@ const stopSandbox = Effect.gen(function* () {
     }
     return HttpServerResponse.unsafeJson(response, { status: 202 })
   }
-
-  // Final credit meter before termination (best-effort)
-  yield* meterSandbox(row, new Date()).pipe(Effect.catchAll(() => Effect.void))
 
   // Transition to stopping
   yield* repo.updateStatus(idBytes, auth.orgId, 'stopping', {

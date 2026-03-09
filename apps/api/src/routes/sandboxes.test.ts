@@ -22,6 +22,7 @@ import { QuotaService } from '../services/quota.js'
 import { createInMemoryQuotaApi } from '../services/quota.memory.js'
 import { BillingService } from '../services/billing.js'
 import { createInMemoryBillingApi } from '../services/billing.memory.js'
+import type { BillingApi } from '../services/billing.js'
 import { AuditLog } from '../services/audit-log.js'
 import { createInMemoryAuditLog } from '../services/audit-log.memory.js'
 import { NodeRepo } from '../services/node-repo.js'
@@ -38,7 +39,7 @@ import type { NodeClientApi } from '../services/node-client.js'
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
 
-function createTestEnv(overrides?: { nodeClient?: NodeClientApi }) {
+function createTestEnv(overrides?: { nodeClient?: NodeClientApi; billingApi?: BillingApi }) {
   const sandboxRepo = createInMemorySandboxRepo()
   const execRepo = createInMemoryExecRepo()
   const sessionRepo = createInMemorySessionRepo()
@@ -47,7 +48,7 @@ function createTestEnv(overrides?: { nodeClient?: NodeClientApi }) {
   const redis = createInMemoryRedisApi()
   const artifactRepo = createInMemoryArtifactRepo()
   const quotaApi = createInMemoryQuotaApi()
-  const billingApi = createInMemoryBillingApi()
+  const billingApi = overrides?.billingApi ?? createInMemoryBillingApi()
   const auditLog = createInMemoryAuditLog()
 
   const TestLayer = AppLive.pipe(
@@ -557,6 +558,36 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes — node daemon 
 
     expect(result.status).toBe(201)
     expect(result.body.status).toBe('running')
+  })
+})
+
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/stop', () => {
+  test('returns 202 even if final billing metering fails', async () => {
+    const baseBillingApi = createInMemoryBillingApi()
+    const env = createTestEnv({
+      billingApi: {
+        ...baseBillingApi,
+        getBillingTier: () => Effect.die(new Error('billing unavailable')),
+        trackCompute: () => Effect.die(new Error('billing unavailable')),
+      },
+    })
+
+    const sandboxId = await createRunningSandbox(env)
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/stop`),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { sandbox_id: string; status: string } }
+      }),
+    )
+
+    expect(result.status).toBe(202)
+    expect(result.body.sandbox_id).toBe(sandboxId)
+    expect(result.body.status).toBe('stopping')
   })
 })
 
