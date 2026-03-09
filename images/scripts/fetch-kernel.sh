@@ -9,7 +9,7 @@
 set -euo pipefail
 
 KERNEL_VERSION="5.10"
-FC_VERSION="v1.10.1"
+FC_VERSION="v1.12.0"
 OUTPUT_DIR=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -18,7 +18,7 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --version VERSION   Kernel version: 5.10 or 6.1 (default: 5.10)"
-    echo "  --fc-version VER    Firecracker release version (default: v1.10.1)"
+    echo "  --fc-version VER    Firecracker release version (default: v1.12.0)"
     echo "  --output DIR        Output directory (default: images/kernel/)"
     echo "  -h, --help          Show this help"
     exit 0

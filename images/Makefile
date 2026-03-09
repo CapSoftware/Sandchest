@@ -27,7 +27,7 @@ TOOLCHAIN    ?= base
 IMAGE_SIZE   ?= 2G
 AGENT_BIN    ?=
 KERNEL_VER   ?= 5.10
-FC_VERSION   ?= v1.10.1
+FC_VERSION   ?= v1.12.0
 
 # Directories
 IMAGES_DIR   := $(shell pwd)

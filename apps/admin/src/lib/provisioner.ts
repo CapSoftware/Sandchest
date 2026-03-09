@@ -144,7 +144,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
     id: 'install-firecracker',
     name: 'Install Firecracker',
     commands: [
-      'FC_VERSION=1.10.1',
+      'FC_VERSION=1.12.0',
       'curl -sSL https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/firecracker-v${FC_VERSION}-x86_64.tgz -o /tmp/fc.tgz',
       'tar -xzf /tmp/fc.tgz -C /tmp',
       'mv /tmp/release-v${FC_VERSION}-x86_64/firecracker-v${FC_VERSION}-x86_64 /usr/local/bin/firecracker',
