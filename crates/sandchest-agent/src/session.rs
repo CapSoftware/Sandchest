@@ -215,6 +215,17 @@ fn spawn_shell(
     let pty = nix::pty::openpty(None, None)
         .map_err(|e| Status::internal(format!("openpty failed: {e}")))?;
 
+    #[cfg(unix)]
+    {
+        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+
+        let mut termios = tcgetattr(&pty.slave)
+            .map_err(|e| Status::internal(format!("tcgetattr failed: {e}")))?;
+        termios.local_flags.remove(LocalFlags::ECHO);
+        tcsetattr(&pty.slave, SetArg::TCSANOW, &termios)
+            .map_err(|e| Status::internal(format!("tcsetattr failed: {e}")))?;
+    }
+
     let slave_raw = pty.slave.as_raw_fd();
 
     let mut cmd = Command::new(shell);
