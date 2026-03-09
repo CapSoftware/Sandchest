@@ -51,16 +51,14 @@ pub fn heartbeat_msg(
     metrics: Option<proto::NodeMetrics>,
 ) -> proto::NodeToControl {
     proto::NodeToControl {
-        event: Some(proto::node_to_control::Event::Heartbeat(
-            proto::Heartbeat {
-                node_id: node_id.to_string(),
-                active_sandbox_ids,
-                slots_total,
-                slots_used,
-                snapshot_ids,
-                metrics,
-            },
-        )),
+        event: Some(proto::node_to_control::Event::Heartbeat(proto::Heartbeat {
+            node_id: node_id.to_string(),
+            active_sandbox_ids,
+            slots_total,
+            slots_used,
+            snapshot_ids,
+            metrics,
+        })),
     }
 }
 
@@ -499,12 +497,7 @@ mod tests {
     #[test]
     fn exec_output_stdout_takes_priority_over_stderr() {
         // When both are provided, stdout wins
-        let msg = exec_output(
-            "ex_both",
-            1,
-            Some(b"out".to_vec()),
-            Some(b"err".to_vec()),
-        );
+        let msg = exec_output("ex_both", 1, Some(b"out".to_vec()), Some(b"err".to_vec()));
         match msg.event {
             Some(proto::node_to_control::Event::ExecOutput(eo)) => {
                 assert!(matches!(

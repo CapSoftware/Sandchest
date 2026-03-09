@@ -81,11 +81,7 @@ impl proto::node_server::Node for NodeService {
 
         let _info = self
             .sandbox_manager
-            .create_sandbox_from_snapshot(
-                &req.sandbox_id,
-                &req.snapshot_ref,
-                req.env,
-            )
+            .create_sandbox_from_snapshot(&req.sandbox_id, &req.snapshot_ref, req.env)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -122,9 +118,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&sandbox_id).await?;
 
         let agent_req = router::to_agent_exec_request(req);
-        let response = client.exec(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent exec failed: {}", e))
-        })?;
+        let response = client
+            .exec(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent exec failed: {}", e)))?;
 
         let mut agent_stream = response.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -152,9 +149,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&req.sandbox_id).await?;
 
         let agent_req = router::to_agent_create_session(req);
-        let response = client.create_session(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent create_session failed: {}", e))
-        })?;
+        let response = client
+            .create_session(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent create_session failed: {}", e)))?;
 
         let resp = response.into_inner();
         Ok(Response::new(proto::NodeCreateSessionResponse {
@@ -172,9 +170,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&req.sandbox_id).await?;
 
         let agent_req = router::to_agent_session_exec(req);
-        let response = client.session_exec(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent session_exec failed: {}", e))
-        })?;
+        let response = client
+            .session_exec(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent session_exec failed: {}", e)))?;
 
         let mut agent_stream = response.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -202,9 +201,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&req.sandbox_id).await?;
 
         let agent_req = router::to_agent_session_input(req);
-        client.session_input(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent session_input failed: {}", e))
-        })?;
+        client
+            .session_input(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent session_input failed: {}", e)))?;
 
         Ok(Response::new(()))
     }
@@ -217,9 +217,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&req.sandbox_id).await?;
 
         let agent_req = router::to_agent_destroy_session(req);
-        client.destroy_session(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent destroy_session failed: {}", e))
-        })?;
+        client
+            .destroy_session(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent destroy_session failed: {}", e)))?;
 
         Ok(Response::new(()))
     }
@@ -258,9 +259,7 @@ impl proto::node_server::Node for NodeService {
         let response = client
             .put_file(ReceiverStream::new(rx))
             .await
-            .map_err(|e| {
-                Status::internal(format!("agent put_file failed: {}", e))
-            })?;
+            .map_err(|e| Status::internal(format!("agent put_file failed: {}", e)))?;
 
         let resp = response.into_inner();
         Ok(Response::new(proto::NodePutFileResponse {
@@ -279,9 +278,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&sandbox_id).await?;
 
         let agent_req = router::to_agent_get_file(req);
-        let response = client.get_file(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent get_file failed: {}", e))
-        })?;
+        let response = client
+            .get_file(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent get_file failed: {}", e)))?;
 
         let mut agent_stream = response.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -309,9 +309,10 @@ impl proto::node_server::Node for NodeService {
         let mut client = self.router.get_agent(&req.sandbox_id).await?;
 
         let agent_req = router::to_agent_list_files(req);
-        let response = client.list_files(agent_req).await.map_err(|e| {
-            Status::internal(format!("agent list_files failed: {}", e))
-        })?;
+        let response = client
+            .list_files(agent_req)
+            .await
+            .map_err(|e| Status::internal(format!("agent list_files failed: {}", e)))?;
 
         Ok(Response::new(router::to_node_list_files_response(
             response.into_inner(),

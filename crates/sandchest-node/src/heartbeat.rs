@@ -17,7 +17,11 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_SLOTS: u32 = 256;
 
 /// Collect system metrics using the sysinfo crate.
-fn collect_metrics(sys: &mut System, networks: &mut Networks, disks: &mut Disks) -> proto::NodeMetrics {
+fn collect_metrics(
+    sys: &mut System,
+    networks: &mut Networks,
+    disks: &mut Disks,
+) -> proto::NodeMetrics {
     sys.refresh_cpu_all();
     sys.refresh_memory();
     networks.refresh();
@@ -137,7 +141,9 @@ mod tests {
         tokio::fs::create_dir(dir.join("snap_abc")).await.unwrap();
         tokio::fs::create_dir(dir.join("snap_def")).await.unwrap();
         // Create a file (should be ignored — only directories are snapshots)
-        tokio::fs::write(dir.join("not-a-snapshot"), b"").await.unwrap();
+        tokio::fs::write(dir.join("not-a-snapshot"), b"")
+            .await
+            .unwrap();
 
         let ids = scan_snapshots(dir.to_str().unwrap()).await;
         assert_eq!(ids, vec!["snap_abc", "snap_def"]);

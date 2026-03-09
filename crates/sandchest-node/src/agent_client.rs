@@ -121,9 +121,10 @@ impl AgentClient {
             make_channel(endpoint, Duration::from_secs(2), Duration::from_secs(5)).await?;
 
         let mut client = agent_proto::guest_agent_client::GuestAgentClient::new(channel);
-        let response = client.health(()).await.map_err(|e| {
-            AgentClientError::Rpc(format!("health RPC failed: {}", e))
-        })?;
+        let response = client
+            .health(())
+            .await
+            .map_err(|e| AgentClientError::Rpc(format!("health RPC failed: {}", e)))?;
 
         Ok(response.into_inner().ready)
     }
@@ -131,12 +132,20 @@ impl AgentClient {
     /// Connect and return a reusable gRPC client handle.
     pub async fn connect(
         &self,
-    ) -> Result<agent_proto::guest_agent_client::GuestAgentClient<tonic::transport::Channel>, AgentClientError>
-    {
-        let channel =
-            make_channel(&self.endpoint, Duration::from_secs(5), Duration::from_secs(300)).await?;
+    ) -> Result<
+        agent_proto::guest_agent_client::GuestAgentClient<tonic::transport::Channel>,
+        AgentClientError,
+    > {
+        let channel = make_channel(
+            &self.endpoint,
+            Duration::from_secs(5),
+            Duration::from_secs(300),
+        )
+        .await?;
 
-        Ok(agent_proto::guest_agent_client::GuestAgentClient::new(channel))
+        Ok(agent_proto::guest_agent_client::GuestAgentClient::new(
+            channel,
+        ))
     }
 }
 
@@ -155,19 +164,15 @@ async fn make_channel(
     request_timeout: Duration,
 ) -> Result<tonic::transport::Channel, AgentClientError> {
     match endpoint {
-        AgentEndpoint::Tcp(uri) => {
-            tonic::transport::Channel::from_shared(uri.clone())
-                .map_err(|e| AgentClientError::Connection(format!("invalid endpoint: {}", e)))?
-                .connect_timeout(connect_timeout)
-                .timeout(request_timeout)
-                .connect()
-                .await
-                .map_err(|e| AgentClientError::Connection(format!("connect failed: {}", e)))
-        }
+        AgentEndpoint::Tcp(uri) => tonic::transport::Channel::from_shared(uri.clone())
+            .map_err(|e| AgentClientError::Connection(format!("invalid endpoint: {}", e)))?
+            .connect_timeout(connect_timeout)
+            .timeout(request_timeout)
+            .connect()
+            .await
+            .map_err(|e| AgentClientError::Connection(format!("connect failed: {}", e))),
         AgentEndpoint::Uds(path) => {
-            let connector = UdsConnector {
-                path: path.clone(),
-            };
+            let connector = UdsConnector { path: path.clone() };
             // The URI is unused — the connector ignores it and connects to the
             // UDS path directly. We still need a valid URI for HTTP/2 framing.
             tonic::transport::Endpoint::from_static("http://[::1]:0")
@@ -212,8 +217,9 @@ impl UdsConnector {
 impl tower::Service<http::Uri> for UdsConnector {
     type Response = hyper_util::rt::TokioIo<tokio::net::UnixStream>;
     type Error = std::io::Error;
-    type Future =
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
 
     fn poll_ready(
         &mut self,
@@ -296,7 +302,8 @@ mod tests {
     #[test]
     fn endpoint_for_sandbox_dev_mode() {
         std::env::set_var("SANDCHEST_AGENT_DEV", "1");
-        let endpoint = AgentClient::endpoint_for_sandbox("/var/sandchest/sandboxes/sb_x/vsock.sock");
+        let endpoint =
+            AgentClient::endpoint_for_sandbox("/var/sandchest/sandboxes/sb_x/vsock.sock");
         assert!(matches!(endpoint, AgentEndpoint::Tcp(_)));
         std::env::remove_var("SANDCHEST_AGENT_DEV");
     }
@@ -317,7 +324,8 @@ mod tests {
 
     #[test]
     fn agent_endpoint_uds_display() {
-        let endpoint = AgentEndpoint::Uds("/var/sandchest/sandboxes/sb_x/vsock.sock_52".to_string());
+        let endpoint =
+            AgentEndpoint::Uds("/var/sandchest/sandboxes/sb_x/vsock.sock_52".to_string());
         assert_eq!(
             endpoint.to_string(),
             "unix:/var/sandchest/sandboxes/sb_x/vsock.sock_52"
@@ -343,7 +351,9 @@ mod tests {
     fn agent_client_new_stores_endpoint() {
         let endpoint = AgentEndpoint::Tcp("http://localhost:9090".to_string());
         let client = AgentClient::new(endpoint);
-        assert!(matches!(client.endpoint, AgentEndpoint::Tcp(ref uri) if uri == "http://localhost:9090"));
+        assert!(
+            matches!(client.endpoint, AgentEndpoint::Tcp(ref uri) if uri == "http://localhost:9090")
+        );
     }
 
     #[test]
@@ -414,8 +424,7 @@ mod tests {
     #[tokio::test]
     async fn wait_for_health_timeout_on_unreachable_tcp() {
         let endpoint = AgentEndpoint::Tcp("http://127.0.0.1:1".to_string());
-        let result =
-            AgentClient::wait_for_health(&endpoint, Duration::from_millis(200)).await;
+        let result = AgentClient::wait_for_health(&endpoint, Duration::from_millis(200)).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -425,10 +434,8 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_health_timeout_on_unreachable_uds() {
-        let endpoint =
-            AgentEndpoint::Uds("/tmp/sandchest-nonexistent-vsock.sock_52".to_string());
-        let result =
-            AgentClient::wait_for_health(&endpoint, Duration::from_millis(200)).await;
+        let endpoint = AgentEndpoint::Uds("/tmp/sandchest-nonexistent-vsock.sock_52".to_string());
+        let result = AgentClient::wait_for_health(&endpoint, Duration::from_millis(200)).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),

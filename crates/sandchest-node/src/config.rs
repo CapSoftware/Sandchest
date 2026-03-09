@@ -55,10 +55,7 @@ pub struct FirecrackerConfig {
     #[serde(rename = "machine-config")]
     pub machine_config: MachineConfig,
     pub vsock: Vsock,
-    #[serde(
-        rename = "network-interfaces",
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "network-interfaces", skip_serializing_if = "Vec::is_empty")]
     pub network_interfaces: Vec<NetworkInterface>,
 }
 
@@ -96,8 +93,7 @@ pub struct NetworkInterface {
     pub host_dev_name: String,
 }
 
-const BOOT_ARGS: &str =
-    "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/overlay-init";
+const BOOT_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/overlay-init";
 
 impl VmConfig {
     /// Build the Firecracker JSON configuration.
@@ -179,8 +175,7 @@ impl S3Config {
 
         Some(Self {
             bucket,
-            region: std::env::var("SANDCHEST_S3_REGION")
-                .unwrap_or_else(|_| "auto".to_string()),
+            region: std::env::var("SANDCHEST_S3_REGION").unwrap_or_else(|_| "auto".to_string()),
             endpoint: std::env::var("SANDCHEST_S3_ENDPOINT").ok(),
             access_key,
             secret_key,
@@ -234,8 +229,8 @@ pub struct NodeConfig {
 
 impl NodeConfig {
     pub fn from_env() -> Self {
-        let data_dir = std::env::var("SANDCHEST_DATA_DIR")
-            .unwrap_or_else(|_| "/var/sandchest".to_string());
+        let data_dir =
+            std::env::var("SANDCHEST_DATA_DIR").unwrap_or_else(|_| "/var/sandchest".to_string());
         Self {
             node_id: std::env::var("SANDCHEST_NODE_ID")
                 .unwrap_or_else(|_| id::generate_id(id::NODE_PREFIX)),

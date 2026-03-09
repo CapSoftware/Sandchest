@@ -9,8 +9,7 @@ use crate::agent_client::agent_proto;
 use crate::config::S3Config;
 use crate::proto;
 
-type AgentGrpcClient =
-    agent_proto::guest_agent_client::GuestAgentClient<tonic::transport::Channel>;
+type AgentGrpcClient = agent_proto::guest_agent_client::GuestAgentClient<tonic::transport::Channel>;
 
 /// Collect artifacts from a sandbox by reading files via the guest agent
 /// and uploading them to S3-compatible object storage.
@@ -92,9 +91,10 @@ async fn fetch_file(client: &mut AgentGrpcClient, path: &str) -> Result<Vec<u8>,
         path: path.to_string(),
     };
 
-    let response = client.get_file(request).await.map_err(|e| {
-        Status::internal(format!("agent get_file failed for {}: {}", path, e))
-    })?;
+    let response = client
+        .get_file(request)
+        .await
+        .map_err(|e| Status::internal(format!("agent get_file failed for {}: {}", path, e)))?;
 
     let mut stream = response.into_inner();
     let mut data = Vec::new();
@@ -160,8 +160,7 @@ async fn build_s3_client(config: &S3Config) -> aws_sdk_s3::Client {
             .load()
             .await;
 
-        let mut s3_config =
-            aws_sdk_s3::config::Builder::from(&aws_config);
+        let mut s3_config = aws_sdk_s3::config::Builder::from(&aws_config);
 
         if let Some(ref endpoint) = config.endpoint {
             s3_config = s3_config.endpoint_url(endpoint).force_path_style(true);

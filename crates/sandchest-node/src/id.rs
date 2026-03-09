@@ -60,7 +60,9 @@ pub fn generate_id(prefix: &str) -> String {
 
 /// Parse a prefixed ID back to its prefix and raw bytes.
 pub fn parse_id(id: &str) -> Result<(String, [u8; 16]), String> {
-    let idx = id.rfind('_').ok_or("Invalid ID format: missing prefix separator")?;
+    let idx = id
+        .rfind('_')
+        .ok_or("Invalid ID format: missing prefix separator")?;
     let prefix = &id[..=idx];
     let encoded = &id[idx + 1..];
     let bytes = base62_decode(encoded)?;

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use serde_json::json;
 use tracing::info;
 
 /// Firecracker API client that communicates over a Unix domain socket.
@@ -39,8 +40,8 @@ impl FirecrackerApi {
         path: &str,
         body: Option<&str>,
     ) -> Result<(u16, String), SnapshotError> {
-        use std::os::unix::net::UnixStream as StdUnixStream;
         use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream as StdUnixStream;
 
         let socket_path = self.api_socket_path.clone();
         let method = method.to_string();
@@ -128,6 +129,7 @@ impl FirecrackerApi {
         &self,
         snapshot_path: &str,
         mem_path: &str,
+        network_host_dev_name: Option<&str>,
     ) -> Result<(), SnapshotError> {
         info!(
             snapshot_path = %snapshot_path,
@@ -135,12 +137,11 @@ impl FirecrackerApi {
             "loading snapshot"
         );
 
-        let body = format!(
-            r#"{{"snapshot_path":"{}","mem_file_path":"{}","enable_diff_snapshots":false,"resume_vm":false}}"#,
-            snapshot_path, mem_path
-        );
-
-        let (status, resp_body) = self.send_request("PUT", "/snapshot/load", Some(&body)).await?;
+        let body =
+            build_restore_snapshot_body(snapshot_path, mem_path, network_host_dev_name).to_string();
+        let (status, resp_body) = self
+            .send_request("PUT", "/snapshot/load", Some(&body))
+            .await?;
         if status >= 300 {
             return Err(SnapshotError::Api(format!(
                 "PUT /snapshot/load returned {}: {}",
@@ -209,7 +210,9 @@ impl FirecrackerApi {
             snapshot_path, mem_path
         );
 
-        let (status, resp_body) = self.send_request("PUT", "/snapshot/create", Some(&body)).await?;
+        let (status, resp_body) = self
+            .send_request("PUT", "/snapshot/create", Some(&body))
+            .await?;
         if status >= 300 {
             return Err(SnapshotError::Api(format!(
                 "PUT /snapshot/create returned {}: {}",
@@ -232,9 +235,9 @@ fn parse_status_code(response: &str) -> Result<u16, SnapshotError> {
             first_line
         )));
     }
-    parts[1].parse::<u16>().map_err(|_| {
-        SnapshotError::Api(format!("invalid status code in: {}", first_line))
-    })
+    parts[1]
+        .parse::<u16>()
+        .map_err(|_| SnapshotError::Api(format!("invalid status code in: {}", first_line)))
 }
 
 fn parse_content_length(headers: &str) -> Option<usize> {
@@ -247,6 +250,30 @@ fn parse_content_length(headers: &str) -> Option<usize> {
         }
     }
     None
+}
+
+fn build_restore_snapshot_body(
+    snapshot_path: &str,
+    mem_path: &str,
+    network_host_dev_name: Option<&str>,
+) -> serde_json::Value {
+    let mut body = json!({
+        "snapshot_path": snapshot_path,
+        "mem_file_path": mem_path,
+        "enable_diff_snapshots": false,
+        "resume_vm": false,
+    });
+
+    if let Some(host_dev_name) = network_host_dev_name {
+        body["network_overrides"] = json!([
+            {
+                "iface_id": "eth0",
+                "host_dev_name": host_dev_name,
+            }
+        ]);
+    }
+
+    body
 }
 
 #[derive(Debug)]
@@ -283,10 +310,7 @@ mod tests {
             parse_content_length("Content-Length: 42\r\nOther: val"),
             Some(42)
         );
-        assert_eq!(
-            parse_content_length("content-length: 100\r\n"),
-            Some(100)
-        );
+        assert_eq!(parse_content_length("content-length: 100\r\n"), Some(100));
         assert_eq!(parse_content_length("No-CL-Header: true"), None);
     }
 
@@ -326,10 +350,7 @@ mod tests {
 
     #[test]
     fn parse_content_length_mixed_case() {
-        assert_eq!(
-            parse_content_length("CONTENT-LENGTH: 50\r\n"),
-            Some(50)
-        );
+        assert_eq!(parse_content_length("CONTENT-LENGTH: 50\r\n"), Some(50));
     }
 
     #[test]
@@ -353,10 +374,7 @@ mod tests {
 
     #[test]
     fn parse_content_length_invalid_value() {
-        assert_eq!(
-            parse_content_length("Content-Length: notanumber\r\n"),
-            None
-        );
+        assert_eq!(parse_content_length("Content-Length: notanumber\r\n"), None);
     }
 
     #[test]
@@ -400,7 +418,7 @@ mod tests {
     #[tokio::test]
     async fn firecracker_api_send_request_fails_on_nonexistent_socket() {
         let api = FirecrackerApi::new("/tmp/nonexistent-socket-send-test.sock");
-        let result = api.restore_snapshot("/snap", "/mem").await;
+        let result = api.restore_snapshot("/snap", "/mem", None).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SnapshotError::Api(_)));
     }
@@ -424,5 +442,20 @@ mod tests {
         let api = FirecrackerApi::new("/tmp/nonexistent-socket-take-test.sock");
         let result = api.take_snapshot("/snap", "/mem").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn restore_snapshot_body_omits_network_overrides_when_absent() {
+        let body = build_restore_snapshot_body("/snap", "/mem", None);
+        assert_eq!(body["snapshot_path"], "/snap");
+        assert_eq!(body["mem_file_path"], "/mem");
+        assert!(body.get("network_overrides").is_none());
+    }
+
+    #[test]
+    fn restore_snapshot_body_includes_network_override_when_present() {
+        let body = build_restore_snapshot_body("/snap", "/mem", Some("tap-child"));
+        assert_eq!(body["network_overrides"][0]["iface_id"], "eth0");
+        assert_eq!(body["network_overrides"][0]["host_dev_name"], "tap-child");
     }
 }

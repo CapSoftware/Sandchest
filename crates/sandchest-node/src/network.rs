@@ -45,8 +45,8 @@ pub async fn setup_network(sandbox_id: &str, slot: u16) -> Result<NetworkConfig,
     let host_cidr = format!("{}/30", host_ip);
     let guest_mac = mac_for_slot(slot);
 
-    let outbound_iface =
-        std::env::var("SANDCHEST_OUTBOUND_IFACE").unwrap_or_else(|_| DEFAULT_OUTBOUND_IFACE.to_string());
+    let outbound_iface = std::env::var("SANDCHEST_OUTBOUND_IFACE")
+        .unwrap_or_else(|_| DEFAULT_OUTBOUND_IFACE.to_string());
 
     info!(
         sandbox_id = %sandbox_id,
@@ -69,22 +69,52 @@ pub async fn setup_network(sandbox_id: &str, slot: u16) -> Result<NetworkConfig,
     // 4. NAT masquerade
     run_cmd(
         "iptables",
-        &["-t", "nat", "-A", "POSTROUTING", "-o", &outbound_iface, "-s", &subnet, "-j", "MASQUERADE"],
+        &[
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-o",
+            &outbound_iface,
+            "-s",
+            &subnet,
+            "-j",
+            "MASQUERADE",
+        ],
     )
     .await?;
 
     // 5. Forward rules
     run_cmd(
         "iptables",
-        &["-A", "FORWARD", "-i", &tap_name, "-o", &outbound_iface, "-j", "ACCEPT"],
+        &[
+            "-A",
+            "FORWARD",
+            "-i",
+            &tap_name,
+            "-o",
+            &outbound_iface,
+            "-j",
+            "ACCEPT",
+        ],
     )
     .await?;
 
     run_cmd(
         "iptables",
         &[
-            "-A", "FORWARD", "-i", &outbound_iface, "-o", &tap_name,
-            "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT",
+            "-A",
+            "FORWARD",
+            "-i",
+            &outbound_iface,
+            "-o",
+            &tap_name,
+            "-m",
+            "state",
+            "--state",
+            "RELATED,ESTABLISHED",
+            "-j",
+            "ACCEPT",
         ],
     )
     .await?;
@@ -114,8 +144,8 @@ pub async fn teardown_network(sandbox_id: &str, slot: u16) {
     let tap_name = tap_name_for(sandbox_id);
     let subnet = format!("172.16.{}.0/30", slot);
 
-    let outbound_iface =
-        std::env::var("SANDCHEST_OUTBOUND_IFACE").unwrap_or_else(|_| DEFAULT_OUTBOUND_IFACE.to_string());
+    let outbound_iface = std::env::var("SANDCHEST_OUTBOUND_IFACE")
+        .unwrap_or_else(|_| DEFAULT_OUTBOUND_IFACE.to_string());
 
     info!(sandbox_id = %sandbox_id, tap = %tap_name, slot = slot, "tearing down network");
 
@@ -123,8 +153,18 @@ pub async fn teardown_network(sandbox_id: &str, slot: u16) {
     if let Err(e) = run_cmd(
         "iptables",
         &[
-            "-D", "FORWARD", "-i", &outbound_iface, "-o", &tap_name,
-            "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT",
+            "-D",
+            "FORWARD",
+            "-i",
+            &outbound_iface,
+            "-o",
+            &tap_name,
+            "-m",
+            "state",
+            "--state",
+            "RELATED,ESTABLISHED",
+            "-j",
+            "ACCEPT",
         ],
     )
     .await
@@ -134,7 +174,16 @@ pub async fn teardown_network(sandbox_id: &str, slot: u16) {
 
     if let Err(e) = run_cmd(
         "iptables",
-        &["-D", "FORWARD", "-i", &tap_name, "-o", &outbound_iface, "-j", "ACCEPT"],
+        &[
+            "-D",
+            "FORWARD",
+            "-i",
+            &tap_name,
+            "-o",
+            &outbound_iface,
+            "-j",
+            "ACCEPT",
+        ],
     )
     .await
     {
@@ -143,7 +192,18 @@ pub async fn teardown_network(sandbox_id: &str, slot: u16) {
 
     if let Err(e) = run_cmd(
         "iptables",
-        &["-t", "nat", "-D", "POSTROUTING", "-o", &outbound_iface, "-s", &subnet, "-j", "MASQUERADE"],
+        &[
+            "-t",
+            "nat",
+            "-D",
+            "POSTROUTING",
+            "-o",
+            &outbound_iface,
+            "-s",
+            &subnet,
+            "-j",
+            "MASQUERADE",
+        ],
     )
     .await
     {
@@ -166,8 +226,8 @@ async fn setup_bandwidth_limit(tap_name: &str, rate_mbps: u32) -> Result<(), Net
     run_cmd(
         "tc",
         &[
-            "qdisc", "add", "dev", tap_name, "root", "tbf",
-            "rate", &rate, "burst", &burst, "latency", "50ms",
+            "qdisc", "add", "dev", tap_name, "root", "tbf", "rate", &rate, "burst", &burst,
+            "latency", "50ms",
         ],
     )
     .await

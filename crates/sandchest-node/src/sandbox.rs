@@ -121,10 +121,7 @@ impl SandboxManager {
                     .to_string(),
             }
         } else {
-            let dir = format!(
-                "{}/sandboxes/{}",
-                self.node_config.data_dir, sandbox_id
-            );
+            let dir = format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
             SandboxPaths {
                 api_socket: format!("{}/api.sock", dir),
                 vsock: format!("{}/vsock.sock", dir),
@@ -169,7 +166,8 @@ impl SandboxManager {
 
         // Insert as provisioning
         let paths = self.sandbox_paths(sandbox_id);
-        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot), &paths.vsock).await?;
+        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot), &paths.vsock)
+            .await?;
         self.report_event(events::sandbox_event(
             sandbox_id,
             proto::SandboxEventType::Created,
@@ -182,9 +180,16 @@ impl SandboxManager {
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to set up network");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("network setup failed: {}", e)));
+                self.report_event(events::sandbox_event(
+                    sandbox_id,
+                    proto::SandboxEventType::Failed,
+                    &format!("network setup failed: {}", e),
+                ));
                 self.slot_manager.release(slot);
-                return Err(SandboxError::CreateFailed(format!("network setup failed: {}", e)));
+                return Err(SandboxError::CreateFailed(format!(
+                    "network setup failed: {}",
+                    e
+                )));
             }
         };
 
@@ -197,10 +202,17 @@ impl SandboxManager {
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to prepare chroot");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("chroot setup failed: {}", e)));
+                    self.report_event(events::sandbox_event(
+                        sandbox_id,
+                        proto::SandboxEventType::Failed,
+                        &format!("chroot setup failed: {}", e),
+                    ));
                     network::teardown_network(sandbox_id, slot).await;
                     self.slot_manager.release(slot);
-                    return Err(SandboxError::CreateFailed(format!("chroot setup failed: {}", e)));
+                    return Err(SandboxError::CreateFailed(format!(
+                        "chroot setup failed: {}",
+                        e
+                    )));
                 }
             }
             match disk::clone_disk_to(rootfs_ref, &paths.dir, &self.node_config.data_dir).await {
@@ -208,11 +220,18 @@ impl SandboxManager {
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk to chroot");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    self.report_event(events::sandbox_event(
+                        sandbox_id,
+                        proto::SandboxEventType::Failed,
+                        &format!("disk clone failed: {}", e),
+                    ));
                     network::teardown_network(sandbox_id, slot).await;
                     self.slot_manager.release(slot);
                     jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
-                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                    return Err(SandboxError::CreateFailed(format!(
+                        "disk clone failed: {}",
+                        e
+                    )));
                 }
             }
         } else {
@@ -221,21 +240,35 @@ impl SandboxManager {
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone disk");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    self.report_event(events::sandbox_event(
+                        sandbox_id,
+                        proto::SandboxEventType::Failed,
+                        &format!("disk clone failed: {}", e),
+                    ));
                     network::teardown_network(sandbox_id, slot).await;
                     self.slot_manager.release(slot);
-                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                    return Err(SandboxError::CreateFailed(format!(
+                        "disk clone failed: {}",
+                        e
+                    )));
                 }
             }
         };
 
         // Step 3: Configure and start Firecracker (with networking)
-        let vm = match self.start_firecracker(sandbox_id, kernel_ref, &rootfs_path, profile, &net_config).await {
+        let vm = match self
+            .start_firecracker(sandbox_id, kernel_ref, &rootfs_path, profile, &net_config)
+            .await
+        {
             Ok(vm) => vm,
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to start Firecracker");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("firecracker failed: {}", e)));
+                self.report_event(events::sandbox_event(
+                    sandbox_id,
+                    proto::SandboxEventType::Failed,
+                    &format!("firecracker failed: {}", e),
+                ));
                 network::teardown_network(sandbox_id, slot).await;
                 self.slot_manager.release(slot);
                 // Best-effort cleanup of cloned disk
@@ -248,11 +281,18 @@ impl SandboxManager {
         if let Err(e) = self.wait_for_agent_health(sandbox_id).await {
             error!(sandbox_id = %sandbox_id, error = %e, "guest agent health check failed");
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("agent health check failed: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("agent health check failed: {}", e),
+            ));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
-            return Err(SandboxError::CreateFailed(format!("agent health check failed: {}", e)));
+            return Err(SandboxError::CreateFailed(format!(
+                "agent health check failed: {}",
+                e
+            )));
         }
 
         // Step 5 + 6: Store VM handle, env vars already stored, mark running
@@ -320,7 +360,15 @@ impl SandboxManager {
             .map_err(|e| SandboxError::CreateFailed(e.to_string()))?;
 
         let snapshot_paths = self.sandbox_paths(sandbox_id);
-        self.insert_provisioning(sandbox_id, profile, &env, start, Some(slot), &snapshot_paths.vsock).await?;
+        self.insert_provisioning(
+            sandbox_id,
+            profile,
+            &env,
+            start,
+            Some(slot),
+            &snapshot_paths.vsock,
+        )
+        .await?;
         self.report_event(events::sandbox_event(
             sandbox_id,
             proto::SandboxEventType::Created,
@@ -330,14 +378,21 @@ impl SandboxManager {
         // Step 1a: Set up networking
         // Network is set up but config isn't passed to Firecracker in snapshot mode
         // (snapshot already has networking baked in). We keep the TAP/NAT rules active.
-        let _net_config = match network::setup_network(sandbox_id, slot).await {
+        let net_config = match network::setup_network(sandbox_id, slot).await {
             Ok(cfg) => cfg,
             Err(e) => {
                 error!(sandbox_id = %sandbox_id, error = %e, "failed to set up network");
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("network setup failed: {}", e)));
+                self.report_event(events::sandbox_event(
+                    sandbox_id,
+                    proto::SandboxEventType::Failed,
+                    &format!("network setup failed: {}", e),
+                ));
                 self.slot_manager.release(slot);
-                return Err(SandboxError::CreateFailed(format!("network setup failed: {}", e)));
+                return Err(SandboxError::CreateFailed(format!(
+                    "network setup failed: {}",
+                    e
+                )));
             }
         };
 
@@ -347,23 +402,39 @@ impl SandboxManager {
             // Prepare chroot directory first
             if let Err(e) = jailer::prepare_chroot(&self.node_config.jailer, sandbox_id).await {
                 self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("chroot setup failed: {}", e)));
+                self.report_event(events::sandbox_event(
+                    sandbox_id,
+                    proto::SandboxEventType::Failed,
+                    &format!("chroot setup failed: {}", e),
+                ));
                 network::teardown_network(sandbox_id, slot).await;
                 self.slot_manager.release(slot);
-                return Err(SandboxError::CreateFailed(format!("chroot setup failed: {}", e)));
+                return Err(SandboxError::CreateFailed(format!(
+                    "chroot setup failed: {}",
+                    e
+                )));
             }
         }
         let _rootfs_path = if self.node_config.jailer.enabled {
-            match disk::clone_disk_to(&snapshot_rootfs, &paths.dir, &self.node_config.data_dir).await {
+            match disk::clone_disk_to(&snapshot_rootfs, &paths.dir, &self.node_config.data_dir)
+                .await
+            {
                 Ok(path) => path,
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    self.report_event(events::sandbox_event(
+                        sandbox_id,
+                        proto::SandboxEventType::Failed,
+                        &format!("disk clone failed: {}", e),
+                    ));
                     network::teardown_network(sandbox_id, slot).await;
                     self.slot_manager.release(slot);
                     jailer::cleanup_jail(&self.node_config.jailer, sandbox_id).await;
-                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                    return Err(SandboxError::CreateFailed(format!(
+                        "disk clone failed: {}",
+                        e
+                    )));
                 }
             }
         } else {
@@ -372,10 +443,17 @@ impl SandboxManager {
                 Err(e) => {
                     error!(sandbox_id = %sandbox_id, error = %e, "failed to clone snapshot disk");
                     self.set_status(sandbox_id, SandboxStatus::Failed).await;
-                    self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("disk clone failed: {}", e)));
+                    self.report_event(events::sandbox_event(
+                        sandbox_id,
+                        proto::SandboxEventType::Failed,
+                        &format!("disk clone failed: {}", e),
+                    ));
                     network::teardown_network(sandbox_id, slot).await;
                     self.slot_manager.release(slot);
-                    return Err(SandboxError::CreateFailed(format!("disk clone failed: {}", e)));
+                    return Err(SandboxError::CreateFailed(format!(
+                        "disk clone failed: {}",
+                        e
+                    )));
                 }
             }
         };
@@ -388,17 +466,31 @@ impl SandboxManager {
         let local_snapshot = format!("{}/snapshot_file", paths.dir);
         if let Err(e) = tokio::fs::copy(&snapshot_mem, &local_mem).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("copy mem file failed: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("copy mem file failed: {}", e),
+            ));
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
-            return Err(SandboxError::CreateFailed(format!("failed to copy mem file: {}", e)));
+            return Err(SandboxError::CreateFailed(format!(
+                "failed to copy mem file: {}",
+                e
+            )));
         }
         if let Err(e) = tokio::fs::copy(&snapshot_state, &local_snapshot).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("copy snapshot file failed: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("copy snapshot file failed: {}", e),
+            ));
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
-            return Err(SandboxError::CreateFailed(format!("failed to copy snapshot file: {}", e)));
+            return Err(SandboxError::CreateFailed(format!(
+                "failed to copy snapshot file: {}",
+                e
+            )));
         }
 
         // Start Firecracker (jailed or direct, without config-file for snapshot mode)
@@ -411,9 +503,7 @@ impl SandboxManager {
                 None,
             )
             .spawn()
-            .map_err(|e| {
-                SandboxError::CreateFailed(format!("failed to spawn jailer: {}", e))
-            })?;
+            .map_err(|e| SandboxError::CreateFailed(format!("failed to spawn jailer: {}", e)))?;
             FirecrackerVm::from_parts(
                 sandbox_id.to_string(),
                 api_socket_path.clone(),
@@ -449,7 +539,11 @@ impl SandboxManager {
         let fc_api = FirecrackerApi::new(&api_socket_path);
         if let Err(e) = fc_api.wait_for_ready(Duration::from_secs(5)).await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("firecracker API not ready: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("firecracker API not ready: {}", e),
+            ));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -463,9 +557,16 @@ impl SandboxManager {
         let fc_snapshot = vm.fc_path(&local_snapshot);
         let fc_mem = vm.fc_path(&local_mem);
 
-        if let Err(e) = fc_api.restore_snapshot(&fc_snapshot, &fc_mem).await {
+        if let Err(e) = fc_api
+            .restore_snapshot(&fc_snapshot, &fc_mem, Some(&net_config.tap_name))
+            .await
+        {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("snapshot restore failed: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("snapshot restore failed: {}", e),
+            ));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -478,7 +579,11 @@ impl SandboxManager {
         // Step 4: Resume VM
         if let Err(e) = fc_api.resume_vm().await {
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("VM resume failed: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("VM resume failed: {}", e),
+            ));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -492,7 +597,11 @@ impl SandboxManager {
         if let Err(e) = self.wait_for_agent_health(sandbox_id).await {
             warn!(sandbox_id = %sandbox_id, error = %e, "agent health check failed after warm start");
             self.set_status(sandbox_id, SandboxStatus::Failed).await;
-            self.report_event(events::sandbox_event(sandbox_id, proto::SandboxEventType::Failed, &format!("agent health check failed: {}", e)));
+            self.report_event(events::sandbox_event(
+                sandbox_id,
+                proto::SandboxEventType::Failed,
+                &format!("agent health check failed: {}", e),
+            ));
             let _ = vm.destroy().await;
             network::teardown_network(sandbox_id, slot).await;
             self.slot_manager.release(slot);
@@ -582,7 +691,14 @@ impl SandboxManager {
         // Insert fork as provisioning
         let fork_initial_paths = self.sandbox_paths(new_sandbox_id);
         if let Err(e) = self
-            .insert_provisioning(new_sandbox_id, profile, &env, start, Some(slot), &fork_initial_paths.vsock)
+            .insert_provisioning(
+                new_sandbox_id,
+                profile,
+                &env,
+                start,
+                Some(slot),
+                &fork_initial_paths.vsock,
+            )
             .await
         {
             self.slot_manager.release(slot);
@@ -596,31 +712,29 @@ impl SandboxManager {
         ));
 
         // Set up networking for the fork
-        if let Err(e) = network::setup_network(new_sandbox_id, slot).await {
-            self.cleanup_fork_failure(
-                new_sandbox_id,
-                slot,
-                None,
-                &format!("network setup failed: {}", e),
-            )
-            .await;
-            return Err(SandboxError::ForkFailed(format!(
-                "network setup failed: {}",
-                e
-            )));
-        }
+        let net_config = match network::setup_network(new_sandbox_id, slot).await {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                self.cleanup_fork_failure(
+                    new_sandbox_id,
+                    slot,
+                    None,
+                    &format!("network setup failed: {}", e),
+                )
+                .await;
+                return Err(SandboxError::ForkFailed(format!(
+                    "network setup failed: {}",
+                    e
+                )));
+            }
+        };
 
         // Create fork sandbox directory (needed before Firecracker writes snapshot files)
         let fork_paths = self.sandbox_paths(new_sandbox_id);
         let fork_sandbox_dir = fork_paths.dir.clone();
         if let Err(e) = tokio::fs::create_dir_all(&fork_sandbox_dir).await {
-            self.cleanup_fork_failure(
-                new_sandbox_id,
-                slot,
-                None,
-                &format!("mkdir failed: {}", e),
-            )
-            .await;
+            self.cleanup_fork_failure(new_sandbox_id, slot, None, &format!("mkdir failed: {}", e))
+                .await;
             return Err(SandboxError::ForkFailed(format!(
                 "failed to create fork dir: {}",
                 e
@@ -670,7 +784,10 @@ impl SandboxManager {
         }
 
         // --- Step 2: Take snapshot (while source is paused) ---
-        if let Err(e) = fc_api.take_snapshot(&api_snapshot_path, &api_mem_path).await {
+        if let Err(e) = fc_api
+            .take_snapshot(&api_snapshot_path, &api_mem_path)
+            .await
+        {
             let _ = fc_api.resume_vm().await; // Best-effort resume on failure
             self.cleanup_fork_failure(
                 new_sandbox_id,
@@ -687,7 +804,12 @@ impl SandboxManager {
 
         // --- Step 3: Clone disk (while source is paused for consistency) ---
         let disk_result = if self.node_config.jailer.enabled {
-            disk::clone_disk_to(&source_rootfs, &fork_sandbox_dir, &self.node_config.data_dir).await
+            disk::clone_disk_to(
+                &source_rootfs,
+                &fork_sandbox_dir,
+                &self.node_config.data_dir,
+            )
+            .await
         } else {
             disk::clone_disk(&source_rootfs, new_sandbox_id, &self.node_config.data_dir).await
         };
@@ -848,7 +970,7 @@ impl SandboxManager {
         let fc_fork_snap = vm.fc_path(&fork_snap_path);
         let fc_fork_mem = vm.fc_path(&fork_mem_path);
         if let Err(e) = fork_fc_api
-            .restore_snapshot(&fc_fork_snap, &fc_fork_mem)
+            .restore_snapshot(&fc_fork_snap, &fc_fork_mem, Some(&net_config.tap_name))
             .await
         {
             self.cleanup_fork_failure(
@@ -896,8 +1018,12 @@ impl SandboxManager {
 
         // --- Step 7: Finalize ---
         let boot_duration_ms = start.elapsed().as_millis() as u64;
-        self.vms.write().await.insert(new_sandbox_id.to_string(), vm);
-        self.finalize_running(new_sandbox_id, boot_duration_ms).await;
+        self.vms
+            .write()
+            .await
+            .insert(new_sandbox_id.to_string(), vm);
+        self.finalize_running(new_sandbox_id, boot_duration_ms)
+            .await;
 
         self.report_event(events::sandbox_event(
             new_sandbox_id,
@@ -1007,8 +1133,7 @@ impl SandboxManager {
         sandboxes
             .values()
             .filter(|s| {
-                s.status == SandboxStatus::Running
-                    || s.status == SandboxStatus::Provisioning
+                s.status == SandboxStatus::Running || s.status == SandboxStatus::Provisioning
             })
             .count()
     }
@@ -1111,8 +1236,7 @@ impl SandboxManager {
                 .await
                 .map_err(|e| SandboxError::CreateFailed(e.to_string()))
         } else {
-            let sandbox_dir =
-                format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
+            let sandbox_dir = format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
             let vsock_path = format!("{}/vsock.sock", sandbox_dir);
             let vm_config = VmConfig {
                 sandbox_id: sandbox_id.to_string(),
@@ -1246,12 +1370,26 @@ mod tests {
 
         let env = HashMap::new();
         let result = manager
-            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_dup",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await;
         assert!(result.is_ok());
 
         let result = manager
-            .insert_provisioning("sb_dup", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_dup",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(1),
+                "/tmp/vsock.sock",
+            )
             .await;
         assert!(matches!(result, Err(SandboxError::AlreadyExists(_))));
     }
@@ -1348,7 +1486,14 @@ mod tests {
         env.insert("KEY".to_string(), "value".to_string());
 
         manager
-            .insert_provisioning("sb_fields", Profile::Medium, &env, Instant::now(), Some(5), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_fields",
+                Profile::Medium,
+                &env,
+                Instant::now(),
+                Some(5),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 
@@ -1368,11 +1513,25 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_a", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_a",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager
-            .insert_provisioning("sb_b", Profile::Large, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_b",
+                Profile::Large,
+                &env,
+                Instant::now(),
+                Some(1),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 
@@ -1390,7 +1549,14 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_fin", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_fin",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 
@@ -1407,13 +1573,18 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_status", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_status",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 
-        manager
-            .set_status("sb_status", SandboxStatus::Failed)
-            .await;
+        manager.set_status("sb_status", SandboxStatus::Failed).await;
 
         let info = manager.get_sandbox("sb_status").await.unwrap();
         assert_eq!(info.status, SandboxStatus::Failed);
@@ -1423,9 +1594,7 @@ mod tests {
     async fn set_status_nonexistent_is_noop() {
         let manager = SandboxManager::new(test_node_config());
         // Should not panic
-        manager
-            .set_status("sb_ghost", SandboxStatus::Stopped)
-            .await;
+        manager.set_status("sb_ghost", SandboxStatus::Stopped).await;
     }
 
     #[tokio::test]
@@ -1434,11 +1603,25 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_prov", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_prov",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager
-            .insert_provisioning("sb_run", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_run",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(1),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 
@@ -1455,11 +1638,25 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_p", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_p",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager
-            .insert_provisioning("sb_r", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_r",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(1),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager.finalize_running("sb_r", 50).await;
@@ -1474,20 +1671,30 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_f", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_f",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
-        manager
-            .set_status("sb_f", SandboxStatus::Failed)
-            .await;
+        manager.set_status("sb_f", SandboxStatus::Failed).await;
 
         manager
-            .insert_provisioning("sb_s", Profile::Small, &env, Instant::now(), Some(1), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_s",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(1),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
-        manager
-            .set_status("sb_s", SandboxStatus::Stopped)
-            .await;
+        manager.set_status("sb_s", SandboxStatus::Stopped).await;
 
         assert_eq!(manager.active_count().await, 0);
     }
@@ -1534,12 +1741,21 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 
         let result = manager.fork_sandbox("sb_src", "sb_fork").await;
-        assert!(matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("not running")));
+        assert!(
+            matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("not running"))
+        );
     }
 
     #[tokio::test]
@@ -1547,15 +1763,22 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
-        manager
-            .set_status("sb_src", SandboxStatus::Failed)
-            .await;
+        manager.set_status("sb_src", SandboxStatus::Failed).await;
 
         let result = manager.fork_sandbox("sb_src", "sb_fork").await;
-        assert!(matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("not running")));
+        assert!(
+            matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("not running"))
+        );
     }
 
     #[tokio::test]
@@ -1563,15 +1786,22 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
-        manager
-            .set_status("sb_src", SandboxStatus::Stopped)
-            .await;
+        manager.set_status("sb_src", SandboxStatus::Stopped).await;
 
         let result = manager.fork_sandbox("sb_src", "sb_fork").await;
-        assert!(matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("not running")));
+        assert!(
+            matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("not running"))
+        );
     }
 
     #[tokio::test]
@@ -1579,23 +1809,29 @@ mod tests {
         let manager = SandboxManager::new(test_node_config());
         let env = HashMap::new();
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager.finalize_running("sb_src", 100).await;
 
         // Source is Running but has no VM handle in the vms map
         let result = manager.fork_sandbox("sb_src", "sb_fork").await;
-        assert!(matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("VM handle not found")));
+        assert!(
+            matches!(result, Err(SandboxError::ForkFailed(ref msg)) if msg.contains("VM handle not found"))
+        );
     }
 
     #[test]
     fn sandbox_error_fork_failed_display() {
         let err = SandboxError::ForkFailed("source not running".to_string());
-        assert_eq!(
-            err.to_string(),
-            "sandbox fork failed: source not running"
-        );
+        assert_eq!(err.to_string(), "sandbox fork failed: source not running");
     }
 
     #[test]
@@ -1618,7 +1854,14 @@ mod tests {
         let env = HashMap::new();
         // Source is Medium profile
         manager
-            .insert_provisioning("sb_src", Profile::Medium, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Medium,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager.finalize_running("sb_src", 100).await;
@@ -1636,7 +1879,14 @@ mod tests {
         env.insert("MY_VAR".to_string(), "my_value".to_string());
 
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager.finalize_running("sb_src", 100).await;
@@ -1659,7 +1909,14 @@ mod tests {
         // We can't add a real VM handle, so we test the AlreadyExists path
         // by making the new_sandbox_id already exist
         manager
-            .insert_provisioning("sb_existing", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_existing",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
         manager.finalize_running("sb_existing", 100).await;
@@ -1680,7 +1937,14 @@ mod tests {
         let env = HashMap::new();
 
         manager
-            .insert_provisioning("sb_src", Profile::Small, &env, Instant::now(), Some(0), "/tmp/vsock.sock")
+            .insert_provisioning(
+                "sb_src",
+                Profile::Small,
+                &env,
+                Instant::now(),
+                Some(0),
+                "/tmp/vsock.sock",
+            )
             .await
             .unwrap();
 

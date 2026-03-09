@@ -7,7 +7,11 @@ use tracing::{info, warn};
 /// On XFS/btrfs this is an instant CoW clone. On other filesystems it falls
 /// back to a regular copy. The cloned file is passed directly to Firecracker
 /// as the drive's `path_on_host`.
-pub async fn clone_disk(src_ext4: &str, sandbox_id: &str, data_dir: &str) -> Result<String, DiskError> {
+pub async fn clone_disk(
+    src_ext4: &str,
+    sandbox_id: &str,
+    data_dir: &str,
+) -> Result<String, DiskError> {
     let sandbox_dir = format!("{}/sandboxes/{}", data_dir, sandbox_id);
     let dest = format!("{}/rootfs.ext4", sandbox_dir);
 
@@ -20,7 +24,10 @@ pub async fn clone_disk(src_ext4: &str, sandbox_id: &str, data_dir: &str) -> Res
 
     // Create sandbox directory
     tokio::fs::create_dir_all(&sandbox_dir).await.map_err(|e| {
-        DiskError::Io(format!("failed to create sandbox directory {}: {}", sandbox_dir, e))
+        DiskError::Io(format!(
+            "failed to create sandbox directory {}: {}",
+            sandbox_dir, e
+        ))
     })?;
 
     if !Path::new(&resolved_src).exists() {
@@ -69,7 +76,11 @@ pub async fn clone_disk(src_ext4: &str, sandbox_id: &str, data_dir: &str) -> Res
 ///
 /// Like `clone_disk` but allows specifying the target directory directly.
 /// The destination directory must already exist.
-pub async fn clone_disk_to(src_ext4: &str, dest_dir: &str, data_dir: &str) -> Result<String, DiskError> {
+pub async fn clone_disk_to(
+    src_ext4: &str,
+    dest_dir: &str,
+    data_dir: &str,
+) -> Result<String, DiskError> {
     let dest = format!("{}/rootfs.ext4", dest_dir);
 
     // Resolve relative source paths against data_dir
@@ -127,9 +138,9 @@ pub async fn cleanup_disk(sandbox_id: &str, data_dir: &str) -> Result<(), DiskEr
         return Ok(());
     }
 
-    tokio::fs::remove_dir_all(&sandbox_dir).await.map_err(|e| {
-        DiskError::Io(format!("failed to remove {}: {}", sandbox_dir, e))
-    })?;
+    tokio::fs::remove_dir_all(&sandbox_dir)
+        .await
+        .map_err(|e| DiskError::Io(format!("failed to remove {}: {}", sandbox_dir, e)))?;
 
     info!(sandbox_id = %sandbox_id, "disk cleanup complete");
     Ok(())
@@ -272,7 +283,12 @@ mod tests {
         let dest_dir = tmp.join("target");
         std::fs::create_dir_all(&dest_dir).unwrap();
 
-        let result = clone_disk_to(src_file.to_str().unwrap(), dest_dir.to_str().unwrap(), tmp.to_str().unwrap()).await;
+        let result = clone_disk_to(
+            src_file.to_str().unwrap(),
+            dest_dir.to_str().unwrap(),
+            tmp.to_str().unwrap(),
+        )
+        .await;
         assert!(result.is_ok());
 
         let dest = result.unwrap();

@@ -106,9 +106,7 @@ impl FirecrackerVm {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| {
-                FirecrackerError::Spawn(format!("failed to spawn firecracker: {}", e))
-            })?;
+            .map_err(|e| FirecrackerError::Spawn(format!("failed to spawn firecracker: {}", e)))?;
 
         info!(
             sandbox_id = %vm_config.sandbox_id,
@@ -232,11 +230,8 @@ impl FirecrackerVm {
             }
 
             // Wait up to 5 seconds for graceful exit
-            let graceful = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                self.child.wait(),
-            )
-            .await;
+            let graceful =
+                tokio::time::timeout(std::time::Duration::from_secs(5), self.child.wait()).await;
 
             if graceful.is_err() {
                 warn!(sandbox_id = %self.sandbox_id, "Firecracker did not exit gracefully, sending SIGKILL");
@@ -430,9 +425,7 @@ mod tests {
         // so we test the logic inline
         let chroot_root: Option<String> = None;
         let result = if let Some(ref root) = chroot_root {
-            path.strip_prefix(root.as_str())
-                .unwrap_or(path)
-                .to_string()
+            path.strip_prefix(root.as_str()).unwrap_or(path).to_string()
         } else {
             path.to_string()
         };
@@ -442,8 +435,7 @@ mod tests {
     #[test]
     fn fc_path_jailed_strips_chroot_prefix() {
         let chroot_root = Some("/var/sandchest/jailer/firecracker/sb_test/root".to_string());
-        let host_path =
-            "/var/sandchest/jailer/firecracker/sb_test/root/snapshot_file";
+        let host_path = "/var/sandchest/jailer/firecracker/sb_test/root/snapshot_file";
         let result = if let Some(ref root) = chroot_root {
             let relative = host_path.strip_prefix(root.as_str()).unwrap_or(host_path);
             if relative.is_empty() {
@@ -506,7 +498,11 @@ mod tests {
         let vm_config = crate::config::VmConfig {
             sandbox_id: "sb_jail_test".to_string(),
             kernel_path: kernel_path.to_str().unwrap().to_string(),
-            rootfs_path: chroot_root.join("rootfs.ext4").to_str().unwrap().to_string(),
+            rootfs_path: chroot_root
+                .join("rootfs.ext4")
+                .to_str()
+                .unwrap()
+                .to_string(),
             vcpu_count: 2,
             mem_size_mib: 4096,
             vsock_uds_path: "/vsock.sock".to_string(),

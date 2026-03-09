@@ -373,10 +373,8 @@ mod tests {
     #[test]
     fn to_chroot_path_root() {
         let config = test_jailer_config();
-        let path = config.to_chroot_path(
-            "sb_test",
-            "/var/sandchest/jailer/firecracker/sb_test/root",
-        );
+        let path =
+            config.to_chroot_path("sb_test", "/var/sandchest/jailer/firecracker/sb_test/root");
         assert_eq!(path, "/");
     }
 

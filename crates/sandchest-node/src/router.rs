@@ -92,7 +92,9 @@ pub fn to_agent_exec_request(req: proto::NodeExecRequest) -> agent_proto::ExecRe
     }
 }
 
-pub fn to_agent_create_session(req: proto::NodeCreateSessionRequest) -> agent_proto::CreateSessionRequest {
+pub fn to_agent_create_session(
+    req: proto::NodeCreateSessionRequest,
+) -> agent_proto::CreateSessionRequest {
     agent_proto::CreateSessionRequest {
         session_id: req.session_id,
         shell: req.shell,
@@ -100,7 +102,9 @@ pub fn to_agent_create_session(req: proto::NodeCreateSessionRequest) -> agent_pr
     }
 }
 
-pub fn to_agent_session_exec(req: proto::NodeSessionExecRequest) -> agent_proto::SessionExecRequest {
+pub fn to_agent_session_exec(
+    req: proto::NodeSessionExecRequest,
+) -> agent_proto::SessionExecRequest {
     agent_proto::SessionExecRequest {
         session_id: req.session_id,
         cmd: req.cmd,
@@ -108,7 +112,9 @@ pub fn to_agent_session_exec(req: proto::NodeSessionExecRequest) -> agent_proto:
     }
 }
 
-pub fn to_agent_session_input(req: proto::NodeSessionInputRequest) -> agent_proto::SessionInputRequest {
+pub fn to_agent_session_input(
+    req: proto::NodeSessionInputRequest,
+) -> agent_proto::SessionInputRequest {
     agent_proto::SessionInputRequest {
         session_id: req.session_id,
         data: req.data,
@@ -146,12 +152,8 @@ pub fn to_node_exec_event(event: agent_proto::ExecEvent) -> proto::ExecEvent {
     proto::ExecEvent {
         seq: event.seq,
         event: event.event.map(|e| match e {
-            agent_proto::exec_event::Event::Stdout(data) => {
-                proto::exec_event::Event::Stdout(data)
-            }
-            agent_proto::exec_event::Event::Stderr(data) => {
-                proto::exec_event::Event::Stderr(data)
-            }
+            agent_proto::exec_event::Event::Stdout(data) => proto::exec_event::Event::Stdout(data),
+            agent_proto::exec_event::Event::Stderr(data) => proto::exec_event::Event::Stderr(data),
             agent_proto::exec_event::Event::Exit(exit) => {
                 proto::exec_event::Event::Exit(proto::ExitEvent {
                     exit_code: exit.exit_code,
