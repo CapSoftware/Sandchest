@@ -839,22 +839,101 @@ impl SandboxManager {
             )));
         }
 
-        // Compute snapshot paths. When source is jailed, snapshot files must go
-        // into the source's chroot (Firecracker can only write within its chroot).
-        let (api_snapshot_path, api_mem_path, host_snapshot_path, host_mem_path) =
-            if let Some(ref src_chroot) = source_chroot_root {
-                // Jailed source: write to source chroot, then copy later
-                let api_snap = "/fork_snapshot_file".to_string();
-                let api_mem = "/fork_mem_file".to_string();
-                let host_snap = format!("{}/fork_snapshot_file", src_chroot);
-                let host_mem = format!("{}/fork_mem_file", src_chroot);
-                (api_snap, api_mem, host_snap, host_mem)
-            } else {
-                // Non-jailed: write directly to fork's sandbox dir
-                let snap = format!("{}/snapshot_file", fork_sandbox_dir);
-                let mem = format!("{}/mem_file", fork_sandbox_dir);
-                (snap.clone(), mem.clone(), snap, mem)
-            };
+        let fork_snap = format!("{}/snapshot_file", fork_sandbox_dir);
+        let fork_mem = format!("{}/mem_file", fork_sandbox_dir);
+
+        // Compute snapshot paths. When source is jailed, Firecracker can only
+        // write within the source chroot, so we expose the fork snapshot files
+        // there via hard links instead of copying them afterward.
+        let (
+            api_snapshot_path,
+            api_mem_path,
+            host_snapshot_path,
+            host_mem_path,
+            linked_snapshot_files,
+        ) = if let Some(ref src_chroot) = source_chroot_root {
+            let api_snap = "/fork_snapshot_file".to_string();
+            let api_mem = "/fork_mem_file".to_string();
+            let host_snap = format!("{}/fork_snapshot_file", src_chroot);
+            let host_mem = format!("{}/fork_mem_file", src_chroot);
+            (api_snap, api_mem, host_snap, host_mem, true)
+        } else {
+            (
+                fork_snap.clone(),
+                fork_mem.clone(),
+                fork_snap.clone(),
+                fork_mem.clone(),
+                false,
+            )
+        };
+
+        if linked_snapshot_files {
+            for path in [&fork_snap, &fork_mem, &host_snapshot_path, &host_mem_path] {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+
+            for path in [&fork_snap, &fork_mem] {
+                if let Err(e) = tokio::fs::File::create(path).await {
+                    self.cleanup_fork_failure(
+                        new_sandbox_id,
+                        slot,
+                        None,
+                        &format!("snapshot staging failed: {}", e),
+                    )
+                    .await;
+                    return Err(SandboxError::ForkFailed(format!(
+                        "failed to stage fork snapshot file {}: {}",
+                        path, e
+                    )));
+                }
+
+                if let Err(e) =
+                    jailer::chown_to_jailer(&self.node_config.jailer, std::path::Path::new(path))
+                        .await
+                {
+                    self.cleanup_fork_failure(
+                        new_sandbox_id,
+                        slot,
+                        None,
+                        &format!("snapshot staging ownership failed: {}", e),
+                    )
+                    .await;
+                    return Err(SandboxError::ForkFailed(format!(
+                        "failed to set fork snapshot ownership for {}: {}",
+                        path, e
+                    )));
+                }
+            }
+
+            if let Err(e) = tokio::fs::hard_link(&fork_snap, &host_snapshot_path).await {
+                self.cleanup_fork_failure(
+                    new_sandbox_id,
+                    slot,
+                    None,
+                    &format!("snapshot hard-link setup failed: {}", e),
+                )
+                .await;
+                return Err(SandboxError::ForkFailed(format!(
+                    "failed to hard-link snapshot file into source chroot: {}",
+                    e
+                )));
+            }
+
+            if let Err(e) = tokio::fs::hard_link(&fork_mem, &host_mem_path).await {
+                let _ = tokio::fs::remove_file(&host_snapshot_path).await;
+                self.cleanup_fork_failure(
+                    new_sandbox_id,
+                    slot,
+                    None,
+                    &format!("mem hard-link setup failed: {}", e),
+                )
+                .await;
+                return Err(SandboxError::ForkFailed(format!(
+                    "failed to hard-link memory snapshot file into source chroot: {}",
+                    e
+                )));
+            }
+        }
         let source_rootfs = if source_chroot_root.is_some() {
             let src_paths = self.sandbox_paths(source_sandbox_id);
             format!("{}/rootfs.ext4", src_paths.dir)
@@ -887,6 +966,8 @@ impl SandboxManager {
             .await
         {
             let _ = fc_api.resume_vm().await; // Best-effort resume on failure
+            let _ = tokio::fs::remove_file(&host_snapshot_path).await;
+            let _ = tokio::fs::remove_file(&host_mem_path).await;
             self.cleanup_fork_failure(
                 new_sandbox_id,
                 slot,
@@ -898,6 +979,11 @@ impl SandboxManager {
                 "failed to take snapshot: {}",
                 e
             )));
+        }
+
+        if linked_snapshot_files {
+            let _ = tokio::fs::remove_file(&host_snapshot_path).await;
+            let _ = tokio::fs::remove_file(&host_mem_path).await;
         }
 
         // --- Step 3: Clone disk (while source is paused for consistency) ---
@@ -948,68 +1034,6 @@ impl SandboxManager {
                 "failed to clone disk: {}",
                 e
             )));
-        }
-
-        // For jailed source: copy snapshot files from source chroot to fork's dir
-        if source_chroot_root.is_some() {
-            let fork_snap = format!("{}/snapshot_file", fork_sandbox_dir);
-            let fork_mem = format!("{}/mem_file", fork_sandbox_dir);
-            if let Err(e) = tokio::fs::copy(&host_snapshot_path, &fork_snap).await {
-                self.cleanup_fork_failure(
-                    new_sandbox_id,
-                    slot,
-                    None,
-                    &format!("copy snapshot to fork failed: {}", e),
-                )
-                .await;
-                // Clean up temp files from source chroot
-                let _ = tokio::fs::remove_file(&host_snapshot_path).await;
-                let _ = tokio::fs::remove_file(&host_mem_path).await;
-                return Err(SandboxError::ForkFailed(format!(
-                    "failed to copy snapshot to fork: {}",
-                    e
-                )));
-            }
-            if let Err(e) = tokio::fs::copy(&host_mem_path, &fork_mem).await {
-                self.cleanup_fork_failure(
-                    new_sandbox_id,
-                    slot,
-                    None,
-                    &format!("copy mem to fork failed: {}", e),
-                )
-                .await;
-                let _ = tokio::fs::remove_file(&host_snapshot_path).await;
-                let _ = tokio::fs::remove_file(&host_mem_path).await;
-                return Err(SandboxError::ForkFailed(format!(
-                    "failed to copy mem to fork: {}",
-                    e
-                )));
-            }
-            // Clean up temp files from source chroot
-            let _ = tokio::fs::remove_file(&host_snapshot_path).await;
-            let _ = tokio::fs::remove_file(&host_mem_path).await;
-            if self.node_config.jailer.enabled {
-                for path in [&fork_snap, &fork_mem] {
-                    if let Err(e) = jailer::chown_to_jailer(
-                        &self.node_config.jailer,
-                        std::path::Path::new(path),
-                    )
-                    .await
-                    {
-                        self.cleanup_fork_failure(
-                            new_sandbox_id,
-                            slot,
-                            None,
-                            &format!("snapshot artifact ownership setup failed: {}", e),
-                        )
-                        .await;
-                        return Err(SandboxError::ForkFailed(format!(
-                            "snapshot artifact ownership setup failed: {}",
-                            e
-                        )));
-                    }
-                }
-            }
         }
 
         // --- Step 5: Boot fork from snapshot ---
