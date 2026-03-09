@@ -33,16 +33,17 @@ import { idToBytes } from '@sandchest/contract'
 import type { CreateSandboxResponse, GetSandboxResponse, ReplayBundle } from '@sandchest/contract'
 import type { BufferedEvent } from '../services/redis.js'
 import { RUN_API_INTEGRATION_TESTS } from '../test-support.js'
+import type { NodeClientApi } from '../services/node-client.js'
 
 const TEST_ORG = 'org_test_123'
 const TEST_USER = 'user_test_456'
 
-function createTestEnv() {
+function createTestEnv(overrides?: { nodeClient?: NodeClientApi }) {
   const sandboxRepo = createInMemorySandboxRepo()
   const execRepo = createInMemoryExecRepo()
   const sessionRepo = createInMemorySessionRepo()
   const objectStorage = createInMemoryObjectStorage()
-  const nodeClient = createInMemoryNodeClient()
+  const nodeClient = overrides?.nodeClient ?? createInMemoryNodeClient()
   const redis = createInMemoryRedisApi()
   const artifactRepo = createInMemoryArtifactRepo()
   const quotaApi = createInMemoryQuotaApi()
@@ -774,6 +775,48 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/fork — quo
     expect(result.status).toBe(400)
     expect(result.body.error).toBe('validation_error')
     expect(result.body.message).toContain('300')
+  })
+})
+
+describe.skipIf(!RUN_API_INTEGRATION_TESTS)('POST /v1/sandboxes/:id/fork — node failure handling', () => {
+  test('returns internal_error with node message and marks fork failed', async () => {
+    const baseNodeClient = createInMemoryNodeClient()
+    const failingNodeClient: NodeClientApi = {
+      ...baseNodeClient,
+      forkSandbox: () => Effect.die(new Error('simulated fork failure')),
+    }
+    const env = createTestEnv({ nodeClient: failingNodeClient })
+    const parentId = await createRunningSandbox(env)
+
+    const result = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.post(`/v1/sandboxes/${parentId}/fork`).pipe(
+            HttpClientRequest.bodyUnsafeJson({}),
+          ),
+        )
+        const body = yield* response.json
+        return { status: response.status, body: body as { error: string; message: string } }
+      }),
+    )
+
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('internal_error')
+    expect(result.body.message).toContain('simulated fork failure')
+
+    const tree = await env.runTest(
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(
+          HttpClientRequest.get(`/v1/sandboxes/${parentId}/forks`),
+        )
+        return (yield* response.json) as { tree: Array<{ status: string; failure_reason?: string | null }> }
+      }),
+    )
+
+    const failedFork = tree.tree.find((node) => node.status === 'failed')
+    expect(failedFork).toBeDefined()
   })
 })
 

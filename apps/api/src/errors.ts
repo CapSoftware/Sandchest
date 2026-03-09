@@ -58,6 +58,10 @@ export class BillingLimitError extends Data.TaggedError('BillingLimitError')<{
   readonly message: string
 }> {}
 
+export class InternalError extends Data.TaggedError('InternalError')<{
+  readonly message: string
+}> {}
+
 export type ApiError =
   | NotFoundError
   | UnauthorizedError
@@ -73,6 +77,7 @@ export type ApiError =
   | GoneError
   | NotImplementedError
   | BillingLimitError
+  | InternalError
 
 const STATUS_MAP: Record<ApiError['_tag'], number> = {
   NotFoundError: 404,
@@ -89,6 +94,7 @@ const STATUS_MAP: Record<ApiError['_tag'], number> = {
   GoneError: 410,
   NotImplementedError: 501,
   BillingLimitError: 403,
+  InternalError: 500,
 }
 
 const CODE_MAP: Record<ApiError['_tag'], string> = {
@@ -106,6 +112,7 @@ const CODE_MAP: Record<ApiError['_tag'], string> = {
   GoneError: 'gone',
   NotImplementedError: 'not_implemented',
   BillingLimitError: 'billing_limit',
+  InternalError: 'internal_error',
 }
 
 export function errorToResponse(error: ApiError, requestId: string) {

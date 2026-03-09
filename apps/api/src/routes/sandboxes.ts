@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from '@effect/platform'
-import { Effect } from 'effect'
+import { Cause, Effect } from 'effect'
 import {
   generateUUIDv7,
   idToBytes,
@@ -33,6 +33,7 @@ import {
   ForkDepthExceededError,
   ForkLimitExceededError,
   GoneError,
+  InternalError,
   NotFoundError,
   QuotaExceededError,
   SandboxNotRunningError,
@@ -613,14 +614,29 @@ const forkSandbox = Effect.gen(function* () {
     ttlSeconds,
   })
 
-  // Increment parent's fork count
-  yield* repo.incrementForkCount(sourceIdBytes, auth.orgId)
-
   // Tell the node to fork the VM
   yield* nodeClient.forkSandbox({
     sourceSandboxId: sourceIdBytes,
     newSandboxId: forkId,
-  })
+  }).pipe(
+    Effect.catchAllCause((cause) =>
+      Effect.gen(function* () {
+        yield* repo.updateStatus(forkId, auth.orgId, 'failed', {
+          endedAt: new Date(),
+          failureReason: 'provision_failed',
+        })
+
+        return yield* Effect.fail(
+          new InternalError({
+            message: `Fork failed on node: ${Cause.pretty(cause)}`,
+          }),
+        )
+      }),
+    ),
+  )
+
+  // Increment parent's fork count only after the node confirms the fork succeeded.
+  yield* repo.incrementForkCount(sourceIdBytes, auth.orgId)
 
   const sandboxId = bytesToId(SANDBOX_PREFIX, forkRow.id)
   const response: ForkSandboxResponse = {
