@@ -12,6 +12,7 @@ import type { IdempotencyRepo } from './idempotency-cleanup.js'
 import type { MetricsRepo } from '../services/metrics-repo.js'
 import type { NodeClient } from '../services/node-client.js'
 import type { BillingService } from '../services/billing.js'
+import type { NodeRepo } from '../services/node-repo.js'
 import { startWorkers, type WorkerConfig } from './runner.js'
 import { ttlEnforcementWorker } from './ttl-enforcement.js'
 import { ttlWarningWorker } from './ttl-warning.js'
@@ -40,6 +41,7 @@ export type WorkerDeps =
   | MetricsRepo
   | NodeClient
   | BillingService
+  | NodeRepo
 
 const allWorkers: ReadonlyArray<WorkerConfig<WorkerDeps>> = [
   ttlEnforcementWorker,

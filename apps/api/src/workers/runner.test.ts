@@ -37,6 +37,8 @@ import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
 import { NodeClient, type NodeClientApi } from '../services/node-client.js'
 import { createInMemoryNodeClient } from '../services/node-client.memory.js'
+import { NodeRepo, type NodeRepoApi } from '../services/node-repo.js'
+import { createInMemoryNodeRepo } from '../services/node-repo.memory.js'
 import { vmTeardownWorker } from './vm-teardown.js'
 import type { WorkerDeps } from './index.js'
 
@@ -52,6 +54,7 @@ let idempotencyApi: IdempotencyRepoApi
 let idempotencyStore: Map<string, { createdAt: Date; orgId?: string | undefined }>
 let quotaApi: QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, unknown>) => void }
 let nodeClientApi: NodeClientApi
+let nodeRepo: NodeRepoApi
 let testLayer: Layer.Layer<WorkerDeps | RedisService>
 
 function run<A>(effect: Effect.Effect<A, never, WorkerDeps | RedisService>): Promise<A> {
@@ -76,6 +79,7 @@ beforeEach(() => {
   quotaApi = createInMemoryQuotaApi()
   const billingApi = createInMemoryBillingApi()
   nodeClientApi = createInMemoryNodeClient()
+  nodeRepo = createInMemoryNodeRepo()
 
   testLayer = Layer.mergeAll(
     Layer.succeed(RedisService, redis),
@@ -91,6 +95,7 @@ beforeEach(() => {
     Layer.succeed(BillingService, billingApi),
     Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
     Layer.succeed(NodeClient, nodeClientApi),
+    Layer.succeed(NodeRepo, nodeRepo),
   )
 })
 
@@ -334,9 +339,59 @@ describe('orphan-reconciliation', () => {
     expect(sandbox?.status).toBe('running')
   })
 
+  test('returns 0 when node has never reported a heartbeat', async () => {
+    const nodeId = generateUUIDv7()
+    const sandboxId = generateUUIDv7()
+
+    await Effect.runPromise(
+      nodeRepo.create({
+        id: nodeId,
+        name: 'node-test',
+        hostname: '127.0.0.1',
+        slotsTotal: 256,
+        status: 'online',
+        version: null,
+        firecrackerVersion: null,
+      }),
+    )
+
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id: sandboxId,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.assignNode(sandboxId, 'org_test', nodeId))
+
+    const count = await run(runWorkerTick(orphanReconciliationWorker, 'inst-1'))
+    expect(count).toBe(0)
+
+    const sandbox = await Effect.runPromise(sandboxRepo.findById(sandboxId, 'org_test'))
+    expect(sandbox?.status).toBe('running')
+  })
+
   test('marks sandboxes as failed when node heartbeat is missing', async () => {
     const nodeId = generateUUIDv7()
     const sandboxId = generateUUIDv7()
+
+    await Effect.runPromise(
+      nodeRepo.create({
+        id: nodeId,
+        name: 'node-test',
+        hostname: '127.0.0.1',
+        slotsTotal: 256,
+        status: 'online',
+        version: null,
+        firecrackerVersion: null,
+      }),
+    )
+    await Effect.runPromise(nodeRepo.touchLastSeen(nodeId))
 
     await Effect.runPromise(
       sandboxRepo.create({
@@ -366,6 +421,9 @@ describe('orphan-reconciliation', () => {
     const nodeId = generateUUIDv7()
     const sandbox1 = generateUUIDv7()
     const sandbox2 = generateUUIDv7()
+
+    await Effect.runPromise(nodeRepo.create({ id: nodeId }))
+    await Effect.runPromise(nodeRepo.touchLastSeen(nodeId))
 
     for (const id of [sandbox1, sandbox2]) {
       await Effect.runPromise(
@@ -397,6 +455,11 @@ describe('orphan-reconciliation', () => {
     const offlineNodeId = generateUUIDv7()
     const onlineSandbox = generateUUIDv7()
     const offlineSandbox = generateUUIDv7()
+
+    await Effect.runPromise(nodeRepo.create({ id: onlineNodeId }))
+    await Effect.runPromise(nodeRepo.touchLastSeen(onlineNodeId))
+    await Effect.runPromise(nodeRepo.create({ id: offlineNodeId }))
+    await Effect.runPromise(nodeRepo.touchLastSeen(offlineNodeId))
 
     // Create sandboxes on two different nodes
     for (const [id, nodeId] of [[onlineSandbox, onlineNodeId], [offlineSandbox, offlineNodeId]] as const) {

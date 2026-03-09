@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import { NodeRepo } from '../services/node-repo.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { RedisService } from '../services/redis.js'
 import { BillingService } from '../services/billing.js'
@@ -6,20 +7,26 @@ import { bytesToId, NODE_PREFIX } from '@sandchest/contract'
 import { meterSandbox } from './credit-metering.js'
 import type { WorkerConfig } from './runner.js'
 
-export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService | BillingService> = {
+export const orphanReconciliationWorker: WorkerConfig<SandboxRepo | RedisService | BillingService | NodeRepo> = {
   name: 'orphan-reconciliation',
   intervalMs: 60_000,
   handler: Effect.gen(function* () {
     const repo = yield* SandboxRepo
     const redis = yield* RedisService
+    const nodeRepo = yield* NodeRepo
 
     const activeNodeIds = yield* repo.getActiveNodeIds()
     if (activeNodeIds.length === 0) return 0
 
     const offlineNodeIds: Uint8Array[] = []
     for (const nodeId of activeNodeIds) {
-      const alive = yield* redis.hasNodeHeartbeat(bytesToId(NODE_PREFIX, nodeId))
+      const nodeIdStr = bytesToId(NODE_PREFIX, nodeId)
+      const alive = yield* redis.hasNodeHeartbeat(nodeIdStr)
       if (!alive) {
+        const node = yield* nodeRepo.findById(nodeId)
+        if (!node?.lastSeenAt) {
+          continue
+        }
         offlineNodeIds.push(nodeId)
       }
     }
