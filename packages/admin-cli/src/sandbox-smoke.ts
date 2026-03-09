@@ -98,6 +98,10 @@ function makeRunId(): string {
   return `admin-smoke-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function fetchSandboxState(
   baseUrl: string,
   apiKey: string,
@@ -140,6 +144,24 @@ function formatSandboxState(snapshot: SandboxStateSnapshot | null): string {
     return `sandbox state ${snapshot.status} (${snapshot.failureReason})`
   }
   return `sandbox state ${snapshot.status}`
+}
+
+async function waitForArtifact(
+  sandbox: Sandbox,
+  expectedName: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const artifacts = await sandbox.artifacts.list()
+    if (artifacts.some((artifact: { name: string }) => artifact.name === expectedName)) {
+      return true
+    }
+    await sleep(250)
+  }
+
+  return false
 }
 
 async function measureCheck(
@@ -376,29 +398,41 @@ export async function runSandboxSmokeTest(
     let forkSandbox: Sandbox | undefined
     checks.push(
       await measureCheck('fork sandbox', logger, async () => {
-        forkSandbox = await sandbox.fork({
-          ttlSeconds: resolved.ttlSeconds,
-        })
-        tracker.trackSandbox('fork', forkSandbox)
-        forkSandboxId = forkSandbox.id
+        try {
+          forkSandbox = await sandbox.fork({
+            ttlSeconds: resolved.ttlSeconds,
+          })
+          tracker.trackSandbox('fork', forkSandbox)
+          forkSandboxId = forkSandbox.id
 
-        const forkReadback = await forkSandbox.fs.read(sharedPath)
-        assert(forkReadback === fileContents, 'Fork did not inherit parent filesystem state')
+          const forkReadback = await forkSandbox.fs.read(sharedPath)
+          assert(forkReadback === fileContents, 'Fork did not inherit parent filesystem state')
 
-        const forkExec = await forkSandbox.exec(
-          ['sh', '-lc', 'test "$SMOKE_FORK" = "$EXPECTED" && printf fork-ok'],
-          { env: { SMOKE_FORK: runId, EXPECTED: runId }, timeout: 60 },
-        )
-        assertExecSuccess(forkExec, 'fork exec')
-        assert(forkExec.stdout === 'fork-ok', `Unexpected fork stdout: ${JSON.stringify(forkExec.stdout)}`)
+          const forkExec = await forkSandbox.exec(
+            ['sh', '-lc', 'test "$SMOKE_FORK" = "$EXPECTED" && printf fork-ok'],
+            { env: { SMOKE_FORK: runId, EXPECTED: runId }, timeout: 60 },
+          )
+          assertExecSuccess(forkExec, 'fork exec')
+          assert(forkExec.stdout === 'fork-ok', `Unexpected fork stdout: ${JSON.stringify(forkExec.stdout)}`)
 
-        const forkTree = await sandbox.forks()
-        assert(
-          forkTree.tree.some(
-            (node: { sandbox_id: string }) => node.sandbox_id === forkSandbox!.id,
-          ),
-          `Fork tree did not include ${forkSandbox.id}`,
-        )
+          const forkTree = await sandbox.forks()
+          assert(
+            forkTree.tree.some(
+              (node: { sandbox_id: string }) => node.sandbox_id === forkSandbox!.id,
+            ),
+            `Fork tree did not include ${forkSandbox.id}`,
+          )
+        } catch (error) {
+          const sourceSnapshot = await fetchSandboxState(resolved.baseUrl, resolved.apiKey, sandbox.id)
+          const forkSnapshot = forkSandboxId
+            ? await fetchSandboxState(resolved.baseUrl, resolved.apiKey, forkSandboxId)
+            : null
+          const normalized = toError(error)
+          throw new Error(
+            `${normalized.message}; source ${formatSandboxState(sourceSnapshot)}; fork ${formatSandboxState(forkSnapshot)}`,
+            { cause: normalized },
+          )
+        }
       }),
     )
 
@@ -423,6 +457,13 @@ export async function runSandboxSmokeTest(
 
     checks.push(
       await measureCheck('collect artifacts on stop', logger, async () => {
+        await sandbox.fs.write(sharedPath, fileContents)
+        const artifactReadback = await sandbox.fs.read(sharedPath)
+        assert(
+          artifactReadback === fileContents,
+          'artifact file could not be refreshed before stop',
+        )
+
         await sandbox.stop()
         assert(
           sandbox.status === 'stopping' || sandbox.status === 'stopped',
@@ -435,11 +476,9 @@ export async function runSandboxSmokeTest(
           `Expected fetched root sandbox to be stopping or stopped, got ${fetched.status}`,
         )
 
-        const artifacts = await sandbox.artifacts.list()
-        assert(
-          artifacts.some((artifact: { name: string }) => artifact.name === sharedPath),
-          `artifact list did not include ${sharedPath}`,
-        )
+        const expectedArtifactName = sharedPath.split('/').filter(Boolean).pop() ?? sharedPath
+        const foundArtifact = await waitForArtifact(sandbox, expectedArtifactName, 5_000)
+        assert(foundArtifact, `artifact list did not include ${expectedArtifactName}`)
       }),
     )
   } catch (error) {
