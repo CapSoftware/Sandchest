@@ -355,7 +355,7 @@ export async function runSandboxSmokeTest(
           const persistedResult = await session.exec(`pwd && cat "${sessionPath}"`, { timeout: 60 })
           assertExecSuccess(persistedResult, 'session persisted exec')
 
-          const output = persistedResult.stdout.trimEnd()
+          const output = persistedResult.stdout.replace(/\r\n/g, '\n').trimEnd()
           assert(
             output === `/tmp\nsession:${runId}`,
             `Session state did not persist as expected: ${JSON.stringify(output)}`,

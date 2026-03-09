@@ -47,6 +47,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<ExecRequest>,
     ) -> Result<Response<Self::ExecStream>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let stream = crate::exec::spawn_exec(request.into_inner());
         Ok(Response::new(stream))
@@ -56,6 +57,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<CreateSessionRequest>,
     ) -> Result<Response<SessionResponse>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let req = request.into_inner();
         let session_id = self
@@ -71,6 +73,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<SessionExecRequest>,
     ) -> Result<Response<Self::SessionExecStream>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let req = request.into_inner();
         let stream = self
@@ -84,6 +87,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<SessionInputRequest>,
     ) -> Result<Response<()>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let req = request.into_inner();
         self.session_manager
@@ -96,6 +100,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<DestroySessionRequest>,
     ) -> Result<Response<()>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let req = request.into_inner();
         self.session_manager
@@ -108,6 +113,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<Streaming<FileChunk>>,
     ) -> Result<Response<PutFileResponse>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let response = crate::files::put_file(request.into_inner()).await?;
         Ok(Response::new(response))
@@ -119,6 +125,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<GetFileRequest>,
     ) -> Result<Response<Self::GetFileStream>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let stream = crate::files::spawn_get_file(request.into_inner());
         Ok(Response::new(stream))
@@ -128,6 +135,7 @@ impl GuestAgent for GuestAgentService {
         &self,
         request: Request<ListFilesRequest>,
     ) -> Result<Response<ListFilesResponse>, Status> {
+        snapshot::ensure_recovered_if_needed(&self.session_manager).await;
         snapshot::note_user_activity();
         let response = crate::files::list_files(request.into_inner()).await?;
         Ok(Response::new(response))

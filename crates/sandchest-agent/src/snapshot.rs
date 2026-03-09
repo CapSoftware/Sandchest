@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::session::SessionManager;
@@ -13,6 +14,7 @@ const STALE_THRESHOLD_SECS: u64 = 5;
 #[cfg(target_os = "linux")]
 const URANDOM_SEED_BYTES: usize = 256;
 static LAST_USER_ACTIVITY_SECS: AtomicU64 = AtomicU64::new(0);
+static RECOVERY_LOCK: Mutex<()> = Mutex::const_new(());
 
 fn current_unix_secs() -> u64 {
     SystemTime::now()
@@ -229,6 +231,34 @@ async fn perform_fork_recovery(session_manager: &SessionManager) {
     info!("Fork recovery complete — agent ready");
 }
 
+pub async fn ensure_recovered_if_needed(session_manager: &SessionManager) {
+    let _guard = RECOVERY_LOCK.lock().await;
+    let heartbeat_path = Path::new(HEARTBEAT_PATH);
+
+    let Some(file_ts) = read_heartbeat_timestamp(heartbeat_path) else {
+        return;
+    };
+
+    let now = current_unix_secs();
+    let last_activity = last_user_activity_secs();
+
+    if should_perform_fork_recovery(file_ts, now, last_activity) {
+        info!(
+            stale_secs = now - file_ts,
+            "Stale heartbeat detected before serving traffic — running fork recovery"
+        );
+        perform_fork_recovery(session_manager).await;
+    } else if heartbeat_is_stale(file_ts, now) {
+        warn!(
+            stale_secs = now - file_ts,
+            last_activity_secs = last_activity,
+            heartbeat_secs = file_ts,
+            "Skipping fork recovery because the agent has already served post-resume traffic"
+        );
+        write_heartbeat().await;
+    }
+}
+
 /// Write current timestamp to the heartbeat file.
 async fn write_heartbeat() {
     let ts = SystemTime::now()
@@ -252,27 +282,7 @@ async fn write_heartbeat() {
 pub fn start_snapshot_watcher(session_manager: Arc<SessionManager>) {
     tokio::spawn(async move {
         loop {
-            // Check for stale heartbeat BEFORE writing a fresh one
-            let heartbeat_path = Path::new(HEARTBEAT_PATH);
-            if let Some(file_ts) = read_heartbeat_timestamp(heartbeat_path) {
-                let now = current_unix_secs();
-                let last_activity = last_user_activity_secs();
-
-                if should_perform_fork_recovery(file_ts, now, last_activity) {
-                    info!(
-                        stale_secs = now - file_ts,
-                        "Stale heartbeat detected — snapshot restore likely"
-                    );
-                    perform_fork_recovery(&session_manager).await;
-                } else if heartbeat_is_stale(file_ts, now) {
-                    warn!(
-                        stale_secs = now - file_ts,
-                        last_activity_secs = last_activity,
-                        heartbeat_secs = file_ts,
-                        "Skipping fork recovery because the agent has already served post-resume traffic"
-                    );
-                }
-            }
+            ensure_recovered_if_needed(&session_manager).await;
 
             write_heartbeat().await;
 

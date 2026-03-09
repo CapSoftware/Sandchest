@@ -487,15 +487,21 @@ async fn run_session_exec(
 /// Look for the sentinel pattern in the buffer. Returns (output_before_sentinel, exit_code).
 fn extract_sentinel(buf: &[u8], sentinel_marker: &str) -> Option<(Vec<u8>, i32)> {
     let buf_str = String::from_utf8_lossy(buf);
-    let marker_pos = buf_str.find(sentinel_marker)?;
+    let mut search_from = 0;
 
-    let after_marker = &buf_str[marker_pos + sentinel_marker.len()..];
-    let suffix_pos = after_marker.find(SENTINEL_SUFFIX)?;
-    let exit_code_str = &after_marker[..suffix_pos];
-    let exit_code: i32 = exit_code_str.parse().unwrap_or(-1);
+    while let Some(relative_pos) = buf_str[search_from..].find(sentinel_marker) {
+        let marker_pos = search_from + relative_pos;
+        let after_marker = &buf_str[marker_pos + sentinel_marker.len()..];
+        let suffix_pos = after_marker.find(SENTINEL_SUFFIX)?;
+        let exit_code_str = &after_marker[..suffix_pos];
+        if let Ok(exit_code) = exit_code_str.parse::<i32>() {
+            let output = buf[..marker_pos].to_vec();
+            return Some((output, exit_code));
+        }
+        search_from = marker_pos + sentinel_marker.len();
+    }
 
-    let output = buf[..marker_pos].to_vec();
-    Some((output, exit_code))
+    None
 }
 
 /// Strip the echoed command line from PTY output.
@@ -526,6 +532,20 @@ fn strip_command_echo(output: &[u8], cmd: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_stream::StreamExt;
+
+    async fn collect_session_events(
+        manager: &SessionManager,
+        session_id: &str,
+        cmd: &str,
+    ) -> Vec<Result<ExecEvent, Status>> {
+        manager
+            .spawn_session_exec(session_id, cmd.to_string(), 10)
+            .await
+            .unwrap()
+            .collect()
+            .await
+    }
 
     // ---- extract_sentinel tests ----
 
@@ -590,8 +610,7 @@ mod tests {
     fn extract_sentinel_invalid_exit_code() {
         let marker = "__SC_SENTINEL_999_";
         let buf = b"__SC_SENTINEL_999_notanumber__\n";
-        let (_, code) = extract_sentinel(buf, marker).unwrap();
-        assert_eq!(code, -1); // parse failure falls back to -1
+        assert!(extract_sentinel(buf, marker).is_none());
     }
 
     #[test]
@@ -609,6 +628,19 @@ mod tests {
         let buf = b"__SC_SENTINEL_001_255__";
         let (_, code) = extract_sentinel(buf, marker).unwrap();
         assert_eq!(code, 255);
+    }
+
+    #[test]
+    fn extract_sentinel_skips_echoed_marker_literal() {
+        let marker = "__SC_SENTINEL_123_";
+        let buf =
+            b"echo \"__SC_SENTINEL_123_${__sc_exit}__\"\nreal output\n__SC_SENTINEL_123_0__\n";
+        let (output, code) = extract_sentinel(buf, marker).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&output),
+            "echo \"__SC_SENTINEL_123_${__sc_exit}__\"\nreal output\n"
+        );
+        assert_eq!(code, 0);
     }
 
     // ---- strip_command_echo tests ----
@@ -744,6 +776,46 @@ mod tests {
         let id = manager.create_session("", "", &env).await.unwrap();
         assert!(id.starts_with("sess_"));
         manager.destroy_session(&id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_exec_runs_command_and_preserves_working_directory() {
+        let manager = SessionManager::new();
+        let env = HashMap::new();
+        let session_id = manager.create_session("", "", &env).await.unwrap();
+
+        let prime_events = collect_session_events(
+            &manager,
+            &session_id,
+            "cd /tmp && printf '%s' test-session > /tmp/session-test.txt",
+        )
+        .await;
+        let prime_exit = prime_events
+            .iter()
+            .find_map(|event| match event.as_ref().ok()?.event.as_ref()? {
+                exec_event::Event::Exit(exit) => Some(exit.exit_code),
+                _ => None,
+            });
+        assert_eq!(prime_exit, Some(0));
+
+        let persisted_events =
+            collect_session_events(&manager, &session_id, "pwd && cat /tmp/session-test.txt").await;
+        let mut stdout = Vec::new();
+        let mut exit = None;
+        for event in &persisted_events {
+            let event = event.as_ref().unwrap();
+            match event.event.as_ref() {
+                Some(exec_event::Event::Stdout(data)) => stdout.extend_from_slice(data),
+                Some(exec_event::Event::Exit(info)) => exit = Some(info.exit_code),
+                _ => {}
+            }
+        }
+
+        assert_eq!(exit, Some(0));
+        let normalized = String::from_utf8_lossy(&stdout).replace("\r\n", "\n");
+        assert_eq!(normalized.trim_end(), "/tmp\ntest-session");
+
+        manager.destroy_session(&session_id).await.unwrap();
     }
 
     #[tokio::test]
