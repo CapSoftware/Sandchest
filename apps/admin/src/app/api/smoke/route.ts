@@ -23,15 +23,22 @@ function getSmokeConfig() {
 
   const ttlValue = process.env['SANDCHEST_SMOKE_TTL_SECONDS']
   const ttlSeconds = ttlValue ? Number.parseInt(ttlValue, 10) : undefined
+  const timeoutValue = process.env['SANDCHEST_SMOKE_TIMEOUT_MS']
+  const timeoutMs = timeoutValue ? Number.parseInt(timeoutValue, 10) : undefined
+  const baseUrl =
+    process.env['SANDCHEST_SMOKE_BASE_URL']?.trim() ||
+    process.env['API_URL']?.trim() ||
+    DEFAULT_BASE_URL
 
   return {
     apiKey,
-    baseUrl: DEFAULT_BASE_URL,
+    baseUrl,
     image: process.env['SANDCHEST_SMOKE_IMAGE']?.trim() || undefined,
     profile: (process.env['SANDCHEST_SMOKE_PROFILE']?.trim() || undefined) as
       | SmokeProfile
       | undefined,
     ttlSeconds,
+    timeoutMs,
   }
 }
 

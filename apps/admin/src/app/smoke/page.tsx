@@ -62,11 +62,11 @@ export default function SmokePage() {
 
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-          <div className="card-title">Production Lifecycle Test</div>
+          <div className="card-title">Sandbox Lifecycle Test</div>
           <p className="text-weak" style={{ fontSize: '0.8125rem', lineHeight: 1.6 }}>
-            Runs the full sandbox lifecycle against <code>https://api.sandchest.com</code> from
-            the admin server using configured credentials. The flow creates live sandboxes,
-            exercises exec/session/file/fork paths, and attempts cleanup in all cases.
+            Runs the full sandbox lifecycle against the API configured on the admin server.
+            The flow creates live sandboxes, exercises exec/session/file/fork paths, and
+            attempts cleanup in all cases.
           </p>
         </div>
 
@@ -75,7 +75,8 @@ export default function SmokePage() {
             {isRunning ? 'Running smoke test...' : 'Run smoke test'}
           </button>
           <span className="text-weak" style={{ fontSize: '0.75rem' }}>
-            Uses `SANDCHEST_SMOKE_API_KEY` or `SANDCHEST_API_KEY` on the admin server.
+            Uses `SANDCHEST_SMOKE_BASE_URL` or `API_URL`, plus `SANDCHEST_SMOKE_API_KEY` or
+            `SANDCHEST_API_KEY`, and optional `SANDCHEST_SMOKE_TIMEOUT_MS`, on the admin server.
           </span>
         </div>
       </div>
