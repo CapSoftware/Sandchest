@@ -239,6 +239,29 @@ impl FirecrackerVm {
             let _ = self.child.kill().await;
         }
 
+        // Fallback: kill any orphaned Firecracker process matching this sandbox ID.
+        // When the jailer uses --new-pid-ns, the Firecracker child may end up in a
+        // different process group (due to setsid inside the jailer), so the process-
+        // group kill above only terminates the jailer — Firecracker survives as an
+        // orphan. This pkill catches it by matching the --id flag.
+        #[cfg(unix)]
+        {
+            let pattern = format!("firecracker.*--id {}", self.sandbox_id);
+            match tokio::process::Command::new("pkill")
+                .args(["-9", "-f", &pattern])
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    warn!(
+                        sandbox_id = %self.sandbox_id,
+                        "killed orphaned Firecracker process via pkill fallback"
+                    );
+                }
+                _ => {} // No match or pkill failed — process already dead, which is fine
+            }
+        }
+
         // Clean up sandbox data directory
         if Path::new(&self.data_dir).exists() {
             if let Err(e) = tokio::fs::remove_dir_all(&self.data_dir).await {
