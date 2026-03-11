@@ -83,6 +83,18 @@ export function createDrizzleSandboxRepo(db: Database): SandboxRepoApi {
   }
 
   return {
+    listImages: () =>
+      Effect.promise(async () => {
+        const rows = await db
+          .select({
+            osVersion: images.osVersion,
+            toolchain: images.toolchain,
+          })
+          .from(images)
+          .where(isNull(images.deprecatedAt))
+        return rows
+      }),
+
     resolveImage: (imageStr) =>
       Effect.promise(async () => {
         const parsed = parseImageRef(imageStr)

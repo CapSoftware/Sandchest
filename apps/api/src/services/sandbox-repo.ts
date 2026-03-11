@@ -32,7 +32,16 @@ export interface SandboxRow {
   readonly imageRef: string
 }
 
+/** Row returned by listImages. */
+export interface ImageRow {
+  readonly osVersion: string
+  readonly toolchain: string
+}
+
 export interface SandboxRepoApi {
+  /** List all available images. */
+  readonly listImages: () => Effect.Effect<ImageRow[], never, never>
+
   /** Look up image by string like "ubuntu-22.04" or "ubuntu-22.04/base". */
   readonly resolveImage: (
     imageStr: string,
