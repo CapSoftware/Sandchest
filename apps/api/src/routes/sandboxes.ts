@@ -203,8 +203,12 @@ const createSandbox = Effect.gen(function* () {
 
   const image = yield* repo.resolveImage(imageStr)
   if (!image) {
+    const allImages = yield* repo.listImages()
+    const available = allImages.map((i) => `${i.osVersion}/${i.toolchain}`).join(', ')
     return yield* Effect.fail(
-      new ValidationError({ message: `Unknown image: ${imageStr}` }),
+      new ValidationError({
+        message: `Unknown image: ${imageStr}. Available images: ${available}. Run 'sandchest images' to see all options.`,
+      }),
     )
   }
 
