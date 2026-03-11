@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { NodeClient } from '../services/node-client.js'
-import { BillingService } from '../services/billing.js'
+import type { BillingService } from '../services/billing.js'
 import { meterSandbox } from './credit-metering.js'
 import type { WorkerConfig } from './runner.js'
 
