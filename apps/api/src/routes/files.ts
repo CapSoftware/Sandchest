@@ -16,7 +16,7 @@ import { NodeClient } from '../services/node-client.js'
 const MAX_SINGLE_FILE = 5 * 1024 * 1024 * 1024 // 5 GB
 const MAX_BATCH_FILE = 10 * 1024 * 1024 * 1024 // 10 GB
 const DEFAULT_LIST_LIMIT = 200
-const DEFAULT_NODE_FILE_TIMEOUT_MS = 30_000
+const DEFAULT_NODE_FILE_TIMEOUT_MS = 120_000
 
 function parseSandboxId(idStr: string | undefined) {
   if (!idStr) {
