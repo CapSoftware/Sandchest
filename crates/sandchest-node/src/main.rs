@@ -8,6 +8,7 @@ pub mod heartbeat;
 pub mod id;
 pub mod jailer;
 pub mod network;
+pub mod provision;
 pub mod router;
 pub mod sandbox;
 pub mod slot;
@@ -362,6 +363,27 @@ impl proto::node_server::Node for NodeService {
 
         Ok(Response::new(()))
     }
+
+    async fn provision_images(
+        &self,
+        request: Request<proto::ProvisionImagesRequest>,
+    ) -> Result<Response<proto::ProvisionImagesResponse>, Status> {
+        let req = request.into_inner();
+
+        let s3_config = self
+            .node_config
+            .s3
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("S3 not configured on this node"))?;
+
+        let images_dir = self.node_config.images_dir();
+        let results =
+            provision::provision_images(s3_config, &images_dir, &req.image_refs).await;
+
+        Ok(Response::new(proto::ProvisionImagesResponse {
+            images: results,
+        }))
+    }
 }
 
 #[tokio::main]
@@ -408,6 +430,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut rx = event_rx;
             while rx.recv().await.is_some() {}
         });
+    }
+
+    // Auto-provision: download missing rootfs images from R2 on startup
+    if let Some(ref s3_config) = node_config.s3 {
+        let images_dir = node_config.images_dir();
+        info!(images_dir = %images_dir, "checking for missing rootfs images");
+        let results = provision::provision_images(s3_config, &images_dir, &[]).await;
+        for r in &results {
+            info!(
+                image_ref = %r.image_ref,
+                status = %r.status,
+                "provision result"
+            );
+        }
+    } else {
+        info!("S3 not configured, skipping image auto-provision");
     }
 
     let addr = format!("0.0.0.0:{}", node_config.grpc_port)
