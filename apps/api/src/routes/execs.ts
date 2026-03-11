@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from '@effect/platform'
-import { Effect } from 'effect'
+import { Cause, Effect } from 'effect'
 import {
   generateUUIDv7,
   idToBytes,
@@ -67,6 +67,92 @@ function rowToExec(row: ExecRow): Exec {
     ended_at: row.endedAt?.toISOString() ?? null,
   }
 }
+
+// -- Background async exec ----------------------------------------------------
+
+const runAsyncExec = (
+  execId: Uint8Array,
+  execIdStr: string,
+  sandboxIdBytes: Uint8Array,
+  cmdArray: string[],
+  cwd: string,
+  env: Record<string, string>,
+  timeoutSeconds: number,
+) =>
+  Effect.gen(function* () {
+    const execRepo = yield* ExecRepo
+    const nodeClient = yield* NodeClient
+    const redis = yield* RedisService
+
+    // Transition to running
+    yield* execRepo.updateStatus(execId, 'running', { startedAt: new Date() })
+
+    const result = yield* nodeClient.exec({
+      sandboxId: sandboxIdBytes,
+      execId: execIdStr,
+      cmd: cmdArray,
+      cwd,
+      env,
+      timeoutSeconds,
+    })
+
+    // Push events to Redis for SSE consumption
+    let eventSeq = 0
+    const now = new Date().toISOString()
+
+    if (result.stdout) {
+      eventSeq++
+      yield* redis.pushExecEvent(
+        execIdStr,
+        { seq: eventSeq, ts: now, data: { seq: eventSeq, t: 'stdout', data: result.stdout } },
+        EVENT_TTL_SECONDS,
+      )
+    }
+    if (result.stderr) {
+      eventSeq++
+      yield* redis.pushExecEvent(
+        execIdStr,
+        { seq: eventSeq, ts: now, data: { seq: eventSeq, t: 'stderr', data: result.stderr } },
+        EVENT_TTL_SECONDS,
+      )
+    }
+    eventSeq++
+    yield* redis.pushExecEvent(
+      execIdStr,
+      {
+        seq: eventSeq,
+        ts: now,
+        data: {
+          seq: eventSeq,
+          t: 'exit',
+          code: result.exitCode,
+          duration_ms: result.durationMs,
+          resource_usage: {
+            cpu_ms: result.cpuMs,
+            peak_memory_bytes: result.peakMemoryBytes,
+          },
+        },
+      },
+      EVENT_TTL_SECONDS,
+    )
+
+    // Update exec row to done
+    yield* execRepo.updateStatus(execId, 'done', {
+      exitCode: result.exitCode,
+      cpuMs: result.cpuMs,
+      peakMemoryBytes: result.peakMemoryBytes,
+      durationMs: result.durationMs,
+      endedAt: new Date(),
+    })
+  }).pipe(
+    Effect.catchAllCause((cause) =>
+      Effect.gen(function* () {
+        yield* Effect.logError(`Async exec failed for ${execIdStr}: ${Cause.pretty(cause)}`)
+        const execRepo = yield* ExecRepo
+        yield* execRepo.updateStatus(execId, 'failed', { endedAt: new Date() })
+      }).pipe(Effect.catchAll(() => Effect.void)),
+    ),
+  )
 
 // -- Execute command ----------------------------------------------------------
 
@@ -185,8 +271,20 @@ const execCommand = Effect.gen(function* () {
 
   const execIdStr = bytesToId(EXEC_PREFIX, execId)
 
-  // Async mode: return immediately
+  // Async mode: fire background execution and return immediately
   if (!wait) {
+    yield* Effect.forkDaemon(
+      runAsyncExec(
+        execId,
+        execIdStr,
+        sandboxIdBytes,
+        cmdArray,
+        body.cwd ?? DEFAULT_CWD,
+        body.env ?? {},
+        timeoutSeconds,
+      ),
+    )
+
     const response: ExecAsyncResponse = {
       exec_id: execIdStr,
       status: 'queued',

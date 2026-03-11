@@ -332,7 +332,7 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/exec/:execId 
     expect(body.ended_at).toBeDefined()
   })
 
-  test('returns queued exec from async execution', async () => {
+  test('returns completed exec from async execution (background fiber finishes)', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
 
@@ -347,6 +347,9 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/exec/:execId 
         )
         const execBody = (yield* execRes.json) as { exec_id: string }
 
+        // Allow the daemon fiber to complete
+        yield* Effect.yieldNow()
+
         const getRes = yield* client.execute(
           HttpClientRequest.get(
             `/v1/sandboxes/${sandboxId}/exec/${execBody.exec_id}`,
@@ -359,8 +362,9 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/exec/:execId 
 
     expect(result.status).toBe(200)
     const body = result.body as Record<string, unknown>
-    expect(body.status).toBe('queued')
-    expect(body.exit_code).toBeNull()
+    // Background fiber runs the exec and transitions to done
+    expect(body.status).toBe('done')
+    expect(body.exit_code).toBe(0)
   })
 
   test('returns 404 for unknown exec', async () => {
@@ -474,12 +478,15 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/execs — lis
             HttpClientRequest.bodyUnsafeJson({ cmd: ['echo', 'sync'] }),
           ),
         )
-        // Async exec → queued
+        // Async exec → also completes to done (background fiber runs immediately in tests)
         yield* client.execute(
           HttpClientRequest.post(`/v1/sandboxes/${sandboxId}/exec`).pipe(
             HttpClientRequest.bodyUnsafeJson({ cmd: ['sleep', '10'], wait: false }),
           ),
         )
+
+        // Allow the daemon fiber to complete
+        yield* Effect.yieldNow()
 
         const response = yield* client.execute(
           HttpClientRequest.get(`/v1/sandboxes/${sandboxId}/execs?status=done`),
@@ -491,8 +498,10 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('GET /v1/sandboxes/:id/execs — lis
 
     expect(result.status).toBe(200)
     const body = result.body as { execs: Array<{ status: string }> }
-    expect(body.execs.length).toBe(1)
+    // Both execs complete to done (background fiber finishes immediately with in-memory services)
+    expect(body.execs.length).toBe(2)
     expect(body.execs[0].status).toBe('done')
+    expect(body.execs[1].status).toBe('done')
   })
 
   test('returns 404 for unknown sandbox', async () => {
@@ -710,7 +719,7 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Exec status transitions', () => {
     expect(result.ended_at).toBeDefined()
   })
 
-  test('async exec stays queued until processed', async () => {
+  test('async exec transitions to done after background fiber completes', async () => {
     const env = createTestEnv()
     const sandboxId = await createRunningSandbox(env)
 
@@ -725,6 +734,9 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Exec status transitions', () => {
         )
         const execBody = (yield* execRes.json) as { exec_id: string }
 
+        // Allow the daemon fiber to complete
+        yield* Effect.yieldNow()
+
         const getRes = yield* client.execute(
           HttpClientRequest.get(
             `/v1/sandboxes/${sandboxId}/exec/${execBody.exec_id}`,
@@ -735,10 +747,10 @@ describe.skipIf(!RUN_API_INTEGRATION_TESTS)('Exec status transitions', () => {
       }),
     )
 
-    expect(result.status).toBe('queued')
-    expect(result.exit_code).toBeNull()
-    expect(result.started_at).toBeNull()
-    expect(result.ended_at).toBeNull()
+    expect(result.status).toBe('done')
+    expect(result.exit_code).toBe(0)
+    expect(result.started_at).toBeDefined()
+    expect(result.ended_at).toBeDefined()
   })
 })
 
