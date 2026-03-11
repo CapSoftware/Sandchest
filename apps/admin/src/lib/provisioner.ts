@@ -1,4 +1,5 @@
 import { presignDaemonBinary, presignKernel, presignRootfs } from './r2.js'
+import { TOOLCHAINS } from '@sandchest/contract'
 
 // --- Rootfs patching ---
 // The R2 rootfs image may be missing overlay-init and/or the guest agent
@@ -36,8 +37,8 @@ Restart=on-failure
 RestartSec=1
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/tmp /var/tmp /home
+ProtectHome=no
+ReadWritePaths=/tmp /var/tmp /home /root /work
 PrivateTmp=no
 LimitNOFILE=65536
 LimitNPROC=4096
@@ -49,22 +50,32 @@ SyslogIdentifier=sandchest-agent
 WantedBy=multi-user.target
 `
 
-const ROOTFS_PATH = '/var/sandchest/images/ubuntu-22.04-base/rootfs.ext4'
+const IMAGES_DIR = '/var/sandchest/images'
 const ROOTFS_MNT = '/tmp/sandchest-rootfs-patch'
 
+/** Build the local rootfs path for a given toolchain. */
+export function rootfsPath(toolchain: string): string {
+  return `${IMAGES_DIR}/ubuntu-22.04/${toolchain}/rootfs.ext4`
+}
+
+/** Build the local kernel path. */
+export function kernelPath(): string {
+  return `${IMAGES_DIR}/vmlinux-5.10`
+}
+
 /**
- * Commands to mount the rootfs ext4 image and inject overlay-init + guest
+ * Commands to mount a rootfs ext4 image and inject overlay-init + guest
  * agent systemd unit if they are missing. Idempotent.
  */
-export function patchRootfsCommands(): string[] {
+export function patchRootfsCommands(rootfs = rootfsPath('base')): string[] {
   const overlayB64 = Buffer.from(OVERLAY_INIT).toString('base64')
   const serviceB64 = Buffer.from(GUEST_AGENT_SERVICE).toString('base64')
   return [
     // Clean up stale mounts from previous failed runs
     `(umount ${ROOTFS_MNT} 2>/dev/null || true)`,
-    `(umount ${ROOTFS_PATH} 2>/dev/null || true)`,
+    `(umount ${rootfs} 2>/dev/null || true)`,
     `mkdir -p ${ROOTFS_MNT}`,
-    `mount -o loop ${ROOTFS_PATH} ${ROOTFS_MNT}`,
+    `mount -o loop ${rootfs} ${ROOTFS_MNT}`,
     // Install overlay-init
     `echo '${overlayB64}' | base64 -d > ${ROOTFS_MNT}/sbin/overlay-init`,
     `chmod +x ${ROOTFS_MNT}/sbin/overlay-init`,
@@ -75,6 +86,13 @@ export function patchRootfsCommands(): string[] {
     `umount ${ROOTFS_MNT}`,
     `rmdir ${ROOTFS_MNT}`,
   ]
+}
+
+/**
+ * Commands to patch all toolchain rootfs images with overlay-init + guest agent.
+ */
+export function patchAllRootfsCommands(): string[] {
+  return TOOLCHAINS.flatMap((tc) => patchRootfsCommands(rootfsPath(tc)))
 }
 
 export interface ProvisionContext {
@@ -200,26 +218,33 @@ export const PROVISION_STEPS: ProvisionStep[] = [
   },
   {
     id: 'download-images',
-    name: 'Download kernel & rootfs',
-    timeoutMs: 300_000, // 5 min — images can be large
+    name: 'Download kernel & all toolchain rootfs images',
+    timeoutMs: 600_000, // 10 min — multiple images
     commands: async () => {
-      const kernelUrl = await presignKernel()
-      const rootfsUrl = await presignRootfs()
+      const [kernelUrl, ...rootfsUrls] = await Promise.all([
+        presignKernel(),
+        ...TOOLCHAINS.map((tc) => presignRootfs(tc)),
+      ])
       return [
-        'mkdir -p /var/sandchest/images/ubuntu-22.04-base',
-        `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/ubuntu-22.04-base/vmlinux`,
-        `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrl}' -o /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4`,
-        'chmod 644 /var/sandchest/images/ubuntu-22.04-base/vmlinux /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4',
+        // Create directories for all toolchains
+        ...TOOLCHAINS.map((tc) => `mkdir -p ${IMAGES_DIR}/ubuntu-22.04/${tc}`),
+        // Download kernel
+        `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o ${kernelPath()}`,
+        `chmod 644 ${kernelPath()}`,
+        // Download each toolchain rootfs
+        ...TOOLCHAINS.map((tc, i) =>
+          `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrls[i]}' -o ${rootfsPath(tc)} && chmod 644 ${rootfsPath(tc)}`
+        ),
       ]
     },
-    validate: 'test -f /var/sandchest/images/ubuntu-22.04-base/vmlinux && test -f /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4 && echo "images ok"',
+    validate: `test -f ${kernelPath()} && ${TOOLCHAINS.map((tc) => `test -f ${rootfsPath(tc)}`).join(' && ')} && echo "images ok"`,
   },
   {
     id: 'patch-rootfs',
-    name: 'Patch rootfs (overlay-init + agent service)',
-    timeoutMs: 60_000,
-    commands: () => patchRootfsCommands(),
-    validate: `mount -o loop,ro ${ROOTFS_PATH} ${ROOTFS_MNT} && test -f ${ROOTFS_MNT}/sbin/overlay-init && test -f ${ROOTFS_MNT}/etc/systemd/system/sandchest-guest-agent.service && echo "rootfs patched ok"; umount ${ROOTFS_MNT} 2>/dev/null; rmdir ${ROOTFS_MNT} 2>/dev/null; true`,
+    name: 'Patch all rootfs images (overlay-init + agent service)',
+    timeoutMs: 120_000, // 2 min — patching multiple images
+    commands: () => patchAllRootfsCommands(),
+    validate: `mount -o loop,ro ${rootfsPath('base')} ${ROOTFS_MNT} && test -f ${ROOTFS_MNT}/sbin/overlay-init && test -f ${ROOTFS_MNT}/etc/systemd/system/sandchest-guest-agent.service && echo "rootfs patched ok"; umount ${ROOTFS_MNT} 2>/dev/null; rmdir ${ROOTFS_MNT} 2>/dev/null; true`,
   },
   {
     id: 'install-certs-mtls',
@@ -292,7 +317,7 @@ export const PROVISION_STEPS: ProvisionStep[] = [
         `curl -fsSL --retry 3 --retry-delay 5 '${url}' -o /usr/local/bin/sandchest-node`,
         'chmod +x /usr/local/bin/sandchest-node',
         'mkdir -p /etc/sandchest',
-        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\nSANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
+        `printf 'SANDCHEST_NODE_ID=${ctx.nodeId}\\nSANDCHEST_KERNEL_PATH=${kernelPath()}\\nSANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
         `(test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true)`,
         `echo '${unitFileB64}' | base64 -d > /etc/systemd/system/sandchest-node.service`,
         'systemctl daemon-reload',
