@@ -104,8 +104,9 @@ describe('constants', () => {
   test('TOOLCHAINS contains expected entries', () => {
     expect(TOOLCHAINS).toContain('base')
     expect(TOOLCHAINS).toContain('node-22')
+    expect(TOOLCHAINS).toContain('bun')
     expect(TOOLCHAINS).toContain('python-3.12')
     expect(TOOLCHAINS).toContain('go-1.22')
-    expect(TOOLCHAINS.length).toBe(4)
+    expect(TOOLCHAINS.length).toBe(5)
   })
 })

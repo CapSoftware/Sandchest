@@ -5,7 +5,7 @@ export const DEFAULT_TOOLCHAIN = 'base'
 export const IMAGE_URI_SCHEME = 'sandchest'
 
 /** Supported toolchain identifiers. */
-export const TOOLCHAINS = ['base', 'node-22', 'python-3.12', 'go-1.22'] as const
+export const TOOLCHAINS = ['base', 'node-22', 'bun', 'python-3.12', 'go-1.22'] as const
 export type Toolchain = (typeof TOOLCHAINS)[number]
 
 /** Parsed image reference. */
