@@ -159,6 +159,9 @@ impl FirecrackerVm {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: vm_config.tap_dev_name.clone(),
             guest_mac: vm_config.guest_mac.clone(),
+            guest_ip: vm_config.guest_ip.clone(),
+            gateway_ip: vm_config.gateway_ip.clone(),
+            dns: vm_config.dns.clone(),
         };
 
         let config_json = jailed_vm_config
@@ -359,6 +362,9 @@ mod tests {
             vsock_uds_path: "/var/sandchest/sandboxes/sb_test123/vsock.sock".to_string(),
             tap_dev_name: Some("tap-sb_test1".to_string()),
             guest_mac: Some("AA:FC:00:00:00:01".to_string()),
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
 
         let json = config.to_json().unwrap();
@@ -409,6 +415,9 @@ mod tests {
             vsock_uds_path: "/var/sandchest/sandboxes/sb_test123/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
 
         let json = config.to_json().unwrap();
@@ -457,6 +466,9 @@ mod tests {
             vsock_uds_path: "/tmp/sandchest-fc-test/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
 
         let tmp = std::env::temp_dir().join("sandchest-fc-create-test");
@@ -564,6 +576,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
 
         let result = super::FirecrackerVm::create_jailed(&vm_config, &jailer_config).await;

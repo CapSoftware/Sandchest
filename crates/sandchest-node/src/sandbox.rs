@@ -1410,6 +1410,9 @@ impl SandboxManager {
                 vsock_uds_path: paths.vsock,
                 tap_dev_name: Some(net_config.tap_name.clone()),
                 guest_mac: Some(net_config.guest_mac.clone()),
+                guest_ip: Some(net_config.guest_ip.clone()),
+                gateway_ip: Some(net_config.gateway.clone()),
+                dns: Some(net_config.dns.clone()),
             };
             FirecrackerVm::create_jailed(&vm_config, &self.node_config.jailer)
                 .await
@@ -1426,6 +1429,9 @@ impl SandboxManager {
                 vsock_uds_path: vsock_path,
                 tap_dev_name: Some(net_config.tap_name.clone()),
                 guest_mac: Some(net_config.guest_mac.clone()),
+                guest_ip: Some(net_config.guest_ip.clone()),
+                gateway_ip: Some(net_config.gateway.clone()),
+                dns: Some(net_config.dns.clone()),
             };
             FirecrackerVm::create(&vm_config, &self.node_config.data_dir)
                 .await
