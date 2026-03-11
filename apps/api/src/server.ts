@@ -17,6 +17,7 @@ import { AdminNodeRouter } from './routes/admin-nodes.js'
 import { AdminSandboxRouter } from './routes/admin-sandboxes.js'
 import { AdminStatusRouter } from './routes/admin-status.js'
 import { DocsRouter } from './routes/docs.js'
+import { ImageRouter } from './routes/images.js'
 
 const handleBetterAuth = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest
@@ -37,6 +38,7 @@ export const ApiRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(AdminSandboxRouter),
   HttpRouter.concat(AdminStatusRouter),
   HttpRouter.concat(DocsRouter),
+  HttpRouter.concat(ImageRouter),
   HttpRouter.all('/api/auth/*', handleBetterAuth),
   HttpRouter.all('/api/auth', handleBetterAuth),
   HttpRouter.catchAll((error) => Effect.succeed(formatApiError(error))),
