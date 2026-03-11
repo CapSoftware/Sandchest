@@ -143,14 +143,16 @@ install_python_312() {
         apt-get install -y -qq --no-install-recommends \
             python3.12 \
             python3.12-venv \
-            python3.12-dev \
-            python3-pip
+            python3.12-dev
+        python3.12 -m ensurepip --upgrade
+        ln -sf /usr/local/bin/pip3 /usr/local/bin/pip || true
         update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 || true
         update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 || true
         apt-get clean
         rm -rf /var/lib/apt/lists/*
         echo '--- Python version ---'
         python3.12 --version
+        pip3 --version || true
     "
 }
 
