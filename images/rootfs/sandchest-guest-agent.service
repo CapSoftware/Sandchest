@@ -12,8 +12,8 @@ RestartSec=1
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/tmp /var/tmp /home
+ProtectHome=no
+ReadWritePaths=/tmp /var/tmp /home /root /work
 PrivateTmp=no
 
 # Resource limits
