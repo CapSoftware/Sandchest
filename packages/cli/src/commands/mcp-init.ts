@@ -133,6 +133,18 @@ export function mcpInitCommand(): Command {
         const existingServer = isRecord(mcpServers['sandchest'])
           ? (mcpServers['sandchest'] as McpServerConfig)
           : undefined
+        // Verify API key if present
+        const currentApiKey = getApiKey()
+        if (currentApiKey && currentApiKey !== '<your-api-key>') {
+          try {
+            const { Sandchest } = await import('@sandchest/sdk')
+            const testClient = new Sandchest({ apiKey: currentApiKey })
+            await testClient.list({ limit: 1 })
+          } catch {
+            process.stderr.write('warning: API key could not be verified. The API may be unreachable.\n')
+          }
+        }
+
         const allowedPaths = normalizeAllowPaths(options.allowPath)
         const sandchestServer = buildSandchestServer(existingServer, {
           apiKey: getApiKey(),
