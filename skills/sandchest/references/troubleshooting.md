@@ -37,6 +37,30 @@ Fixes:
 - Narrow the upload scope.
 - Exclude generated directories and dependency folders.
 
+## Writable Paths
+
+The sandbox root filesystem uses an overlay mount. The guest agent runs with
+ProtectSystem=strict, with explicit ReadWritePaths for user-writable directories.
+
+Writable directories:
+- `/work` (primary workspace — default for uploads, clones, and exec cwd)
+- `/root` (root user home)
+- `/tmp` and `/var/tmp` (ephemeral scratch space)
+- `/home` (user home directories)
+
+Use `/work` as the default destination for uploads and clones.
+
+## Image Availability
+
+Only `sandchest://ubuntu-22.04/base` is currently available. Do not request
+node-22, bun, python-3.12, or go-1.22 images unless they have been explicitly
+provisioned on the target node.
+
+Install toolchains manually in the base image:
+- Node.js: `curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs`
+- Bun: `curl -fsSL https://bun.sh/install | bash`
+- Python 3.12: `apt-get install -y python3.12 python3.12-venv`
+
 ## Directory Upload Failed On Extraction
 
 Bulk upload is not transactional. Partial files may remain.
@@ -45,6 +69,29 @@ Fixes:
 - Fork before bulk upload.
 - Destroy the failed fork and retry from the checkpoint.
 - Check whether the archive contains links or unsupported entry types.
+
+## Upload Dir Fails With Symlinks
+
+The sandbox_upload_dir tool filters out directory symlinks and broken symlinks
+automatically for git repos. If you still get symlink errors:
+
+Fixes:
+- Ensure the MCP server dist is rebuilt and the process is restarted.
+- Use the exclude parameter to skip problematic paths.
+- For public repos, prefer sandbox_git_clone over sandbox_upload_dir.
+
+## Sandbox Has No Network
+
+If sandbox_git_clone or package install commands fail with network errors:
+
+Possible causes:
+- NAT/iptables rules not applied on the host node.
+- Outbound interface mismatch (SANDCHEST_OUTBOUND_IFACE).
+- DNS resolution failure.
+
+Workarounds:
+- Use sandbox_upload_dir to transfer code locally instead of cloning.
+- Upload pre-built dependencies via sandbox_upload.
 
 ## Private Repo Clone Not Supported Yet
 
