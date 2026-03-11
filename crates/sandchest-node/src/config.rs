@@ -44,6 +44,9 @@ pub struct VmConfig {
     pub vsock_uds_path: String,
     pub tap_dev_name: Option<String>,
     pub guest_mac: Option<String>,
+    pub guest_ip: Option<String>,
+    pub gateway_ip: Option<String>,
+    pub dns: Option<String>,
 }
 
 /// Firecracker JSON configuration structures.
@@ -93,9 +96,20 @@ pub struct NetworkInterface {
     pub host_dev_name: String,
 }
 
-const BOOT_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/overlay-init";
+const BASE_BOOT_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/overlay-init";
 
 impl VmConfig {
+    fn build_boot_args(&self) -> String {
+        let mut args = BASE_BOOT_ARGS.to_string();
+        if let (Some(ip), Some(gw)) = (&self.guest_ip, &self.gateway_ip) {
+            args.push_str(&format!(" sandchest.ip={}/30 sandchest.gw={}", ip, gw));
+            if let Some(dns) = &self.dns {
+                args.push_str(&format!(" sandchest.dns={}", dns));
+            }
+        }
+        args
+    }
+
     /// Build the Firecracker JSON configuration.
     pub fn to_firecracker_config(&self) -> FirecrackerConfig {
         let mut network_interfaces = Vec::new();
@@ -110,7 +124,7 @@ impl VmConfig {
         FirecrackerConfig {
             boot_source: BootSource {
                 kernel_image_path: self.kernel_path.clone(),
-                boot_args: BOOT_ARGS.to_string(),
+                boot_args: self.build_boot_args(),
             },
             drives: vec![Drive {
                 drive_id: "rootfs".to_string(),
@@ -349,6 +363,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert!(fc.boot_source.boot_args.contains("overlay-init"));
@@ -366,6 +383,9 @@ mod tests {
             vsock_uds_path: "/custom/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert_eq!(fc.vsock.guest_cid, 3);
@@ -383,6 +403,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert_eq!(fc.drives.len(), 1);
@@ -403,6 +426,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert!(!fc.machine_config.smt);
@@ -421,6 +447,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: Some("tap0".to_string()),
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert!(fc.network_interfaces.is_empty());
@@ -437,6 +466,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert!(fc.network_interfaces.is_empty());
@@ -453,6 +485,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: Some("tap-sb_test".to_string()),
             guest_mac: Some("AA:FC:00:00:00:01".to_string()),
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let fc = config.to_firecracker_config();
         assert_eq!(fc.network_interfaces.len(), 1);
@@ -472,6 +507,9 @@ mod tests {
             vsock_uds_path: "/vsock.sock".to_string(),
             tap_dev_name: None,
             guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
         };
         let json = config.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -685,5 +723,45 @@ mod tests {
 
         std::env::remove_var("SANDCHEST_S3_BUCKET");
         std::env::remove_var("SANDCHEST_S3_SECRET_KEY");
+    }
+
+    #[test]
+    fn vm_config_boot_args_include_network_params() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: Some("tap0".to_string()),
+            guest_mac: Some("AA:FC:00:00:00:01".to_string()),
+            guest_ip: Some("172.16.5.2".to_string()),
+            gateway_ip: Some("172.16.5.1".to_string()),
+            dns: Some("1.1.1.1".to_string()),
+        };
+        let fc = config.to_firecracker_config();
+        assert!(fc.boot_source.boot_args.contains("sandchest.ip=172.16.5.2/30"));
+        assert!(fc.boot_source.boot_args.contains("sandchest.gw=172.16.5.1"));
+        assert!(fc.boot_source.boot_args.contains("sandchest.dns=1.1.1.1"));
+    }
+
+    #[test]
+    fn vm_config_boot_args_no_network_without_ip() {
+        let config = VmConfig {
+            sandbox_id: "sb_test".to_string(),
+            kernel_path: "/vmlinux".to_string(),
+            rootfs_path: "/rootfs.ext4".to_string(),
+            vcpu_count: 2,
+            mem_size_mib: 4096,
+            vsock_uds_path: "/vsock.sock".to_string(),
+            tap_dev_name: None,
+            guest_mac: None,
+            guest_ip: None,
+            gateway_ip: None,
+            dns: None,
+        };
+        let fc = config.to_firecracker_config();
+        assert!(!fc.boot_source.boot_args.contains("sandchest.ip"));
     }
 }
