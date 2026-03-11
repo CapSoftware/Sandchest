@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useStatus } from '@/hooks/use-status'
 
 function formatUptime(seconds: number): string {
@@ -195,7 +196,63 @@ export default function StatusPage() {
             )}
           </div>
         ) : null}
+
+        {/* Database Actions */}
+        <DatabaseActions />
       </div>
     </>
+  )
+}
+
+function DatabaseActions() {
+  const [seeding, setSeeding] = useState(false)
+  const [result, setResult] = useState<{ success?: boolean; message?: string; error?: string } | null>(null)
+
+  async function handleSeed() {
+    setSeeding(true)
+    setResult(null)
+    try {
+      const res = await fetch('/api/seed', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        setResult({ success: true, message: data.message })
+      } else {
+        setResult({ error: data.error ?? 'Seed failed' })
+      }
+    } catch (err) {
+      setResult({ error: err instanceof Error ? err.message : 'Network error' })
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header" style={{ marginBottom: '0.5rem' }}>
+        <span className="card-title">Database</span>
+      </div>
+      <p style={{ fontSize: '0.8125rem', marginBottom: '0.75rem' }} className="text-weak">
+        Re-seed profiles and images. Idempotent — safe to run multiple times.
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <button
+          className="btn btn-sm"
+          onClick={handleSeed}
+          disabled={seeding}
+        >
+          {seeding ? 'Seeding...' : 'Seed Profiles & Images'}
+        </button>
+        {result?.success ? (
+          <span style={{ fontSize: '0.8125rem', color: 'var(--color-success, #22c55e)' }}>
+            {result.message}
+          </span>
+        ) : null}
+        {result?.error ? (
+          <span style={{ fontSize: '0.8125rem', color: 'var(--color-danger, #ef4444)' }}>
+            {result.error}
+          </span>
+        ) : null}
+      </div>
+    </div>
   )
 }
