@@ -13,17 +13,23 @@ export function createUploadCommand(
     .argument('<local_path>', 'Local file path')
     .argument('<remote_path>', 'Destination path in the sandbox')
     .option('--json', 'Output as JSON')
+    .option('--timeout <ms>', 'Upload timeout in milliseconds', '120000')
     .action(
       async (
         sandboxId: string,
         localPath: string,
         remotePath: string,
-        options: { json?: boolean },
+        options: { json?: boolean; timeout?: string },
       ) => {
         try {
           const client = getClient()
           const sandbox = await client.get(sandboxId)
           const content = new Uint8Array(readFileSync(localPath))
+
+          const fileSize = (content.byteLength / 1024 / 1024).toFixed(1)
+          if (!options.json) {
+            process.stderr.write(`Uploading ${localPath} (${fileSize} MB)...\n`)
+          }
 
           await sandbox.fs.upload(remotePath, content)
 
