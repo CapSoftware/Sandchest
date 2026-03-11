@@ -15,7 +15,10 @@ import { logsCommand } from './commands/logs.js'
 import { copyCommand } from './commands/copy.js'
 import { gitCommand } from './commands/git.js'
 import { mcpInitCommand } from './commands/mcp-init.js'
+import { mcpTestCommand } from './commands/mcp-test.js'
 import { skillInstallCommand } from './commands/skill-install.js'
+import { runCommand } from './commands/run.js'
+import { imagesCommand } from './commands/images.js'
 
 const program = new Command()
   .name('sandchest')
@@ -37,9 +40,12 @@ program.addCommand(downloadCommand())
 program.addCommand(logsCommand())
 program.addCommand(copyCommand())
 program.addCommand(gitCommand())
+program.addCommand(runCommand())
+program.addCommand(imagesCommand())
 
 const mcpGroup = new Command('mcp').description('MCP server management')
 mcpGroup.addCommand(mcpInitCommand())
+mcpGroup.addCommand(mcpTestCommand())
 program.addCommand(mcpGroup)
 
 const skillGroup = new Command('skill').description('Skill installation and management')
