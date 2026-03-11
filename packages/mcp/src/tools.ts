@@ -332,7 +332,7 @@ function validateGitCloneUrl(
   return { ok: true, url }
 }
 
-function createGitArchive(localPath: string, archivePath: string): 'git-ls-files' {
+function createGitArchive(localPath: string, archivePath: string, exclude?: string[]): 'git-ls-files' {
   const repoRoot = execFileSync('git', ['-C', localPath, 'rev-parse', '--show-toplevel'], {
     stdio: ['pipe', 'pipe', 'pipe'],
   }).toString('utf-8').trim()
@@ -389,16 +389,16 @@ function createGitArchive(localPath: string, archivePath: string): 'git-ls-files
     try {
       const entry = lstatSync(join(localPath, selectedRelPath))
       if (entry.isSymbolicLink()) {
-        throw new Error(
-          `sandbox_upload_dir does not support symbolic links yet. Refusing to archive '${selectedRelPath}' because sandbox upload validation rejects link entries.`,
-        )
+        try {
+          const target = statSync(join(localPath, selectedRelPath))
+          // Symlink to a regular file: include it (tar -h will dereference)
+          return target.isFile()
+        } catch {
+          // Broken symlink: skip
+          return false
+        }
       }
-      if (!entry.isFile()) {
-        throw new Error(
-          `sandbox_upload_dir only supports regular files in git-aware uploads. Refusing to archive '${selectedRelPath}'.`,
-        )
-      }
-      return true
+      return entry.isFile()
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return false
@@ -407,13 +407,23 @@ function createGitArchive(localPath: string, archivePath: string): 'git-ls-files
     }
   })
 
+  const filteredFiles = exclude && exclude.length > 0
+    ? existingFiles.filter((relPath) => !exclude.some((pattern) => {
+        // Support both glob-style prefix matching and exact matching
+        if (pattern.endsWith('*')) {
+          return relPath.startsWith(pattern.slice(0, -1))
+        }
+        return relPath === pattern || relPath.startsWith(`${pattern}/`)
+      }))
+    : existingFiles
+
   const fileListPath = join(tmpdir(), `.sandchest-filelist-${crypto.randomUUID()}`)
   try {
     writeFileSync(
       fileListPath,
-      Buffer.from(existingFiles.length === 0 ? '' : `${existingFiles.join('\0')}\0`, 'utf-8'),
+      Buffer.from(filteredFiles.length === 0 ? '' : `${filteredFiles.join('\0')}\0`, 'utf-8'),
     )
-    execFileSync('tar', ['czf', archivePath, '-C', localPath, '--null', '-T', fileListPath], {
+    execFileSync('tar', ['czf', archivePath, '-h', '-C', localPath, '--null', '-T', fileListPath], {
       stdio: 'pipe',
       env: { ...process.env, COPYFILE_DISABLE: '1' },
     })
@@ -425,7 +435,7 @@ function createGitArchive(localPath: string, archivePath: string): 'git-ls-files
 }
 
 function createTarArchive(localPath: string, archivePath: string, exclude: string[] = []): 'tar' {
-  const tarArgs = ['czf', archivePath]
+  const tarArgs = ['czf', archivePath, '-h']
   for (const pattern of ['.git', 'node_modules', '__pycache__', '.venv', '.tox']) {
     tarArgs.push('--exclude', pattern)
   }
@@ -458,7 +468,7 @@ function createLocalArchive(
     throw error
   }
 
-  return createGitArchive(localPath, archivePath)
+  return createGitArchive(localPath, archivePath, options?.exclude)
 }
 
 function normalizeScopePrefix(prefix: string): string {
@@ -775,7 +785,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
         .string()
         .optional()
         .describe(
-          "Image URI. Default: 'sandchest://ubuntu-22.04/base'. Options: 'sandchest://ubuntu-22.04/node-22', 'sandchest://ubuntu-22.04/python-3.12', 'sandchest://ubuntu-24.04/base'.",
+          "Image URI. Default: 'sandchest://ubuntu-22.04/base'. Currently only 'sandchest://ubuntu-22.04/base' is available. Additional toolchain images (node-22, bun, python-3.12, go-1.22) will be provisioned separately.",
         ),
       profile: z
         .enum(['small', 'medium', 'large'])
@@ -952,6 +962,15 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
         validateArchiveFile(archivePath, 'sandbox_upload_dir')
 
         const tarball = new Uint8Array(readFileSync(archivePath))
+
+        const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
+        if (tarball.byteLength > MAX_UPLOAD_BYTES) {
+          return jsonContent({
+            ok: false,
+            error: `Archive is ${(tarball.byteLength / 1024 / 1024).toFixed(1)} MB, which exceeds the 100 MB upload limit. Use sandbox_git_clone for public repos, or narrow the upload scope with exclude patterns.`,
+          })
+        }
+
         await sb.fs.uploadDir(remotePath, tarball)
 
         let baselineCreated: boolean | undefined
@@ -1008,6 +1027,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       return jsonContent({
         ok: false,
         error: err instanceof Error ? err.message : String(err),
+        hint: 'If this is a size or timeout issue, try sandbox_git_clone for public repos or narrow the upload scope with exclude patterns.',
       })
     }
   })
@@ -1095,6 +1115,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       return jsonContent({
         ok: false,
         error: err instanceof Error ? err.message : String(err),
+        hint: 'If this is a size or timeout issue, try sandbox_git_clone for public repos or narrow the upload scope with exclude patterns.',
       })
     }
   })
@@ -1232,7 +1253,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       'List files and directories at a path inside a sandbox. Returns names, types (file/directory), and sizes. Use this to explore the sandbox filesystem before downloading or modifying files.',
     inputSchema: {
       sandbox_id: z.string().describe('The sandbox to list files in.'),
-      path: z.string().describe('Directory path to list (e.g., /root, /work).'),
+      path: z.string().describe('Directory path to list (e.g., /work, /root, /tmp).'),
     },
   }, async (args) => {
     const sb = await sandchest.get(args.sandbox_id)

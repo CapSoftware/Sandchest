@@ -892,14 +892,26 @@ describe('MCP Server', () => {
     expect(existsSync(join(inspectDir, 'ignored.txt'))).toBe(false)
   })
 
-  test('sandbox_upload_dir rejects git-tracked symbolic links before upload', async () => {
+  test('sandbox_upload_dir dereferences symlinks to files in git repos', async () => {
     process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
 
     const repoDir = join(tempDir, 'repo-with-link')
     execFileSync('git', ['init', repoDir], { stdio: 'pipe' })
-    writeFileSync(join(repoDir, 'tracked.txt'), 'tracked')
+    writeFileSync(join(repoDir, 'tracked.txt'), 'tracked-content')
     symlinkSync('tracked.txt', join(repoDir, 'linked.txt'))
     execFileSync('git', ['-C', repoDir, 'add', 'tracked.txt', 'linked.txt'], { stdio: 'pipe' })
+
+    let capturedTarball: Uint8Array | undefined
+    const uploadDir = mock(async (_remotePath: string, tarball: Uint8Array) => {
+      capturedTarball = tarball
+    })
+    const sb = mockSandbox({
+      fs: {
+        ...mockSandbox().fs,
+        uploadDir,
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
 
     const result = await client.callTool({
       name: 'sandbox_upload_dir',
@@ -909,10 +921,66 @@ describe('MCP Server', () => {
         remote_path: '/work/repo',
       },
     })
-    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; error: string }
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; method: string }
 
-    expect(data.ok).toBe(false)
-    expect(data.error).toContain('does not support symbolic links')
+    expect(data.ok).toBe(true)
+    expect(data.method).toBe('git-ls-files')
+    expect(capturedTarball).toBeDefined()
+
+    const inspectDir = join(tempDir, 'inspect-link')
+    mkdirSync(inspectDir)
+    const archivePath = join(inspectDir, 'archive.tar.gz')
+    writeFileSync(archivePath, capturedTarball!)
+    execFileSync('tar', ['xzf', archivePath, '-C', inspectDir], { stdio: 'pipe' })
+
+    expect(readFileSync(join(inspectDir, 'tracked.txt'), 'utf-8')).toBe('tracked-content')
+    expect(readFileSync(join(inspectDir, 'linked.txt'), 'utf-8')).toBe('tracked-content')
+  })
+
+  test('sandbox_upload_dir skips symlinks to directories in git repos', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+
+    const repoDir = join(tempDir, 'repo-with-dirlink')
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' })
+    mkdirSync(join(repoDir, 'real-dir'))
+    writeFileSync(join(repoDir, 'real-dir', 'file.txt'), 'inside-dir')
+    symlinkSync('real-dir', join(repoDir, 'linked-dir'))
+    execFileSync('git', ['-C', repoDir, 'add', '.'], { stdio: 'pipe' })
+
+    let capturedTarball: Uint8Array | undefined
+    const uploadDir = mock(async (_remotePath: string, tarball: Uint8Array) => {
+      capturedTarball = tarball
+    })
+    const sb = mockSandbox({
+      fs: {
+        ...mockSandbox().fs,
+        uploadDir,
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_upload_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        local_path: repoDir,
+        remote_path: '/work/repo',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { ok: boolean; method: string }
+
+    expect(data.ok).toBe(true)
+
+    const inspectDir = join(tempDir, 'inspect-dirlink')
+    mkdirSync(inspectDir)
+    const archivePath = join(inspectDir, 'archive.tar.gz')
+    writeFileSync(archivePath, capturedTarball!)
+    execFileSync('tar', ['xzf', archivePath, '-C', inspectDir], { stdio: 'pipe' })
+
+    // Real directory contents are included
+    expect(readFileSync(join(inspectDir, 'real-dir', 'file.txt'), 'utf-8')).toBe('inside-dir')
+    // Symlink to directory is skipped (not in archive)
+    expect(existsSync(join(inspectDir, 'linked-dir'))).toBe(false)
   })
 
   test('sandbox_download_dir extracts a sandbox archive into a new local directory', async () => {
