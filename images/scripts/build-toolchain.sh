@@ -67,10 +67,19 @@ if [[ -z "$OUTPUT_DIR" ]]; then
     OUTPUT_DIR="$(dirname "$ROOTFS")"
 fi
 
+kill_chroot_procs() {
+    # Kill any processes still referencing the mount point
+    if [[ -n "$MOUNT_POINT" ]]; then
+        fuser -km "$MOUNT_POINT" 2>/dev/null || true
+        sleep 0.5
+    fi
+}
+
 cleanup() {
     echo "Cleaning up..."
     if [[ -n "$MOUNT_POINT" ]] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
-        umount -R "$MOUNT_POINT" 2>/dev/null || true
+        kill_chroot_procs
+        umount -R "$MOUNT_POINT" 2>/dev/null || umount -lR "$MOUNT_POINT" 2>/dev/null || true
     fi
     if [[ -n "$MOUNT_POINT" ]] && [[ -d "$MOUNT_POINT" ]]; then
         rmdir "$MOUNT_POINT" 2>/dev/null || true
@@ -128,7 +137,7 @@ install_python_312() {
     chroot "$MOUNT_POINT" /bin/bash -c "
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq --no-install-recommends software-properties-common
+        apt-get install -y -qq --no-install-recommends software-properties-common gnupg
         add-apt-repository -y ppa:deadsnakes/ppa
         apt-get update -qq
         apt-get install -y -qq --no-install-recommends \
@@ -197,11 +206,12 @@ echo ">>> Cleaning up..."
 chroot "$MOUNT_POINT" /bin/bash -c "
     rm -rf /tmp/* /var/tmp/* /var/cache/apt/*
 "
+kill_chroot_procs
 umount "${MOUNT_POINT}/dev/pts" 2>/dev/null || true
 umount "${MOUNT_POINT}/dev" 2>/dev/null || true
 umount "${MOUNT_POINT}/sys" 2>/dev/null || true
 umount "${MOUNT_POINT}/proc" 2>/dev/null || true
-umount "$MOUNT_POINT"
+umount "$MOUNT_POINT" 2>/dev/null || umount -l "$MOUNT_POINT"
 MOUNT_POINT=""
 
 # Recompute digest
