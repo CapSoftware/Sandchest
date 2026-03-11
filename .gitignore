@@ -19,6 +19,9 @@ target/
 .env.*
 !.env.example
 
+# MCP config (contains env var references)
+.mcp.json
+
 # mTLS certificates (private keys)
 /certs/
 
