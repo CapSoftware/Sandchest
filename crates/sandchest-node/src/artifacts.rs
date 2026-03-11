@@ -134,7 +134,7 @@ async fn upload_to_s3(config: &S3Config, key: &str, data: &[u8]) -> Result<(), S
 /// When static credentials are provided (for S3-compatible services like Scaleway),
 /// uses those directly with path-style addressing. Otherwise, uses the default
 /// credential chain (EC2 instance profile / IMDS) with virtual-hosted style.
-async fn build_s3_client(config: &S3Config) -> aws_sdk_s3::Client {
+pub async fn build_s3_client(config: &S3Config) -> aws_sdk_s3::Client {
     if config.has_static_credentials() {
         let creds = aws_credential_types::Credentials::new(
             config.access_key.as_deref().unwrap_or_default(),
