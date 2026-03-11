@@ -4,6 +4,7 @@ import { generateUUIDv7, idToBytes, bytesToId, NODE_PREFIX } from '@sandchest/co
 import { NotFoundError, ValidationError } from '../errors.js'
 import { RedisService } from '../services/redis.js'
 import { NodeRepo } from '../services/node-repo.js'
+import { NodeClient } from '../services/node-client.js'
 
 /**
  * Admin node routes. Protected by ADMIN_API_TOKEN bearer auth (see middleware).
@@ -234,6 +235,49 @@ export const AdminNodeRouter = HttpRouter.empty.pipe(
       yield* nodeRepo.remove(nodeIdBytes)
 
       return HttpServerResponse.unsafeJson({ id: nodeId, deleted: true }, { status: 200 })
+    }),
+  ),
+
+  // POST /v1/admin/nodes/:id/reprovision — trigger image provisioning on a node
+  HttpRouter.post(
+    '/v1/admin/nodes/:id/reprovision',
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params
+      const nodeId = params.id!
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const body = (yield* request.json) as {
+        image_refs?: string[]
+      }
+
+      let nodeIdBytes: Uint8Array
+      try {
+        nodeIdBytes = idToBytes(nodeId)
+      } catch {
+        return yield* Effect.fail(new ValidationError({ message: 'Invalid node ID format' }))
+      }
+
+      const nodeRepo = yield* NodeRepo
+      const node = yield* nodeRepo.findById(nodeIdBytes)
+      if (!node) {
+        return yield* Effect.fail(new NotFoundError({ message: `Node ${nodeId} not found` }))
+      }
+
+      const nodeClient = yield* NodeClient
+      const results = yield* nodeClient.provisionImages({
+        imageRefs: body.image_refs ?? [],
+      })
+
+      return HttpServerResponse.unsafeJson(
+        {
+          node_id: nodeId,
+          images: results.map((r) => ({
+            image_ref: r.imageRef,
+            status: r.status,
+            error: r.error || undefined,
+          })),
+        },
+        { status: 200 },
+      )
     }),
   ),
 )
