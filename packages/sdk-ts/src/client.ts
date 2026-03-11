@@ -8,7 +8,7 @@ import { HttpClient } from './http.js'
 import { Sandbox } from './sandbox.js'
 
 const DEFAULT_BASE_URL = 'https://api.sandchest.com'
-const DEFAULT_TIMEOUT = 30_000
+const DEFAULT_TIMEOUT = 120_000
 const DEFAULT_RETRIES = 3
 
 /**
