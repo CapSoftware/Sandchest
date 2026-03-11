@@ -203,7 +203,7 @@ async function measureCheck(
   } catch (error) {
     const normalized = toError(error)
     throw new Error(`Smoke step "${name}" failed: ${normalized.message}`, {
-      cause: normalized,
+      cause: error,
     })
   }
   const durationMs = Date.now() - startedAt
@@ -426,7 +426,7 @@ export async function runSandboxSmokeTest(
           const snapshot = await fetchSandboxState(resolved.baseUrl, resolved.apiKey, sandbox.id)
           const normalized = toError(error)
           throw new Error(`${normalized.message}; ${formatSandboxState(snapshot)}`, {
-            cause: normalized,
+            cause: error,
           })
         }
       }),
@@ -467,7 +467,7 @@ export async function runSandboxSmokeTest(
           const normalized = toError(error)
           throw new Error(
             `${normalized.message}; source ${formatSandboxState(sourceSnapshot)}; fork ${formatSandboxState(forkSnapshot)}`,
-            { cause: normalized },
+            { cause: error },
           )
         }
       }),
