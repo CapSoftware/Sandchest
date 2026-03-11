@@ -10,6 +10,7 @@
 # Toolchains:
 #   base        — No additional packages (validates rootfs only)
 #   node-22     — Node.js 22 LTS via NodeSource
+#   bun         — Bun runtime
 #   python-3.12 — Python 3.12 via deadsnakes PPA
 #   go-1.22     — Go 1.22 from official tarball
 
@@ -109,11 +110,16 @@ install_node_22() {
         curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
         apt-get install -y -qq --no-install-recommends nodejs
         npm install -g npm@latest 2>/dev/null || true
+        npm install -g pnpm@latest yarn@latest 2>/dev/null || true
+        # Enable corepack for managed pnpm/yarn if preferred
+        corepack enable 2>/dev/null || true
         apt-get clean
         rm -rf /var/lib/apt/lists/*
-        echo '--- Node.js version ---'
+        echo '--- Node.js versions ---'
         node --version
         npm --version
+        pnpm --version
+        yarn --version
     "
 }
 
@@ -139,6 +145,26 @@ install_python_312() {
     "
 }
 
+install_bun() {
+    echo ">>> Installing Bun + Node.js..."
+    chroot "$MOUNT_POINT" /bin/bash -c "
+        export DEBIAN_FRONTEND=noninteractive
+        # Install Bun
+        curl -fsSL https://bun.sh/install | bash
+        mv /root/.bun/bin/bun /usr/local/bin/bun
+        ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+        rm -rf /root/.bun
+        # Install Node.js too — many projects need both
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        apt-get install -y -qq --no-install-recommends nodejs
+        apt-get clean
+        rm -rf /var/lib/apt/lists/*
+        echo '--- Versions ---'
+        bun --version
+        node --version
+    "
+}
+
 install_go_122() {
     echo ">>> Installing Go 1.22..."
     chroot "$MOUNT_POINT" /bin/bash -c "
@@ -156,11 +182,12 @@ install_go_122() {
 
 case "$TOOLCHAIN" in
     node-22)     install_node_22 ;;
+    bun)         install_bun ;;
     python-3.12) install_python_312 ;;
     go-1.22)     install_go_122 ;;
     *)
         echo "Error: Unknown toolchain '${TOOLCHAIN}'" >&2
-        echo "Available: base, node-22, python-3.12, go-1.22" >&2
+        echo "Available: base, node-22, bun, python-3.12, go-1.22" >&2
         exit 1
         ;;
 esac
