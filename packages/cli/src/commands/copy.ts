@@ -226,9 +226,8 @@ function createGitArchive(localPath: string, archivePath: string): 'git-ls-files
     try {
       const entry = lstatSync(join(localPath, selectedRelPath))
       if (entry.isSymbolicLink()) {
-        throw new Error(
-          `sandchest copy up does not support symbolic links yet. Refusing to archive '${selectedRelPath}' because sandbox upload validation rejects link entries.`,
-        )
+        process.stderr.write(`warning: skipping symlink: ${selectedRelPath}\n`)
+        return false
       }
       if (!entry.isFile()) {
         throw new Error(
@@ -277,7 +276,7 @@ function createTarArchive(localPath: string, archivePath: string, exclude: strin
   return 'tar'
 }
 
-function createLocalArchive(
+export function createLocalArchive(
   localPath: string,
   archivePath: string,
   options: { gitignore?: boolean | undefined; exclude?: string[] | undefined },

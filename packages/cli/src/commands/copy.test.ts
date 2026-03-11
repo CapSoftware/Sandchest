@@ -209,27 +209,22 @@ describe('copy command', () => {
     expect(readFileSync(join(destination, 'subdir', 'result.txt'), 'utf-8')).toBe('payload')
   })
 
-  test('copy up rejects git-tracked symbolic links instead of silently dropping them', async () => {
+  test('copy up skips git-tracked symbolic links with a warning', async () => {
     const repoDir = join(tempDir, 'repo-links')
     execFileSync('git', ['init', repoDir], { stdio: 'pipe' })
     writeFileSync(join(repoDir, 'tracked.txt'), 'tracked')
     symlinkSync('tracked.txt', join(repoDir, 'linked.txt'))
     execFileSync('git', ['-C', repoDir, 'add', 'tracked.txt', 'linked.txt'], { stdio: 'pipe' })
 
-    const exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`)
-    }) as never)
+    // Symlinks are now skipped with a warning instead of rejecting.
+    // The archive should still be created, containing only the regular file.
+    const archivePath = join(tempDir, 'links-archive.tar.gz')
+    const { createLocalArchive } = await import('./copy.js')
+    const method = createLocalArchive(repoDir, archivePath, {})
+    expect(method).toBe('git-ls-files')
 
-    try {
-      const program = new Command()
-      program.addCommand(copyCommand())
-
-      await expect(
-        program.parseAsync(['node', 'test', 'copy', 'up', 'sb_copy', repoDir, '/work/repo']),
-      ).rejects.toThrow('exit:2')
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('does not support symbolic links'))
-    } finally {
-      exitSpy.mockRestore()
-    }
+    // The archive should exist and contain tracked.txt but NOT linked.txt
+    const { existsSync } = await import('node:fs')
+    expect(existsSync(archivePath)).toBe(true)
   })
 })
