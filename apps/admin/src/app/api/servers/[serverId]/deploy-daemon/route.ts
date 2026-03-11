@@ -5,8 +5,8 @@ import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
 import { createSshConnection, execCommand } from '@/lib/ssh'
 import { presignDaemonBinary, presignKernel, presignRootfs } from '@/lib/r2'
-import { firecrackerInstallCommands, patchRootfsCommands } from '@/lib/provisioner'
-import { generateId, idToBytes, bytesToId, NODE_PREFIX } from '@sandchest/contract'
+import { firecrackerInstallCommands, patchAllRootfsCommands, rootfsPath, kernelPath } from '@/lib/provisioner'
+import { generateId, idToBytes, bytesToId, NODE_PREFIX, TOOLCHAINS } from '@sandchest/contract'
 
 export async function POST(
   _request: Request,
@@ -28,13 +28,16 @@ export async function POST(
 
   let binaryUrl: string
   let kernelUrl: string
-  let rootfsUrl: string
+  let rootfsUrls: Map<string, string>
   try {
-    ;[binaryUrl, kernelUrl, rootfsUrl] = await Promise.all([
+    const [binary, kernel, ...rootfsList] = await Promise.all([
       presignDaemonBinary(),
       presignKernel(),
-      presignRootfs(),
+      ...TOOLCHAINS.map((tc) => presignRootfs(tc)),
     ])
+    binaryUrl = binary
+    kernelUrl = kernel
+    rootfsUrls = new Map(TOOLCHAINS.map((tc, i) => [tc, rootfsList[i]]))
   } catch (err) {
     return NextResponse.json(
       { error: `R2 presign failed: ${err instanceof Error ? err.message : String(err)}` },
@@ -78,21 +81,25 @@ export async function POST(
       // Stop daemon and unmount any stale rootfs loop mounts
       '(systemctl stop sandchest-node 2>/dev/null || true)',
       '(umount /tmp/sandchest-rootfs-patch 2>/dev/null || true)',
-      '(umount /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4 2>/dev/null || true)',
-      // Download latest kernel + rootfs images
-      'mkdir -p /var/sandchest/images/ubuntu-22.04-base',
-      `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o /var/sandchest/images/ubuntu-22.04-base/vmlinux`,
-      `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrl}' -o /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4`,
-      'chmod 644 /var/sandchest/images/ubuntu-22.04-base/vmlinux /var/sandchest/images/ubuntu-22.04-base/rootfs.ext4',
-      // Patch rootfs with overlay-init + guest agent systemd unit
-      ...patchRootfsCommands(),
+      ...TOOLCHAINS.map((tc) => `(umount ${rootfsPath(tc)} 2>/dev/null || true)`),
+      // Create directories for all toolchain images
+      ...TOOLCHAINS.map((tc) => `mkdir -p /var/sandchest/images/ubuntu-22.04/${tc}`),
+      // Download latest kernel
+      `curl -fsSL --retry 3 --retry-delay 5 '${kernelUrl}' -o ${kernelPath()}`,
+      `chmod 644 ${kernelPath()}`,
+      // Download all toolchain rootfs images
+      ...TOOLCHAINS.map((tc) =>
+        `curl -fsSL --retry 3 --retry-delay 5 '${rootfsUrls.get(tc)}' -o ${rootfsPath(tc)} && chmod 644 ${rootfsPath(tc)}`
+      ),
+      // Patch all rootfs images with overlay-init + guest agent systemd unit
+      ...patchAllRootfsCommands(),
       // Keep the host Firecracker/Jailer version aligned with the node binary expectations.
       ...firecrackerInstallCommands(),
       // Download latest daemon binary
       `curl -fsSL --retry 3 --retry-delay 5 '${binaryUrl}' -o /usr/local/bin/sandchest-node`,
       'chmod +x /usr/local/bin/sandchest-node',
       'mkdir -p /etc/sandchest',
-      `printf 'SANDCHEST_NODE_ID=${nodeId}\\nSANDCHEST_KERNEL_PATH=/var/sandchest/images/ubuntu-22.04-base/vmlinux\\nSANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
+      `printf 'SANDCHEST_NODE_ID=${nodeId}\\nSANDCHEST_KERNEL_PATH=${kernelPath()}\\nSANDCHEST_JAILER_ENABLED=1\\nSANDCHEST_JAILER_BINARY=/usr/local/bin/jailer\\nSANDCHEST_FIRECRACKER_BINARY=/usr/local/bin/firecracker\\n' > /etc/sandchest/node.env`,
       // Append TLS paths if mTLS certs exist on this server
       `test -f /etc/sandchest/certs/server.pem && printf 'SANDCHEST_GRPC_CERT=/etc/sandchest/certs/server.pem\\nSANDCHEST_GRPC_KEY=/etc/sandchest/certs/server.key\\nSANDCHEST_GRPC_CA=/etc/sandchest/certs/ca.pem\\n' >> /etc/sandchest/node.env || true`,
       // Ensure the systemd unit references the env file (idempotent — rewrites the unit)
@@ -101,7 +108,7 @@ export async function POST(
       'systemctl restart sandchest-node',
     ]
 
-    const result = await execCommand(conn, commands.join(' && '), 300_000)
+    const result = await execCommand(conn, commands.join(' && '), 600_000)
 
     if (result.code !== 0) {
       const output = (result.stdout + '\n' + result.stderr).trim()
