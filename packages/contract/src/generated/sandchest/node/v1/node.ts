@@ -234,6 +234,20 @@ export interface DestroySandboxRequest {
   sandboxId: string;
 }
 
+export interface ProvisionImagesRequest {
+  imageRefs: string[];
+}
+
+export interface ProvisionImagesResponse {
+  images: ProvisionedImage[];
+}
+
+export interface ProvisionedImage {
+  imageRef: string;
+  status: string;
+  error: string;
+}
+
 /** Wraps all Node -> Control event types in a single oneof. */
 export interface NodeToControl {
   heartbeat?: Heartbeat | undefined;
@@ -3144,6 +3158,228 @@ export const DestroySandboxRequest: MessageFns<DestroySandboxRequest> = {
   },
 };
 
+function createBaseProvisionImagesRequest(): ProvisionImagesRequest {
+  return { imageRefs: [] };
+}
+
+export const ProvisionImagesRequest: MessageFns<ProvisionImagesRequest> = {
+  encode(message: ProvisionImagesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.imageRefs) {
+      writer.uint32(10).string(v);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionImagesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionImagesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.imageRefs.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionImagesRequest {
+    return {
+      imageRefs: globalThis.Array.isArray(object?.imageRefs)
+        ? object.imageRefs.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.image_refs)
+        ? object.image_refs.map((e: any) => globalThis.String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ProvisionImagesRequest): unknown {
+    const obj: any = {};
+    if (message.imageRefs?.length) {
+      obj.imageRefs = message.imageRefs;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ProvisionImagesRequest>): ProvisionImagesRequest {
+    return ProvisionImagesRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ProvisionImagesRequest>): ProvisionImagesRequest {
+    const message = createBaseProvisionImagesRequest();
+    message.imageRefs = object.imageRefs?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseProvisionImagesResponse(): ProvisionImagesResponse {
+  return { images: [] };
+}
+
+export const ProvisionImagesResponse: MessageFns<ProvisionImagesResponse> = {
+  encode(message: ProvisionImagesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.images) {
+      ProvisionedImage.encode(v, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionImagesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionImagesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.images.push(ProvisionedImage.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionImagesResponse {
+    return {
+      images: globalThis.Array.isArray(object?.images)
+        ? object.images.map((e: any) => ProvisionedImage.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ProvisionImagesResponse): unknown {
+    const obj: any = {};
+    if (message.images?.length) {
+      obj.images = message.images.map((e) => ProvisionedImage.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ProvisionImagesResponse>): ProvisionImagesResponse {
+    return ProvisionImagesResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ProvisionImagesResponse>): ProvisionImagesResponse {
+    const message = createBaseProvisionImagesResponse();
+    message.images = object.images?.map((e) => ProvisionedImage.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseProvisionedImage(): ProvisionedImage {
+  return { imageRef: "", status: "", error: "" };
+}
+
+export const ProvisionedImage: MessageFns<ProvisionedImage> = {
+  encode(message: ProvisionedImage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.imageRef !== "") {
+      writer.uint32(10).string(message.imageRef);
+    }
+    if (message.status !== "") {
+      writer.uint32(18).string(message.status);
+    }
+    if (message.error !== "") {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ProvisionedImage {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseProvisionedImage();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.imageRef = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ProvisionedImage {
+    return {
+      imageRef: isSet(object.imageRef)
+        ? globalThis.String(object.imageRef)
+        : isSet(object.image_ref)
+        ? globalThis.String(object.image_ref)
+        : "",
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+      error: isSet(object.error) ? globalThis.String(object.error) : "",
+    };
+  },
+
+  toJSON(message: ProvisionedImage): unknown {
+    const obj: any = {};
+    if (message.imageRef !== "") {
+      obj.imageRef = message.imageRef;
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    if (message.error !== "") {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ProvisionedImage>): ProvisionedImage {
+    return ProvisionedImage.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ProvisionedImage>): ProvisionedImage {
+    const message = createBaseProvisionedImage();
+    message.imageRef = object.imageRef ?? "";
+    message.status = object.status ?? "";
+    message.error = object.error ?? "";
+    return message;
+  },
+};
+
 function createBaseNodeToControl(): NodeToControl {
   return {
     heartbeat: undefined,
@@ -4590,6 +4826,14 @@ export const NodeDefinition = {
       requestType: DestroySandboxRequest,
       requestStream: false,
       responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
+    provisionImages: {
+      name: "ProvisionImages",
+      requestType: ProvisionImagesRequest,
+      requestStream: false,
+      responseType: ProvisionImagesResponse,
       responseStream: false,
       options: {},
     },

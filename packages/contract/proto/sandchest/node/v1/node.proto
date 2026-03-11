@@ -21,6 +21,7 @@ service Node {
   rpc CollectArtifacts(CollectArtifactsRequest) returns (CollectArtifactsResponse);
   rpc StopSandbox(StopSandboxRequest) returns (StopSandboxResponse);
   rpc DestroySandbox(DestroySandboxRequest) returns (google.protobuf.Empty);
+  rpc ProvisionImages(ProvisionImagesRequest) returns (ProvisionImagesResponse);
 }
 
 // Control service — hosted on the control plane. Node daemons connect and
@@ -178,6 +179,23 @@ message StopSandboxResponse {
 
 message DestroySandboxRequest {
   string sandbox_id = 1;
+}
+
+message ProvisionImagesRequest {
+  // Image refs to provision (e.g. "ubuntu-22.04/base"). If empty, the node
+  // discovers all available images from the R2 manifest.
+  repeated string image_refs = 1;
+}
+
+message ProvisionImagesResponse {
+  repeated ProvisionedImage images = 1;
+}
+
+message ProvisionedImage {
+  string image_ref = 1;
+  // "downloaded", "already_exists", or "failed"
+  string status = 2;
+  string error = 3;
 }
 
 // --- Control service messages ---
