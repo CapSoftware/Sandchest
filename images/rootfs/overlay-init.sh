@@ -40,6 +40,40 @@ mount --move /sys "${MERGED}/sys"
 # Bind /dev into merged root
 mount --bind /dev "${MERGED}/dev"
 
+# Ensure /work directory exists (writable via overlay upperdir)
+mkdir -p "${MERGED}/work"
+# Will chown after pivot (sandchest user may not exist in current namespace)
+
+# Configure guest networking from kernel cmdline parameters
+# The node daemon passes: sandchest.ip=172.16.X.2/30 sandchest.gw=172.16.X.1 sandchest.dns=1.1.1.1
+CMDLINE=$(cat "${MERGED}/proc/cmdline" 2>/dev/null || cat /proc/cmdline)
+SANDCHEST_IP=""
+SANDCHEST_GW=""
+SANDCHEST_DNS=""
+
+for param in $CMDLINE; do
+  case "$param" in
+    sandchest.ip=*)  SANDCHEST_IP="${param#sandchest.ip=}" ;;
+    sandchest.gw=*)  SANDCHEST_GW="${param#sandchest.gw=}" ;;
+    sandchest.dns=*) SANDCHEST_DNS="${param#sandchest.dns=}" ;;
+  esac
+done
+
+if [ -n "$SANDCHEST_IP" ] && [ -n "$SANDCHEST_GW" ]; then
+  # Write a systemd-networkd config for eth0
+  mkdir -p "${MERGED}/etc/systemd/network"
+  cat > "${MERGED}/etc/systemd/network/10-eth0.network" <<NETCFG
+[Match]
+Name=eth0
+
+[Network]
+DHCP=no
+Address=${SANDCHEST_IP}
+Gateway=${SANDCHEST_GW}
+DNS=${SANDCHEST_DNS:-1.1.1.1}
+NETCFG
+fi
+
 # Pivot root into the overlay
 cd "$MERGED"
 mkdir -p old_root
@@ -48,6 +82,9 @@ pivot_root . old_root
 # Clean up old root mount
 umount -l /old_root 2>/dev/null || true
 rmdir /old_root 2>/dev/null || true
+
+# Chown /work to sandchest user (UID 1000)
+chown 1000:1000 /work 2>/dev/null || true
 
 # Exec into systemd
 exec /sbin/init "$@"
