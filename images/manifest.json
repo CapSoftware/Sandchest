@@ -1,0 +1,9 @@
+{
+  "images": [
+    { "os_version": "ubuntu-22.04", "toolchain": "base" },
+    { "os_version": "ubuntu-22.04", "toolchain": "node-22" },
+    { "os_version": "ubuntu-22.04", "toolchain": "bun" },
+    { "os_version": "ubuntu-22.04", "toolchain": "python-3.12" },
+    { "os_version": "ubuntu-22.04", "toolchain": "go-1.22" }
+  ]
+}
