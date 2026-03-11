@@ -3,7 +3,7 @@ import { createChannel, createClient, type Channel } from 'nice-grpc'
 import { ChannelCredentials } from '@grpc/grpc-js'
 import { readFileSync } from 'node:fs'
 import { nodeRpc } from '@sandchest/contract'
-import type { NodeClientApi, NodeFileEntry, CollectedArtifact } from './node-client.js'
+import type { NodeClientApi, NodeFileEntry, CollectedArtifact, ProvisionedImage } from './node-client.js'
 import { NodeClient } from './node-client.js'
 import { bytesToHex } from './node-client.shared.js'
 
@@ -230,6 +230,23 @@ export function createLiveNodeClient(channel: Channel, nodeIdBytes: Uint8Array):
         await client.destroySandbox({
           sandboxId: bytesToHex(params.sandboxId),
         })
+      }),
+
+    provisionImages: (params) =>
+      Effect.promise(async () => {
+        // nice-grpc type inference truncates with many methods; cast needed
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- nice-grpc drops method types beyond ~10 on the generated client
+        const provisionFn = (client as any).provisionImages as (req: {
+          imageRefs: string[]
+        }) => Promise<{ images: Array<{ imageRef: string; status: string; error: string }> }>
+        const response = await provisionFn({ imageRefs: params.imageRefs })
+        return response.images.map(
+          (img): ProvisionedImage => ({
+            imageRef: img.imageRef,
+            status: img.status,
+            error: img.error,
+          }),
+        )
       }),
   }
 }

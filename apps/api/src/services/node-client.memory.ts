@@ -109,6 +109,15 @@ export function createInMemoryNodeClient(): NodeClientApi {
     stopSandbox: () => Effect.void,
 
     destroySandbox: () => Effect.void,
+
+    provisionImages: ({ imageRefs }) =>
+      Effect.succeed(
+        (imageRefs.length > 0 ? imageRefs : ['ubuntu-22.04/base']).map((ref) => ({
+          imageRef: ref,
+          status: 'already_exists' as const,
+          error: '',
+        })),
+      ),
   }
 }
 

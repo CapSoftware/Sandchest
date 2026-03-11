@@ -127,6 +127,19 @@ export interface NodeClientApi {
   readonly destroySandbox: (params: {
     sandboxId: Uint8Array
   }) => Effect.Effect<void, never, never>
+
+  /** Trigger image provisioning on the node. Downloads missing rootfs images from R2. */
+  readonly provisionImages: (params: {
+    imageRefs: string[]
+  }) => Effect.Effect<ProvisionedImage[], never, never>
+}
+
+/** Result of provisioning a single image on a node. */
+export interface ProvisionedImage {
+  readonly imageRef: string
+  /** "downloaded", "already_exists", or "failed" */
+  readonly status: string
+  readonly error: string
 }
 
 /** Artifact metadata returned by the node after collection. */
