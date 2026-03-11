@@ -13,13 +13,16 @@ describe('mcp init command', () => {
   let tempDir: string
   let previousHome: string | undefined
   let previousApiKey: string | undefined
+  let previousXdg: string | undefined
   let logSpy: ReturnType<typeof spyOn>
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'sandchest-mcp-init-'))
     previousHome = process.env['HOME']
     previousApiKey = process.env['SANDCHEST_API_KEY']
+    previousXdg = process.env['XDG_CONFIG_HOME']
     process.env['HOME'] = tempDir
+    process.env['XDG_CONFIG_HOME'] = join(tempDir, '.config')
     process.env['SANDCHEST_API_KEY'] = 'sk_test_key'
     process.env['NO_COLOR'] = '1'
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
@@ -36,6 +39,11 @@ describe('mcp init command', () => {
       delete process.env['SANDCHEST_API_KEY']
     } else {
       process.env['SANDCHEST_API_KEY'] = previousApiKey
+    }
+    if (previousXdg === undefined) {
+      delete process.env['XDG_CONFIG_HOME']
+    } else {
+      process.env['XDG_CONFIG_HOME'] = previousXdg
     }
     delete process.env['NO_COLOR']
     logSpy.mockRestore()
