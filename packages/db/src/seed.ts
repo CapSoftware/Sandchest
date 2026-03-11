@@ -16,6 +16,10 @@ export const PROFILE_IDS = {
 /** Well-known image IDs. */
 export const IMAGE_IDS = {
   'ubuntu-22.04/base': new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]),
+  'ubuntu-22.04/node-22': new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]),
+  'ubuntu-22.04/bun': new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]),
+  'ubuntu-22.04/python-3.12': new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3]),
+  'ubuntu-22.04/go-1.22': new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4]),
 } as const
 
 /** Well-known dev node ID (not used in production). */
@@ -79,15 +83,53 @@ async function seedProfiles(db: Database) {
 async function seedImages(db: Database) {
   await db
     .insert(images)
-    .values({
-      id: IMAGE_IDS['ubuntu-22.04/base'],
-      osVersion: 'ubuntu-22.04',
-      toolchain: 'base',
-      kernelRef: 'images/ubuntu-22.04-base/vmlinux',
-      rootfsRef: 'images/ubuntu-22.04-base/rootfs.ext4',
-      digest: '0000000000000000000000000000000000000000000000000000000000000000',
-      sizeBytes: 0,
-    })
+    .values([
+      {
+        id: IMAGE_IDS['ubuntu-22.04/base'],
+        osVersion: 'ubuntu-22.04',
+        toolchain: 'base',
+        kernelRef: 'images/ubuntu-22.04-base/vmlinux',
+        rootfsRef: 'images/ubuntu-22.04-base/rootfs.ext4',
+        digest: '0000000000000000000000000000000000000000000000000000000000000000',
+        sizeBytes: 0,
+      },
+      {
+        id: IMAGE_IDS['ubuntu-22.04/node-22'],
+        osVersion: 'ubuntu-22.04',
+        toolchain: 'node-22',
+        kernelRef: 'images/ubuntu-22.04-base/vmlinux',
+        rootfsRef: 'images/ubuntu-22.04-node-22/rootfs.ext4',
+        digest: '0000000000000000000000000000000000000000000000000000000000000000',
+        sizeBytes: 0,
+      },
+      {
+        id: IMAGE_IDS['ubuntu-22.04/bun'],
+        osVersion: 'ubuntu-22.04',
+        toolchain: 'bun',
+        kernelRef: 'images/ubuntu-22.04-base/vmlinux',
+        rootfsRef: 'images/ubuntu-22.04-bun/rootfs.ext4',
+        digest: '0000000000000000000000000000000000000000000000000000000000000000',
+        sizeBytes: 0,
+      },
+      {
+        id: IMAGE_IDS['ubuntu-22.04/python-3.12'],
+        osVersion: 'ubuntu-22.04',
+        toolchain: 'python-3.12',
+        kernelRef: 'images/ubuntu-22.04-base/vmlinux',
+        rootfsRef: 'images/ubuntu-22.04-python-3.12/rootfs.ext4',
+        digest: '0000000000000000000000000000000000000000000000000000000000000000',
+        sizeBytes: 0,
+      },
+      {
+        id: IMAGE_IDS['ubuntu-22.04/go-1.22'],
+        osVersion: 'ubuntu-22.04',
+        toolchain: 'go-1.22',
+        kernelRef: 'images/ubuntu-22.04-base/vmlinux',
+        rootfsRef: 'images/ubuntu-22.04-go-1.22/rootfs.ext4',
+        digest: '0000000000000000000000000000000000000000000000000000000000000000',
+        sizeBytes: 0,
+      },
+    ])
     .onDuplicateKeyUpdate({ set: { toolchain: sql`VALUES(toolchain)` } })
 }
 
@@ -131,7 +173,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
       console.log('Seed complete (production reference data)')
     }
     console.log('  - 3 profiles (small, medium, large)')
-    console.log('  - 1 image (ubuntu-22.04/base)')
+    console.log('  - 5 images (ubuntu-22.04: base, node-22, bun, python-3.12, go-1.22)')
     if (isDev) console.log('  - 1 dev node (dev-node-01)')
     process.exit(0)
   } catch (err: unknown) {
