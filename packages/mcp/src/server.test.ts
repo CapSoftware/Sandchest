@@ -8,7 +8,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { createServer } from './server.js'
 import type { Sandchest, Sandbox, ExecResult } from '@sandchest/sdk'
 
-const TEXT_ENCODER = new TextEncoder()
+const _TEXT_ENCODER = new TextEncoder()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mockSandbox(overrides?: Record<string, any>): Sandbox {
