@@ -21,7 +21,7 @@ function parseEnvPairs(pairs: string[]): Record<string, string> {
 export function createCommand(): Command {
   return new Command('create')
     .description('Create a new sandbox')
-    .option('-i, --image <image>', 'Base image')
+    .option('-i, --image <image>', 'Base image (run "sandchest images" to see available)')
     .addOption(
       new Option('-p, --profile <profile>', 'Resource profile').choices([
         'small',

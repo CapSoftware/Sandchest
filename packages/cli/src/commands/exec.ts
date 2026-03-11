@@ -4,7 +4,7 @@ import { printJson, handleError } from '../output.js'
 
 export function execCommand(): Command {
   return new Command('exec')
-    .description('Execute a command in a sandbox')
+    .description('Execute a command in a sandbox (quote shell expressions: sandchest exec sb_xxx \'cat foo > bar\')')
     .argument('<sandbox_id>', 'Sandbox ID')
     .argument('<cmd...>', 'Command to execute')
     .allowUnknownOption(true)

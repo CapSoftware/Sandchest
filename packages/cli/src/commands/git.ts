@@ -79,7 +79,7 @@ function gitCloneCommand(): Command {
     .description('Clone a git repository into a sandbox')
     .argument('<sandbox_id>', 'Sandbox ID')
     .argument('<url>', 'Repository URL')
-    .argument('[dest]', 'Destination path in the sandbox (defaults to /work)')
+    .argument('[dest]', 'Destination path in the sandbox', '/work')
     .option('--branch <branch>', 'Branch or tag to check out')
     .option('--depth <depth>', 'Shallow clone depth', parseInt)
     .option('--all-branches', 'Clone all branches instead of a single branch')
