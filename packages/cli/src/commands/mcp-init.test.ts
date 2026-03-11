@@ -159,6 +159,23 @@ describe('mcp init command', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sandbox_upload_dir'))
   })
 
+  test('writes claude-code config to ~/.claude/mcp.json', async () => {
+    const allowPath = join(tempDir, 'projects')
+    const program = new Command().addCommand(new Command('mcp').addCommand(mcpInitCommand()))
+
+    await program.parseAsync(['node', 'test', 'mcp', 'init', 'claude-code', '--allow-path', allowPath])
+
+    const config = readJson(getMcpConfigPath('claude-code'))
+    const sandchest = (
+      ((config.mcpServers as Record<string, unknown>)['sandchest'] ?? {}) as Record<string, unknown>
+    )
+    const env = sandchest['env'] as Record<string, string>
+
+    expect(getMcpConfigPath('claude-code')).toBe(join(tempDir, '.claude', 'mcp.json'))
+    expect(env['SANDCHEST_API_KEY']).toBe('sk_test_key')
+    expect(env['SANDCHEST_MCP_ALLOWED_PATHS']).toBe(resolve(allowPath))
+  })
+
   test('uses bunx without changing env merging behavior', async () => {
     const configPath = getMcpConfigPath('cursor')
     mkdirSync(join(tempDir, '.cursor'), { recursive: true })

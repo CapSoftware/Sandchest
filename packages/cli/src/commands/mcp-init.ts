@@ -5,7 +5,7 @@ import { Command } from 'commander'
 import { getApiKey } from '../config.js'
 import { handleError, info, success } from '../output.js'
 
-type McpClient = 'claude' | 'cursor' | 'windsurf'
+type McpClient = 'claude' | 'claude-code' | 'cursor' | 'windsurf'
 
 interface McpServerConfig {
   command?: string
@@ -31,6 +31,8 @@ function getClientLabel(client: McpClient): string {
   switch (client) {
     case 'claude':
       return 'Claude Desktop'
+    case 'claude-code':
+      return 'Claude Code'
     case 'cursor':
       return 'Cursor'
     case 'windsurf':
@@ -47,6 +49,8 @@ export function getMcpConfigPath(client: McpClient): string {
   switch (client) {
     case 'claude':
       return join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+    case 'claude-code':
+      return join(home, '.claude', 'mcp.json')
     case 'cursor':
       return join(home, '.cursor', 'mcp.json')
     case 'windsurf':
@@ -116,7 +120,7 @@ function writeMcpConfig(configPath: string, config: McpConfig): void {
 export function mcpInitCommand(): Command {
   return new Command('init')
     .description('Add Sandchest to an MCP client config')
-    .argument('<client>', 'MCP client to configure (claude, cursor, windsurf)')
+    .argument('<client>', 'MCP client to configure (claude, claude-code, cursor, windsurf)')
     .option('--allow-path <path>', 'Approved local root for MCP filesystem tools (repeatable)', collectAllowPath, [])
     .option('--bunx', 'Use bunx instead of npx in the generated config')
     .action(async (client: McpClient, options: { allowPath: string[]; bunx?: boolean }) => {
