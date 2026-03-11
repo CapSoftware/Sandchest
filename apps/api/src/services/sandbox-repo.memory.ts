@@ -36,11 +36,11 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
   }
 
   const SEED_IMAGES: Array<{ id: Uint8Array; osVersion: string; toolchain: string; kernelRef: string; rootfsRef: string }> = [
-    { id: SEED_IMAGE_ID, osVersion: 'ubuntu-22.04', toolchain: 'base', kernelRef: 'images/ubuntu-22.04-base/vmlinux', rootfsRef: 'images/ubuntu-22.04-base/rootfs.ext4' },
-    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]), osVersion: 'ubuntu-22.04', toolchain: 'node-22', kernelRef: 'images/ubuntu-22.04-base/vmlinux', rootfsRef: 'images/ubuntu-22.04-node-22/rootfs.ext4' },
-    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]), osVersion: 'ubuntu-22.04', toolchain: 'bun', kernelRef: 'images/ubuntu-22.04-base/vmlinux', rootfsRef: 'images/ubuntu-22.04-bun/rootfs.ext4' },
-    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3]), osVersion: 'ubuntu-22.04', toolchain: 'python-3.12', kernelRef: 'images/ubuntu-22.04-base/vmlinux', rootfsRef: 'images/ubuntu-22.04-python-3.12/rootfs.ext4' },
-    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4]), osVersion: 'ubuntu-22.04', toolchain: 'go-1.22', kernelRef: 'images/ubuntu-22.04-base/vmlinux', rootfsRef: 'images/ubuntu-22.04-go-1.22/rootfs.ext4' },
+    { id: SEED_IMAGE_ID, osVersion: 'ubuntu-22.04', toolchain: 'base', kernelRef: 'images/vmlinux-5.10', rootfsRef: 'images/ubuntu-22.04/base/rootfs.ext4' },
+    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]), osVersion: 'ubuntu-22.04', toolchain: 'node-22', kernelRef: 'images/vmlinux-5.10', rootfsRef: 'images/ubuntu-22.04/node-22/rootfs.ext4' },
+    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]), osVersion: 'ubuntu-22.04', toolchain: 'bun', kernelRef: 'images/vmlinux-5.10', rootfsRef: 'images/ubuntu-22.04/bun/rootfs.ext4' },
+    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3]), osVersion: 'ubuntu-22.04', toolchain: 'python-3.12', kernelRef: 'images/vmlinux-5.10', rootfsRef: 'images/ubuntu-22.04/python-3.12/rootfs.ext4' },
+    { id: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4]), osVersion: 'ubuntu-22.04', toolchain: 'go-1.22', kernelRef: 'images/vmlinux-5.10', rootfsRef: 'images/ubuntu-22.04/go-1.22/rootfs.ext4' },
   ]
 
   return {

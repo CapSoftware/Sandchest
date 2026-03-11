@@ -36,11 +36,11 @@ export async function presignDaemonBinary(version = 'latest', expiresIn = 3600):
 }
 
 /** Presigned URL for the vmlinux kernel image. */
-export async function presignKernel(version = 'latest', expiresIn = 3600): Promise<string> {
-  return presignR2Object(`binaries/vmlinux/${version}/vmlinux`, expiresIn)
+export async function presignKernel(expiresIn = 3600): Promise<string> {
+  return presignR2Object('images/vmlinux-5.10', expiresIn)
 }
 
-/** Presigned URL for the rootfs ext4 base image. */
-export async function presignRootfs(version = 'latest', expiresIn = 3600): Promise<string> {
-  return presignR2Object(`binaries/rootfs/${version}/rootfs.ext4`, expiresIn)
+/** Presigned URL for a toolchain rootfs ext4 image. */
+export async function presignRootfs(toolchain = 'base', expiresIn = 3600): Promise<string> {
+  return presignR2Object(`images/ubuntu-22.04/${toolchain}/rootfs.ext4`, expiresIn)
 }
