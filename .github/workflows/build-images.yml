@@ -9,16 +9,16 @@ on:
 
   workflow_dispatch:
     inputs:
-      toolchain:
-        description: 'Toolchain to build'
+      toolchains:
+        description: 'Toolchains to build (comma-separated, or "all")'
         required: true
-        default: 'base'
-        type: choice
-        options:
-          - base
-          - node-22
-          - python-3.12
-          - go-1.22
+        default: 'all'
+        type: string
+      reprovision:
+        description: 'Trigger reprovision on nodes after upload'
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: build-images
@@ -26,12 +26,14 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  ALL_TOOLCHAINS: base,node-22,bun,python-3.12,go-1.22
 
 jobs:
-  build:
-    name: Build Images
+  # Build the guest agent once, shared across all toolchain builds
+  build-agent:
+    name: Build Guest Agent
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -41,18 +43,68 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler musl-tools debootstrap e2fsprogs
+      - name: Install protobuf compiler and musl tools
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler musl-tools
 
       - name: Build guest agent (static musl binary)
-        run: |
-          cargo clean -p sandchest-agent --target x86_64-unknown-linux-musl --release
-          cargo build --release --package sandchest-agent --target x86_64-unknown-linux-musl --features vsock
+        run: cargo build --release --package sandchest-agent --target x86_64-unknown-linux-musl --features vsock
 
-      - name: Verify agent has vsock support
+      - name: Verify vsock support
         run: |
-          strings target/x86_64-unknown-linux-musl/release/sandchest-agent | grep -c vsock || { echo "ERROR: agent binary missing vsock support"; exit 1; }
-          ls -la target/x86_64-unknown-linux-musl/release/sandchest-agent
+          VSOCK_COUNT=$(strings target/x86_64-unknown-linux-musl/release/sandchest-agent | grep -c vsock || true)
+          echo "vsock string count: $VSOCK_COUNT"
+          if [ "$VSOCK_COUNT" -lt 10 ]; then
+            echo "ERROR: agent binary missing vsock support"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-agent
+          path: target/x86_64-unknown-linux-musl/release/sandchest-agent
+          retention-days: 1
+
+  # Compute the matrix of toolchains to build
+  matrix:
+    name: Compute Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      toolchains: ${{ steps.set.outputs.toolchains }}
+    steps:
+      - id: set
+        run: |
+          INPUT="${{ github.event.inputs.toolchains || 'all' }}"
+          ALL="base,node-22,bun,python-3.12,go-1.22"
+          if [ "$INPUT" = "all" ]; then
+            LIST="$ALL"
+          else
+            LIST="$INPUT"
+          fi
+          # Convert comma-separated to JSON array
+          JSON=$(echo "$LIST" | tr ',' '\n' | jq -R . | jq -sc .)
+          echo "toolchains=$JSON" >> "$GITHUB_OUTPUT"
+          echo "Building: $JSON"
+
+  # Build each toolchain in parallel
+  build-image:
+    name: Build ${{ matrix.toolchain }}
+    needs: [build-agent, matrix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ${{ fromJSON(needs.matrix.outputs.toolchains) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: guest-agent
+          path: agent-bin/
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y debootstrap e2fsprogs
 
       - name: Fetch kernel
         working-directory: images
@@ -61,45 +113,34 @@ jobs:
       - name: Build base rootfs with guest agent
         working-directory: images
         run: |
+          chmod +x ../agent-bin/sandchest-agent
           sudo make rootfs \
-            AGENT_BIN=../target/x86_64-unknown-linux-musl/release/sandchest-agent
+            TOOLCHAIN=${{ matrix.toolchain }} \
+            AGENT_BIN=../agent-bin/sandchest-agent
 
       - name: Install toolchain
-        if: ${{ github.event.inputs.toolchain && github.event.inputs.toolchain != 'base' }}
+        if: matrix.toolchain != 'base'
         working-directory: images
-        run: |
-          sudo make toolchain \
-            TOOLCHAIN=${{ github.event.inputs.toolchain }}
+        run: sudo make toolchain TOOLCHAIN=${{ matrix.toolchain }}
 
-      - name: Verify agent inside rootfs has vsock
+      - name: Verify agent inside rootfs
         run: |
-          ROOTFS="images/output/ubuntu-22.04/${{ github.event.inputs.toolchain || 'base' }}/rootfs.ext4"
+          ROOTFS="images/output/ubuntu-22.04/${{ matrix.toolchain }}/rootfs.ext4"
           MNT=$(mktemp -d)
           sudo mount -o loop,ro "$ROOTFS" "$MNT"
           AGENT="$MNT/usr/local/bin/sandchest-guest-agent"
-          echo "Agent binary inside rootfs:"
           ls -la "$AGENT"
           VSOCK_COUNT=$(strings "$AGENT" | grep -c vsock || true)
           echo "vsock string count: $VSOCK_COUNT"
           sudo umount "$MNT" && rmdir "$MNT"
           if [ "$VSOCK_COUNT" -lt 10 ]; then
-            echo "ERROR: agent binary inside rootfs is missing vsock support ($VSOCK_COUNT strings)"
+            echo "ERROR: agent binary inside rootfs is missing vsock support"
             exit 1
           fi
 
       - name: Validate image
         working-directory: images
-        run: ./scripts/validate-image.sh --output output/ubuntu-22.04/${{ github.event.inputs.toolchain || 'base' }}
-
-      - name: Upload kernel to R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-        run: |
-          aws s3 cp images/kernel/vmlinux-5.10 \
-            "s3://${{ secrets.R2_BUCKET }}/binaries/vmlinux/latest/vmlinux" \
-            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+        run: ./scripts/validate-image.sh --output output/ubuntu-22.04/${{ matrix.toolchain }}
 
       - name: Upload rootfs to R2
         env:
@@ -107,23 +148,85 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
         run: |
-          TOOLCHAIN=${{ github.event.inputs.toolchain || 'base' }}
+          TOOLCHAIN=${{ matrix.toolchain }}
+
+          # Upload to provisioning path (used by auto-provision)
           aws s3 cp "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
-            "s3://${{ secrets.R2_BUCKET }}/binaries/rootfs/latest/rootfs.ext4" \
-            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
-          aws s3 cp "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
-            "s3://${{ secrets.R2_BUCKET }}/binaries/rootfs/${{ github.sha }}/rootfs.ext4" \
+            "s3://${{ secrets.R2_BUCKET }}/images/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
             --endpoint-url "${{ secrets.R2_ENDPOINT }}"
 
-      - name: Upload image artifacts
-        uses: actions/upload-artifact@v4
+          # Also upload to versioned path for rollback
+          aws s3 cp "images/output/ubuntu-22.04/${TOOLCHAIN}/rootfs.ext4" \
+            "s3://${{ secrets.R2_BUCKET }}/images/ubuntu-22.04/${TOOLCHAIN}/${{ github.sha }}/rootfs.ext4" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+      - name: Upload kernel to R2
+        if: matrix.toolchain == 'base'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp images/kernel/vmlinux-5.10 \
+            "s3://${{ secrets.R2_BUCKET }}/images/vmlinux-5.10" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: vm-images-${{ github.sha }}
+          name: rootfs-${{ matrix.toolchain }}-${{ github.sha }}
           path: |
-            images/kernel/vmlinux-5.10
-            images/output/ubuntu-22.04/*/rootfs.ext4
-            images/output/ubuntu-22.04/*/rootfs.sha256
+            images/output/ubuntu-22.04/${{ matrix.toolchain }}/rootfs.ext4
+            images/output/ubuntu-22.04/${{ matrix.toolchain }}/rootfs.sha256
           retention-days: 30
 
-      # Images are deployed to servers via the admin "Redeploy Daemon" button,
-      # which pulls from R2 and patches the rootfs in-place. No direct SSH needed.
+  # Upload manifest and trigger reprovision after all images are built
+  finalize:
+    name: Upload Manifest & Reprovision
+    needs: [build-image, matrix]
+    runs-on: ubuntu-latest
+    if: always() && !contains(needs.build-image.result, 'failure')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload manifest to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp images/manifest.json \
+            "s3://${{ secrets.R2_BUCKET }}/images/manifest.json" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+      - name: Trigger reprovision on all nodes
+        if: github.event.inputs.reprovision != 'false'
+        env:
+          ADMIN_API_URL: ${{ secrets.API_URL }}
+          ADMIN_API_TOKEN: ${{ secrets.ADMIN_API_TOKEN }}
+        run: |
+          if [ -z "$ADMIN_API_URL" ] || [ -z "$ADMIN_API_TOKEN" ]; then
+            echo "API_URL or ADMIN_API_TOKEN not set, skipping reprovision"
+            exit 0
+          fi
+
+          # Get list of online nodes
+          NODES=$(curl -sf \
+            -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+            "$ADMIN_API_URL/v1/admin/nodes" | jq -r '.nodes[] | select(.status == "online") | .id')
+
+          if [ -z "$NODES" ]; then
+            echo "No online nodes found, skipping reprovision"
+            exit 0
+          fi
+
+          # Trigger reprovision on each node
+          for NODE_ID in $NODES; do
+            echo "Reprovisioning node $NODE_ID..."
+            RESULT=$(curl -sf \
+              -X POST \
+              -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"image_refs": []}' \
+              "$ADMIN_API_URL/v1/admin/nodes/$NODE_ID/reprovision" || echo '{"error": "request failed"}')
+            echo "$RESULT" | jq .
+          done
