@@ -657,5 +657,25 @@ describe('HttpClient', () => {
         expect(err).toBeInstanceOf(ConnectionError)
       }
     })
+
+    test('allows per-request retry override', async () => {
+      let calls = 0
+      globalThis.fetch = mock(async () => {
+        calls++
+        return new Response(
+          JSON.stringify(errorBody('internal_error', 'Server error')),
+          { status: 500, headers: { 'Content-Type': 'application/json' } },
+        )
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 3 })
+      try {
+        await client.requestRaw({ method: 'PUT', path: '/v1/files', retries: 0 })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandchestError)
+        expect(calls).toBe(1)
+      }
+    })
   })
 })

@@ -41,6 +41,7 @@ export interface RawRequestOptions {
   body?: Uint8Array | string
   headers?: Record<string, string>
   timeout?: number | undefined
+  retries?: number | undefined
 }
 
 /** Generate a random idempotency key for mutation requests. */
@@ -187,9 +188,10 @@ export class HttpClient {
     }
 
     const timeoutMs = options.timeout ?? this.timeout
+    const retries = options.retries ?? this.retries
     let lastError: Error | undefined
 
-    for (let attempt = 0; attempt <= this.retries; attempt++) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt > 0) {
         await sleep(backoffDelay(attempt - 1))
       }
@@ -212,7 +214,7 @@ export class HttpClient {
         }
 
         // Retry on server errors
-        if (response.status >= 500 && attempt < this.retries) {
+        if (response.status >= 500 && attempt < retries) {
           await response.text().catch(() => {}) // drain body to free connection
           lastError = new SandchestError({
             code: 'internal_error',
@@ -231,7 +233,7 @@ export class HttpClient {
         clearTimeout(timer)
         if (error instanceof SandchestError) throw error
 
-        if (attempt < this.retries) {
+        if (attempt < retries) {
           lastError = error instanceof Error ? error : new Error(String(error))
           continue
         }
