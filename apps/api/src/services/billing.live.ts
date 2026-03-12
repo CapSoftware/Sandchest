@@ -6,11 +6,21 @@ import { loadEnv } from '../env.js'
 export function createAutumnBillingApi(secretKey: string): BillingApi {
   const autumn = new Autumn({ secretKey })
 
+  const allowByDefault = (featureId: string) =>
+    Effect.succeed({
+      allowed: true,
+      featureId,
+      balance: null,
+      unlimited: undefined,
+    } as const)
+
   return {
     check: (customerId, featureId) =>
-      Effect.tryPromise(() =>
-        autumn.check({ customer_id: customerId, feature_id: featureId }),
-      ).pipe(
+      !customerId
+        ? allowByDefault(featureId)
+        : Effect.tryPromise(() =>
+            autumn.check({ customer_id: customerId, feature_id: featureId }),
+          ).pipe(
         Effect.map((result) => ({
           allowed: result.data?.allowed ?? true,
           featureId,
@@ -31,79 +41,85 @@ export function createAutumnBillingApi(secretKey: string): BillingApi {
       ),
 
     track: (customerId, featureId, value) =>
-      Effect.tryPromise(() =>
-        autumn.track({
-          customer_id: customerId,
-          feature_id: featureId,
-          value: value ?? 1,
-        }),
-      ).pipe(
-        Effect.tapError((err) =>
-          Effect.logWarning(`Billing track failed for ${customerId}/${featureId}: ${err}`),
-        ),
-        Effect.catchAll(() => Effect.void),
-        Effect.map(() => undefined),
-      ),
+      !customerId
+        ? Effect.void
+        : Effect.tryPromise(() =>
+            autumn.track({
+              customer_id: customerId,
+              feature_id: featureId,
+              value: value ?? 1,
+            }),
+          ).pipe(
+            Effect.tapError((err) =>
+              Effect.logWarning(`Billing track failed for ${customerId}/${featureId}: ${err}`),
+            ),
+            Effect.catchAll(() => Effect.void),
+            Effect.map(() => undefined),
+          ),
 
     trackCompute: (customerId, dollarAmount, sandboxId) =>
-      Effect.tryPromise(() =>
-        autumn.track({
-          customer_id: customerId,
-          feature_id: 'compute',
-          value: dollarAmount,
-          properties: { sandbox_id: sandboxId },
-        }),
-      ).pipe(
-        Effect.tapError((err) =>
-          Effect.logWarning(`Billing trackCompute failed for ${customerId}/${sandboxId}: ${err}`),
-        ),
-        Effect.catchAll(() => Effect.void),
-        Effect.map(() => undefined),
-      ),
+      !customerId
+        ? Effect.void
+        : Effect.tryPromise(() =>
+            autumn.track({
+              customer_id: customerId,
+              feature_id: 'compute',
+              value: dollarAmount,
+              properties: { sandbox_id: sandboxId },
+            }),
+          ).pipe(
+            Effect.tapError((err) =>
+              Effect.logWarning(`Billing trackCompute failed for ${customerId}/${sandboxId}: ${err}`),
+            ),
+            Effect.catchAll(() => Effect.void),
+            Effect.map(() => undefined),
+          ),
 
     checkCredits: (customerId, estimatedDollars) =>
-      Effect.tryPromise(() =>
-        autumn.check({
-          customer_id: customerId,
-          feature_id: 'credits',
-          // Always send a required_balance so Autumn checks actual balance.
-          // Use the estimate if provided, otherwise check for at least $0.01.
-          required_balance: estimatedDollars > 0 ? estimatedDollars : 0.01,
-        }),
-      ).pipe(
-        Effect.map((result) => ({
-          allowed: result.data?.allowed ?? true,
-          featureId: 'credits',
-          balance: result.data?.balance,
-          unlimited: result.data?.unlimited,
-        })),
-        Effect.tapError((err) =>
-          Effect.logWarning(`Failed to check credits for ${customerId}: ${err}`),
-        ),
-        Effect.catchAll(() =>
-          Effect.succeed({
-            allowed: true,
-            featureId: 'credits',
-            balance: null,
-            unlimited: undefined,
-          }),
-        ),
-      ),
+      !customerId
+        ? allowByDefault('credits')
+        : Effect.tryPromise(() =>
+            autumn.check({
+              customer_id: customerId,
+              feature_id: 'credits',
+              required_balance: estimatedDollars > 0 ? estimatedDollars : 0.01,
+            }),
+          ).pipe(
+            Effect.map((result) => ({
+              allowed: result.data?.allowed ?? true,
+              featureId: 'credits',
+              balance: result.data?.balance,
+              unlimited: result.data?.unlimited,
+            })),
+            Effect.tapError((err) =>
+              Effect.logWarning(`Failed to check credits for ${customerId}: ${err}`),
+            ),
+            Effect.catchAll(() =>
+              Effect.succeed({
+                allowed: true,
+                featureId: 'credits',
+                balance: null,
+                unlimited: undefined,
+              }),
+            ),
+          ),
     getBillingTier: (customerId) =>
-      Effect.tryPromise(async () => {
-        const customer = await autumn.customers.get(customerId)
-        const products = customer?.data?.products ?? []
-        const hasMax = products.some(
-          (p: { id?: string; status?: string }) =>
-            p.id === 'max' && p.status === 'active',
-        )
-        return hasMax ? 'max' as const : 'free' as const
-      }).pipe(
-        Effect.tapError((err) =>
-          Effect.logWarning(`Failed to get billing tier for ${customerId}: ${err}`),
-        ),
-        Effect.catchAll(() => Effect.succeed('free' as const)),
-      ),
+      !customerId
+        ? Effect.succeed('free' as const)
+        : Effect.tryPromise(async () => {
+            const customer = await autumn.customers.get(customerId)
+            const products = customer?.data?.products ?? []
+            const hasMax = products.some(
+              (p: { id?: string; status?: string }) =>
+                p.id === 'max' && p.status === 'active',
+            )
+            return hasMax ? 'max' as const : 'free' as const
+          }).pipe(
+            Effect.tapError((err) =>
+              Effect.logWarning(`Failed to get billing tier for ${customerId}: ${err}`),
+            ),
+            Effect.catchAll(() => Effect.succeed('free' as const)),
+          ),
   }
 }
 

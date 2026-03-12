@@ -23,6 +23,9 @@ export function meterSandbox(
     // Skip sandboxes that never started — no compute to bill
     if (!sandbox.startedAt) return
 
+    // Skip sandboxes with no org — nothing to bill
+    if (!sandbox.orgId) return
+
     const billing = yield* BillingService
     const repo = yield* SandboxRepo
 
