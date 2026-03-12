@@ -1,4 +1,4 @@
-import { bigint, index, int, json, mysqlEnum, mysqlTable, text, varchar } from 'drizzle-orm/mysql-core'
+import { bigint, index, int, json, mediumtext, mysqlEnum, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
 import { createdAt, timestampMicro, updatedAt, uuidv7Binary } from '../columns.js'
 
 export const execs = mysqlTable(
@@ -9,7 +9,7 @@ export const execs = mysqlTable(
     orgId: varchar('org_id', { length: 36 }).notNull(),
     sessionId: uuidv7Binary('session_id'),
     seq: int('seq').notNull(),
-    cmd: text('cmd').notNull(),
+    cmd: mediumtext('cmd').notNull(),
     cmdFormat: mysqlEnum('cmd_format', ['array', 'shell']).notNull().default('array'),
     cwd: varchar('cwd', { length: 1024 }),
     env: json('env'),

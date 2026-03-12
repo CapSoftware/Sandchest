@@ -1,0 +1,1 @@
+ALTER TABLE `execs` MODIFY COLUMN `cmd` mediumtext NOT NULL;
