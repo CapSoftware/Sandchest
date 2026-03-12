@@ -1,6 +1,29 @@
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import { getApiKey, getClient } from '../config.js'
-import { success, error, handleError } from '../output.js'
+import { success, error, handleError, info } from '../output.js'
+
+function hasClaudeCodeSkill(): boolean {
+  const home = process.env['HOME'] ?? homedir()
+  return (
+    existsSync(join(process.cwd(), '.claude', 'skills', 'sandchest', 'SKILL.md')) ||
+    existsSync(join(home, '.claude', 'skills', 'sandchest', 'SKILL.md'))
+  )
+}
+
+async function hasMcpPackage(): Promise<boolean> {
+  try {
+    await import('@sandchest/mcp')
+    return true
+  } catch {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const workspacePackage = resolve(here, '../../../mcp/package.json')
+    return existsSync(workspacePackage)
+  }
+}
 
 export function mcpTestCommand(): Command {
   return new Command('test')
@@ -26,13 +49,26 @@ export function mcpTestCommand(): Command {
         }
 
         // Check 3: MCP package importable (runtime check, not a compile-time dependency)
-        try {
-          const mcpPkg = '@sandchest/mcp'
-          await import(mcpPkg)
+        if (await hasMcpPackage()) {
           success('MCP package found')
-        } catch {
+        } else {
           error('@sandchest/mcp package not found. Install it: bun add @sandchest/mcp')
           process.exit(1)
+        }
+
+        const allowedRoots = process.env['SANDCHEST_MCP_ALLOWED_PATHS']
+        if (allowedRoots) {
+          success(`Approved local roots configured: ${allowedRoots}`)
+        } else {
+          info(
+            'Warning: SANDCHEST_MCP_ALLOWED_PATHS is not set in this shell. In Claude Code, local upload tools stay disabled unless the client config sets approved roots.',
+          )
+        }
+
+        if (hasClaudeCodeSkill()) {
+          success('Claude Code skill installed')
+        } else {
+          info('Tip: install the Claude Code skill with `sandchest skill install` or `sandchest skill install --global`.')
         }
 
         success('MCP server ready')
