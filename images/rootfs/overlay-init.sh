@@ -86,5 +86,20 @@ rmdir /old_root 2>/dev/null || true
 # Chown /work to sandchest user (UID 1000)
 chown 1000:1000 /work 2>/dev/null || true
 
+# Configure networking imperatively before systemd starts.
+# systemd-networkd may not be enabled in the base image, and once systemd
+# remounts root read-only the resolv.conf symlink becomes unwritable.
+# Doing it here (post-pivot, pre-init) guarantees eth0 is UP with an address,
+# a default route, and a real /etc/resolv.conf before any service starts.
+if [ -n "$SANDCHEST_IP" ] && [ -n "$SANDCHEST_GW" ]; then
+  ip link set eth0 up 2>/dev/null || true
+  ip addr add "${SANDCHEST_IP}" dev eth0 2>/dev/null || true
+  ip route add default via "${SANDCHEST_GW}" 2>/dev/null || true
+
+  # Replace the systemd-resolved stub symlink with a real resolv.conf
+  rm -f /etc/resolv.conf 2>/dev/null || true
+  echo "nameserver ${SANDCHEST_DNS:-1.1.1.1}" > /etc/resolv.conf 2>/dev/null || true
+fi
+
 # Exec into systemd
 exec /sbin/init "$@"
