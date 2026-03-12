@@ -4,7 +4,7 @@ const pillars = [
     title: 'Sub-second forking',
     subtitle: 'Agents explore freely',
     description:
-      'Fork a running sandbox \u2014 memory, disk, network state, everything \u2014 in under 100ms. The original stays untouched. Your agent tries risky operations in a fork, keeps what works, discards what doesn\u2019t. Real undo at the infrastructure level.',
+      'Fork a running sandbox \u2014 memory, disk, network state, everything \u2014 in under a second. The original stays untouched. Your agent tries risky operations in a fork, keeps what works, discards what doesn\u2019t. Real undo at the infrastructure level.',
     example: [
       { text: 'const ', cls: 'text-text-weak' },
       { text: 'sb', cls: 'text-text-strong' },
@@ -20,7 +20,7 @@ const pillars = [
       { text: 'await ', cls: 'text-text-weak' },
       { text: 'sb', cls: 'text-text-strong' },
       { text: '.fork()', cls: 'text-text' },
-      { text: '  // <100ms', cls: 'text-border' },
+      { text: '  // <1s', cls: 'text-border' },
     ],
   },
   {

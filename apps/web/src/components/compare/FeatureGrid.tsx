@@ -5,7 +5,7 @@ type FeatureKey = keyof Competitor['features']
 
 const FEATURES: Array<{ name: string; key: FeatureKey }> = [
   { name: 'Session replay', key: 'sessionReplay' },
-  { name: 'Sub-100ms forking', key: 'subSecondForking' },
+  { name: 'Sub-second forking', key: 'subSecondForking' },
   { name: 'MCP server', key: 'mcpServer' },
   { name: 'CLI with SSH', key: 'cliWithSsh' },
   { name: 'VM-grade isolation', key: 'vmIsolation' },

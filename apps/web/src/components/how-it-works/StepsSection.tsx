@@ -17,8 +17,8 @@ const steps = [
     number: '3',
     title: 'Run code, fork, explore',
     description:
-      'Your agent executes commands, forks state in under 100ms to try risky operations, and backtracks instantly if something breaks. The original sandbox stays untouched.',
-    code: 'const fork = await sb.fork()  // <100ms',
+      'Your agent executes commands, forks state in under a second to try risky operations, and backtracks instantly if something breaks. The original sandbox stays untouched.',
+    code: 'const fork = await sb.fork()  // <1s',
   },
   {
     number: '4',

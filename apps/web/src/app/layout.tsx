@@ -6,11 +6,11 @@ import '@/styles/global.css'
 export const metadata: Metadata = {
   title: 'Sandchest — The sandbox platform for AI agents',
   description:
-    'Give your agents undo. Bare metal sandboxes that fork in under 100ms.',
+    'Give your agents undo. Bare metal sandboxes that fork in under a second.',
   openGraph: {
     title: 'Sandchest — The sandbox platform for AI agents',
     description:
-      'Give your agents undo. Bare metal sandboxes that fork in under 100ms.',
+      'Give your agents undo. Bare metal sandboxes that fork in under a second.',
     images: ['/og.png'],
     type: 'website',
   },
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Sandchest — The sandbox platform for AI agents',
     description:
-      'Give your agents undo. Bare metal sandboxes that fork in under 100ms.',
+      'Give your agents undo. Bare metal sandboxes that fork in under a second.',
     images: ['/og.png'],
   },
   icons: {
