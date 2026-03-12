@@ -33,7 +33,7 @@ Sandchest is built around **forkable VMs**. An agent can set up an environment, 
 - **TypeScript SDK** - `@sandchest/sdk` with a simple, modern API
 - **Python SDK** - `sandchest` on PyPI with full feature parity
 - **CLI** - `sandchest create`, `sandchest exec`, `sandchest fork`, `sandchest ssh`
-- **MCP server** - `@sandchest/mcp` for Claude Code and other AI tools
+- **MCP server** - `@sandchest/mcp` for Claude Code and other AI tools, including `sandbox_run_project` for one-shot repo commands
 - **GitHub Action** - provision sandboxes in CI/CD workflows
 - **Session replay** - every sandbox session is fully replayable (logs, actions, file changes) from the dashboard or as full context for agents in the CLI
 
@@ -59,6 +59,19 @@ if (result.exitCode !== 0) {
   await fork.destroy(); // original untouched
 }
 ```
+
+## MCP quick start
+
+For agent workflows, prefer the high-level MCP tool:
+
+```text
+sandbox_run_project({
+  command: "bun run lint",
+  local_path: "/path/to/project"
+})
+```
+
+That single tool call creates a sandbox, loads the project, installs dependencies, runs the command, and returns the replay URL.
 
 ## Project structure
 
