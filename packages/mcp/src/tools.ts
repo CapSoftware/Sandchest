@@ -16,11 +16,44 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { Sandchest } from '@sandchest/sdk'
+import type { Sandchest, Sandbox } from '@sandchest/sdk'
 import { ExecFailedError, SandchestError, Session } from '@sandchest/sdk'
 
 function jsonContent(data: unknown): { content: Array<{ type: 'text'; text: string }> } {
   return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+}
+
+/**
+ * Ensures the sandbox has working network connectivity.
+ * Reads network params from kernel cmdline and configures eth0 if needed.
+ */
+async function ensureSandboxNetwork(sb: Sandbox): Promise<void> {
+  const check = await sb.exec(
+    ['sh', '-c', 'ip addr show eth0 2>/dev/null | grep -q "state UP" && ip route show | grep -q default'],
+    { timeout: 5 },
+  )
+  if (check.exitCode === 0) return
+
+  const cmdline = await sb.exec(['cat', '/proc/cmdline'], { timeout: 5 })
+  if (cmdline.exitCode !== 0) return
+
+  const params: Record<string, string> = {}
+  for (const part of cmdline.stdout.split(/\s+/)) {
+    const match = part.match(/^sandchest\.(ip|gw|dns)=(.+)$/)
+    if (match) params[match[1]] = match[2]
+  }
+
+  if (!params.ip || !params.gw) return
+
+  const dns = params.dns || '1.1.1.1'
+
+  await sb.exec(['sh', '-c', [
+    'ip link set eth0 up',
+    `ip addr add ${params.ip} dev eth0 2>/dev/null || true`,
+    `ip route add default via ${params.gw} 2>/dev/null || true`,
+    'mount -o remount,rw / 2>/dev/null || true',
+    `rm -f /etc/resolv.conf && printf "nameserver ${dns}\\n" > /etc/resolv.conf`,
+  ].join(' && ')], { timeout: 10 })
 }
 
 const EXEC_OUTPUT_CAP_BYTES = 1_048_576
@@ -971,7 +1004,71 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
           })
         }
 
-        await sb.fs.uploadDir(remotePath, tarball)
+        let uploadMethod: string = method
+        try {
+          await sb.fs.uploadDir(remotePath, tarball)
+        } catch {
+          // Fallback: upload via exec (base64 chunks through shell commands)
+          uploadMethod = `${method}+exec-fallback`
+          const b64 = Buffer.from(tarball).toString('base64')
+          const tmpPath = `/tmp/.sandchest-upload-${crypto.randomUUID()}.tar.gz`
+          const CHUNK_SIZE = 200_000 // ~200KB base64 per exec call
+          const totalChunks = Math.ceil(b64.length / CHUNK_SIZE)
+
+          for (let i = 0; i < totalChunks; i++) {
+            const chunk = b64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+            const op = i === 0 ? '>' : '>>'
+            const result = await sb.exec(
+              ['sh', '-c', `printf '%s' '${chunk}' ${op} ${tmpPath}.b64`],
+              { timeout: 30 },
+            )
+            if (result.exitCode !== 0) {
+              throw new ExecFailedError({
+                operation: 'uploadDir:exec-write',
+                exitCode: result.exitCode,
+                stderr: result.stderr,
+              })
+            }
+          }
+
+          // Decode base64 and extract
+          const decodeResult = await sb.exec(
+            ['sh', '-c', `base64 -d ${tmpPath}.b64 > ${tmpPath} && rm -f ${tmpPath}.b64`],
+            { timeout: 30 },
+          )
+          if (decodeResult.exitCode !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:exec-decode',
+              exitCode: decodeResult.exitCode,
+              stderr: decodeResult.stderr,
+            })
+          }
+
+          // mkdir, validate, extract (same as SDK uploadDir)
+          const mkdirResult = await sb.exec(['mkdir', '-p', remotePath], { timeout: 10 })
+          if (mkdirResult.exitCode !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:mkdir',
+              exitCode: mkdirResult.exitCode,
+              stderr: mkdirResult.stderr,
+            })
+          }
+
+          const extractResult = await sb.exec(
+            ['tar', 'xzf', tmpPath, '--no-same-owner', '-C', remotePath],
+            { timeout: 60 },
+          )
+          if (extractResult.exitCode !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:extract',
+              exitCode: extractResult.exitCode,
+              stderr: extractResult.stderr,
+            })
+          }
+
+          // Cleanup
+          await sb.exec(['rm', '-f', tmpPath], { timeout: 5 }).catch(() => {})
+        }
 
         let baselineCreated: boolean | undefined
         if (args.baseline) {
@@ -1005,7 +1102,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
           ok: true,
           local_path: localPath,
           remote_path: remotePath,
-          method,
+          method: uploadMethod,
           bytes: tarball.byteLength,
           baseline_created: baselineCreated,
         })
@@ -1169,6 +1266,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
 
     try {
       const sb = await sandchest.get(args.sandbox_id)
+      await ensureSandboxNetwork(sb)
       const result = await sb.git.clone(validated.url, {
         dest: args.path,
         branch: args.branch,
