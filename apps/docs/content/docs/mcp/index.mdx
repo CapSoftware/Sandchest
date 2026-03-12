@@ -5,6 +5,8 @@ description: Model Context Protocol server for AI agent integration.
 
 The `@sandchest/mcp` package is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents access to Sandchest sandboxes. It works with any MCP-compatible client including Claude, Cursor, and Windsurf.
 
+For most agent requests, the best default is `sandbox_run_project`: one tool call that creates a sandbox, loads the project, installs dependencies, runs the command, and returns a replay URL.
+
 ## Installation
 
 ```bash
@@ -14,6 +16,19 @@ bun add @sandchest/mcp
 ## Configuration
 
 The MCP server requires a `SANDCHEST_API_KEY` environment variable.
+
+If you want agents to upload local code with tools like `sandbox_run_project` or `sandbox_upload_dir`, also set `SANDCHEST_MCP_ALLOWED_PATHS` to one or more approved local roots.
+
+### Claude Code
+
+The fastest setup path is:
+
+```bash
+sandchest mcp init claude-code --allow-path /absolute/path/to/your/workspace
+sandchest skill install --global
+```
+
+This writes the MCP config to `~/.claude/mcp.json`, allow-lists your local workspace for upload tools, and installs the Sandchest skill so Claude Code is more likely to choose `sandbox_run_project` first.
 
 ### Claude Desktop
 
@@ -55,11 +70,22 @@ Add to your Cursor MCP settings:
 
 With the MCP server, AI agents can:
 
+- Run a repo command in a fresh sandbox with one tool call
 - Create isolated sandboxes to run code safely
 - Execute commands and inspect results
 - Upload and download files
 - Fork sandboxes for experimentation
 - Use persistent sessions for multi-step workflows
 - Access replay URLs for sharing
+
+## Recommended workflow
+
+Use these defaults in order:
+
+1. For "run this command in a new sandbox" requests, use `sandbox_run_project`.
+2. For repeated work, check `sandbox_list` and fork an existing prepared sandbox.
+3. Drop to `sandbox_create`, `sandbox_git_clone`, `sandbox_upload_dir`, and sessions only when you need fine-grained control.
+
+For Claude Code, also install the bundled Sandchest skill. It reinforces the same decision tree and reduces the odds of the agent falling back to manual multi-step setup for one-shot tasks.
 
 See the [Tools Reference](/docs/mcp/tools) for the complete list.
