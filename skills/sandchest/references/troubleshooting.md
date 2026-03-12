@@ -17,6 +17,7 @@ Common causes:
 - Large test or build step
 
 Fixes:
+- Prefer `sandbox_run_project` for one-shot "new sandbox + run command" tasks so setup, install, and execution are handled together.
 - Increase the timeout on the command or helper.
 - Set non-interactive env vars where appropriate.
 - Use `GIT_TERMINAL_PROMPT=0` style protections for git workflows.
@@ -33,6 +34,7 @@ Fixes:
 ## Upload Too Large
 
 Fixes:
+- Prefer `sandbox_run_project` in `source: "auto"` mode for a one-shot task. It can fall back from upload to clone automatically when a public origin is available.
 - Prefer `sandbox_git_clone` for public repos.
 - Narrow the upload scope.
 - Exclude generated directories and dependency folders.
@@ -43,12 +45,12 @@ The sandbox root filesystem uses an overlay mount. The guest agent runs with
 ProtectSystem=strict, with explicit ReadWritePaths for user-writable directories.
 
 Writable directories:
-- `/work` (primary workspace — default for uploads, clones, and exec cwd)
+- `/tmp/work` (recommended default workspace for MCP uploads, clones, exec, and sessions)
 - `/root` (root user home)
 - `/tmp` and `/var/tmp` (ephemeral scratch space)
 - `/home` (user home directories)
 
-Use `/work` as the default destination for uploads and clones.
+Use `/tmp/work` as the default destination unless you know the target image exposes `/work`.
 
 ## Image Availability
 
@@ -58,7 +60,7 @@ provisioned on the target node.
 
 Install toolchains manually in the base image:
 - Node.js: `curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs`
-- Bun: `curl -fsSL https://bun.sh/install | bash`
+- Bun: `curl -fsSL https://bun.sh/install | bash && export PATH="/root/.bun/bin:$PATH"`
 - Python 3.12: `apt-get install -y python3.12 python3.12-venv`
 
 ## Directory Upload Failed On Extraction
@@ -90,6 +92,7 @@ Possible causes:
 - DNS resolution failure.
 
 Workarounds:
+- Prefer `sandbox_run_project` with `local_path` if the code is already on the local machine.
 - Use sandbox_upload_dir to transfer code locally instead of cloning.
 - Upload pre-built dependencies via sandbox_upload.
 

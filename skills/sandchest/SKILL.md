@@ -38,6 +38,29 @@ Rule of thumb: if it runs code or installs dependencies, sandbox it.
 
 IMPORTANT: Follow this decision tree exactly. Do NOT skip steps or improvise.
 
+### Step 0 — Prefer the compound helper for one-shot tasks
+
+If the user wants to run a single command in a fresh sandbox, use `sandbox_run_project` first.
+
+```text
+sandbox_run_project({
+  command: "bun run lint",
+  local_path: "/path/to/project"
+})
+```
+
+Use it for requests like:
+- "run tests in a new sandbox"
+- "lint this repo in Sandchest"
+- "try this build in isolation"
+
+It handles sandbox creation, source loading, runtime setup, dependency install, command execution, and replay URL return in one step.
+
+Drop to the manual flow below only when:
+- You need to reuse or fork an existing sandbox.
+- You need fine-grained control over setup.
+- You are doing a multi-step workflow, patch workflow, or artifact workflow.
+
 ### Step 1 — Check for reusable sandbox
 
 Call `sandbox_list` first. If a running sandbox already has the code you need, fork it with `sandbox_fork` and skip to Step 5. This is instant and avoids redundant setup.
@@ -48,7 +71,12 @@ Call `sandbox_list` first. If a running sandbox already has the code you need, f
 sandbox_create({ profile: "small" })
 ```
 
-Only `sandchest://ubuntu-22.04/base` is available. Do not request other images.
+Prefer the matching official image when the runtime is obvious:
+- `sandchest://ubuntu-22.04/bun` for Bun repos
+- `sandchest://ubuntu-22.04/node-22` for Node.js, npm, pnpm, and yarn repos
+- `sandchest://ubuntu-22.04/python-3.12` for Python repos
+- `sandchest://ubuntu-22.04/go-1.22` for Go repos
+- `sandchest://ubuntu-22.04/base` only when you need custom setup or do not know the runtime yet
 
 ### Step 3 — Load code (pick ONE)
 
@@ -68,13 +96,15 @@ Use a session so state persists between commands:
 ```text
 sandbox_session_create({ sandbox_id })
 sandbox_session_exec({ cmd: "curl -fsSL https://bun.sh/install | bash" })
-sandbox_session_exec({ cmd: "source /root/.bashrc && cd /tmp/work && bun install" })
+sandbox_session_exec({ cmd: "export PATH=\"/root/.bun/bin:$PATH\" && cd /tmp/work && bun install" })
 ```
 
 Common toolchain installs:
-- Bun: `curl -fsSL https://bun.sh/install | bash && source /root/.bashrc`
+- Bun: `curl -fsSL https://bun.sh/install | bash && export PATH="/root/.bun/bin:$PATH"`
 - Node.js: `curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs`
 - Python: `apt-get install -y python3.12 python3.12-venv`
+
+If you picked the matching official image and the tool already exists, skip manual installation.
 
 ### Step 5 — Fork checkpoint
 
@@ -151,6 +181,12 @@ sandbox_exec({ cmd: "git clone https://user:TOKEN@github.com/org/repo" })
 Correct:
 
 ```text
+sandbox_run_project({ command: "npm test", repo_url: "https://github.com/org/repo" })
+```
+
+Also correct when you need manual control:
+
+```text
 sandbox_git_clone({ url: "https://github.com/org/repo", depth: 1 })
 ```
 
@@ -171,6 +207,12 @@ Incorrect — setting up from scratch every time:
 ```text
 sandbox_create -> git_clone -> install deps -> run task -> destroy
 sandbox_create -> git_clone -> install deps -> run task -> destroy  // again!
+```
+
+Correct — one-shot execution:
+
+```text
+sandbox_run_project({ command: "bun run lint", local_path: "/path/to/project" })
 ```
 
 Correct — fork-based reuse:
