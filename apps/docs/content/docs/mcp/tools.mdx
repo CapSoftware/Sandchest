@@ -1,153 +1,167 @@
 ---
 title: Tools Reference
-description: Complete reference for all 14 MCP tools.
+description: Reference for the Sandchest MCP tools, with sandbox_run_project as the default entry point.
 ---
 
-## Sandbox lifecycle
+Sandchest exposes low-level sandbox primitives and one high-level workflow tool.
 
-### `sandbox_create`
+## Start here
 
-Create a new isolated Linux sandbox (Firecracker microVM).
+### `sandbox_run_project`
+
+The default tool for requests like:
+
+- "run `bun run lint` in a new sandbox"
+- "test this repo in Sandchest"
+- "build this project in isolation"
+
+It creates a sandbox, loads the project, prepares the runtime, installs dependencies, runs the command, and returns the result plus replay URL.
+
+In `source: "auto"` mode, it preserves local changes with upload, but prefers shallow clone when the local repo is clean and has a public HTTPS origin.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `image` | `string` | No | Image URI. Default: `sandchest://ubuntu-22.04/base` |
-| `profile` | `small \| medium \| large` | No | Resource profile. Default: `small` |
-| `env` | `Record<string, string>` | No | Environment variables |
+| `command` | `string` | Yes | Command to run inside the project |
+| `local_path` | `string` | No | Local project directory to upload |
+| `repo_url` | `string` | No | Public git repo URL to clone |
+| `source` | `auto \| upload \| git_clone` | No | How to load code. Default: `auto` |
+| `remote_path` | `string` | No | Workspace path in the sandbox. Default: `/tmp/work` |
+| `profile` | `small \| medium \| large` | No | Sandbox size |
+| `env` | `Record<string, string>` | No | Environment variables for sandbox creation |
+| `runtime` | `auto \| bun \| npm \| yarn \| pnpm \| python \| go \| none` | No | Runtime/toolchain to prepare |
+| `install` | `boolean` | No | Install dependencies before running. Default: `true` |
+| `install_command` | `string` | No | Override the dependency install command |
+| `exclude` | `string[]` | No | Extra exclude globs for local uploads |
+| `baseline` | `boolean` | No | Initialize a baseline git repo after upload |
+| `keep_sandbox` | `boolean` | No | Keep the sandbox after the command. Default: `true` |
+| `timeout` | `number` | No | Final command timeout in seconds. Default: `300` |
 
-Returns: `sandbox_id`, `replay_url`
+Returns:
+
+- `sandbox_id`
+- `replay_url`
+- `source` summary
+- detected project/runtime details
+- final command result (`exit_code`, `stdout`, `stderr`, `duration_ms`)
+- any warnings
+
+## Lifecycle
+
+### `sandbox_create`
+
+Create a new isolated Linux sandbox.
 
 ### `sandbox_list`
 
 List active sandboxes.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `status` | `running \| stopped \| failed` | No | Filter by status |
-
-Returns: Array of `{ sandbox_id, status, replay_url }`
-
 ### `sandbox_stop`
 
-Gracefully stop a sandbox. Collects artifacts and flushes logs.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox to stop |
+Gracefully stop a sandbox and preserve the replay URL.
 
 ### `sandbox_destroy`
 
-Permanently destroy a sandbox and all its data.
+Hard-delete a sandbox immediately.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox to destroy |
+### `sandbox_fork`
+
+Fork a running sandbox to create a fast checkpointed copy.
+
+### `sandbox_replay`
+
+Return the replay URL for a sandbox.
 
 ## Command execution
 
 ### `sandbox_exec`
 
-Execute a command in a sandbox. Returns exit code, stdout, and stderr.
+Run a one-off command in a sandbox.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox to execute in |
-| `cmd` | `string` | Yes | Command to run (interpreted by `/bin/sh`) |
-| `cwd` | `string` | No | Working directory. Default: `/root` |
-| `timeout` | `number` | No | Timeout in seconds. Default: 300 |
+Use this when you already have a prepared sandbox and do not need shell state to persist.
 
 ### `sandbox_session_create`
 
-Create a persistent shell session where commands share state.
+Create a persistent shell session.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
+Optional inputs:
 
-Returns: `session_id`
+- `shell` with default `/bin/bash`
+- `env` for session-scoped environment variables
 
 ### `sandbox_session_exec`
 
-Run a command in a persistent session. Inherits all prior state.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
-| `session_id` | `string` | Yes | The session |
-| `cmd` | `string` | Yes | Command to run |
-| `timeout` | `number` | No | Timeout in seconds. Default: 300 |
+Run a command inside a persistent session.
 
 ### `sandbox_session_destroy`
 
-Destroy a persistent shell session.
+Destroy a persistent session.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
-| `session_id` | `string` | Yes | The session to destroy |
+## Source loading and files
 
-## Files
+### `sandbox_git_clone`
+
+Clone a public git repository into a sandbox.
+
+Best when:
+
+- the repo is public
+- you want the fastest source-loading path
+- you do not need local uncommitted changes
+
+Defaults to `/tmp/work` when no destination path is provided.
 
 ### `sandbox_upload`
 
-Upload a file to a sandbox.
+Upload one file into a sandbox.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
-| `path` | `string` | Yes | Destination path (e.g., `/work/config.json`) |
-| `content` | `string` | Yes | File content |
-| `encoding` | `utf-8 \| base64` | No | Content encoding. Default: `utf-8` |
+### `sandbox_upload_dir`
+
+Upload a local directory into a sandbox.
+
+Best when:
+
+- the repo is private
+- the code only exists locally
+- local uncommitted changes must be included
+
+Requires `SANDCHEST_MCP_ALLOWED_PATHS`.
 
 ### `sandbox_download`
 
-Download a file from a sandbox.
+Download one file from a sandbox.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
-| `path` | `string` | Yes | File path in the sandbox |
+### `sandbox_download_dir`
+
+Download a sandbox directory to a new local path.
+
+Requires `SANDCHEST_MCP_ALLOWED_PATHS`.
 
 ### `sandbox_file_list`
 
-List files and directories at a path.
+List files in a sandbox directory.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
-| `path` | `string` | Yes | Directory path to list |
+## Review and patch workflows
+
+### `sandbox_diff`
+
+Inspect changes in a git repo inside the sandbox.
+
+Use `mode: "review"` for inspection and `mode: "patch"` for a patch-safe export.
+
+### `sandbox_apply_patch`
+
+Apply a unified diff inside a sandbox git repo.
 
 ## Artifacts
 
 ### `sandbox_artifacts_list`
 
-List registered artifacts for a sandbox.
+List artifacts registered for a sandbox.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
+## Recommended defaults
 
-## Forking
+Use these in order:
 
-### `sandbox_fork`
-
-Create an instant copy of a running sandbox (memory + filesystem + all state).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox to fork |
-| `env` | `Record<string, string>` | No | Additional env vars for the fork |
-
-Fork is sub-second. The original sandbox is unaffected.
-
-## Replay
-
-### `sandbox_replay`
-
-Get the replay URL for a sandbox.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sandbox_id` | `string` | Yes | The sandbox |
-
-Returns: `sandbox_id`, `replay_url`
+1. `sandbox_run_project` for one-shot "new sandbox + run command" requests.
+2. `sandbox_list` and `sandbox_fork` for reuse.
+3. Primitive tools when you need exact control over setup, sessions, file transfer, or patch workflows.
