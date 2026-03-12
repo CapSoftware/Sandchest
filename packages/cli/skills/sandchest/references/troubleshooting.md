@@ -17,6 +17,7 @@ Common causes:
 - Large test or build step
 
 Fixes:
+- Prefer `sandbox_run_project` for one-shot "new sandbox + run command" tasks so setup, install, and execution are handled together.
 - Increase the timeout on the command or helper.
 - Set non-interactive env vars where appropriate.
 - Use `GIT_TERMINAL_PROMPT=0` style protections for git workflows.
@@ -33,9 +34,17 @@ Fixes:
 ## Upload Too Large
 
 Fixes:
+- Prefer `sandbox_run_project` in `source: "auto"` mode for a one-shot task. It can fall back from upload to clone automatically when a public origin is available.
 - Prefer `sandbox_git_clone` for public repos.
 - Narrow the upload scope.
 - Exclude generated directories and dependency folders.
+
+## Writable Paths
+
+Fixes:
+- Default to `/tmp/work` for MCP uploads, clones, exec, and sessions.
+- Use `/tmp` or `/var/tmp` for scratch space.
+- Only use `/work` when you know the target image mounts it read-write.
 
 ## Directory Upload Failed On Extraction
 

@@ -36,11 +36,35 @@ Rule of thumb: if it runs code or installs dependencies, sandbox it.
 
 ## 2. Setup Recipe
 
+If the user wants a single command run in a fresh sandbox, prefer `sandbox_run_project` first:
+
+```text
+sandbox_run_project({
+  command: "bun run lint",
+  local_path: "/path/to/project"
+})
+```
+
+Use the manual setup below when you need reuse, forking, patch workflows, or fine-grained control.
+
 1. Create a sandbox with `sandbox_create`.
-2. Choose an image using [references/image-selection.md](references/image-selection.md).
+2. Prefer the matching official image when the runtime is obvious:
+   - `sandchest://ubuntu-22.04/bun` for Bun repos
+   - `sandchest://ubuntu-22.04/node-22` for Node.js, npm, pnpm, and yarn repos
+   - `sandchest://ubuntu-22.04/python-3.12` for Python repos
+   - `sandchest://ubuntu-22.04/go-1.22` for Go repos
+   - `sandchest://ubuntu-22.04/base` only when you need custom setup or do not know the runtime yet
 3. Load code with `sandbox_git_clone` for public git repos, or `sandbox_upload_dir` for local code.
-4. Install dependencies with `sandbox_session_create` plus `sandbox_session_exec`.
+4. Install dependencies with `sandbox_session_create` plus `sandbox_session_exec`, defaulting to `/tmp/work`.
 5. Fork after setup so you have a clean checkpoint before experiments.
+
+Example Bun setup:
+
+```text
+sandbox_session_create({ sandbox_id, shell: "/bin/bash" })
+sandbox_session_exec({ cmd: "curl -fsSL https://bun.sh/install | bash" })
+sandbox_session_exec({ cmd: "export PATH=\"/root/.bun/bin:$PATH\" && cd /tmp/work && bun install" })
+```
 
 If you uploaded local code and you want diff workflows, initialize a baseline repo first:
 
@@ -84,9 +108,10 @@ If a patch is too large or the repo is not initialized, fall back to directory d
 | Image | Use for |
 |-------|---------|
 | `sandchest://ubuntu-22.04/base` | General Linux work and custom setup |
-| `sandchest://ubuntu-22.04/node-22` | Node.js, Bun, TypeScript, frontend repos |
-| `sandchest://ubuntu-22.04/python-3.12` | Python projects |
-| `sandchest://ubuntu-24.04/base` | Newer Ubuntu userland |
+| `sandchest://ubuntu-22.04/node-22` | Node.js, npm, pnpm, yarn, frontend, CLIs |
+| `sandchest://ubuntu-22.04/bun` | Bun workspaces and Bun-first repos |
+| `sandchest://ubuntu-22.04/python-3.12` | Python apps and tooling |
+| `sandchest://ubuntu-22.04/go-1.22` | Go projects |
 
 See [references/image-selection.md](references/image-selection.md) for the full guide.
 
@@ -101,6 +126,12 @@ sandbox_exec({ cmd: "git clone https://user:TOKEN@github.com/org/repo" })
 Correct:
 
 ```text
+sandbox_run_project({ command: "npm test", repo_url: "https://github.com/org/repo" })
+```
+
+Also correct when you need manual control:
+
+```text
 sandbox_git_clone({ url: "https://github.com/org/repo" })
 ```
 
@@ -112,6 +143,12 @@ sandbox_exec({ cmd: "rm -rf dist && npm run build:esm" })
 ```
 
 Correct:
+
+```text
+sandbox_run_project({ command: "npm run build", local_path: "/path/to/project" })
+```
+
+Or for reusable setup:
 
 ```text
 create sandbox
