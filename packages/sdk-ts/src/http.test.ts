@@ -561,4 +561,101 @@ describe('HttpClient', () => {
       }
     })
   })
+
+  describe('requestRaw', () => {
+    test('returns Response directly on success', async () => {
+      globalThis.fetch = mock(async () =>
+        new Response('file contents', { status: 200 }),
+      ) as unknown as typeof fetch
+
+      const client = createClient()
+      const response = await client.requestRaw({ method: 'GET', path: '/v1/files' })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('file contents')
+    })
+
+    test('retries on 500 errors', async () => {
+      let calls = 0
+      globalThis.fetch = mock(async () => {
+        calls++
+        if (calls === 1) {
+          return new Response('internal error', { status: 500 })
+        }
+        return new Response('ok', { status: 200 })
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      const response = await client.requestRaw({ method: 'PUT', path: '/v1/files' })
+      expect(response.status).toBe(200)
+      expect(calls).toBe(2)
+    })
+
+    test('retries on network errors', async () => {
+      let calls = 0
+      globalThis.fetch = mock(async () => {
+        calls++
+        if (calls === 1) {
+          throw new TypeError('fetch failed')
+        }
+        return new Response('ok', { status: 200 })
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      const response = await client.requestRaw({ method: 'PUT', path: '/v1/files' })
+      expect(response.status).toBe(200)
+      expect(calls).toBe(2)
+    })
+
+    test('throws after exhausting retries on 500', async () => {
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify(errorBody('internal_error', 'Server error')), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      try {
+        await client.requestRaw({ method: 'PUT', path: '/v1/files' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandchestError)
+        expect((err as SandchestError).status).toBe(500)
+      }
+    })
+
+    test('does not retry on 4xx client errors', async () => {
+      let calls = 0
+      globalThis.fetch = mock(async () => {
+        calls++
+        return new Response(
+          JSON.stringify(errorBody('not_found', 'Not found', 'req_1')),
+          { status: 404, headers: { 'Content-Type': 'application/json' } },
+        )
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 2 })
+      try {
+        await client.requestRaw({ method: 'GET', path: '/v1/files' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(NotFoundError)
+        expect(calls).toBe(1)
+      }
+    })
+
+    test('wraps network errors into ConnectionError after exhausting retries', async () => {
+      globalThis.fetch = mock(async () => {
+        throw new TypeError('fetch failed')
+      }) as unknown as typeof fetch
+
+      const client = createClient({ retries: 1 })
+      try {
+        await client.requestRaw({ method: 'PUT', path: '/v1/files' })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConnectionError)
+      }
+    })
+  })
 })

@@ -40,6 +40,8 @@ const WAIT_READY_DEFAULT_TIMEOUT = 120_000
 const WAIT_READY_POLL_INTERVAL = 1_000
 const TEXT_ENCODER = new TextEncoder()
 const TEXT_DECODER = new TextDecoder()
+/** Uploads larger than this threshold are split into chunks to avoid body-size issues. */
+const UPLOAD_CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
 const VALIDATE_TAR_SCRIPT = `
 import posixpath
 import sys
@@ -201,14 +203,49 @@ export class Sandbox {
         await this.fs.upload(path, TEXT_ENCODER.encode(content))
       },
       uploadDir: async (path: string, tarball: Uint8Array): Promise<void> => {
-        const tmpPath = `/tmp/.sandchest-upload-${crypto.randomUUID()}.tar.gz`
-        await this._http.requestRaw({
-          method: 'PUT',
-          path: `/v1/sandboxes/${this.id}/files`,
-          query: { path: tmpPath, batch: true },
-          body: tarball,
-          headers: { 'Content-Type': 'application/octet-stream' },
-        })
+        const uuid = crypto.randomUUID()
+        const tmpPath = `/tmp/.sandchest-upload-${uuid}.tar.gz`
+        const chunkPaths: string[] = []
+
+        // Upload the tarball — chunked for large files to avoid body-size issues
+        if (tarball.byteLength <= UPLOAD_CHUNK_SIZE) {
+          await this._http.requestRaw({
+            method: 'PUT',
+            path: `/v1/sandboxes/${this.id}/files`,
+            query: { path: tmpPath, batch: true },
+            body: tarball,
+            headers: { 'Content-Type': 'application/octet-stream' },
+          })
+        } else {
+          const totalChunks = Math.ceil(tarball.byteLength / UPLOAD_CHUNK_SIZE)
+          for (let i = 0; i < totalChunks; i++) {
+            const start = i * UPLOAD_CHUNK_SIZE
+            const end = Math.min(start + UPLOAD_CHUNK_SIZE, tarball.byteLength)
+            const chunkPath = `/tmp/.sandchest-chunk-${uuid}-${String(i).padStart(4, '0')}`
+            chunkPaths.push(chunkPath)
+            await this._http.requestRaw({
+              method: 'PUT',
+              path: `/v1/sandboxes/${this.id}/files`,
+              query: { path: chunkPath },
+              body: tarball.slice(start, end),
+              headers: { 'Content-Type': 'application/octet-stream' },
+            })
+          }
+
+          // Concatenate chunks into the final tarball
+          const catResult = await this._execSync(
+            ['sh', '-c', `cat /tmp/.sandchest-chunk-${uuid}-* > ${tmpPath}`],
+            { operation: 'uploadDir:concat' },
+          )
+          if (catResult.exit_code !== 0) {
+            throw new ExecFailedError({
+              operation: 'uploadDir:concat',
+              exitCode: catResult.exit_code,
+              stderr: catResult.stderr,
+            })
+          }
+        }
+
         try {
           const mkdirResult = await this._execSync(['mkdir', '-p', path], {
             operation: 'uploadDir:mkdir',
@@ -255,9 +292,12 @@ export class Sandbox {
             })
           }
         } finally {
-          await this._execSync(['rm', '-f', tmpPath], {
-            operation: 'uploadDir:cleanup',
-          }).catch(() => {})
+          // Clean up tarball and any chunk files
+          const cleanupPaths = [tmpPath, ...chunkPaths]
+          await this._execSync(
+            ['rm', '-f', ...cleanupPaths],
+            { operation: 'uploadDir:cleanup' },
+          ).catch(() => {})
         }
       },
       download: async (path: string): Promise<Uint8Array> => {
@@ -361,6 +401,15 @@ export class Sandbox {
         }
 
         cmd.push('--', validated.url, dest)
+
+        // Ensure the parent directory exists (sandbox root FS is read-only outside writable paths)
+        const parentDir = dest.includes('/') ? dest.slice(0, dest.lastIndexOf('/')) : undefined
+        if (parentDir && parentDir !== '') {
+          await this._execSync(['mkdir', '-p', parentDir], {
+            operation: 'git.clone:mkdir',
+            timeout: 5,
+          }).catch(() => {}) // Best-effort — parent may already exist
+        }
 
         const result = await this._execSync(cmd, {
           operation: 'git.clone',

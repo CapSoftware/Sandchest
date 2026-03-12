@@ -187,32 +187,60 @@ export class HttpClient {
     }
 
     const timeoutMs = options.timeout ?? this.timeout
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let lastError: Error | undefined
 
-    try {
-      const response = await fetch(url, {
-        method: options.method,
-        headers,
-        body: options.body,
-        signal: controller.signal,
-      })
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
+      if (attempt > 0) {
+        await sleep(backoffDelay(attempt - 1))
+      }
 
-      clearTimeout(timer)
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-      if (!response.ok) {
+      try {
+        const response = await fetch(url, {
+          method: options.method,
+          headers,
+          body: options.body,
+          signal: controller.signal,
+        })
+
+        clearTimeout(timer)
+
+        if (response.ok) {
+          return response
+        }
+
+        // Retry on server errors
+        if (response.status >= 500 && attempt < this.retries) {
+          await response.text().catch(() => {}) // drain body to free connection
+          lastError = new SandchestError({
+            code: 'internal_error',
+            message: `HTTP ${response.status}`,
+            status: response.status,
+            requestId: response.headers.get('x-request-id') ?? '',
+          })
+          continue
+        }
+
         const errorBody = (await response.json().catch(() => null)) as ApiErrorBody | null
         const requestId = errorBody?.request_id ?? response.headers.get('x-request-id') ?? ''
         const message = errorBody?.message ?? `HTTP ${response.status}`
         throw this.parseErrorResponse(response.status, message, requestId, errorBody)
-      }
+      } catch (error) {
+        clearTimeout(timer)
+        if (error instanceof SandchestError) throw error
 
-      return response
-    } catch (error) {
-      clearTimeout(timer)
-      if (error instanceof SandchestError) throw error
-      throw this.wrapRawError(error, timeoutMs)
+        if (attempt < this.retries) {
+          lastError = error instanceof Error ? error : new Error(String(error))
+          continue
+        }
+
+        throw this.wrapRawError(lastError ?? error, timeoutMs)
+      }
     }
+
+    throw this.wrapRawError(lastError, timeoutMs)
   }
 
   /** Wrap non-SDK errors into typed TimeoutError or ConnectionError. */
