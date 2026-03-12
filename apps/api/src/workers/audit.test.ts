@@ -70,10 +70,10 @@ describe('phase 9 gap audit', () => {
     expect(src).toContain('action')
   })
 
-  test('MCP has all 19 tools', () => {
+  test('MCP has all 20 tools', () => {
     const src = readFileSync(resolve(ROOT, 'packages/mcp/src/tools.ts'), 'utf-8')
     const toolCount = (src.match(/registerTool\(/g) ?? []).length
-    expect(toolCount).toBe(19)
+    expect(toolCount).toBe(20)
   })
 
   test('dashboard has create sandbox dialog', () => {
