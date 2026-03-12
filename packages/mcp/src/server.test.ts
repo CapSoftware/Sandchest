@@ -1059,7 +1059,7 @@ describe('MCP Server', () => {
       arguments: {
         sandbox_id: 'sb_test123',
         url: 'https://github.com/sandchest/sandchest.git',
-        dest: '/work/repo',
+        path: '/work/repo',
         branch: 'main',
         depth: 1,
         single_branch: false,

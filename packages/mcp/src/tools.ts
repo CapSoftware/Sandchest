@@ -779,7 +779,7 @@ function normalizePatchAgainstRepoRoot(
 export function registerTools(server: McpServer, sandchest: Sandchest): void {
   server.registerTool('sandbox_create', {
     description:
-      "Create a new isolated Linux sandbox (Firecracker microVM). Use this when you need a clean environment to run commands, install packages, clone repos, run tests, or execute any code safely. The sandbox is fully isolated — nothing you do affects the host. Returns a sandbox_id for use with other tools. The sandbox is ready to use immediately.",
+      "Create a new isolated Linux sandbox (Firecracker microVM). Returns a sandbox_id. Writable paths: /tmp (recommended default), /var/tmp. Only sandchest://ubuntu-22.04/base is available — install toolchains manually (bun, node, python) after creation. Use /tmp/work as your working directory. TIP: Check sandbox_list first — if a running sandbox already has your code, fork it instead of creating a new one.",
     inputSchema: {
       image: z
         .string()
@@ -811,13 +811,13 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
     inputSchema: {
       sandbox_id: z.string().describe('The sandbox to execute in.'),
       cmd: z.string().describe('The command to run. Interpreted by /bin/sh.'),
-      cwd: z.string().optional().describe('Working directory. Default: /root'),
+      cwd: z.string().optional().describe('Working directory. Default: /tmp/work'),
       timeout: z.number().optional().describe('Timeout in seconds. Default: 300'),
     },
   }, async (args) => {
     const sb = await sandchest.get(args.sandbox_id)
     const result = await sb.exec(args.cmd, {
-      cwd: args.cwd,
+      cwd: args.cwd ?? '/tmp/work',
       timeout: args.timeout,
     })
     return jsonContent({
@@ -890,7 +890,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       'Upload a file to a sandbox. Use this to place source code, configuration files, or test data into the sandbox filesystem.',
     inputSchema: {
       sandbox_id: z.string(),
-      path: z.string().describe('Destination path in the sandbox (e.g., /work/config.json)'),
+      path: z.string().describe('Destination path in the sandbox (e.g., /tmp/work/config.json)'),
       content: z.string().describe('File content (text). For binary files, use base64 encoding.'),
       encoding: z
         .enum(['utf-8', 'base64'])
@@ -912,11 +912,11 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
 
   server.registerTool('sandbox_upload_dir', {
     description:
-      'Upload a local directory to a sandbox. Reads files from your local machine, respects .gitignore for git repos, validates the final archive, and extracts it in the sandbox. Disabled unless SANDCHEST_MCP_ALLOWED_PATHS allow-lists the local root.',
+      'Upload a local directory to a sandbox. For git repos, only sends tracked + untracked files (respects .gitignore). Max 100 MB archive. PREFER sandbox_git_clone for public repos — it is faster and avoids upload limits. Use this for private repos or local-only code. Disabled unless SANDCHEST_MCP_ALLOWED_PATHS allow-lists the local root.',
     inputSchema: {
       sandbox_id: z.string(),
       local_path: z.string().describe('Local directory to upload'),
-      remote_path: z.string().optional().describe('Destination directory in the sandbox. Default: /work'),
+      remote_path: z.string().optional().describe('Destination directory in the sandbox. Default: /tmp/work. Writable paths: /tmp, /var/tmp.'),
       exclude: z
         .array(z.string())
         .optional()
@@ -955,7 +955,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
         return jsonContent({ ok: false, error: `Not a directory: ${localPath}` })
       }
 
-      const remotePath = args.remote_path ?? '/work'
+      const remotePath = args.remote_path ?? '/tmp/work'
       const archivePath = join(tmpdir(), `.sandchest-upload-${crypto.randomUUID()}.tar.gz`)
       try {
         const method = createLocalArchive(localPath, archivePath, { exclude: args.exclude })
@@ -1013,20 +1013,42 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
         rmSync(archivePath, { force: true })
       }
     } catch (err) {
+      const remotePath = args.remote_path ?? '/tmp/work'
       if (err instanceof ExecFailedError) {
+        const hint =
+          err.operation === 'uploadDir:mkdir'
+            ? `Cannot create '${remotePath}' — the root filesystem is read-only outside writable mounts. Set remote_path to a writable location like '/tmp/work'. Do NOT retry the same path.`
+            : 'Writable paths: /tmp, /var/tmp. If the path is correct, try sandbox_git_clone for public repos instead.'
         return jsonContent({
           ok: false,
-          error: err.message,
+          error: `uploadDir failed at ${err.operation}: ${err.message}`,
           stderr: err.stderr,
           exit_code: err.exitCode,
+          remote_path: remotePath,
+          hint,
         })
       }
       if (err instanceof SandchestError) {
-        return jsonContent({ ok: false, error: err.message, code: err.code })
+        const hint =
+          err.code === 'connection_error'
+            ? 'Network error during upload. Check that the sandbox is still running and retry.'
+            : err.code === 'timeout'
+              ? 'Upload timed out. The archive may be too large — try adding exclude patterns or use sandbox_git_clone for public repos.'
+              : 'The Sandchest API returned an error during file upload. Check sandbox status and retry.'
+        return jsonContent({
+          ok: false,
+          error: err.message,
+          code: err.code,
+          status: err.status,
+          request_id: err.requestId || undefined,
+          remote_path: remotePath,
+          hint,
+        })
       }
       return jsonContent({
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+        remote_path: remotePath,
         hint: 'If this is a size or timeout issue, try sandbox_git_clone for public repos or narrow the upload scope with exclude patterns.',
       })
     }
@@ -1122,13 +1144,13 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
 
   server.registerTool('sandbox_git_clone', {
     description:
-      'Clone a git repository into a sandbox. Public HTTPS URLs are allowed by default. Set allow_non_https to true for SSH or git:// URLs.',
+      'Clone a git repository into a sandbox. PREFERRED way to load code for public repos — faster than upload_dir and no size limits. Clones run inside the sandbox (requires network). Use --depth 1 for faster clones when full history is not needed.',
     inputSchema: {
       sandbox_id: z.string(),
       url: z.string().describe('Repository URL to clone. Embedded credentials are rejected.'),
-      dest: z.string().optional().describe('Destination path. Default: /work'),
+      path: z.string().optional().describe('Destination path inside sandbox. Default: /work. Use /tmp/work if /work is read-only.'),
       branch: z.string().optional().describe('Branch or tag to check out during clone.'),
-      depth: z.number().int().positive().optional().describe('Shallow clone depth.'),
+      depth: z.number().int().positive().optional().describe('Shallow clone depth. Use 1 for fastest clone.'),
       single_branch: z
         .boolean()
         .optional()
@@ -1148,7 +1170,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
     try {
       const sb = await sandchest.get(args.sandbox_id)
       const result = await sb.git.clone(validated.url, {
-        dest: args.dest,
+        dest: args.path,
         branch: args.branch,
         depth: args.depth,
         singleBranch: args.single_branch,
@@ -1163,11 +1185,18 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       })
     } catch (err) {
       if (err instanceof ExecFailedError) {
+        const isAuthError =
+          /Authentication failed|could not read Username|terminal prompts disabled|Permission denied/i.test(
+            err.stderr,
+          )
         return jsonContent({
           ok: false,
           error: err.message,
           stderr: err.stderr,
           exit_code: err.exitCode,
+          hint: isAuthError
+            ? 'This repository requires authentication. Private repos are not supported via sandbox_git_clone yet. Use sandbox_upload_dir to upload code from your local machine instead.'
+            : undefined,
         })
       }
       if (err instanceof SandchestError) {
@@ -1253,7 +1282,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       'List files and directories at a path inside a sandbox. Returns names, types (file/directory), and sizes. Use this to explore the sandbox filesystem before downloading or modifying files.',
     inputSchema: {
       sandbox_id: z.string().describe('The sandbox to list files in.'),
-      path: z.string().describe('Directory path to list (e.g., /work, /root, /tmp).'),
+      path: z.string().describe('Directory path to list (e.g., /tmp/work, /tmp, /root).'),
     },
   }, async (args) => {
     const sb = await sandchest.get(args.sandbox_id)
@@ -1298,7 +1327,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       'Review or export changes from a sandbox git work tree. Requires the directory to be a git repo. `mode: "review"` returns tracked diff output and reports untracked files separately; it may truncate. `mode: "patch"` produces a git-apply-safe patch including untracked files and binary changes.',
     inputSchema: {
       sandbox_id: z.string(),
-      path: z.string().optional().describe('Directory to diff. Default: /work'),
+      path: z.string().optional().describe('Directory to diff. Default: /tmp/work'),
       staged: z.boolean().optional().describe('Show only staged changes. Default: false.'),
       mode: z.enum(['review', 'patch']).optional().describe('Default: review.'),
       max_lines: z.number().optional().describe('Maximum lines returned in review mode. Default: 5000.'),
@@ -1307,7 +1336,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
   }, async (args) => {
     try {
       const sb = await sandchest.get(args.sandbox_id)
-      const cwd = args.path ?? '/work'
+      const cwd = args.path ?? '/tmp/work'
       const mode = args.mode ?? 'review'
 
       const repoCheck = await sb.exec(['git', '-C', cwd, 'rev-parse', '--is-inside-work-tree'], {
@@ -1599,12 +1628,12 @@ fi`,
       patch: z
         .string()
         .max(10_485_760, 'Patch content exceeds 10 MB limit. Split it into smaller patches.'),
-      path: z.string().optional().describe('Working directory for applying the patch. Default: /work'),
+      path: z.string().optional().describe('Working directory for applying the patch. Default: /tmp/work'),
     },
   }, async (args) => {
     try {
       const sb = await sandchest.get(args.sandbox_id)
-      const cwd = args.path ?? '/work'
+      const cwd = args.path ?? '/tmp/work'
       const patchPath = `/tmp/.sandchest-patch-${crypto.randomUUID()}.patch`
 
       try {

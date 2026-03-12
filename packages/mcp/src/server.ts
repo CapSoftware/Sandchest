@@ -23,6 +23,24 @@ FILES & ARTIFACTS:
 GIT SETUP:
 - sandbox_git_clone: Clone a git repository into a sandbox without opening a shell session first
 
+LOADING CODE — DECISION TREE (follow in order):
+1. Check sandbox_list first — if a running sandbox already has the code, fork it instead of starting over
+2. Public repo → use sandbox_git_clone (fastest, preferred, clones inside sandbox with --depth 1)
+3. Private repo or local-only code → use sandbox_upload_dir (respects .gitignore, only sends tracked files)
+4. NEVER manually tar, base64-encode, or chunk files — the tools handle this automatically
+
+WORKSPACE:
+- /work is the default writable workspace for uploads and clones
+- Other writable paths: /root, /tmp, /var/tmp, /home
+- Do NOT use paths outside these (root filesystem is read-only)
+- All tools default to /work — you rarely need to specify a path
+
+TOOLCHAIN SETUP:
+- Only sandchest://ubuntu-22.04/base is currently available — install toolchains manually after clone:
+  - Node.js: curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs
+  - Bun: curl -fsSL https://bun.sh/install | bash && source /root/.bashrc
+  - Python: apt-get install -y python3.12 python3.12-venv
+
 DIFF WORKFLOW:
 - If you uploaded local code instead of cloning a repo, initialize git first:
   git init && git add -A && git -c user.name=Sandchest -c user.email=sandchest@local commit -m "baseline"
@@ -42,12 +60,13 @@ FORKING (your most powerful tool):
 - When in doubt, fork first. It's always better to fork and throw away than to break your working environment.
 
 WORKFLOW PATTERN:
-1. Create sandbox
-2. Use a session for setup (git clone, install deps)
-3. Fork before risky operations
-4. Try approach in fork
-5. If fork fails → destroy fork, try different approach in original
-6. If fork succeeds → continue in fork (or destroy original)
+1. Check sandbox_list for a reusable running sandbox
+2. If found → sandbox_fork from it (instant, skip to step 5)
+3. If not → sandbox_create, then load code (git_clone or upload_dir), install deps in a session
+4. sandbox_fork to create a checkpoint (keep original as reusable base)
+5. Do your work in the fork
+6. If fork fails → destroy fork, fork from checkpoint again
+7. Extract results (diff, download, artifacts) before destroying
 
 REPO-SPECIFIC GUIDANCE:
 - Load the sandchest skill if it is available when the task is about sandboxed execution workflows
