@@ -133,8 +133,11 @@ describe('landing page server/client component boundaries', () => {
 
     test('BentoGrid contains feature data and section header', () => {
       const src = read('BentoGrid.tsx')
-      expect(src).toContain('Sub-100ms forking')
+      expect(src).toContain('Sub-second forking')
       expect(src).toContain('VM-grade isolation')
+      expect(src).toContain('Stateful sessions')
+      expect(src).toContain('Pre-built runtimes')
+      expect(src).toContain('Artifacts')
       expect(src).toContain('TypeScript SDK')
       expect(src).toContain('What is Sandchest?')
     })
