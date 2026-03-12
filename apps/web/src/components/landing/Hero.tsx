@@ -8,10 +8,22 @@ export default function Hero() {
       </h1>
 
       <p className="hero-reveal hero-reveal-delay-2 text-text" style={{ marginBottom: 32, maxWidth: '82%' }}>
-        Every sandbox runs on bare metal. Firecracker microVMs that fork in under 100ms — your agent tries ideas in parallel, backtracks instantly, and iterates faster than any human could.
+        Every sandbox runs on bare metal. Firecracker microVMs that fork in under a second — your agent tries ideas in parallel, backtracks instantly, and iterates faster than any human could.
       </p>
 
       <InstallCommand />
+
+      <div className="hero-reveal hero-reveal-delay-3" style={{ marginTop: 24 }}>
+        <div className="hero-callout">
+          <p className="text-text-weak" style={{ fontSize: 13, marginBottom: 8 }}>
+            <span className="text-accent">One command</span>
+            {' — create a sandbox, detect runtime, install deps, run code.'}
+          </p>
+          <code className="text-text" style={{ fontSize: 13, opacity: 0.7 }}>
+            {'await sandchest.runProject({ command: "npm test" })'}
+          </code>
+        </div>
+      </div>
 
       <div className="hero-reveal hero-reveal-delay-3 how-it-works" style={{ marginTop: 40 }}>
         <p className="text-text-weak" style={{ fontSize: 13, marginBottom: 16, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600 }}>
