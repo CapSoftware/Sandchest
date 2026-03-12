@@ -118,7 +118,7 @@ describe('MCP Server', () => {
     }
   })
 
-  test('lists all 19 tools', async () => {
+  test('lists all 20 tools', async () => {
     const result = await client.listTools()
     const toolNames = result.tools.map((t) => t.name).sort()
     expect(toolNames).toEqual([
@@ -135,6 +135,7 @@ describe('MCP Server', () => {
       'sandbox_git_clone',
       'sandbox_list',
       'sandbox_replay',
+      'sandbox_run_project',
       'sandbox_session_create',
       'sandbox_session_destroy',
       'sandbox_session_exec',
@@ -156,11 +157,243 @@ describe('MCP Server', () => {
     expect(instructions).toContain('Sandchest')
     expect(instructions).toContain('sandbox_diff')
     expect(instructions).toContain('sandbox_git_clone')
+    expect(instructions).toContain('sandbox_run_project')
     expect(instructions).toContain('FORKING')
     expect(instructions).toContain('WORKFLOW PATTERN')
     expect(instructions).toContain('sandchest skill')
     expect(instructions).toContain('checkpoint and fork patterns')
     expect(instructions).toContain('results extraction')
+  })
+
+  test('sandbox_run_project uploads a local bun project and runs the command', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+    const projectDir = join(tempDir, 'project')
+    mkdirSync(projectDir)
+    writeFileSync(join(projectDir, 'bun.lock'), '')
+    writeFileSync(join(projectDir, 'package.json'), '{"name":"fixture"}')
+
+    const sessionExec = mock(async (cmd: string) => ({
+      execId: `ex_${cmd.length}`,
+      exitCode: 0,
+      stdout: cmd === 'bun run lint' ? 'lint ok\n' : '',
+      stderr: '',
+      durationMs: 1,
+    }))
+    const sb = mockSandbox({
+      session: {
+        create: mock(async () => ({
+          id: 'sess_run',
+          _sandboxId: 'sb_test123',
+          _http: {},
+          exec: sessionExec,
+          destroy: mock(async () => {}),
+        })),
+      },
+    })
+    ;(sandchest.create as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_run_project',
+      arguments: {
+        command: 'bun run lint',
+        local_path: projectDir,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      sandbox_id: string
+      source: { method: string; local_path: string; upload_method: string }
+      project: { runtime: string; install_command: string }
+      result: { exit_code: number; stdout: string }
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.sandbox_id).toBe('sb_test123')
+    expect(data.source.method).toBe('upload')
+    expect(data.source.local_path).toEndWith('/project')
+    expect(data.source.upload_method).toBe('tar')
+    expect(data.project.runtime).toBe('bun')
+    expect(data.project.install_command).toBe('bun install --frozen-lockfile')
+    expect(data.result.exit_code).toBe(0)
+    expect(data.result.stdout).toBe('lint ok\n')
+    expect(sandchest.create).toHaveBeenCalledWith(
+      expect.objectContaining({ image: 'sandchest://ubuntu-22.04/bun' }),
+    )
+
+    const commands = sessionExec.mock.calls.map((call) => call[0])
+    expect(commands).toContain("cd '/tmp/work'")
+    expect(commands).toContain('bun install --frozen-lockfile')
+    expect(commands).toContain('bun run lint')
+    expect((sb.fs.uploadDir as ReturnType<typeof mock>).mock.calls).toHaveLength(1)
+  })
+
+  test('sandbox_run_project clones a repo URL when asked and destroys the sandbox when requested', async () => {
+    const sessionExec = mock(async (cmd: string) => ({
+      execId: `ex_${cmd.length}`,
+      exitCode: 0,
+      stdout: cmd === 'npm test' ? 'ok\n' : '',
+      stderr: '',
+      durationMs: 1,
+    }))
+    const sbExec = mock(async (cmd: string | string[]) => {
+      if (Array.isArray(cmd) && cmd[0] === '/bin/sh') {
+        return {
+          execId: 'ex_detect',
+          exitCode: 0,
+          stdout: 'npm\n',
+          stderr: '',
+          durationMs: 1,
+        }
+      }
+      return mockExecResult()
+    })
+    const sb = mockSandbox({
+      exec: sbExec,
+      session: {
+        create: mock(async () => ({
+          id: 'sess_clone',
+          _sandboxId: 'sb_test123',
+          _http: {},
+          exec: sessionExec,
+          destroy: mock(async () => {}),
+        })),
+      },
+    })
+    ;(sandchest.create as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_run_project',
+      arguments: {
+        command: 'npm test',
+        repo_url: 'https://github.com/CapSoftware/Sandchest.git',
+        source: 'git_clone',
+        keep_sandbox: false,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      kept_sandbox: boolean
+      source: { method: string; repo_url: string }
+      project: { runtime: string }
+      result: { stdout: string }
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.kept_sandbox).toBe(false)
+    expect(data.source.method).toBe('git_clone')
+    expect(data.source.repo_url).toBe('https://github.com/CapSoftware/Sandchest.git')
+    expect(data.project.runtime).toBe('npm')
+    expect(data.result.stdout).toBe('ok\n')
+    expect((sb.git.clone as ReturnType<typeof mock>).mock.calls[0]?.[0]).toBe('https://github.com/CapSoftware/Sandchest.git')
+    expect((sb.destroy as ReturnType<typeof mock>).mock.calls).toHaveLength(1)
+  })
+
+  test('sandbox_run_project prefers git clone for a clean local repo with a public origin', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+    const projectDir = join(tempDir, 'project-clean-origin')
+    mkdirSync(projectDir)
+    writeFileSync(join(projectDir, 'bun.lock'), '')
+    writeFileSync(join(projectDir, 'package.json'), '{"name":"fixture"}')
+    execFileSync('git', ['init', projectDir], { stdio: 'pipe' })
+    execFileSync('git', ['-C', projectDir, 'config', 'user.name', 'Test User'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', projectDir, 'config', 'user.email', 'test@example.com'], { stdio: 'pipe' })
+    execFileSync(
+      'git',
+      ['-C', projectDir, 'remote', 'add', 'origin', 'https://github.com/CapSoftware/Sandchest.git'],
+      { stdio: 'pipe' },
+    )
+    execFileSync('git', ['-C', projectDir, 'add', 'bun.lock', 'package.json'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', projectDir, 'commit', '-m', 'initial'], { stdio: 'pipe' })
+
+    const sessionExec = mock(async (cmd: string) => ({
+      execId: `ex_${cmd.length}`,
+      exitCode: 0,
+      stdout: cmd === 'bun run lint' ? 'lint ok\n' : '',
+      stderr: '',
+      durationMs: 1,
+    }))
+    const sbExec = mock(async (cmd: string | string[]) => {
+      if (Array.isArray(cmd) && cmd[0] === '/bin/sh') {
+        return {
+          execId: 'ex_detect',
+          exitCode: 0,
+          stdout: 'bun\n',
+          stderr: '',
+          durationMs: 1,
+        }
+      }
+      return mockExecResult()
+    })
+    const sb = mockSandbox({
+      exec: sbExec,
+      session: {
+        create: mock(async () => ({
+          id: 'sess_clone_first',
+          _sandboxId: 'sb_test123',
+          _http: {},
+          exec: sessionExec,
+          destroy: mock(async () => {}),
+        })),
+      },
+    })
+    ;(sandchest.create as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_run_project',
+      arguments: {
+        command: 'bun run lint',
+        local_path: projectDir,
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      source: { method: string; repo_url: string }
+      warnings: string[]
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.source.method).toBe('git_clone')
+    expect(data.source.repo_url).toBe('https://github.com/CapSoftware/Sandchest.git')
+    expect(data.warnings).toContain(
+      'Detected a clean git worktree with a public origin. Used sandbox_git_clone instead of uploading local files for faster setup.',
+    )
+    expect((sb.fs.uploadDir as ReturnType<typeof mock>).mock.calls).toHaveLength(0)
+    expect((sb.git.clone as ReturnType<typeof mock>).mock.calls[0]?.[0]).toBe('https://github.com/CapSoftware/Sandchest.git')
+    expect(sandchest.create).toHaveBeenCalledWith(
+      expect.objectContaining({ image: 'sandchest://ubuntu-22.04/bun' }),
+    )
+  })
+
+  test('sandbox_session_create forwards shell and env options', async () => {
+    const createSession = mock(async () => ({
+      id: 'sess_custom',
+      _sandboxId: 'sb_test123',
+      _http: {},
+      exec: mock(async () => mockExecResult()),
+      destroy: mock(async () => {}),
+    }))
+    const sb = mockSandbox({
+      session: {
+        create: createSession,
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_session_create',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        shell: '/bin/bash',
+        env: { CI: '1' },
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as { session_id: string }
+
+    expect(data.session_id).toBe('sess_custom')
+    expect(createSession).toHaveBeenCalledWith({
+      shell: '/bin/bash',
+      env: { CI: '1' },
+    })
   })
 
   test('sandbox_diff returns a review diff with untracked files', async () => {
@@ -892,6 +1125,50 @@ describe('MCP Server', () => {
     expect(existsSync(join(inspectDir, 'ignored.txt'))).toBe(false)
   })
 
+  test('sandbox_upload_dir falls back to exec-based extraction when archive upload fails', async () => {
+    process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
+
+    const repoDir = join(tempDir, 'repo-fallback')
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' })
+    writeFileSync(join(repoDir, 'tracked.txt'), 'tracked')
+    execFileSync('git', ['-C', repoDir, 'add', 'tracked.txt'], { stdio: 'pipe' })
+
+    const uploadDir = mock(async () => {
+      throw new Error('upload failed')
+    })
+    const exec = mock(async () => mockExecResult())
+    const sb = mockSandbox({
+      fs: {
+        ...mockSandbox().fs,
+        uploadDir,
+      },
+      exec,
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_upload_dir',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        local_path: repoDir,
+        remote_path: '/tmp/work',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      method: string
+      remote_path: string
+    }
+
+    expect(data.ok).toBe(true)
+    expect(data.method).toBe('git-ls-files+exec-fallback')
+    expect(data.remote_path).toBe('/tmp/work')
+
+    const commands = exec.mock.calls.map((call) => JSON.stringify(call[0]))
+    expect(commands.some((cmd) => cmd.includes('base64 -d'))).toBe(true)
+    expect(commands.some((cmd) => cmd.includes('"tar","xzf"'))).toBe(true)
+  })
+
   test('sandbox_upload_dir dereferences symlinks to files in git repos', async () => {
     process.env['SANDCHEST_MCP_ALLOWED_PATHS'] = tempDir
 
@@ -1121,6 +1398,44 @@ describe('MCP Server', () => {
     expect(data.ok).toBe(false)
     expect(data.code).toBe('invalid_url')
     expect(data.error).toContain('Invalid git URL')
+  })
+
+  test('sandbox_git_clone includes status and request_id for Sandchest API errors', async () => {
+    const { SandchestError } = await import('@sandchest/sdk')
+    const sb = mockSandbox({
+      git: {
+        clone: mock(async () => {
+          throw new SandchestError({
+            code: 'internal_error',
+            message: 'An unexpected error occurred',
+            status: 500,
+            requestId: 'req_clone123',
+          })
+        }),
+      },
+    })
+    ;(sandchest.get as ReturnType<typeof mock>).mockImplementation(async () => sb)
+
+    const result = await client.callTool({
+      name: 'sandbox_git_clone',
+      arguments: {
+        sandbox_id: 'sb_test123',
+        url: 'https://github.com/sandchest/sandchest.git',
+      },
+    })
+    const data = parseToolResult(result as { content: unknown[] }) as {
+      ok: boolean
+      error: string
+      code: string
+      status: number
+      request_id: string
+    }
+
+    expect(data.ok).toBe(false)
+    expect(data.error).toBe('An unexpected error occurred')
+    expect(data.code).toBe('internal_error')
+    expect(data.status).toBe(500)
+    expect(data.request_id).toBe('req_clone123')
   })
 
   test('sandbox_session_destroy calls session.destroy', async () => {

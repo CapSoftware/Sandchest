@@ -5,6 +5,7 @@ import { registerTools } from './tools.js'
 const AGENT_INSTRUCTIONS = `You have access to Sandchest — a sandbox platform that gives you isolated Linux environments to run code. Key capabilities:
 
 SANDBOX BASICS:
+- sandbox_run_project: Best default for "run this repo command in a new sandbox" requests. It creates a sandbox, loads the project, installs the runtime and dependencies, runs the command, and returns a replay URL.
 - sandbox_create: Creates a fresh Linux environment (Firecracker microVM)
 - sandbox_exec: Runs a command and returns output
 - sandbox_session_create + sandbox_session_exec: For multi-step workflows where commands share state (cd, env vars persist between commands)
@@ -24,21 +25,25 @@ GIT SETUP:
 - sandbox_git_clone: Clone a git repository into a sandbox without opening a shell session first
 
 LOADING CODE — DECISION TREE (follow in order):
-1. Check sandbox_list first — if a running sandbox already has the code, fork it instead of starting over
-2. Public repo → use sandbox_git_clone (fastest, preferred, clones inside sandbox with --depth 1)
-3. Private repo or local-only code → use sandbox_upload_dir (respects .gitignore, only sends tracked files)
-4. NEVER manually tar, base64-encode, or chunk files — the tools handle this automatically
+1. If the user wants a single command run in a fresh sandbox, use sandbox_run_project first
+2. Otherwise check sandbox_list first — if a running sandbox already has the code, fork it instead of starting over
+3. Public repo → use sandbox_git_clone (fastest, preferred, clones inside sandbox with --depth 1)
+4. Private repo or local-only code → use sandbox_upload_dir (respects .gitignore, only sends tracked files)
+5. NEVER manually tar, base64-encode, or chunk files — the tools handle this automatically
 
 WORKSPACE:
-- /work is the default writable workspace for uploads and clones
+- Default to /tmp/work for uploads, clones, exec cwd, and sessions
+- /work may be writable on some images, but do not assume it
 - Other writable paths: /root, /tmp, /var/tmp, /home
 - Do NOT use paths outside these (root filesystem is read-only)
-- All tools default to /work — you rarely need to specify a path
+- Most MCP tools already default to /tmp/work — you rarely need to specify a path
 
 TOOLCHAIN SETUP:
-- Only sandchest://ubuntu-22.04/base is currently available — install toolchains manually after clone:
+- Official images include sandchest://ubuntu-22.04/base, sandchest://ubuntu-22.04/node-22, sandchest://ubuntu-22.04/bun, sandchest://ubuntu-22.04/python-3.12, and sandchest://ubuntu-22.04/go-1.22
+- Prefer the matching official image when the runtime is known
+- If you end up on base, install toolchains manually after clone:
   - Node.js: curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs
-  - Bun: curl -fsSL https://bun.sh/install | bash && source /root/.bashrc
+  - Bun: curl -fsSL https://bun.sh/install | bash && export PATH="/root/.bun/bin:$PATH"
   - Python: apt-get install -y python3.12 python3.12-venv
 
 DIFF WORKFLOW:
