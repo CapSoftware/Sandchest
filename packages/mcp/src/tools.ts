@@ -23,6 +23,18 @@ function jsonContent(data: unknown): { content: Array<{ type: 'text'; text: stri
   return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
 }
 
+function sandchestErrorDetails(err: SandchestError): {
+  code: string
+  status: number
+  request_id?: string | undefined
+} {
+  return {
+    code: err.code,
+    status: err.status,
+    request_id: err.requestId === '' ? undefined : err.requestId,
+  }
+}
+
 /**
  * Ensures the sandbox has working network connectivity.
  * Reads network params from kernel cmdline and configures eth0 if needed.
@@ -504,6 +516,492 @@ function createLocalArchive(
   return createGitArchive(localPath, archivePath, options?.exclude)
 }
 
+type ProjectRuntime = 'bun' | 'npm' | 'yarn' | 'pnpm' | 'python' | 'go' | 'none'
+
+type ProjectDetection = {
+  runtime: ProjectRuntime
+  installCommand: string | null
+}
+
+function preferredImageForRuntime(runtime: ProjectRuntime): string | undefined {
+  switch (runtime) {
+    case 'bun':
+      return 'sandchest://ubuntu-22.04/bun'
+    case 'npm':
+    case 'yarn':
+    case 'pnpm':
+      return 'sandchest://ubuntu-22.04/node-22'
+    case 'python':
+      return 'sandchest://ubuntu-22.04/python-3.12'
+    case 'go':
+      return 'sandchest://ubuntu-22.04/go-1.22'
+    case 'none':
+      return undefined
+  }
+}
+
+type UploadLocalDirResult = {
+  localPath: string
+  remotePath: string
+  method: string
+  bytes: number
+  baselineCreated?: boolean | undefined
+}
+
+class LocalDirectoryUploadError extends Error {
+  readonly code:
+    | 'disabled'
+    | 'not_found'
+    | 'outside_allowed_roots'
+    | 'not_directory'
+    | 'archive_too_large'
+    | 'upload_failed'
+  readonly hint?: string | undefined
+  readonly stderr?: string | undefined
+  readonly exitCode?: number | undefined
+  readonly remotePath?: string | undefined
+  readonly bytes?: number | undefined
+
+  constructor(opts: {
+    code:
+      | 'disabled'
+      | 'not_found'
+      | 'outside_allowed_roots'
+      | 'not_directory'
+      | 'archive_too_large'
+      | 'upload_failed'
+    message: string
+    hint?: string | undefined
+    stderr?: string | undefined
+    exitCode?: number | undefined
+    remotePath?: string | undefined
+    bytes?: number | undefined
+  }) {
+    super(opts.message)
+    this.name = 'LocalDirectoryUploadError'
+    this.code = opts.code
+    this.hint = opts.hint
+    this.stderr = opts.stderr
+    this.exitCode = opts.exitCode
+    this.remotePath = opts.remotePath
+    this.bytes = opts.bytes
+  }
+}
+
+function detectLocalProject(localPath: string): ProjectDetection {
+  if (
+    existsSync(join(localPath, 'bun.lock')) ||
+    existsSync(join(localPath, 'bun.lockb')) ||
+    existsSync(join(localPath, 'bunfig.toml'))
+  ) {
+    return { runtime: 'bun', installCommand: 'bun install --frozen-lockfile' }
+  }
+
+  if (existsSync(join(localPath, 'package-lock.json'))) {
+    return { runtime: 'npm', installCommand: 'npm ci' }
+  }
+
+  if (existsSync(join(localPath, 'yarn.lock'))) {
+    return { runtime: 'yarn', installCommand: 'yarn install --frozen-lockfile' }
+  }
+
+  if (existsSync(join(localPath, 'pnpm-lock.yaml'))) {
+    return { runtime: 'pnpm', installCommand: 'pnpm install --frozen-lockfile' }
+  }
+
+  if (existsSync(join(localPath, 'pyproject.toml'))) {
+    return { runtime: 'python', installCommand: 'pip install -e .' }
+  }
+
+  if (existsSync(join(localPath, 'requirements.txt'))) {
+    return { runtime: 'python', installCommand: 'pip install -r requirements.txt' }
+  }
+
+  if (existsSync(join(localPath, 'go.mod'))) {
+    return { runtime: 'go', installCommand: 'go mod download' }
+  }
+
+  return { runtime: 'none', installCommand: null }
+}
+
+async function detectProjectInSandbox(sb: Sandbox, remotePath: string): Promise<ProjectDetection> {
+  const result = await sb.exec(
+    [
+      '/bin/sh',
+      '-lc',
+      [
+        `cd ${shellQuote(remotePath)}`,
+        'if [ -f bun.lock ] || [ -f bun.lockb ] || [ -f bunfig.toml ]; then echo bun',
+        'elif [ -f package-lock.json ]; then echo npm',
+        'elif [ -f yarn.lock ]; then echo yarn',
+        'elif [ -f pnpm-lock.yaml ]; then echo pnpm',
+        'elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then echo python',
+        'elif [ -f go.mod ]; then echo go',
+        'else echo none',
+        'fi',
+      ].join('; '),
+    ],
+    { timeout: 10 },
+  )
+
+  if (result.exitCode !== 0) {
+    throw new ExecFailedError({
+      operation: 'detect-project',
+      exitCode: result.exitCode,
+      stderr: result.stderr,
+    })
+  }
+
+  const runtime = result.stdout.trim() as ProjectRuntime
+  switch (runtime) {
+    case 'bun':
+      return { runtime, installCommand: 'bun install --frozen-lockfile' }
+    case 'npm':
+      return { runtime, installCommand: 'npm ci' }
+    case 'yarn':
+      return { runtime, installCommand: 'yarn install --frozen-lockfile' }
+    case 'pnpm':
+      return { runtime, installCommand: 'pnpm install --frozen-lockfile' }
+    case 'python':
+      return { runtime, installCommand: 'if [ -f pyproject.toml ]; then pip install -e .; else pip install -r requirements.txt; fi' }
+    case 'go':
+      return { runtime, installCommand: 'go mod download' }
+    default:
+      return { runtime: 'none', installCommand: null }
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+function runtimeSetupCommands(runtime: ProjectRuntime): string[] {
+  const commonApt = 'export DEBIAN_FRONTEND=noninteractive'
+  const ensureCurl =
+    'command -v curl >/dev/null || (apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null)'
+
+  switch (runtime) {
+    case 'bun':
+      return [
+        commonApt,
+        'export PATH="/root/.bun/bin:$PATH"',
+        'command -v curl >/dev/null && command -v unzip >/dev/null || (apt-get update -qq && apt-get install -y -qq curl unzip ca-certificates >/dev/null)',
+        `${ensureCurl} && command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 && apt-get install -y -qq nodejs >/dev/null)`,
+        'command -v bun >/dev/null || (command -v unzip >/dev/null || (apt-get update -qq && apt-get install -y -qq unzip ca-certificates >/dev/null); curl -fsSL https://bun.sh/install | bash >/dev/null)',
+        'export PATH="/root/.bun/bin:$PATH"',
+      ]
+    case 'npm':
+    case 'yarn':
+    case 'pnpm':
+      return [
+        commonApt,
+        `${ensureCurl} && command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 && apt-get install -y -qq nodejs >/dev/null)`,
+        'corepack enable >/dev/null 2>&1 || true',
+      ]
+    case 'python':
+      return [
+        commonApt,
+        'apt-get update -qq && apt-get install -y -qq python3.12 python3.12-venv >/dev/null',
+      ]
+    case 'go':
+      return [
+        commonApt,
+        'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null',
+      ]
+    case 'none':
+      return []
+  }
+}
+
+async function runSessionCommand(
+  session: Session,
+  cmd: string,
+  timeout: number,
+  operation: string,
+) {
+  const result = await session.exec(cmd, { timeout })
+  if (result.exitCode !== 0) {
+    throw new ExecFailedError({
+      operation,
+      exitCode: result.exitCode,
+      stderr: result.stderr,
+    })
+  }
+  return result
+}
+
+function tryGetOriginUrl(localPath: string): string | null {
+  try {
+    const rawUrl = execFileSync('git', ['-C', localPath, 'remote', 'get-url', 'origin'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString('utf-8').trim()
+    const validated = validateGitCloneUrl(rawUrl)
+    return validated.ok ? validated.url : null
+  } catch {
+    return null
+  }
+}
+
+function hasLocalGitChanges(localPath: string): boolean {
+  try {
+    const output = execFileSync(
+      'git',
+      ['-C', localPath, 'status', '--porcelain', '--untracked-files=all'],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    ).toString('utf-8')
+    return output.trim() !== ''
+  } catch {
+    return false
+  }
+}
+
+function tryGetOriginCloneSuggestion(localPathArg: string): {
+  repo_url?: string | undefined
+  suggested_tool?: 'sandbox_git_clone' | undefined
+  suggestion_hint?: string | undefined
+} {
+  try {
+    const localPath = resolveExistingPath(localPathArg)
+    const repoUrl = tryGetOriginUrl(localPath)
+    if (!repoUrl) {
+      return {}
+    }
+
+    return hasLocalGitChanges(localPath)
+      ? {
+          repo_url: repoUrl,
+          suggestion_hint:
+            'This repo has a public origin, but cloning it would omit local uncommitted changes. If you need the exact local state, keep using upload-based workflows.',
+        }
+      : {
+          repo_url: repoUrl,
+          suggested_tool: 'sandbox_git_clone',
+          suggestion_hint: `This repo has a public origin. Retrying with sandbox_git_clone({ url: "${repoUrl}" }) will usually be faster and avoid upload failures.`,
+        }
+  } catch {
+    return {}
+  }
+}
+
+function getPreferredCloneUrlForAutoMode(
+  sourceMode: 'auto' | 'upload' | 'git_clone',
+  resolvedLocalPath: string | undefined,
+  originUrl: string | null,
+): string | null {
+  if (sourceMode !== 'auto' || !resolvedLocalPath || !originUrl) {
+    return null
+  }
+
+  if (hasLocalGitChanges(resolvedLocalPath)) {
+    return null
+  }
+
+  const validated = validateGitCloneUrl(originUrl)
+  return validated.ok ? validated.url : null
+}
+
+function resolveAllowedLocalDirectory(localPathArg: string): string {
+  const allowedRoots = parseAllowedRoots()
+  if (allowedRoots.length === 0) {
+    throw new LocalDirectoryUploadError({
+      code: 'disabled',
+      message: `sandbox_upload_dir is disabled until ${ALLOWED_PATHS_ENV} is set to one or more approved local roots.`,
+    })
+  }
+
+  let localPath: string
+  try {
+    localPath = resolveExistingPath(localPathArg)
+  } catch {
+    throw new LocalDirectoryUploadError({
+      code: 'not_found',
+      message: `Path does not exist or is not accessible: ${localPathArg}`,
+    })
+  }
+
+  if (!isWithinAllowedRoots(localPath, allowedRoots)) {
+    throw new LocalDirectoryUploadError({
+      code: 'outside_allowed_roots',
+      message: `Path '${localPath}' is outside the allowed directories. Allowed: ${allowedRoots.join(', ')}.`,
+    })
+  }
+
+  if (!statSync(localPath).isDirectory()) {
+    throw new LocalDirectoryUploadError({
+      code: 'not_directory',
+      message: `Not a directory: ${localPath}`,
+    })
+  }
+
+  return localPath
+}
+
+async function uploadLocalDirToSandbox(
+  sb: Sandbox,
+  args: {
+    localPathArg: string
+    remotePath?: string | undefined
+    exclude?: string[] | undefined
+    baseline?: boolean | undefined
+  },
+): Promise<UploadLocalDirResult> {
+  const localPath = resolveAllowedLocalDirectory(args.localPathArg)
+
+  const remotePath = args.remotePath ?? '/tmp/work'
+  const archivePath = join(tmpdir(), `.sandchest-upload-${crypto.randomUUID()}.tar.gz`)
+  try {
+    const method = createLocalArchive(localPath, archivePath, { exclude: args.exclude })
+    validateArchiveFile(archivePath, 'sandbox_upload_dir')
+
+    const tarball = new Uint8Array(readFileSync(archivePath))
+    const maxUploadBytes = 100 * 1024 * 1024
+    if (tarball.byteLength > maxUploadBytes) {
+      throw new LocalDirectoryUploadError({
+        code: 'archive_too_large',
+        message: `Archive is ${(tarball.byteLength / 1024 / 1024).toFixed(1)} MB, which exceeds the 100 MB upload limit. Use sandbox_git_clone for public repos, or narrow the upload scope with exclude patterns.`,
+        bytes: tarball.byteLength,
+        remotePath,
+      })
+    }
+
+    let uploadMethod: string = method
+    try {
+      await sb.fs.uploadDir(remotePath, tarball)
+    } catch {
+      uploadMethod = `${method}+exec-fallback`
+      const tmpPath = `/tmp/.sandchest-upload-${crypto.randomUUID()}.tar.gz`
+      const b64 = Buffer.from(tarball).toString('base64')
+      const chunkSize = 50_000
+      const totalChunks = Math.ceil(b64.length / chunkSize)
+
+      for (let index = 0; index < totalChunks; index++) {
+        const chunk = b64.slice(index * chunkSize, (index + 1) * chunkSize)
+        const op = index === 0 ? '>' : '>>'
+        const result = await sb.exec(
+          ['sh', '-c', `printf '%s' '${chunk}' ${op} ${tmpPath}.b64`],
+          { timeout: 30 },
+        )
+        if (result.exitCode !== 0) {
+          throw new ExecFailedError({
+            operation: 'uploadDir:exec-write',
+            exitCode: result.exitCode,
+            stderr: result.stderr,
+          })
+        }
+      }
+
+      const decodeResult = await sb.exec(
+        ['sh', '-c', `base64 -d ${tmpPath}.b64 > ${tmpPath} && rm -f ${tmpPath}.b64`],
+        { timeout: 30 },
+      )
+      if (decodeResult.exitCode !== 0) {
+        throw new ExecFailedError({
+          operation: 'uploadDir:exec-decode',
+          exitCode: decodeResult.exitCode,
+          stderr: decodeResult.stderr,
+        })
+      }
+
+      const mkdirResult = await sb.exec(['mkdir', '-p', remotePath], { timeout: 10 })
+      if (mkdirResult.exitCode !== 0) {
+        throw new ExecFailedError({
+          operation: 'uploadDir:mkdir',
+          exitCode: mkdirResult.exitCode,
+          stderr: mkdirResult.stderr,
+        })
+      }
+
+      const extractResult = await sb.exec(
+        ['tar', 'xzf', tmpPath, '--no-same-owner', '-C', remotePath],
+        { timeout: 60 },
+      )
+      if (extractResult.exitCode !== 0) {
+        throw new ExecFailedError({
+          operation: 'uploadDir:extract',
+          exitCode: extractResult.exitCode,
+          stderr: extractResult.stderr,
+        })
+      }
+
+      await sb.exec(['rm', '-f', tmpPath], { timeout: 5 }).catch(() => {})
+    }
+
+    let baselineCreated: boolean | undefined
+    if (args.baseline) {
+      baselineCreated = false
+      const init = await sb.exec(['git', '-C', remotePath, 'init'], { timeout: 10 })
+      if (init.exitCode === 0) {
+        const add = await sb.exec(['git', '-C', remotePath, 'add', '-A'], { timeout: 10 })
+        if (add.exitCode === 0) {
+          const commit = await sb.exec(
+            [
+              'git',
+              '-C',
+              remotePath,
+              '-c',
+              'user.name=Sandchest',
+              '-c',
+              'user.email=sandchest@local',
+              'commit',
+              '-m',
+              'baseline',
+              '--allow-empty',
+            ],
+            { timeout: 10 },
+          )
+          baselineCreated = commit.exitCode === 0
+        }
+      }
+    }
+
+    return {
+      localPath,
+      remotePath,
+      method: uploadMethod,
+      bytes: tarball.byteLength,
+      baselineCreated,
+    }
+  } catch (err) {
+    if (err instanceof LocalDirectoryUploadError) {
+      throw err
+    }
+
+    if (err instanceof ExecFailedError) {
+      const hint =
+        err.operation === 'uploadDir:mkdir'
+          ? `Cannot create '${remotePath}' — the root filesystem is read-only outside writable mounts. Set remote_path to a writable location like '/tmp/work'. Do NOT retry the same path.`
+          : 'Writable paths: /tmp, /var/tmp. If the path is correct, try sandbox_git_clone for public repos instead.'
+      throw new LocalDirectoryUploadError({
+        code: 'upload_failed',
+        message: `uploadDir failed at ${err.operation}: ${err.message}`,
+        hint,
+        stderr: err.stderr,
+        exitCode: err.exitCode,
+        remotePath,
+      })
+    }
+
+    if (err instanceof SandchestError) {
+      const hint =
+        err.code === 'connection_error'
+          ? 'Network error during upload. Check that the sandbox is still running and retry.'
+          : err.code === 'timeout'
+            ? 'Upload timed out. The archive may be too large — try adding exclude patterns or use sandbox_git_clone for public repos.'
+            : 'The Sandchest API returned an error during file upload. Check sandbox status and retry.'
+      throw new LocalDirectoryUploadError({
+        code: 'upload_failed',
+        message: err.message,
+        hint,
+        remotePath,
+      })
+    }
+
+    throw err
+  } finally {
+    rmSync(archivePath, { force: true })
+  }
+}
+
 function normalizeScopePrefix(prefix: string): string {
   return prefix.replace(/\/+$/, '')
 }
@@ -864,13 +1362,18 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
 
   server.registerTool('sandbox_session_create', {
     description:
-      'Create a persistent shell session where commands share state. Use this when you need multiple commands that depend on each other — like cd into a directory, then npm install, then npm test. Each command inherits the working directory, environment variables, and other shell state from previous commands. Prefer this over sandbox_exec for multi-step workflows.',
+      'Create a persistent shell session where commands share state. Use this when you need multiple commands that depend on each other — like cd into a directory, then npm install, then npm test. Each command inherits the working directory, environment variables, and other shell state from previous commands. Prefer this over sandbox_exec for multi-step workflows. Default shell: /bin/bash.',
     inputSchema: {
       sandbox_id: z.string(),
+      shell: z.string().optional().describe('Shell to start. Default: /bin/bash'),
+      env: z.record(z.string(), z.string()).optional().describe('Environment variables for the session shell.'),
     },
   }, async (args) => {
     const sb = await sandchest.get(args.sandbox_id)
-    const session = await sb.session.create()
+    const session = await sb.session.create({
+      shell: args.shell,
+      env: args.env,
+    })
     return jsonContent({ session_id: session.id })
   })
 
@@ -962,191 +1465,370 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
   }, async (args) => {
     try {
       const sb = await sandchest.get(args.sandbox_id)
-      const allowedRoots = parseAllowedRoots()
-      if (allowedRoots.length === 0) {
-        return jsonContent({
-          ok: false,
-          error: `sandbox_upload_dir is disabled until ${ALLOWED_PATHS_ENV} is set to one or more approved local roots.`,
-        })
-      }
+      const upload = await uploadLocalDirToSandbox(sb, {
+        localPathArg: args.local_path,
+        remotePath: args.remote_path,
+        exclude: args.exclude,
+        baseline: args.baseline,
+      })
 
-      let localPath: string
-      try {
-        localPath = resolveExistingPath(args.local_path)
-      } catch {
-        return jsonContent({ ok: false, error: `Path does not exist or is not accessible: ${args.local_path}` })
-      }
-
-      if (!isWithinAllowedRoots(localPath, allowedRoots)) {
-        return jsonContent({
-          ok: false,
-          error: `Path '${localPath}' is outside the allowed directories. Allowed: ${allowedRoots.join(', ')}.`,
-        })
-      }
-
-      if (!statSync(localPath).isDirectory()) {
-        return jsonContent({ ok: false, error: `Not a directory: ${localPath}` })
-      }
-
-      const remotePath = args.remote_path ?? '/tmp/work'
-      const archivePath = join(tmpdir(), `.sandchest-upload-${crypto.randomUUID()}.tar.gz`)
-      try {
-        const method = createLocalArchive(localPath, archivePath, { exclude: args.exclude })
-        validateArchiveFile(archivePath, 'sandbox_upload_dir')
-
-        const tarball = new Uint8Array(readFileSync(archivePath))
-
-        const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
-        if (tarball.byteLength > MAX_UPLOAD_BYTES) {
-          return jsonContent({
-            ok: false,
-            error: `Archive is ${(tarball.byteLength / 1024 / 1024).toFixed(1)} MB, which exceeds the 100 MB upload limit. Use sandbox_git_clone for public repos, or narrow the upload scope with exclude patterns.`,
-          })
-        }
-
-        let uploadMethod: string = method
-        try {
-          await sb.fs.uploadDir(remotePath, tarball)
-        } catch {
-          // Fallback: upload via exec (base64 chunks through shell commands)
-          uploadMethod = `${method}+exec-fallback`
-          const b64 = Buffer.from(tarball).toString('base64')
-          const tmpPath = `/tmp/.sandchest-upload-${crypto.randomUUID()}.tar.gz`
-          const CHUNK_SIZE = 200_000 // ~200KB base64 per exec call
-          const totalChunks = Math.ceil(b64.length / CHUNK_SIZE)
-
-          for (let i = 0; i < totalChunks; i++) {
-            const chunk = b64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-            const op = i === 0 ? '>' : '>>'
-            const result = await sb.exec(
-              ['sh', '-c', `printf '%s' '${chunk}' ${op} ${tmpPath}.b64`],
-              { timeout: 30 },
-            )
-            if (result.exitCode !== 0) {
-              throw new ExecFailedError({
-                operation: 'uploadDir:exec-write',
-                exitCode: result.exitCode,
-                stderr: result.stderr,
-              })
-            }
-          }
-
-          // Decode base64 and extract
-          const decodeResult = await sb.exec(
-            ['sh', '-c', `base64 -d ${tmpPath}.b64 > ${tmpPath} && rm -f ${tmpPath}.b64`],
-            { timeout: 30 },
-          )
-          if (decodeResult.exitCode !== 0) {
-            throw new ExecFailedError({
-              operation: 'uploadDir:exec-decode',
-              exitCode: decodeResult.exitCode,
-              stderr: decodeResult.stderr,
-            })
-          }
-
-          // mkdir, validate, extract (same as SDK uploadDir)
-          const mkdirResult = await sb.exec(['mkdir', '-p', remotePath], { timeout: 10 })
-          if (mkdirResult.exitCode !== 0) {
-            throw new ExecFailedError({
-              operation: 'uploadDir:mkdir',
-              exitCode: mkdirResult.exitCode,
-              stderr: mkdirResult.stderr,
-            })
-          }
-
-          const extractResult = await sb.exec(
-            ['tar', 'xzf', tmpPath, '--no-same-owner', '-C', remotePath],
-            { timeout: 60 },
-          )
-          if (extractResult.exitCode !== 0) {
-            throw new ExecFailedError({
-              operation: 'uploadDir:extract',
-              exitCode: extractResult.exitCode,
-              stderr: extractResult.stderr,
-            })
-          }
-
-          // Cleanup
-          await sb.exec(['rm', '-f', tmpPath], { timeout: 5 }).catch(() => {})
-        }
-
-        let baselineCreated: boolean | undefined
-        if (args.baseline) {
-          baselineCreated = false
-          const init = await sb.exec(['git', '-C', remotePath, 'init'], { timeout: 10 })
-          if (init.exitCode === 0) {
-            const add = await sb.exec(['git', '-C', remotePath, 'add', '-A'], { timeout: 10 })
-            if (add.exitCode === 0) {
-              const commit = await sb.exec(
-                [
-                  'git',
-                  '-C',
-                  remotePath,
-                  '-c',
-                  'user.name=Sandchest',
-                  '-c',
-                  'user.email=sandchest@local',
-                  'commit',
-                  '-m',
-                  'baseline',
-                  '--allow-empty',
-                ],
-                { timeout: 10 },
-              )
-              baselineCreated = commit.exitCode === 0
-            }
-          }
-        }
-
-        return jsonContent({
-          ok: true,
-          local_path: localPath,
-          remote_path: remotePath,
-          method: uploadMethod,
-          bytes: tarball.byteLength,
-          baseline_created: baselineCreated,
-        })
-      } finally {
-        rmSync(archivePath, { force: true })
-      }
+      return jsonContent({
+        ok: true,
+        local_path: upload.localPath,
+        remote_path: upload.remotePath,
+        method: upload.method,
+        bytes: upload.bytes,
+        baseline_created: upload.baselineCreated,
+      })
     } catch (err) {
-      const remotePath = args.remote_path ?? '/tmp/work'
-      if (err instanceof ExecFailedError) {
-        const hint =
-          err.operation === 'uploadDir:mkdir'
-            ? `Cannot create '${remotePath}' — the root filesystem is read-only outside writable mounts. Set remote_path to a writable location like '/tmp/work'. Do NOT retry the same path.`
-            : 'Writable paths: /tmp, /var/tmp. If the path is correct, try sandbox_git_clone for public repos instead.'
-        return jsonContent({
-          ok: false,
-          error: `uploadDir failed at ${err.operation}: ${err.message}`,
-          stderr: err.stderr,
-          exit_code: err.exitCode,
-          remote_path: remotePath,
-          hint,
-        })
-      }
-      if (err instanceof SandchestError) {
-        const hint =
-          err.code === 'connection_error'
-            ? 'Network error during upload. Check that the sandbox is still running and retry.'
-            : err.code === 'timeout'
-              ? 'Upload timed out. The archive may be too large — try adding exclude patterns or use sandbox_git_clone for public repos.'
-              : 'The Sandchest API returned an error during file upload. Check sandbox status and retry.'
+      if (err instanceof LocalDirectoryUploadError) {
+        const originSuggestion = tryGetOriginCloneSuggestion(args.local_path)
         return jsonContent({
           ok: false,
           error: err.message,
-          code: err.code,
-          status: err.status,
-          request_id: err.requestId || undefined,
-          remote_path: remotePath,
-          hint,
+          remote_path: err.remotePath ?? args.remote_path ?? '/tmp/work',
+          hint: err.hint,
+          exit_code: err.exitCode,
+          stderr: err.stderr,
+          bytes: err.bytes,
+          repo_url: originSuggestion.repo_url,
+          suggested_tool: originSuggestion.suggested_tool,
+          suggestion_hint: originSuggestion.suggestion_hint,
         })
       }
       return jsonContent({
         ok: false,
         error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-        remote_path: remotePath,
+        remote_path: args.remote_path ?? '/tmp/work',
         hint: 'If this is a size or timeout issue, try sandbox_git_clone for public repos or narrow the upload scope with exclude patterns.',
+      })
+    }
+  })
+
+  server.registerTool('sandbox_run_project', {
+    description:
+      'Create a new sandbox, load a project, install the right runtime and dependencies, and run one command. This is the preferred tool for requests like "run bun test in a new sandbox" or "lint this repo in Sandchest". In auto mode it preserves local changes with upload, but prefers shallow git clone when a clean public origin is available. Returns the command result plus sandbox_id and replay_url for follow-up work.',
+    inputSchema: {
+      command: z.string().describe('Command to run inside the project directory.'),
+      local_path: z
+        .string()
+        .optional()
+        .describe('Local project directory to upload. Requires SANDCHEST_MCP_ALLOWED_PATHS.'),
+      repo_url: z
+        .string()
+        .optional()
+        .describe('Public git repository URL to clone. Used directly or as fallback when upload is not viable.'),
+      source: z
+        .enum(['auto', 'upload', 'git_clone'])
+        .optional()
+        .describe('How to load code. Default: auto.'),
+      remote_path: z
+        .string()
+        .optional()
+        .describe('Workspace path inside the sandbox. Default: /tmp/work.'),
+      profile: z
+        .enum(['small', 'medium', 'large'])
+        .optional()
+        .describe('Resource profile for the new sandbox.'),
+      env: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('Environment variables to set when the sandbox is created.'),
+      runtime: z
+        .enum(['auto', 'bun', 'npm', 'yarn', 'pnpm', 'python', 'go', 'none'])
+        .optional()
+        .describe('Runtime/toolchain to prepare. Default: auto-detect from the project.'),
+      install: z
+        .boolean()
+        .optional()
+        .describe('Install dependencies before running the command. Default: true.'),
+      install_command: z
+        .string()
+        .optional()
+        .describe('Override the dependency install command.'),
+      exclude: z
+        .array(z.string())
+        .optional()
+        .describe('Extra exclude globs when uploading a local directory.'),
+      baseline: z
+        .boolean()
+        .optional()
+        .describe('Initialize and commit a baseline git repo after upload. Default: false.'),
+      keep_sandbox: z
+        .boolean()
+        .optional()
+        .describe('Keep the sandbox after the command finishes. Default: true.'),
+      timeout: z
+        .number()
+        .optional()
+        .describe('Timeout in seconds for the final command. Default: 300.'),
+    },
+  }, async (args) => {
+    const remotePath = args.remote_path ?? '/tmp/work'
+    const sourceMode = args.source ?? 'auto'
+    const keepSandbox = args.keep_sandbox ?? true
+    const warnings: string[] = []
+    let sb: Sandbox | undefined
+    let session: Session | undefined
+    let detection!: ProjectDetection
+    let selectedImage: string | undefined
+    let sourceSummary:
+      | {
+          method: 'upload' | 'git_clone'
+          local_path?: string | undefined
+          repo_url?: string | undefined
+          bytes?: number | undefined
+          upload_method?: string | undefined
+          fallback?: boolean | undefined
+        }
+      | undefined
+
+    try {
+      let resolvedLocalPath: string | undefined
+      let originUrl: string | null = args.repo_url ?? null
+      let preferredCloneUrl: string | null = null
+      if (args.local_path && sourceMode !== 'git_clone') {
+        resolvedLocalPath = resolveAllowedLocalDirectory(args.local_path)
+        detection = detectLocalProject(resolvedLocalPath)
+        originUrl = originUrl ?? tryGetOriginUrl(resolvedLocalPath)
+        preferredCloneUrl = getPreferredCloneUrlForAutoMode(sourceMode, resolvedLocalPath, originUrl)
+      }
+
+      const requestedRuntime = args.runtime && args.runtime !== 'auto' ? args.runtime : undefined
+      selectedImage = preferredImageForRuntime(requestedRuntime ?? detection?.runtime ?? 'none')
+
+      sb = await sandchest.create({
+        image: selectedImage,
+        profile: args.profile,
+        env: args.env,
+      })
+      await ensureSandboxNetwork(sb)
+
+      if (sourceMode === 'git_clone') {
+        if (!originUrl) {
+          return jsonContent({
+            ok: false,
+            error: 'repo_url is required when source is git_clone.',
+          })
+        }
+
+        const validated = validateGitCloneUrl(originUrl)
+        if (!validated.ok) {
+          return jsonContent({
+            ok: false,
+            error: validated.error,
+          })
+        }
+
+        const clone = await sb.git.clone(validated.url, {
+          dest: remotePath,
+          depth: 1,
+        })
+        sourceSummary = {
+          method: 'git_clone',
+          repo_url: validated.url,
+        }
+        if (clone.stderr.trim() !== '') {
+          warnings.push(clone.stderr.trim())
+        }
+        detection = await detectProjectInSandbox(sb, remotePath)
+      } else if (preferredCloneUrl) {
+        const clone = await sb.git.clone(preferredCloneUrl, {
+          dest: remotePath,
+          depth: 1,
+        })
+        sourceSummary = {
+          method: 'git_clone',
+          repo_url: preferredCloneUrl,
+        }
+        warnings.push(
+          'Detected a clean git worktree with a public origin. Used sandbox_git_clone instead of uploading local files for faster setup.',
+        )
+        if (clone.stderr.trim() !== '') {
+          warnings.push(clone.stderr.trim())
+        }
+        detection = await detectProjectInSandbox(sb, remotePath)
+      } else if (args.local_path) {
+        try {
+          const upload = await uploadLocalDirToSandbox(sb, {
+            localPathArg: args.local_path,
+            remotePath,
+            exclude: args.exclude,
+            baseline: args.baseline,
+          })
+          sourceSummary = {
+            method: 'upload',
+            local_path: upload.localPath,
+            bytes: upload.bytes,
+            upload_method: upload.method,
+          }
+          detection = detectLocalProject(upload.localPath)
+        } catch (err) {
+          if (
+            err instanceof LocalDirectoryUploadError &&
+            sourceMode === 'auto' &&
+            originUrl &&
+            (err.code === 'archive_too_large' || err.code === 'upload_failed')
+          ) {
+            const validated = validateGitCloneUrl(originUrl)
+            if (!validated.ok) {
+              return jsonContent({
+                ok: false,
+                error: err.message,
+                hint: err.hint,
+              })
+            }
+
+            const clone = await sb.git.clone(validated.url, {
+              dest: remotePath,
+              depth: 1,
+            })
+            sourceSummary = {
+              method: 'git_clone',
+              repo_url: validated.url,
+              fallback: true,
+            }
+            const changeWarning =
+              resolvedLocalPath && hasLocalGitChanges(resolvedLocalPath)
+                ? 'Fell back to git clone from origin after upload failed. Local uncommitted changes were not included in the sandbox.'
+                : 'Fell back to git clone from origin after upload failed.'
+            warnings.push(changeWarning)
+            if (err.hint) {
+              warnings.push(err.hint)
+            }
+            if (clone.stderr.trim() !== '') {
+              warnings.push(clone.stderr.trim())
+            }
+            detection = await detectProjectInSandbox(sb, remotePath)
+          } else {
+            throw err
+          }
+        }
+      } else if (originUrl) {
+        const validated = validateGitCloneUrl(originUrl)
+        if (!validated.ok) {
+          return jsonContent({
+            ok: false,
+            error: validated.error,
+          })
+        }
+
+        const clone = await sb.git.clone(validated.url, {
+          dest: remotePath,
+          depth: 1,
+        })
+        sourceSummary = {
+          method: 'git_clone',
+          repo_url: validated.url,
+        }
+        if (clone.stderr.trim() !== '') {
+          warnings.push(clone.stderr.trim())
+        }
+        detection = await detectProjectInSandbox(sb, remotePath)
+      } else {
+        return jsonContent({
+          ok: false,
+          error: 'Provide local_path, repo_url, or both. The tool needs a project source.',
+        })
+      }
+
+      const runtime = args.runtime && args.runtime !== 'auto' ? args.runtime : detection.runtime
+      const installCommand = args.install_command ?? detection.installCommand
+
+      session = await sb.session.create({ shell: '/bin/bash' })
+      await runSessionCommand(session, `cd ${shellQuote(remotePath)}`, 30, 'run-project:cd')
+
+      for (const [index, setupCmd] of runtimeSetupCommands(runtime).entries()) {
+        await runSessionCommand(session, setupCmd, 600, `run-project:setup:${runtime}:${index}`)
+      }
+
+      if ((args.install ?? true) && installCommand) {
+        await runSessionCommand(session, installCommand, 1_200, 'run-project:install')
+      }
+
+      const result = await session.exec(args.command, {
+        timeout: args.timeout ?? 300,
+      })
+      await session.destroy().catch(() => {})
+      session = undefined
+
+      if (!keepSandbox) {
+        await sb.destroy().catch(() => {})
+      }
+
+      return jsonContent({
+        ok: true,
+        sandbox_id: sb.id,
+        replay_url: sb.replayUrl,
+        kept_sandbox: keepSandbox,
+        source: sourceSummary,
+        project: {
+          runtime,
+          install_command: installCommand,
+        },
+        result: {
+          exec_id: result.execId,
+          exit_code: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          duration_ms: result.durationMs,
+        },
+        warnings,
+      })
+    } catch (err) {
+      await session?.destroy().catch(() => {})
+      if (!keepSandbox) {
+        await sb?.destroy().catch(() => {})
+      }
+
+      if (err instanceof LocalDirectoryUploadError) {
+        return jsonContent({
+          ok: false,
+          sandbox_id: sb?.id,
+          replay_url: sb?.replayUrl,
+          stage: 'load_source',
+          error: err.message,
+          hint: err.hint,
+          stderr: err.stderr,
+          exit_code: err.exitCode,
+          warnings,
+        })
+      }
+
+      if (err instanceof ExecFailedError) {
+        return jsonContent({
+          ok: false,
+          sandbox_id: sb?.id,
+          replay_url: sb?.replayUrl,
+          stage: err.operation.startsWith('run-project:install')
+            ? 'install_dependencies'
+            : err.operation.startsWith('run-project:setup')
+              ? 'setup_runtime'
+              : err.operation,
+          error: err.message,
+          stderr: err.stderr,
+          exit_code: err.exitCode,
+          warnings,
+        })
+      }
+
+      if (err instanceof SandchestError) {
+        return jsonContent({
+          ok: false,
+          sandbox_id: sb?.id,
+          replay_url: sb?.replayUrl,
+          error: err.message,
+          ...sandchestErrorDetails(err),
+          warnings,
+        })
+      }
+
+      return jsonContent({
+        ok: false,
+        sandbox_id: sb?.id,
+        replay_url: sb?.replayUrl,
+        error: err instanceof Error ? err.message : String(err),
+        warnings,
       })
     }
   })
@@ -1229,7 +1911,11 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
         })
       }
       if (err instanceof SandchestError) {
-        return jsonContent({ ok: false, error: err.message, code: err.code })
+        return jsonContent({
+          ok: false,
+          error: err.message,
+          ...sandchestErrorDetails(err),
+        })
       }
       return jsonContent({
         ok: false,
@@ -1245,7 +1931,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
     inputSchema: {
       sandbox_id: z.string(),
       url: z.string().describe('Repository URL to clone. Embedded credentials are rejected.'),
-      path: z.string().optional().describe('Destination path inside sandbox. Default: /work. Use /tmp/work if /work is read-only.'),
+      path: z.string().optional().describe('Destination path inside sandbox. Default: /tmp/work.'),
       branch: z.string().optional().describe('Branch or tag to check out during clone.'),
       depth: z.number().int().positive().optional().describe('Shallow clone depth. Use 1 for fastest clone.'),
       single_branch: z
@@ -1268,7 +1954,7 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
       const sb = await sandchest.get(args.sandbox_id)
       await ensureSandboxNetwork(sb)
       const result = await sb.git.clone(validated.url, {
-        dest: args.path,
+        dest: args.path ?? '/tmp/work',
         branch: args.branch,
         depth: args.depth,
         singleBranch: args.single_branch,
@@ -1298,7 +1984,11 @@ export function registerTools(server: McpServer, sandchest: Sandchest): void {
         })
       }
       if (err instanceof SandchestError) {
-        return jsonContent({ ok: false, error: err.message, code: err.code })
+        return jsonContent({
+          ok: false,
+          error: err.message,
+          ...sandchestErrorDetails(err),
+        })
       }
       return jsonContent({
         ok: false,
@@ -1708,7 +2398,12 @@ fi`,
         })
       }
       if (err instanceof SandchestError) {
-        return jsonContent({ ok: false, diff: '', error: err.message, code: err.code })
+        return jsonContent({
+          ok: false,
+          diff: '',
+          error: err.message,
+          ...sandchestErrorDetails(err),
+        })
       }
       return jsonContent({
         ok: false,
@@ -1835,7 +2530,11 @@ fi`,
         })
       }
       if (err instanceof SandchestError) {
-        return jsonContent({ ok: false, error: err.message, code: err.code })
+        return jsonContent({
+          ok: false,
+          error: err.message,
+          ...sandchestErrorDetails(err),
+        })
       }
       return jsonContent({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
