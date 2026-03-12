@@ -64,6 +64,10 @@ describe('OnboardingForm step flow', () => {
     expect(src).toMatch(/router\.replace\(`\/dashboard\/\$\{redirectSlug\}`\)/)
   })
 
+  test('does not redirect when user just created an org in this session', () => {
+    expect(src).toMatch(/!createdSlug/)
+  })
+
   test('finishes by redirecting to org-slug dashboard', () => {
     expect(src).toMatch(/window\.location\.href\s*=\s*`\/dashboard\/\$\{createdSlug\}`/)
   })

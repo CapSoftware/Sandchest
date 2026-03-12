@@ -310,9 +310,11 @@ export default function OnboardingForm() {
   const [step, setStep] = useState<Step>('name')
   const [createdSlug, setCreatedSlug] = useState('')
 
-  // Redirect to dashboard if user already has orgs
+  // Redirect to dashboard if user already had orgs before onboarding.
+  // Skip redirect when the user just created an org in this session
+  // (createdSlug is set) — they still need to pick a plan.
   const hasOrgs = orgs && orgs.length > 0
-  const redirectSlug = hasOrgs && !sessionLoading && !orgsLoading
+  const redirectSlug = hasOrgs && !createdSlug && !sessionLoading && !orgsLoading
     ? (orgs.find((o) => o.id === session?.session.activeOrganizationId) ?? orgs[0]).slug
     : null
 
