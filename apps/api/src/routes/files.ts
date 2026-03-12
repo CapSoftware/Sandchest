@@ -100,8 +100,16 @@ const uploadFile = Effect.gen(function* () {
     return yield* Effect.fail(new ValidationError({ message: 'path query parameter is required' }))
   }
 
-  // Read body as array buffer
-  const arrayBuffer = yield* request.arrayBuffer
+  // Read body as array buffer — catch @effect/platform RequestError
+  const arrayBuffer = yield* request.arrayBuffer.pipe(
+    Effect.catchTag('RequestError', (err) =>
+      Effect.fail(
+        new InternalError({
+          message: `Failed to read upload body: ${err.message}`,
+        }),
+      ),
+    ),
+  )
   const data = new Uint8Array(arrayBuffer)
 
   const maxSize = batch ? MAX_BATCH_FILE : MAX_SINGLE_FILE
