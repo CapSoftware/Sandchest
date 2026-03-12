@@ -896,7 +896,7 @@ describe('Sandbox', () => {
       expect(new TextDecoder().decode(capturedBody)).toBe('hello!')
     })
 
-    test('fs.uploadDir uploads a temp archive, validates, extracts, and cleans up', async () => {
+    test('fs.uploadDir uploads chunk files, concatenates them, validates, extracts, and cleans up', async () => {
       const calls: Array<{ url: string; body?: string | null; method: string }> = []
       globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
         const urlString = String(url)
@@ -925,16 +925,17 @@ describe('Sandbox', () => {
       await sandbox.fs.uploadDir('/app', new Uint8Array(10))
 
       expect(calls[0]!.method).toBe('PUT')
-      expect(calls[0]!.url).toContain('batch=true')
-      expect(calls[0]!.url).toContain('path=%2Ftmp%2F.sandchest-upload-')
+      expect(calls[0]!.url).toContain('path=%2Ftmp%2F.sandchest-chunk-')
 
       const execBodies = calls
         .filter((call) => call.url.endsWith('/v1/sandboxes/sb_x/exec'))
         .map((call) => JSON.parse(call.body ?? '{}'))
-      expect(execBodies[0]!.cmd).toEqual(['mkdir', '-p', '/app'])
-      expect(execBodies[1]!.cmd[0]).toBe('python3')
-      expect(execBodies[1]!.cmd[2]).toContain('Tarball contains unsafe entries')
-      expect(execBodies[2]!.cmd).toEqual([
+      expect(execBodies[0]!.cmd[0]).toBe('sh')
+      expect(execBodies[0]!.cmd[2]).toContain('cat /tmp/.sandchest-chunk-')
+      expect(execBodies[1]!.cmd).toEqual(['mkdir', '-p', '/app'])
+      expect(execBodies[2]!.cmd[0]).toBe('python3')
+      expect(execBodies[2]!.cmd[2]).toContain('Tarball contains unsafe entries')
+      expect(execBodies[3]!.cmd).toEqual([
         'tar',
         'xzf',
         expect.stringMatching(/^\/tmp\/\.sandchest-upload-/),
@@ -942,10 +943,11 @@ describe('Sandbox', () => {
         '-C',
         '/app',
       ])
-      expect(execBodies[3]!.cmd).toEqual([
+      expect(execBodies[4]!.cmd).toEqual([
         'rm',
         '-f',
         expect.stringMatching(/^\/tmp\/\.sandchest-upload-/),
+        expect.stringMatching(/^\/tmp\/\.sandchest-chunk-/),
       ])
     })
 
@@ -1000,6 +1002,7 @@ describe('Sandbox', () => {
         'rm',
         '-f',
         expect.stringMatching(/^\/tmp\/\.sandchest-upload-/),
+        expect.stringMatching(/^\/tmp\/\.sandchest-chunk-/),
       ])
     })
 
@@ -1018,7 +1021,7 @@ describe('Sandbox', () => {
         }
 
         execCall++
-        if (execCall === 2) {
+        if (execCall === 3) {
           return jsonResponse({
             exec_id: 'ex_verify',
             status: 'timed_out',
@@ -1060,6 +1063,7 @@ describe('Sandbox', () => {
         'rm',
         '-f',
         expect.stringMatching(/^\/tmp\/\.sandchest-upload-/),
+        expect.stringMatching(/^\/tmp\/\.sandchest-chunk-/),
       ])
     })
 

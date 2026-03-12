@@ -40,8 +40,8 @@ const WAIT_READY_DEFAULT_TIMEOUT = 120_000
 const WAIT_READY_POLL_INTERVAL = 1_000
 const TEXT_ENCODER = new TextEncoder()
 const TEXT_DECODER = new TextDecoder()
-/** Uploads larger than this threshold are split into chunks to avoid body-size issues. */
-const UPLOAD_CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
+/** Directory uploads always use chunked file transfer to avoid large-body upload failures. */
+const UPLOAD_CHUNK_SIZE = 512 * 1024 // 512 KB
 const VALIDATE_TAR_SCRIPT = `
 import posixpath
 import sys
@@ -207,43 +207,33 @@ export class Sandbox {
         const tmpPath = `/tmp/.sandchest-upload-${uuid}.tar.gz`
         const chunkPaths: string[] = []
 
-        // Upload the tarball — chunked for large files to avoid body-size issues
-        if (tarball.byteLength <= UPLOAD_CHUNK_SIZE) {
+        const totalChunks = Math.ceil(Math.max(tarball.byteLength, 1) / UPLOAD_CHUNK_SIZE)
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * UPLOAD_CHUNK_SIZE
+          const end = Math.min(start + UPLOAD_CHUNK_SIZE, tarball.byteLength)
+          const chunkPath = `/tmp/.sandchest-chunk-${uuid}-${String(i).padStart(4, '0')}`
+          chunkPaths.push(chunkPath)
           await this._http.requestRaw({
             method: 'PUT',
             path: `/v1/sandboxes/${this.id}/files`,
-            query: { path: tmpPath, batch: true },
-            body: tarball,
+            query: { path: chunkPath },
+            body: tarball.slice(start, end),
             headers: { 'Content-Type': 'application/octet-stream' },
+            retries: 0,
           })
-        } else {
-          const totalChunks = Math.ceil(tarball.byteLength / UPLOAD_CHUNK_SIZE)
-          for (let i = 0; i < totalChunks; i++) {
-            const start = i * UPLOAD_CHUNK_SIZE
-            const end = Math.min(start + UPLOAD_CHUNK_SIZE, tarball.byteLength)
-            const chunkPath = `/tmp/.sandchest-chunk-${uuid}-${String(i).padStart(4, '0')}`
-            chunkPaths.push(chunkPath)
-            await this._http.requestRaw({
-              method: 'PUT',
-              path: `/v1/sandboxes/${this.id}/files`,
-              query: { path: chunkPath },
-              body: tarball.slice(start, end),
-              headers: { 'Content-Type': 'application/octet-stream' },
-            })
-          }
+        }
 
-          // Concatenate chunks into the final tarball
-          const catResult = await this._execSync(
-            ['sh', '-c', `cat /tmp/.sandchest-chunk-${uuid}-* > ${tmpPath}`],
-            { operation: 'uploadDir:concat' },
-          )
-          if (catResult.exit_code !== 0) {
-            throw new ExecFailedError({
-              operation: 'uploadDir:concat',
-              exitCode: catResult.exit_code,
-              stderr: catResult.stderr,
-            })
-          }
+        // Concatenate chunks into the final tarball
+        const catResult = await this._execSync(
+          ['sh', '-c', `cat /tmp/.sandchest-chunk-${uuid}-* > ${tmpPath}`],
+          { operation: 'uploadDir:concat' },
+        )
+        if (catResult.exit_code !== 0) {
+          throw new ExecFailedError({
+            operation: 'uploadDir:concat',
+            exitCode: catResult.exit_code,
+            stderr: catResult.stderr,
+          })
         }
 
         try {
