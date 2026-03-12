@@ -20,16 +20,16 @@ export default function WhatIsSandchestPage() {
       <ScrollReveal>
         <ProblemSection />
       </ScrollReveal>
-      <ScrollReveal>
+      <ScrollReveal delay={0.1}>
         <PillarsSection />
       </ScrollReveal>
-      <ScrollReveal>
+      <ScrollReveal delay={0.2}>
         <UseCasesSection />
       </ScrollReveal>
-      <ScrollReveal>
+      <ScrollReveal delay={0.3}>
         <ArchitectureSection />
       </ScrollReveal>
-      <ScrollReveal>
+      <ScrollReveal delay={0.4}>
         <WhatCta />
       </ScrollReveal>
     </>

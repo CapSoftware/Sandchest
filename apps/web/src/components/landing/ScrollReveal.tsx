@@ -2,7 +2,13 @@
 
 import { useEffect, useRef } from 'react'
 
-export default function ScrollReveal({ children }: { children: React.ReactNode }) {
+export default function ScrollReveal({
+  children,
+  delay,
+}: {
+  children: React.ReactNode
+  delay?: number
+}) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -26,7 +32,11 @@ export default function ScrollReveal({ children }: { children: React.ReactNode }
   }, [])
 
   return (
-    <div ref={ref} className="reveal">
+    <div
+      ref={ref}
+      className="reveal"
+      style={delay ? { '--reveal-delay': `${delay}s` } as React.CSSProperties : undefined}
+    >
       {children}
     </div>
   )
