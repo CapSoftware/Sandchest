@@ -1,7 +1,7 @@
 import { HttpMiddleware, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from '@effect/platform'
 import { Effect } from 'effect'
 import { auth } from './auth.js'
-import { formatApiError } from './errors.js'
+import { formatApiError, InternalError } from './errors.js'
 import { withRequestId } from './middleware.js'
 import { withConnectionDrain } from './middleware/connection-drain.js'
 import { withRateLimit } from './middleware/rate-limit.js'
@@ -51,7 +51,7 @@ const withDefectHandler = HttpMiddleware.make((app) =>
       Effect.gen(function* () {
         const message = defect instanceof Error ? defect.message : String(defect)
         yield* Effect.logError(`Unhandled defect: ${message}`)
-        return formatApiError(new Error('internal defect'))
+        return formatApiError(new InternalError({ message }))
       }),
     ),
   ),

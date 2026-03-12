@@ -100,12 +100,12 @@ const uploadFile = Effect.gen(function* () {
     return yield* Effect.fail(new ValidationError({ message: 'path query parameter is required' }))
   }
 
-  // Read body as array buffer — catch @effect/platform RequestError
+  // Read body as array buffer — catch all errors from body reading
   const arrayBuffer = yield* request.arrayBuffer.pipe(
-    Effect.catchTag('RequestError', (err) =>
+    Effect.catchAllCause((cause) =>
       Effect.fail(
         new InternalError({
-          message: `Failed to read upload body: ${err.message}`,
+          message: `Failed to read upload body: ${Cause.pretty(cause)}`,
         }),
       ),
     ),
