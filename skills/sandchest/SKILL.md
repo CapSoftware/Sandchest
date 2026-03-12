@@ -36,21 +36,72 @@ Rule of thumb: if it runs code or installs dependencies, sandbox it.
 
 ## 2. Setup Recipe
 
-1. Create a sandbox with `sandbox_create`.
-2. Choose an image using [references/image-selection.md](references/image-selection.md).
-3. Load code with `sandbox_git_clone` for public git repos, or `sandbox_upload_dir` for local code.
-4. Install dependencies with `sandbox_session_create` plus `sandbox_session_exec`.
-5. Fork after setup so you have a clean checkpoint before experiments.
+IMPORTANT: Follow this decision tree exactly. Do NOT skip steps or improvise.
 
-If you uploaded local code and you want diff workflows, initialize a baseline repo first:
+### Step 1 — Check for reusable sandbox
+
+Call `sandbox_list` first. If a running sandbox already has the code you need, fork it with `sandbox_fork` and skip to Step 5. This is instant and avoids redundant setup.
+
+### Step 2 — Create sandbox
 
 ```text
-git init
-git add -A
-git -c user.name=Sandchest -c user.email=sandchest@local commit -m "baseline"
+sandbox_create({ profile: "small" })
 ```
 
-## 3. Fork Patterns
+Only `sandchest://ubuntu-22.04/base` is available. Do not request other images.
+
+### Step 3 — Load code (pick ONE)
+
+| Situation | Tool | Example |
+|-----------|------|---------|
+| Public repo | `sandbox_git_clone` (preferred) | `sandbox_git_clone({ url: "https://github.com/org/repo", depth: 1 })` |
+| Private repo or local-only | `sandbox_upload_dir` | `sandbox_upload_dir({ local_path: "/path/to/project" })` |
+
+NEVER manually tar, base64-encode, split, or chunk files. The tools handle archiving automatically.
+
+If you need git clone AND the sandbox has no network, fall back to `sandbox_upload_dir`.
+
+### Step 4 — Install toolchains and dependencies
+
+Use a session so state persists between commands:
+
+```text
+sandbox_session_create({ sandbox_id })
+sandbox_session_exec({ cmd: "curl -fsSL https://bun.sh/install | bash" })
+sandbox_session_exec({ cmd: "source /root/.bashrc && cd /tmp/work && bun install" })
+```
+
+Common toolchain installs:
+- Bun: `curl -fsSL https://bun.sh/install | bash && source /root/.bashrc`
+- Node.js: `curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs`
+- Python: `apt-get install -y python3.12 python3.12-venv`
+
+### Step 5 — Fork checkpoint
+
+After setup, fork to create a reusable checkpoint:
+
+```text
+sandbox_fork({ sandbox_id })  // Keep original as base
+```
+
+Do your work in the fork. If anything goes wrong, destroy the fork and create a new one from the original.
+
+### Baseline git (upload_dir only)
+
+If you uploaded local code and want diff workflows, initialize a baseline repo:
+
+```text
+git init && git add -A && git -c user.name=Sandchest -c user.email=sandchest@local commit -m "baseline"
+```
+
+## 3. Workspace Paths
+
+- `/tmp/work` — recommended workspace (default for uploads, exec cwd, diff, apply_patch)
+- `/tmp` and `/var/tmp` — writable scratch space
+
+The root filesystem is **read-only** (including `/work`, `/root`, `/home`). Always use `/tmp/work` as your working directory. Tools default to `/tmp/work`.
+
+## 4. Fork Patterns
 
 Fork before risky work. The main patterns are:
 - Checkpoint pattern: fork after clone or install so failures can be discarded.
@@ -61,7 +112,7 @@ Forking is checkpointing, not parallel execution. Within one agent turn, treat f
 
 Read [references/fork-patterns.md](references/fork-patterns.md) for the detailed workflows.
 
-## 4. Results Extraction
+## 5. Results Extraction
 
 Use these outputs in order of fidelity:
 - `sandbox_diff` with `mode: "review"` to inspect tracked changes.
@@ -72,25 +123,24 @@ Use these outputs in order of fidelity:
 
 If a patch is too large or the repo is not initialized, fall back to directory download.
 
-## 5. Sandbox Reuse
+## 6. Sandbox Reuse
 
-- Reuse running sandboxes for related tasks. Check `sandbox_list` first.
-- Use sessions for multi-step setup so shell state persists.
+- **Always check `sandbox_list` before creating a new sandbox.** Reuse beats recreate.
 - Fork from a prepared sandbox instead of recreating everything.
+- Use sessions for multi-step setup so shell state persists.
 - Destroy sandboxes when done. Replay URLs persist, files do not.
 
-## 6. Image Selection Quick Reference
+## 7. Image Selection Quick Reference
 
 | Image | Use for |
 |-------|---------|
 | `sandchest://ubuntu-22.04/base` | General Linux work and custom setup |
-| `sandchest://ubuntu-22.04/node-22` | Node.js, Bun, TypeScript, frontend repos |
-| `sandchest://ubuntu-22.04/python-3.12` | Python projects |
-| `sandchest://ubuntu-24.04/base` | Newer Ubuntu userland |
+
+Note: Node, Bun, Python, and Go toolchain images are listed in docs but must be provisioned per-node. Default to the base image and install toolchains manually.
 
 See [references/image-selection.md](references/image-selection.md) for the full guide.
 
-## 7. Common Patterns
+## 8. Common Patterns
 
 Incorrect:
 
@@ -101,28 +151,37 @@ sandbox_exec({ cmd: "git clone https://user:TOKEN@github.com/org/repo" })
 Correct:
 
 ```text
-sandbox_git_clone({ url: "https://github.com/org/repo" })
+sandbox_git_clone({ url: "https://github.com/org/repo", depth: 1 })
 ```
 
-Incorrect:
+Incorrect — manually uploading, tarring, or base64-encoding files:
 
 ```text
-sandbox_exec({ cmd: "npm install && npm run build" })
-sandbox_exec({ cmd: "rm -rf dist && npm run build:esm" })
+git archive ... | base64 | sandbox_upload(...)
 ```
 
 Correct:
 
 ```text
-create sandbox
-clone or upload code
-install deps
-sandbox_fork() -> checkpoint
-run experiment in fork
-if it fails: destroy fork, fork checkpoint again
+sandbox_upload_dir({ local_path: "/path/to/project" })  // defaults to /tmp/work
 ```
 
-## 8. Current Limitations
+Incorrect — setting up from scratch every time:
+
+```text
+sandbox_create -> git_clone -> install deps -> run task -> destroy
+sandbox_create -> git_clone -> install deps -> run task -> destroy  // again!
+```
+
+Correct — fork-based reuse:
+
+```text
+sandbox_create -> git_clone -> install deps -> fork (checkpoint)
+fork checkpoint -> run task 1 -> extract results -> destroy fork
+fork checkpoint -> run task 2 -> extract results -> destroy fork
+```
+
+## 9. Current Limitations
 
 - No preview URLs. A web server can run, but you cannot open it from outside the sandbox yet.
 - No GPU access.
