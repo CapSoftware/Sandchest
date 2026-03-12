@@ -168,7 +168,7 @@ const execCommand = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
-  // Billing: check credit balance (org-level, matches trackCompute target)
+  // Billing: check credit balance before exec creation
   const billingCheck = yield* billing.checkCredits(auth.orgId, 0)
   if (!billingCheck.allowed) {
     return yield* Effect.fail(

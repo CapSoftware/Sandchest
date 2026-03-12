@@ -148,7 +148,7 @@ const createSandbox = Effect.gen(function* () {
   const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
 
-  // Billing: check credit balance (org-level, matches trackCompute target)
+  // Billing: check credit balance before sandbox creation
   const billingCheck = yield* billing.checkCredits(auth.orgId, 0)
   if (!billingCheck.allowed) {
     return yield* Effect.fail(
@@ -613,7 +613,7 @@ const forkSandbox = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
-  // Billing: check credit balance (forks count as sandbox creation, org-level)
+  // Billing: check credit balance (forks count as sandbox creation)
   const billingCheck = yield* billing.checkCredits(auth.orgId, 0)
   if (!billingCheck.allowed) {
     return yield* Effect.fail(
