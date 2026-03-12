@@ -12,7 +12,7 @@ export interface ProjectDetection {
  * Returns the recommended image, install command, and working directory.
  */
 export function detectProject(dir: string): ProjectDetection {
-  if (existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bunfig.toml'))) {
+  if (existsSync(join(dir, 'bun.lock')) || existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bunfig.toml'))) {
     return { image: 'ubuntu-22.04/bun', installCmd: 'bun install --frozen-lockfile', workDir: '/work' }
   }
   if (existsSync(join(dir, 'package-lock.json'))) {

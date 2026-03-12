@@ -22,6 +22,13 @@ describe('detectProject', () => {
     expect(result.installCmd).toBe('bun install --frozen-lockfile')
   })
 
+  test('detects bun project from bun.lock', () => {
+    writeFileSync(join(dir, 'bun.lock'), '')
+    const result = detectProject(dir)
+    expect(result.image).toBe('ubuntu-22.04/bun')
+    expect(result.installCmd).toBe('bun install --frozen-lockfile')
+  })
+
   test('detects bun project from bunfig.toml', () => {
     writeFileSync(join(dir, 'bunfig.toml'), '')
     const result = detectProject(dir)
