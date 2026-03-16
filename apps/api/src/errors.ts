@@ -58,6 +58,14 @@ export class BillingLimitError extends Data.TaggedError('BillingLimitError')<{
   readonly message: string
 }> {}
 
+export class NodeUnreachableError extends Data.TaggedError('NodeUnreachableError')<{
+  readonly message: string
+}> {}
+
+export class NodeNotAssignedError extends Data.TaggedError('NodeNotAssignedError')<{
+  readonly message: string
+}> {}
+
 export class InternalError extends Data.TaggedError('InternalError')<{
   readonly message: string
 }> {}
@@ -77,6 +85,8 @@ export type ApiError =
   | GoneError
   | NotImplementedError
   | BillingLimitError
+  | NodeUnreachableError
+  | NodeNotAssignedError
   | InternalError
 
 const STATUS_MAP: Record<ApiError['_tag'], number> = {
@@ -94,6 +104,8 @@ const STATUS_MAP: Record<ApiError['_tag'], number> = {
   GoneError: 410,
   NotImplementedError: 501,
   BillingLimitError: 403,
+  NodeUnreachableError: 502,
+  NodeNotAssignedError: 409,
   InternalError: 500,
 }
 
@@ -112,6 +124,8 @@ const CODE_MAP: Record<ApiError['_tag'], string> = {
   GoneError: 'gone',
   NotImplementedError: 'not_implemented',
   BillingLimitError: 'billing_limit',
+  NodeUnreachableError: 'node_unreachable',
+  NodeNotAssignedError: 'node_not_assigned',
   InternalError: 'internal_error',
 }
 

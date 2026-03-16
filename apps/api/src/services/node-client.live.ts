@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { nodeRpc } from '@sandchest/contract'
 import type { NodeClientApi, NodeFileEntry, CollectedArtifact, ProvisionedImage } from './node-client.js'
 import { NodeClient } from './node-client.js'
-import { bytesToHex } from './node-client.shared.js'
+import { bytesToHex, hexToBytes } from './node-client.shared.js'
 
 /** Max chunk size for file streaming (64 KB). */
 const CHUNK_SIZE = 64 * 1024
@@ -249,11 +249,6 @@ export function createLiveNodeClient(channel: Channel, nodeIdBytes: Uint8Array):
         )
       }),
   }
-}
-
-/** Convert a 32-char hex string to a 16-byte Uint8Array. */
-function hexToBytes(hex: string): Uint8Array {
-  return new Uint8Array(Buffer.from(hex, 'hex'))
 }
 
 export function createNodeClientLayer(config: NodeGrpcConfig): Layer.Layer<NodeClient> {
