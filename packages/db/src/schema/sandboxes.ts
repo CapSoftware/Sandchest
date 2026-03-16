@@ -23,6 +23,7 @@ export const sandboxes = mysqlTable(
       .default('queued'),
     env: json('env'),
     forkedFrom: uuidv7Binary('forked_from'),
+    slotIndex: tinyint('slot_index'),
     forkDepth: tinyint('fork_depth').notNull().default(0),
     forkCount: smallint('fork_count').notNull().default(0),
     ttlSeconds: int('ttl_seconds').notNull().default(3600),
