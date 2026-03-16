@@ -85,7 +85,13 @@ describe('seed', () => {
     test('exports IMAGE_IDS', async () => {
       const mod = await import('./seed.js')
       expect(mod.IMAGE_IDS).toBeDefined()
-      expect(Object.keys(mod.IMAGE_IDS)).toEqual(['ubuntu-22.04/base'])
+      expect(Object.keys(mod.IMAGE_IDS)).toEqual([
+        'ubuntu-22.04/base',
+        'ubuntu-22.04/node-22',
+        'ubuntu-22.04/bun',
+        'ubuntu-22.04/python-3.12',
+        'ubuntu-22.04/go-1.22',
+      ])
     })
 
     test('exports DEV_NODE_ID', async () => {
