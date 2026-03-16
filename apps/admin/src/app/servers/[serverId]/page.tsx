@@ -13,6 +13,19 @@ import ServerMetrics from '@/components/ServerMetrics'
 import SandboxTable from '@/components/SandboxTable'
 import CommandRunner from '@/components/CommandRunner'
 
+const codeBlockStyle: React.CSSProperties = {
+  marginTop: '0.75rem',
+  fontSize: '0.6875rem',
+  lineHeight: 1.5,
+  background: 'var(--bg-inset)',
+  padding: '0.75rem',
+  borderRadius: '6px',
+  overflow: 'auto',
+  maxHeight: '24rem',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+}
+
 function DetailSkeleton() {
   return (
     <div>
@@ -154,6 +167,36 @@ export default function ServerDetailPage({
   })
 
   const [mtlsResult, setMtlsResult] = useState<{ flySecretsSet: boolean; flyCommand?: string; flyError?: string } | null>(null)
+  const [diagOutput, setDiagOutput] = useState<string | null>(null)
+  const [logsOutput, setLogsOutput] = useState<string | null>(null)
+
+  const diagnoseMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/diagnose-vm`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Diagnostic failed' })) as { error: string }
+        throw new Error(data.error)
+      }
+      return res.json() as Promise<{ output: string; exitCode: number }>
+    },
+    onSuccess: (data) => {
+      setDiagOutput(data.output)
+    },
+  })
+
+  const logsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/diagnose-vm/logs?lines=100`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Failed to fetch logs' })) as { error: string }
+        throw new Error(data.error)
+      }
+      return res.json() as Promise<{ output: string; exitCode: number }>
+    },
+    onSuccess: (data) => {
+      setLogsOutput(data.output)
+    },
+  })
 
   const mtlsMutation = useMutation({
     mutationFn: async () => {
@@ -422,6 +465,54 @@ export default function ServerDetailPage({
                 </>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Diagnostics */}
+      {server.provision_status === 'completed' && server.node_id && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div className="card-section-title" style={{ marginBottom: '0.75rem' }}>
+            Diagnostics
+          </div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-weak)', marginBottom: '0.75rem' }}>
+            Debug sandbox creation issues. &ldquo;Boot Test&rdquo; launches an unjailed Firecracker VM and captures the serial console to reveal kernel panics, overlay-init failures, and guest agent crashes.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-sm"
+              onClick={() => { setDiagOutput(null); diagnoseMutation.mutate() }}
+              disabled={diagnoseMutation.isPending}
+            >
+              {diagnoseMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Booting VM…</> : 'Boot Test'}
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => { setLogsOutput(null); logsMutation.mutate() }}
+              disabled={logsMutation.isPending}
+            >
+              {logsMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Fetching…</> : 'Daemon Logs'}
+            </button>
+          </div>
+          {diagnoseMutation.isError && (
+            <div className="feedback-card feedback-danger" style={{ marginTop: '0.75rem' }}>
+              {diagnoseMutation.error.message}
+            </div>
+          )}
+          {diagOutput && (
+            <pre style={codeBlockStyle}>
+              {diagOutput}
+            </pre>
+          )}
+          {logsMutation.isError && (
+            <div className="feedback-card feedback-danger" style={{ marginTop: '0.75rem' }}>
+              {logsMutation.error.message}
+            </div>
+          )}
+          {logsOutput && (
+            <pre style={codeBlockStyle}>
+              {logsOutput}
+            </pre>
           )}
         </div>
       )}
