@@ -16,7 +16,8 @@ function hasClaudeCodeSkill(): boolean {
 
 async function hasMcpPackage(): Promise<boolean> {
   try {
-    await import('@sandchest/mcp')
+    const pkg = '@sandchest/mcp'
+    await import(pkg)
     return true
   } catch {
     const here = dirname(fileURLToPath(import.meta.url))
