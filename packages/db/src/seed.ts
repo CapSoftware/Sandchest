@@ -130,7 +130,17 @@ async function seedImages(db: Database) {
         sizeBytes: 0,
       },
     ])
-    .onDuplicateKeyUpdate({ set: { toolchain: sql`VALUES(toolchain)` } })
+    // Update all image-path fields on conflict, not just toolchain.
+    // rootfsRef format must match the filesystem layout created by deploy-daemon:
+    // images/ubuntu-22.04/{toolchain}/rootfs.ext4  (e.g. images/ubuntu-22.04/base/rootfs.ext4)
+    // The node daemon resolves relative rootfsRef against its data_dir (/var/sandchest).
+    .onDuplicateKeyUpdate({
+      set: {
+        toolchain: sql`VALUES(toolchain)`,
+        kernelRef: sql`VALUES(kernel_ref)`,
+        rootfsRef: sql`VALUES(rootfs_ref)`,
+      },
+    })
 }
 
 async function seedDevNode(db: Database) {
