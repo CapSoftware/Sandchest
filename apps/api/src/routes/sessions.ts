@@ -29,7 +29,7 @@ import { requireScope } from '../scopes.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
 import { SessionRepo, type SessionRow } from '../services/session-repo.js'
 import { ExecRepo } from '../services/exec-repo.js'
-import { NodeClient } from '../services/node-client.js'
+import { getClientForSandbox } from '../services/node-client-registry.js'
 import { RedisService } from '../services/redis.js'
 import { BillingService } from '../services/billing.js'
 
@@ -80,7 +80,6 @@ const createSession = Effect.gen(function* () {
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
-  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -131,6 +130,7 @@ const createSession = Effect.gen(function* () {
   const sessionIdStr = bytesToId(SESSION_PREFIX, sessionId)
 
   // Route to node
+  const nodeClient = yield* getClientForSandbox(sandbox)
   yield* nodeClient.createSession({
     sandboxId: sandboxIdBytes,
     sessionId: sessionIdStr,
@@ -153,7 +153,6 @@ const sessionExec = Effect.gen(function* () {
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
   const execRepo = yield* ExecRepo
-  const nodeClient = yield* NodeClient
   const redis = yield* RedisService
   const billing = yield* BillingService
   const request = yield* HttpServerRequest.HttpServerRequest
@@ -252,6 +251,7 @@ const sessionExec = Effect.gen(function* () {
   // Sync mode: execute and wait
   yield* execRepo.updateStatus(execId, 'running', { startedAt: new Date() })
 
+  const nodeClient = yield* getClientForSandbox(sandbox)
   const result = yield* nodeClient.sessionExec({
     sandboxId: sandboxIdBytes,
     sessionId: sessionIdStr,
@@ -325,7 +325,6 @@ const sessionInput = Effect.gen(function* () {
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
-  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -370,6 +369,7 @@ const sessionInput = Effect.gen(function* () {
     )
   }
 
+  const nodeClient = yield* getClientForSandbox(sandbox)
   yield* nodeClient.sessionInput({
     sandboxId: sandboxIdBytes,
     sessionId: sessionIdStr,
@@ -464,7 +464,6 @@ const destroySession = Effect.gen(function* () {
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const sessionRepo = yield* SessionRepo
-  const nodeClient = yield* NodeClient
   const params = yield* HttpRouter.params
 
   const sandboxIdBytes = yield* parseSandboxId(params.id)
@@ -485,6 +484,7 @@ const destroySession = Effect.gen(function* () {
   }
 
   // Route destroy to node
+  const nodeClient = yield* getClientForSandbox(sandbox)
   yield* nodeClient.destroySession({
     sandboxId: sandboxIdBytes,
     sessionId: sessionIdStr,

@@ -4,7 +4,8 @@ import { generateUUIDv7, idToBytes, bytesToId, NODE_PREFIX } from '@sandchest/co
 import { NotFoundError, ValidationError } from '../errors.js'
 import { RedisService } from '../services/redis.js'
 import { NodeRepo } from '../services/node-repo.js'
-import { NodeClient } from '../services/node-client.js'
+import { NodeClientRegistry } from '../services/node-client-registry.js'
+import { bytesToHex } from '../services/node-client.shared.js'
 
 /**
  * Admin node routes. Protected by ADMIN_API_TOKEN bearer auth (see middleware).
@@ -262,7 +263,8 @@ export const AdminNodeRouter = HttpRouter.empty.pipe(
         return yield* Effect.fail(new NotFoundError({ message: `Node ${nodeId} not found` }))
       }
 
-      const nodeClient = yield* NodeClient
+      const registry = yield* NodeClientRegistry
+      const nodeClient = yield* registry.getClient(bytesToHex(nodeIdBytes))
       const results = yield* nodeClient.provisionImages({
         imageRefs: body.image_refs ?? [],
       })

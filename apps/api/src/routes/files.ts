@@ -11,7 +11,7 @@ import {
 import { AuthContext } from '../context.js'
 import { requireScope } from '../scopes.js'
 import { SandboxRepo } from '../services/sandbox-repo.js'
-import { NodeClient } from '../services/node-client.js'
+import { getClientForSandbox } from '../services/node-client-registry.js'
 
 const MAX_SINGLE_FILE = 5 * 1024 * 1024 * 1024 // 5 GB
 const MAX_BATCH_FILE = 10 * 1024 * 1024 * 1024 // 10 GB
@@ -69,7 +69,6 @@ const uploadFile = Effect.gen(function* () {
   yield* requireScope('file:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
-  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -121,6 +120,7 @@ const uploadFile = Effect.gen(function* () {
     )
   }
 
+  const nodeClient = yield* getClientForSandbox(sandbox)
   const result = yield* withNodeFileTimeout(
     'putFile',
     nodeClient.putFile({
@@ -143,7 +143,6 @@ const downloadOrListFiles = Effect.gen(function* () {
   yield* requireScope('file:read')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
-  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -170,6 +169,8 @@ const downloadOrListFiles = Effect.gen(function* () {
   if (!path) {
     return yield* Effect.fail(new ValidationError({ message: 'path query parameter is required' }))
   }
+
+  const nodeClient = yield* getClientForSandbox(sandbox)
 
   // Directory listing
   if (list) {
@@ -239,7 +240,6 @@ const deleteFile = Effect.gen(function* () {
   yield* requireScope('file:write')
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
-  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -269,6 +269,7 @@ const deleteFile = Effect.gen(function* () {
     return yield* Effect.fail(new ValidationError({ message: 'path query parameter is required' }))
   }
 
+  const nodeClient = yield* getClientForSandbox(sandbox)
   yield* withNodeFileTimeout(
     'deleteFile',
     nodeClient.deleteFile({

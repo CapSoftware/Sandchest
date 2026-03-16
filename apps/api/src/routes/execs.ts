@@ -21,9 +21,9 @@ import type {
 import { NotFoundError, SandboxNotRunningError, ValidationError, BillingLimitError } from '../errors.js'
 import { AuthContext } from '../context.js'
 import { requireScope } from '../scopes.js'
-import { SandboxRepo } from '../services/sandbox-repo.js'
+import { SandboxRepo, type SandboxRow } from '../services/sandbox-repo.js'
 import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
-import { NodeClient } from '../services/node-client.js'
+import { getClientForSandbox } from '../services/node-client-registry.js'
 import { RedisService } from '../services/redis.js'
 import { QuotaService } from '../services/quota.js'
 import { BillingService } from '../services/billing.js'
@@ -78,10 +78,11 @@ const runAsyncExec = (
   cwd: string,
   env: Record<string, string>,
   timeoutSeconds: number,
+  sandbox: SandboxRow,
 ) =>
   Effect.gen(function* () {
     const execRepo = yield* ExecRepo
-    const nodeClient = yield* NodeClient
+    const nodeClient = yield* getClientForSandbox(sandbox)
     const redis = yield* RedisService
 
     // Transition to running
@@ -161,7 +162,6 @@ const execCommand = Effect.gen(function* () {
   const auth = yield* AuthContext
   const sandboxRepo = yield* SandboxRepo
   const execRepo = yield* ExecRepo
-  const nodeClient = yield* NodeClient
   const redis = yield* RedisService
   const quotaService = yield* QuotaService
   const billing = yield* BillingService
@@ -282,6 +282,7 @@ const execCommand = Effect.gen(function* () {
         body.cwd ?? DEFAULT_CWD,
         body.env ?? {},
         timeoutSeconds,
+        sandbox,
       ),
     )
 
@@ -295,6 +296,7 @@ const execCommand = Effect.gen(function* () {
   // Sync mode: execute and wait for result
   yield* execRepo.updateStatus(execId, 'running', { startedAt: new Date() })
 
+  const nodeClient = yield* getClientForSandbox(sandbox)
   const result = yield* nodeClient.exec({
     sandboxId: sandboxIdBytes,
     execId: execIdStr,
