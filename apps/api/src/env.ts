@@ -44,8 +44,8 @@ export function loadEnv() {
     SANDCHEST_S3_REGION: optional('SANDCHEST_S3_REGION', 'auto'),
 
     // Node daemon gRPC (mTLS)
-    NODE_GRPC_ADDR: process.env.NODE_GRPC_ADDR as string | undefined,
-    NODE_GRPC_NODE_ID: process.env.NODE_GRPC_NODE_ID as string | undefined,
+    // DEPRECATED: NODE_GRPC_ADDR and NODE_GRPC_NODE_ID are no longer used.
+    // The API now discovers nodes from the database and creates connections dynamically.
     // mTLS via file paths (local dev)
     NODE_GRPC_CERT_PATH: process.env.NODE_GRPC_CERT_PATH as string | undefined,
     NODE_GRPC_KEY_PATH: process.env.NODE_GRPC_KEY_PATH as string | undefined,

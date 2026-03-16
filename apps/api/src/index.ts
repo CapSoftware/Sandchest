@@ -15,8 +15,9 @@ import { makeExecRepoDrizzle } from './services/exec-repo.drizzle.js'
 import { makeSessionRepoDrizzle } from './services/session-repo.drizzle.js'
 import { ObjectStorageMemory } from './services/object-storage.memory.js'
 import { createObjectStorageLayer } from './services/object-storage.live.js'
-import { NodeClientMemory } from './services/node-client.memory.js'
-import { createNodeClientLayer } from './services/node-client.live.js'
+import { NodeClientRegistryMemory } from './services/node-client-registry.memory.js'
+import { createNodeClientRegistryLayer, type RegistryConfig } from './services/node-client-registry.live.js'
+import { NodeLookupLive } from './services/node-lookup.live.js'
 import { makeArtifactRepoDrizzle } from './services/artifact-repo.drizzle.js'
 import { createRedisLayer } from './services/redis.ioredis.js'
 import { RedisMemory } from './services/redis.memory.js'
@@ -67,25 +68,24 @@ const isProduction = env.NODE_ENV === 'production'
 
 const RedisLive = REDIS_URL ? createRedisLayer(REDIS_URL, { family: REDIS_FAMILY }) : RedisMemory
 
-const { NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, NODE_GRPC_INSECURE, MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM } = env
+const { NODE_GRPC_CERT_PATH, NODE_GRPC_KEY_PATH, NODE_GRPC_CA_PATH, NODE_GRPC_INSECURE, MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM } = env
 const hasPemContent = MTLS_CA_PEM && MTLS_CLIENT_CERT_PEM && MTLS_CLIENT_KEY_PEM
 const hasFilePaths = NODE_GRPC_CERT_PATH && NODE_GRPC_KEY_PATH && NODE_GRPC_CA_PATH
-const hasNodeGrpcConfig = NODE_GRPC_ADDR && NODE_GRPC_NODE_ID && (NODE_GRPC_INSECURE || hasPemContent || hasFilePaths)
-const NodeClientLive =
-  hasNodeGrpcConfig
-    ? createNodeClientLayer({
-        address: NODE_GRPC_ADDR!,
-        nodeId: NODE_GRPC_NODE_ID!,
-        insecure: NODE_GRPC_INSECURE,
-        // Prefer PEM content (Fly.io secrets) over file paths (local dev)
-        caPem: MTLS_CA_PEM,
-        certPem: MTLS_CLIENT_CERT_PEM,
-        keyPem: MTLS_CLIENT_KEY_PEM,
-        caPath: NODE_GRPC_CA_PATH,
-        certPath: NODE_GRPC_CERT_PATH,
-        keyPath: NODE_GRPC_KEY_PATH,
-      })
-    : NodeClientMemory
+const hasMtlsConfig = NODE_GRPC_INSECURE || hasPemContent || hasFilePaths
+
+const registryConfig: RegistryConfig = {
+  insecure: NODE_GRPC_INSECURE,
+  caPem: MTLS_CA_PEM,
+  certPem: MTLS_CLIENT_CERT_PEM,
+  keyPem: MTLS_CLIENT_KEY_PEM,
+  caPath: NODE_GRPC_CA_PATH,
+  certPath: NODE_GRPC_CERT_PATH,
+  keyPath: NODE_GRPC_KEY_PATH,
+}
+
+const NodeClientRegistryLive = hasMtlsConfig
+  ? createNodeClientRegistryLayer(registryConfig)
+  : NodeClientRegistryMemory
 
 const ObjectStorageLive =
   SANDCHEST_S3_ENDPOINT && SANDCHEST_S3_ACCESS_KEY && SANDCHEST_S3_SECRET_KEY && ARTIFACT_BUCKET_NAME
@@ -158,10 +158,15 @@ const ProductionFallbackWarnings = Layer.scopedDiscard(
       )
     }
 
-    const hasNodeClient = hasNodeGrpcConfig
-    if (!hasNodeClient) {
+    if (!hasMtlsConfig) {
       yield* Effect.logWarning(
-        'Node gRPC client is not configured — using in-memory stub. Sandbox creation, exec, and session operations will return mock data. Fix: set NODE_GRPC_ADDR, NODE_GRPC_NODE_ID, and either NODE_GRPC_INSECURE=1 for localhost or mTLS credentials',
+        'Node gRPC mTLS is not configured — using in-memory stub. Sandbox creation, exec, and session operations will return mock data. Fix: set NODE_GRPC_INSECURE=1 for localhost or set mTLS credentials (MTLS_CA_PEM, MTLS_CLIENT_CERT_PEM, MTLS_CLIENT_KEY_PEM or file path equivalents)',
+      )
+    }
+
+    if (process.env.NODE_GRPC_ADDR || process.env.NODE_GRPC_NODE_ID) {
+      yield* Effect.logWarning(
+        'NODE_GRPC_ADDR and NODE_GRPC_NODE_ID are deprecated and ignored. The API now discovers nodes from the database. Remove these env vars to silence this warning.',
       )
     }
   }),
@@ -174,7 +179,8 @@ const ServerLive = Layer.mergeAll(AppLive, WorkersLive, GracefulShutdownLive, Pr
   Layer.provide(makeExecRepoDrizzle(db)),
   Layer.provide(makeSessionRepoDrizzle(db)),
   Layer.provide(ObjectStorageLive),
-  Layer.provide(NodeClientLive),
+  Layer.provide(NodeClientRegistryLive),
+  Layer.provide(NodeLookupLive),
   Layer.provide(makeArtifactRepoDrizzle(db)),
   Layer.provide(makeIdempotencyRepoDrizzle(db)),
   Layer.provide(makeOrgRepoDrizzle(db)),
