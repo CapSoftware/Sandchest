@@ -26,20 +26,21 @@ export async function POST(
     return NextResponse.json({ error: 'Server not found' }, { status: 404 })
   }
 
-  if (server.provisionStatus !== 'failed') {
-    return NextResponse.json({ error: 'Can only retry from failed state' }, { status: 409 })
+  if (server.provisionStatus !== 'failed' && server.provisionStatus !== 'provisioning') {
+    return NextResponse.json({ error: 'Can only retry from failed or stuck provisioning state' }, { status: 409 })
   }
 
-  // Find the failed step index (PlanetScale may return JSON columns as strings)
+  // Find the failed or stuck step index (PlanetScale may return JSON columns as strings)
   const raw = server.provisionSteps
   const steps: StepResult[] = Array.isArray(raw)
     ? raw as StepResult[]
     : typeof raw === 'string'
       ? JSON.parse(raw) as StepResult[]
       : []
-  const failedIndex = steps.findIndex((s) => s.status === 'failed')
-  if (failedIndex === -1) {
-    return NextResponse.json({ error: 'No failed step found' }, { status: 400 })
+  // For stuck 'provisioning' state, find the running step; for 'failed', find the failed step
+  const retryIndex = steps.findIndex((s) => s.status === 'failed' || s.status === 'running')
+  if (retryIndex === -1) {
+    return NextResponse.json({ error: 'No failed or running step found' }, { status: 400 })
   }
 
   // Decrypt SSH key
@@ -51,7 +52,7 @@ export async function POST(
   }
 
   // Reset failed and subsequent steps to pending
-  for (let i = failedIndex; i < steps.length; i++) {
+  for (let i = retryIndex; i < steps.length; i++) {
     steps[i] = { id: steps[i]!.id, status: 'pending' }
   }
 
@@ -59,7 +60,7 @@ export async function POST(
     .update(adminServers)
     .set({
       provisionStatus: 'provisioning',
-      provisionStep: PROVISION_STEPS[failedIndex]!.id,
+      provisionStep: PROVISION_STEPS[retryIndex]!.id,
       provisionSteps: steps,
       provisionError: null,
       updatedAt: new Date(),
@@ -70,11 +71,11 @@ export async function POST(
   const ctx: ProvisionContext = { nodeId, ip: server.ip }
 
   // Run remaining steps in background
-  retryProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, steps, failedIndex, ctx).catch(
+  retryProvisioning(serverId, server.ip, server.sshPort, server.sshUser, sshKey, steps, retryIndex, ctx).catch(
     () => {},
   )
 
-  return NextResponse.json({ status: 'provisioning', retry_from: PROVISION_STEPS[failedIndex]!.id })
+  return NextResponse.json({ status: 'provisioning', retry_from: PROVISION_STEPS[retryIndex]!.id })
 }
 
 async function retryProvisioning(
