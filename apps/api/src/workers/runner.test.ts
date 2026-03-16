@@ -35,8 +35,11 @@ import { BillingService } from '../services/billing.js'
 import { createInMemoryBillingApi } from '../services/billing.memory.js'
 import { MetricsRepo } from '../services/metrics-repo.js'
 import { createInMemoryMetricsRepo } from '../services/metrics-repo.memory.js'
-import { NodeClient, type NodeClientApi } from '../services/node-client.js'
+import { NodeClientRegistry } from '../services/node-client-registry.js'
+import { NodeClientRegistryMemory } from '../services/node-client-registry.memory.js'
 import { createInMemoryNodeClient } from '../services/node-client.memory.js'
+import { NodeLookup } from '../services/scheduler.js'
+import { createNodeLookupMemory } from '../services/node-lookup.live.js'
 import { NodeRepo, type NodeRepoApi } from '../services/node-repo.js'
 import { createInMemoryNodeRepo } from '../services/node-repo.memory.js'
 import { vmTeardownWorker } from './vm-teardown.js'
@@ -53,7 +56,6 @@ let orgRepo: OrgRepoApi & { addDeletedOrg: (orgId: string, deletedAt: Date) => v
 let idempotencyApi: IdempotencyRepoApi
 let idempotencyStore: Map<string, { createdAt: Date; orgId?: string | undefined }>
 let quotaApi: QuotaApi & { setOrgQuota: (orgId: string, quota: Record<string, unknown>) => void }
-let nodeClientApi: NodeClientApi
 let nodeRepo: NodeRepoApi
 let testLayer: Layer.Layer<WorkerDeps | RedisService>
 
@@ -78,7 +80,6 @@ beforeEach(() => {
   idempotencyStore = testable.store
   quotaApi = createInMemoryQuotaApi()
   const billingApi = createInMemoryBillingApi()
-  nodeClientApi = createInMemoryNodeClient()
   nodeRepo = createInMemoryNodeRepo()
 
   testLayer = Layer.mergeAll(
@@ -94,7 +95,8 @@ beforeEach(() => {
     Layer.succeed(QuotaService, quotaApi),
     Layer.succeed(BillingService, billingApi),
     Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
-    Layer.succeed(NodeClient, nodeClientApi),
+    NodeClientRegistryMemory,
+    createNodeLookupMemory([]),
     Layer.succeed(NodeRepo, nodeRepo),
   )
 })
@@ -1407,6 +1409,7 @@ describe('vm-teardown', () => {
   })
 
   test('destroys sandboxes stuck in stopping beyond grace period', async () => {
+    const nodeId = generateUUIDv7()
     const id = generateUUIDv7()
     await Effect.runPromise(
       sandboxRepo.create({
@@ -1420,6 +1423,7 @@ describe('vm-teardown', () => {
         imageRef: 'sandchest://ubuntu-22.04',
       }),
     )
+    await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', nodeId))
     await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
 
     // Backdate updatedAt to 60 seconds ago (beyond the 30s grace period)
@@ -1435,11 +1439,15 @@ describe('vm-teardown', () => {
   })
 
   test('keeps sandbox stopping when node teardown fails', async () => {
-    nodeClientApi = {
-      ...nodeClientApi,
-      destroySandbox: () => Effect.die(new Error('simulated teardown failure')),
-    }
-    testLayer = Layer.mergeAll(
+    // Build a registry where destroySandbox always fails
+    const failingRegistry = Layer.succeed(NodeClientRegistry, {
+      getClient: () =>
+        Effect.succeed({
+          ...createInMemoryNodeClient(),
+          destroySandbox: () => Effect.die(new Error('simulated teardown failure')),
+        }),
+    })
+    const failLayer = Layer.mergeAll(
       Layer.succeed(RedisService, redis),
       Layer.succeed(SandboxRepo, sandboxRepo),
       Layer.succeed(ExecRepo, execRepo),
@@ -1452,10 +1460,42 @@ describe('vm-teardown', () => {
       Layer.succeed(QuotaService, quotaApi),
       Layer.succeed(BillingService, createInMemoryBillingApi()),
       Layer.succeed(MetricsRepo, createInMemoryMetricsRepo()),
-      Layer.succeed(NodeClient, nodeClientApi),
+      failingRegistry,
+      createNodeLookupMemory([]),
       Layer.succeed(NodeRepo, nodeRepo),
     )
 
+    const nodeId = generateUUIDv7()
+    const id = generateUUIDv7()
+    await Effect.runPromise(
+      sandboxRepo.create({
+        id,
+        orgId: 'org_test',
+        imageId: SEED_IMAGE_ID,
+        profileId: SEED_PROFILE_ID,
+        profileName: 'small',
+        env: null,
+        ttlSeconds: 3600,
+        imageRef: 'sandchest://ubuntu-22.04',
+      }),
+    )
+    await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', nodeId))
+    await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
+
+    const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
+
+    const count = await Effect.runPromise(
+      runWorkerTick(vmTeardownWorker, 'inst-1').pipe(Effect.provide(failLayer)),
+    )
+    expect(count).toBe(0)
+
+    const updated = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
+    expect(updated!.status).toBe('stopping')
+    expect(updated!.endedAt).toBeNull()
+  })
+
+  test('skips sandboxes without nodeId', async () => {
     const id = generateUUIDv7()
     await Effect.runPromise(
       sandboxRepo.create({
@@ -1479,10 +1519,10 @@ describe('vm-teardown', () => {
 
     const updated = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
     expect(updated!.status).toBe('stopping')
-    expect(updated!.endedAt).toBeNull()
   })
 
   test('ignores sandboxes in other states', async () => {
+    const nodeId = generateUUIDv7()
     for (const status of ['queued', 'running', 'stopped', 'failed', 'deleted'] as const) {
       const id = generateUUIDv7()
       await Effect.runPromise(
@@ -1497,6 +1537,7 @@ describe('vm-teardown', () => {
           imageRef: 'sandchest://ubuntu-22.04',
         }),
       )
+      await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', nodeId))
       await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', status))
       // Backdate updatedAt
       const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
@@ -1510,6 +1551,7 @@ describe('vm-teardown', () => {
   })
 
   test('tears down multiple stuck sandboxes in one tick', async () => {
+    const nodeId = generateUUIDv7()
     const ids = [generateUUIDv7(), generateUUIDv7()]
     for (const id of ids) {
       await Effect.runPromise(
@@ -1524,6 +1566,7 @@ describe('vm-teardown', () => {
           imageRef: 'sandchest://ubuntu-22.04',
         }),
       )
+      await Effect.runPromise(sandboxRepo.assignNode(id, 'org_test', nodeId))
       await Effect.runPromise(sandboxRepo.updateStatus(id, 'org_test', 'stopping'))
       const row = await Effect.runPromise(sandboxRepo.findById(id, 'org_test'))
       ;(row as { updatedAt: Date }).updatedAt = new Date(Date.now() - 60_000)
