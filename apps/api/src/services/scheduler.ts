@@ -64,6 +64,48 @@ export function schedule(
   })
 }
 
+/**
+ * Schedule a sandbox to a specific node (e.g. for fork affinity).
+ * Only tries the specified node — fails with NoCapacityError if no slots available.
+ */
+export function scheduleOnNode(
+  nodeIdHex: string,
+  sandboxId: string,
+): Effect.Effect<ScheduleResult, NoCapacityError, RedisService | NodeLookup> {
+  return Effect.gen(function* () {
+    const redis = yield* RedisService
+    const nodeLookup = yield* NodeLookup
+
+    const nodes = yield* nodeLookup.getOnlineNodes()
+    const node = nodes.find((n) => n.id === nodeIdHex)
+    if (!node) {
+      return yield* Effect.fail(
+        new NoCapacityError({
+          message: `Node ${nodeIdHex} is not online`,
+        }),
+      )
+    }
+
+    for (let slot = 0; slot < node.slotsTotal; slot++) {
+      const acquired = yield* redis.acquireSlotLease(
+        node.id,
+        slot,
+        sandboxId,
+        SLOT_LEASE_TTL,
+      )
+      if (acquired) {
+        return { nodeId: node.id, slot }
+      }
+    }
+
+    return yield* Effect.fail(
+      new NoCapacityError({
+        message: `Node ${nodeIdHex} is at capacity`,
+      }),
+    )
+  })
+}
+
 /** Release a slot lease when a sandbox is stopped/deleted. */
 export function releaseSlot(
   nodeId: string,
