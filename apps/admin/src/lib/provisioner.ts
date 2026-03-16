@@ -25,6 +25,12 @@ umount -l /old_root 2>/dev/null || true; rmdir /old_root 2>/dev/null || true
 exec /sbin/init "$@"
 `
 
+// IMPORTANT: Do NOT add ProtectSystem=strict, NoNewPrivileges=yes, or similar
+// systemd sandboxing directives here. The guest agent needs access to /dev/vsock
+// (AF_VSOCK socket) to listen for host-initiated gRPC connections. Systemd
+// security restrictions block vsock socket creation, causing the agent to
+// crash-loop on boot. Firecracker VM isolation is the security boundary —
+// additional systemd hardening inside the guest is redundant and harmful.
 const GUEST_AGENT_SERVICE = `[Unit]
 Description=Sandchest Guest Agent
 After=network.target
@@ -35,10 +41,6 @@ Type=simple
 ExecStart=/usr/local/bin/sandchest-guest-agent
 Restart=on-failure
 RestartSec=1
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=no
-ReadWritePaths=/tmp /var/tmp /home /root /work
 PrivateTmp=no
 LimitNOFILE=65536
 LimitNPROC=4096
@@ -179,15 +181,23 @@ export const PROVISION_STEPS: ProvisionStep[] = [
   },
   {
     id: 'load-kernel-modules',
-    name: 'Load kernel modules',
+    name: 'Load kernel modules (install Debian kernel if vsock missing)',
+    timeoutMs: 300_000, // 5 min — may install linux-image-amd64
     commands: [
+      // Install Debian stock kernel if vhost_vsock is unavailable (Hetzner custom kernels strip it).
+      // If the module still won't load after install, a reboot is required — the deploy-daemon
+      // button handles this automatically; during full provision the step will fail validation
+      // and the admin can reboot via the server page, then re-run provisioning.
+      'modprobe vhost_vsock 2>/dev/null || (echo "vhost_vsock missing — installing linux-image-amd64..." && DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq linux-image-amd64 && (modprobe vhost_vsock 2>/dev/null || echo "REBOOT REQUIRED: new kernel installed but vhost_vsock needs a reboot to load"))',
       'modprobe kvm',
       'modprobe kvm_amd || modprobe kvm_intel || true',
       'modprobe tun',
       // Persist modules across reboots
-      'printf "kvm\\ntun\\n" > /etc/modules-load.d/sandchest.conf',
+      'printf "kvm\\ntun\\nvhost_vsock\\n" > /etc/modules-load.d/sandchest.conf',
+      // If reboot is needed, prep GRUB to boot the Debian kernel
+      'if ! test -e /dev/vhost-vsock; then CURRENT=$(uname -r); DEBIAN_K=$(ls /boot/vmlinuz-*-amd64 2>/dev/null | sort -V | tail -1 | sed "s|/boot/vmlinuz-||"); if [ -n "$DEBIAN_K" ] && [ "$CURRENT" != "$DEBIAN_K" ]; then for f in vmlinuz initrd.img config System.map; do test -f "/boot/$f-$CURRENT" && mv "/boot/$f-$CURRENT" "/boot/$f-$CURRENT.bak"; done && update-grub && echo "GRUB configured for Debian kernel ($DEBIAN_K) — reboot server to activate"; fi; fi',
     ],
-    validate: 'lsmod | grep kvm',
+    validate: 'lsmod | grep kvm && test -e /dev/vhost-vsock',
   },
   {
     id: 'enable-ip-forward',
