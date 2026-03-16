@@ -10,7 +10,8 @@ import type { EventRecorder } from '../services/event-recorder.js'
 import type { OrgRepo } from '../services/org-repo.js'
 import type { IdempotencyRepo } from './idempotency-cleanup.js'
 import type { MetricsRepo } from '../services/metrics-repo.js'
-import type { NodeClient } from '../services/node-client.js'
+import type { NodeClientRegistry } from '../services/node-client-registry.js'
+import type { NodeLookup } from '../services/scheduler.js'
 import type { BillingService } from '../services/billing.js'
 import type { NodeRepo } from '../services/node-repo.js'
 import { startWorkers, type WorkerConfig } from './runner.js'
@@ -39,7 +40,8 @@ export type WorkerDeps =
   | OrgRepo
   | IdempotencyRepo
   | MetricsRepo
-  | NodeClient
+  | NodeClientRegistry
+  | NodeLookup
   | BillingService
   | NodeRepo
 
