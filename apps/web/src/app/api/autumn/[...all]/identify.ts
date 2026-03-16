@@ -19,7 +19,7 @@ export async function identify(request: Request) {
   if (!session?.user) return null
 
   // Billing is per-org — use activeOrganizationId to match backend billing checks
-  const customerId = session.session.activeOrganizationId ?? session.user.id
+  const customerId = session.session?.activeOrganizationId ?? session.user.id
   return {
     customerId,
     customerData: {
