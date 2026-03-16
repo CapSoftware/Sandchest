@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { StepResult } from '@/lib/provisioner'
+import type { StepResult } from '@/lib/provision-steps'
 
 interface ProvisionState {
   status: 'pending' | 'provisioning' | 'completed' | 'failed'

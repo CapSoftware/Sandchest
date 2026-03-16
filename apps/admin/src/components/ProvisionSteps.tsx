@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { PROVISION_STEPS } from '@/lib/provisioner'
+import { PROVISION_STEP_META } from '@/lib/provision-steps'
 
 interface StepData {
   id: string
@@ -43,7 +43,7 @@ export default function ProvisionSteps({
 
   return (
     <div className="provision-timeline">
-      {PROVISION_STEPS.map((step) => {
+      {PROVISION_STEP_META.map((step) => {
         const result = stepMap.get(step.id)
         const status = result?.status ?? 'pending'
         const isExpanded = expandedStep === step.id
