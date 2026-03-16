@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
+import { writeFile } from 'node:fs/promises'
 import { getDb } from '@/lib/db'
 import { adminServers } from '@sandchest/db/schema'
 import { decrypt } from '@/lib/encryption'
@@ -101,6 +102,30 @@ export async function POST(
 
     const grpcAddr = `${server.ip}:50051`
 
+    // Write certs to local filesystem for local dev.
+    // In production, the API on Fly.io uses MTLS_*_PEM env vars (inline PEM content).
+    // Locally, the API reads certs from file paths via NODE_GRPC_*_PATH env vars.
+    // When mTLS certs are regenerated on the node, these local files must be updated
+    // too — otherwise the API's gRPC client holds stale certs and the mTLS handshake
+    // fails with "UNAVAILABLE: No connection established".
+    const localCaPath = process.env.NODE_GRPC_CA_PATH
+    const localCertPath = process.env.NODE_GRPC_CERT_PATH
+    const localKeyPath = process.env.NODE_GRPC_KEY_PATH
+
+    if (localCaPath && localCertPath && localKeyPath) {
+      try {
+        await Promise.all([
+          writeFile(localCaPath, ca + '\n'),
+          writeFile(localCertPath, clientCert + '\n'),
+          writeFile(localKeyPath, clientKey + '\n', { mode: 0o600 }),
+        ])
+      } catch (fsErr) {
+        return NextResponse.json({
+          error: `Certs generated on node but failed to write locally: ${fsErr instanceof Error ? fsErr.message : String(fsErr)}`,
+        }, { status: 500 })
+      }
+    }
+
     // Try to auto-set Fly secrets if FLY_ACCESS_TOKEN is available
     const flyToken = process.env.FLY_ACCESS_TOKEN
     const flyApp = process.env.FLY_APP_NAME ?? 'sandchest-api'
@@ -141,6 +166,7 @@ export async function POST(
       return NextResponse.json({
         success: true,
         flySecretsSet: true,
+        localCertsWritten: !!(localCaPath && localCertPath && localKeyPath),
       })
     }
 
@@ -148,6 +174,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       flySecretsSet: false,
+      localCertsWritten: !!(localCaPath && localCertPath && localKeyPath),
       flyCommand: `fly secrets set NODE_GRPC_ADDR='${grpcAddr}' MTLS_CA_PEM='${ca}' MTLS_CLIENT_CERT_PEM='${clientCert}' MTLS_CLIENT_KEY_PEM='${clientKey}' -a ${flyApp}`,
     })
   } catch (err) {

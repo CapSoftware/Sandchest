@@ -34,6 +34,8 @@ export function createSshConnection(config: SshConfig): Promise<Client> {
         username: config.username,
         privateKey: config.privateKey,
         readyTimeout: config.readyTimeout ?? 15_000,
+        keepaliveInterval: 15_000,
+        keepaliveCountMax: 5,
       })
   })
 }
@@ -61,6 +63,8 @@ export function createPasswordSshConnection(config: PasswordSshConfig): Promise<
         password: config.password,
         tryKeyboard: true,
         readyTimeout: 15_000,
+        keepaliveInterval: 15_000,
+        keepaliveCountMax: 5,
         debug: (msg: string) => { debugLines.push(msg) },
       })
   })
