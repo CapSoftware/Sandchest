@@ -151,6 +151,20 @@ export default function ServerDetailPage({
     },
   })
 
+  const registerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/servers/${serverId}/register-node`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Registration failed' })) as { error: string }
+        throw new Error(data.error)
+      }
+      return res.json() as Promise<{ node_id: string; hostname: string; upserted: boolean }>
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+  })
+
   const destroyAllVmsMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/servers/${serverId}/destroy-all-vms`, { method: 'POST' })
@@ -359,6 +373,13 @@ export default function ServerDetailPage({
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               className="btn btn-primary btn-sm"
+              onClick={() => registerMutation.mutate()}
+              disabled={registerMutation.isPending}
+            >
+              {registerMutation.isPending ? <><span className="spinner" style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.375rem' }} /> Registering…</> : 'Register Node'}
+            </button>
+            <button
+              className="btn btn-sm"
               onClick={() => deployMutation.mutate()}
               disabled={deployMutation.isPending}
             >
@@ -405,6 +426,17 @@ export default function ServerDetailPage({
           {destroyAllVmsMutation.isSuccess && (
             <div className="feedback-card feedback-success" style={{ marginTop: '0.75rem' }}>
               All VMs destroyed and daemon restarted.
+            </div>
+          )}
+          {registerMutation.isError && (
+            <div className="feedback-card feedback-danger" style={{ marginTop: '0.75rem' }}>
+              {registerMutation.error.message}
+            </div>
+          )}
+          {registerMutation.isSuccess && (
+            <div className="feedback-card feedback-success" style={{ marginTop: '0.75rem' }}>
+              Node registered — hostname: {server.ip}, ID: {registerMutation.data?.node_id}
+              {registerMutation.data?.upserted ? ' (updated)' : ' (created)'}
             </div>
           )}
         </div>
