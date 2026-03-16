@@ -39,6 +39,7 @@ export function createInMemoryNodeRepo(): NodeRepoApi {
         if (!existing) return
         store.set(key, {
           ...existing,
+          ...(fields.hostname !== undefined ? { hostname: fields.hostname } : {}),
           ...(fields.status !== undefined ? { status: fields.status } : {}),
           ...(fields.slotsTotal !== undefined ? { slotsTotal: fields.slotsTotal } : {}),
           ...(fields.version !== undefined ? { version: fields.version } : {}),

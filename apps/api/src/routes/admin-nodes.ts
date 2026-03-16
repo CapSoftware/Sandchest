@@ -127,6 +127,7 @@ export const AdminNodeRouter = HttpRouter.empty.pipe(
         const existing = yield* nodeRepo.findById(idBytes)
         if (existing) {
           yield* nodeRepo.update(idBytes, {
+            hostname: body.hostname,
             status: 'online',
             slotsTotal: body.slots_total,
             version: body.version,

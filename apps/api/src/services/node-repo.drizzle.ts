@@ -63,6 +63,7 @@ export function createDrizzleNodeRepo(db: Database): NodeRepoApi {
         const setClause: Record<string, unknown> = {
           updatedAt: new Date(),
         }
+        if (fields.hostname !== undefined) setClause.hostname = fields.hostname
         if (fields.status !== undefined) setClause.status = fields.status
         if (fields.slotsTotal !== undefined) setClause.slotsTotal = fields.slotsTotal
         if (fields.version !== undefined) setClause.version = fields.version

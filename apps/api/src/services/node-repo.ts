@@ -33,6 +33,7 @@ export interface NodeRepoApi {
   readonly update: (
     id: Uint8Array,
     fields: {
+      hostname?: string | undefined
       status?: 'online' | 'offline' | 'draining' | 'disabled' | undefined
       slotsTotal?: number | undefined
       version?: string | undefined
