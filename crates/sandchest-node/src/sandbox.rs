@@ -124,7 +124,7 @@ impl SandboxManager {
             let dir = format!("{}/sandboxes/{}", self.node_config.data_dir, sandbox_id);
             SandboxPaths {
                 api_socket: format!("{}/api.sock", dir),
-                vsock: format!("{}/vsock.sock", dir),
+                vsock: format!("{}/vsock.sock_3", dir),
                 chroot_root: None,
                 data_dir: dir.clone(),
                 dir,

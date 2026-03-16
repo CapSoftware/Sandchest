@@ -107,8 +107,11 @@ impl JailerConfig {
     }
 
     /// Host-visible vsock socket path for a jailed VM.
+    ///
+    /// Firecracker creates the host-side UDS at `{uds_path}_{guest_cid}`.
+    /// Guest CID is always 3, so the actual file is `vsock.sock_3`.
     pub fn host_vsock_path(&self, sandbox_id: &str) -> PathBuf {
-        self.chroot_root(sandbox_id).join("vsock.sock")
+        self.chroot_root(sandbox_id).join("vsock.sock_3")
     }
 
     /// Convert a host-absolute path to a chroot-relative path.
@@ -401,7 +404,7 @@ mod tests {
         let path = config.host_vsock_path("sb_test123");
         assert_eq!(
             path,
-            PathBuf::from("/var/sandchest/jailer/firecracker/sb_test123/root/vsock.sock")
+            PathBuf::from("/var/sandchest/jailer/firecracker/sb_test123/root/vsock.sock_3")
         );
     }
 
