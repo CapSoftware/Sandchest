@@ -45,7 +45,9 @@ import { SandboxRepo } from '../services/sandbox-repo.js'
 import { ExecRepo, type ExecRow } from '../services/exec-repo.js'
 import { SessionRepo } from '../services/session-repo.js'
 import { ObjectStorage } from '../services/object-storage.js'
-import { NodeClient } from '../services/node-client.js'
+import { NodeClientRegistry, getClientForSandbox } from '../services/node-client-registry.js'
+import { schedule, scheduleOnNode, releaseSlot } from '../services/scheduler.js'
+import { bytesToHex, hexToBytes } from '../services/node-client.shared.js'
 import { ArtifactRepo } from '../services/artifact-repo.js'
 import { RedisService } from '../services/redis.js'
 import { QuotaService } from '../services/quota.js'
@@ -145,7 +147,7 @@ const createSandbox = Effect.gen(function* () {
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
   const billing = yield* BillingService
-  const nodeClient = yield* NodeClient
+  const registry = yield* NodeClientRegistry
   const request = yield* HttpServerRequest.HttpServerRequest
 
   // Billing: check credit balance before sandbox creation
@@ -233,6 +235,12 @@ const createSandbox = Effect.gen(function* () {
 
   const nodeCreateTimeoutMs = resolveNodeCreateTimeoutMs()
 
+  // Schedule sandbox to a node with available capacity
+  const sandboxIdHex = bytesToHex(id)
+  const { nodeId: scheduledNodeHex, slot } = yield* schedule(sandboxIdHex)
+
+  const nodeClient = yield* registry.getClient(scheduledNodeHex)
+
   // Tell the node daemon to create the VM
   yield* nodeClient.createSandbox({
     sandboxId: id,
@@ -253,6 +261,7 @@ const createSandbox = Effect.gen(function* () {
     }),
     Effect.catchAllCause((cause) =>
       Effect.gen(function* () {
+        yield* releaseSlot(scheduledNodeHex, slot)
         yield* repo.updateStatus(id, auth.orgId, 'failed', {
           endedAt: new Date(),
           failureReason: 'provision_failed',
@@ -268,7 +277,7 @@ const createSandbox = Effect.gen(function* () {
   )
 
   // Transition to running and assign to the node
-  const assigned = yield* repo.assignNode(id, auth.orgId, nodeClient.nodeId)
+  const assigned = yield* repo.assignNode(id, auth.orgId, hexToBytes(scheduledNodeHex), slot)
 
   const sandboxId = bytesToId(SANDBOX_PREFIX, row.id)
   const response: CreateSandboxResponse = {
@@ -372,10 +381,11 @@ const collectArtifactsOnStop = (
   sandboxId: string,
   idBytes: Uint8Array,
   orgId: string,
+  sandbox: SandboxRow,
 ) =>
   Effect.gen(function* () {
     const redis = yield* RedisService
-    const nodeClient = yield* NodeClient
+    const nodeClient = yield* getClientForSandbox(sandbox)
     const artifactRepo = yield* ArtifactRepo
     const nodeCollectArtifactsTimeoutMs = resolveNodeCollectArtifactsTimeoutMs()
 
@@ -434,6 +444,7 @@ const finalizeSandboxStop = (
   idBytes: Uint8Array,
   orgId: string,
   actorId: string,
+  sandbox: SandboxRow,
 ) =>
   Effect.gen(function* () {
     const repo = yield* SandboxRepo
@@ -445,12 +456,19 @@ const finalizeSandboxStop = (
     }
 
     // Collect artifacts before fully stopping (best-effort)
-    yield* collectArtifactsOnStop(sandboxId, idBytes, orgId)
+    yield* collectArtifactsOnStop(sandboxId, idBytes, orgId, sandbox)
 
     // Tell the node daemon to stop the VM. If this fails, leave the sandbox
     // in `stopping` so follow-up teardown can retry instead of claiming success.
-    const nodeClient = yield* NodeClient
+    const nodeClient = yield* getClientForSandbox(sandbox)
     yield* nodeClient.stopSandbox({ sandboxId: idBytes })
+
+    // Release the slot lease (best-effort)
+    if (sandbox.nodeId && sandbox.slotIndex !== null) {
+      yield* releaseSlot(bytesToHex(sandbox.nodeId), sandbox.slotIndex).pipe(
+        Effect.catchAll(() => Effect.void),
+      )
+    }
 
     // Transition to stopped
     yield* SandboxRepo.pipe(
@@ -521,7 +539,7 @@ const stopSandbox = Effect.gen(function* () {
     failureReason: 'sandbox_stopped',
   })
 
-  yield* Effect.forkDaemon(finalizeSandboxStop(id, idBytes, auth.orgId, auth.userId))
+  yield* Effect.forkDaemon(finalizeSandboxStop(id, idBytes, auth.orgId, auth.userId, row))
 
   const response: StopSandboxResponse = {
     sandbox_id: id,
@@ -571,16 +589,27 @@ const deleteSandbox = Effect.gen(function* () {
     row.status === 'queued' ||
     row.status === 'provisioning'
 
-  if (shouldDestroyOnNode) {
+  if (shouldDestroyOnNode && row.nodeId) {
     // Final credit meter before termination (best-effort)
     if (row.status === 'running') {
       yield* meterSandbox(row, new Date()).pipe(Effect.catchAll(() => Effect.void))
     }
 
-    const nodeClient = yield* NodeClient
-    yield* nodeClient.destroySandbox({ sandboxId: idBytes }).pipe(
-      Effect.catchAll(() => Effect.void),
+    const nodeClient = yield* getClientForSandbox(row).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
     )
+    if (nodeClient) {
+      yield* nodeClient.destroySandbox({ sandboxId: idBytes }).pipe(
+        Effect.catchAll(() => Effect.void),
+      )
+    }
+
+    // Release slot lease (best-effort)
+    if (row.slotIndex !== null) {
+      yield* releaseSlot(bytesToHex(row.nodeId), row.slotIndex).pipe(
+        Effect.catchAll(() => Effect.void),
+      )
+    }
   }
 
   const updated = yield* repo.softDelete(idBytes, auth.orgId)
@@ -609,7 +638,6 @@ const forkSandbox = Effect.gen(function* () {
   const repo = yield* SandboxRepo
   const quotaService = yield* QuotaService
   const billing = yield* BillingService
-  const nodeClient = yield* NodeClient
   const request = yield* HttpServerRequest.HttpServerRequest
   const params = yield* HttpRouter.params
 
@@ -694,6 +722,16 @@ const forkSandbox = Effect.gen(function* () {
 
   const forkId = generateUUIDv7()
 
+  // Fork must land on the same node as source (CoW snapshot locality)
+  if (!source.nodeId) {
+    return yield* Effect.fail(
+      new InternalError({ message: `Source sandbox ${id} has no assigned node` }),
+    )
+  }
+  const sourceNodeHex = bytesToHex(source.nodeId)
+  const forkIdHex = bytesToHex(forkId)
+  const { slot: forkSlot } = yield* scheduleOnNode(sourceNodeHex, forkIdHex)
+
   // Create fork row in DB
   const forkRow = yield* repo.createFork({
     id: forkId,
@@ -703,6 +741,9 @@ const forkSandbox = Effect.gen(function* () {
     ttlSeconds,
   })
 
+  // Get client for the source node
+  const nodeClient = yield* getClientForSandbox(source)
+
   // Tell the node to fork the VM
   yield* nodeClient.forkSandbox({
     sourceSandboxId: sourceIdBytes,
@@ -710,6 +751,7 @@ const forkSandbox = Effect.gen(function* () {
   }).pipe(
     Effect.catchAllCause((cause) =>
       Effect.gen(function* () {
+        yield* releaseSlot(sourceNodeHex, forkSlot)
         yield* repo.updateStatus(forkId, auth.orgId, 'failed', {
           endedAt: new Date(),
           failureReason: 'provision_failed',
@@ -723,6 +765,9 @@ const forkSandbox = Effect.gen(function* () {
       }),
     ),
   )
+
+  // Assign fork to the same node with its slot
+  yield* repo.assignNode(forkId, auth.orgId, source.nodeId, forkSlot)
 
   // Increment parent's fork count only after the node confirms the fork succeeded.
   yield* repo.incrementForkCount(sourceIdBytes, auth.orgId)
