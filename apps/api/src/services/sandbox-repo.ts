@@ -11,6 +11,7 @@ export interface SandboxRow {
   readonly id: Uint8Array
   readonly orgId: string
   readonly nodeId: Uint8Array | null
+  readonly slotIndex: number | null
   readonly imageId: Uint8Array
   readonly profileId: Uint8Array
   readonly profileName: ProfileName
@@ -157,6 +158,7 @@ export interface SandboxRepoApi {
     id: Uint8Array,
     orgId: string,
     nodeId: Uint8Array,
+    slotIndex?: number | undefined,
   ) => Effect.Effect<SandboxRow | null, never, never>
 
   /** Count sandboxes in active states (queued, provisioning, running) for an org. */

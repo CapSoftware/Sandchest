@@ -77,6 +77,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           id: params.id,
           orgId: params.orgId,
           nodeId: null,
+          slotIndex: null,
           imageId: params.imageId,
           profileId: params.profileId,
           profileName: params.profileName,
@@ -182,6 +183,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
           id: params.id,
           orgId: params.orgId,
           nodeId: params.source.nodeId,
+          slotIndex: null,
           imageId: params.source.imageId,
           profileId: params.source.profileId,
           profileName: params.source.profileName,
@@ -326,7 +328,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         })
       }),
 
-    assignNode: (id, orgId, nodeId) =>
+    assignNode: (id, orgId, nodeId, slotIndex) =>
       Effect.sync(() => {
         const key = keyFor(id)
         const row = store.get(key)
@@ -335,6 +337,7 @@ export function createInMemorySandboxRepo(): SandboxRepoApi {
         const updated: SandboxRow = {
           ...row,
           nodeId,
+          slotIndex: slotIndex ?? row.slotIndex,
           status: 'running',
           startedAt: now,
           lastActivityAt: now,

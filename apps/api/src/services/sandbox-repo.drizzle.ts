@@ -36,6 +36,7 @@ function toSandboxRow(row: typeof sandboxes.$inferSelect): SandboxRow {
     id: row.id,
     orgId: row.orgId,
     nodeId: row.nodeId,
+    slotIndex: row.slotIndex ?? null,
     imageId: row.imageId,
     profileId: row.profileId,
     profileName: row.profileName as ProfileName,
@@ -427,18 +428,22 @@ export function createDrizzleSandboxRepo(db: Database): SandboxRepoApi {
         return rows.map(toSandboxRow)
       }),
 
-    assignNode: (id, orgId, nodeId) =>
+    assignNode: (id, orgId, nodeId, slotIndex) =>
       Effect.promise(async () => {
         const now = new Date()
+        const setClause: Record<string, unknown> = {
+          nodeId,
+          status: 'running',
+          startedAt: now,
+          lastActivityAt: now,
+          updatedAt: now,
+        }
+        if (slotIndex !== undefined) {
+          setClause.slotIndex = slotIndex
+        }
         await db
           .update(sandboxes)
-          .set({
-            nodeId,
-            status: 'running',
-            startedAt: now,
-            lastActivityAt: now,
-            updatedAt: now,
-          })
+          .set(setClause)
           .where(and(eq(sandboxes.id, id), eq(sandboxes.orgId, orgId)))
 
         return selectByIdAndOrg(id, orgId)
