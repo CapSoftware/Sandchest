@@ -1,72 +1,17 @@
-# Dependencies
-node_modules/
-
-# Build outputs
-dist/
-.next/
-.astro/
-target/
+.DS_Store
+*.log
 *.tsbuildinfo
 
-# Turborepo
-.turbo/
+node_modules
+.turbo
 
-# SST
-.sst/
-
-# Environment
 .env
 .env.*
 !.env.example
 
-# MCP config (contains env var references)
-.mcp.json
+.next
+out
+dist
+coverage
 
-# mTLS certificates (private keys)
-/certs/
-
-# Docker
-docker-compose.override.yml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-*.egg-info/
-.pytest_cache/
-
-# Lock files (project uses bun)
-pnpm-lock.yaml
-package-lock.json
-yarn.lock
-
-# Next.js generated
-next-env.d.ts
-
-# Logs
-*.log
-
-/docs/
-DEPLOYMENT.md
-.source/
-
-/.agents/*
-!/.agents/skills/
-/.agents/skills/*
-!/.agents/skills/sandchest
-/skills/*
-!/skills/sandchest/
-!/skills/sandchest/**
-.claude/skills/*
-!.claude/skills/sandchest
-.ralphy
+.vercel

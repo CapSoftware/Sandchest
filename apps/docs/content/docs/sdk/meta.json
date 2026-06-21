@@ -1,5 +1,0 @@
-{
-  "title": "SDK",
-  "defaultOpen": true,
-  "pages": ["quickstart", "client", "sandbox", "sessions", "files", "artifacts", "streaming", "error-handling"]
-}

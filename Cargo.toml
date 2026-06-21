@@ -1,6 +1,0 @@
-[workspace]
-members = [
-    "crates/sandchest-node",
-    "crates/sandchest-agent",
-]
-resolver = "2"

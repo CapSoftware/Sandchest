@@ -1,56 +1,20 @@
-import type { Metadata } from 'next'
-import { Analytics } from '@vercel/analytics/next'
-import Providers from '@/components/Providers'
-import '@/styles/global.css'
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: 'Sandchest — The sandbox platform for AI agents',
-  description:
-    'Give your agents undo. Bare metal sandboxes that fork in under a second.',
-  openGraph: {
-    title: 'Sandchest — The sandbox platform for AI agents',
-    description:
-      'Give your agents undo. Bare metal sandboxes that fork in under a second.',
-    images: ['/og.png'],
-    type: 'website',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Sandchest — The sandbox platform for AI agents',
-    description:
-      'Give your agents undo. Bare metal sandboxes that fork in under a second.',
-    images: ['/og.png'],
-  },
-  icons: {
-    icon: [
-      { url: '/favicon.svg', type: 'image/svg+xml' },
-      { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
-      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
-    ],
-    apple: '/apple-touch-icon.png',
-  },
-}
+  title: "Sandchest",
+  description: "A minimal Sandchest app shell.",
+};
 
 export default function RootLayout({
   children,
-}: {
-  children: React.ReactNode
-}) {
+}: Readonly<{
+  children: ReactNode;
+}>) {
   return (
     <html lang="en">
-      <head>
-        <link
-          rel="preload"
-          href="/fonts/GeistMono-Variable.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-      </head>
-      <body>
-        <Providers>{children}</Providers>
-        <Analytics />
-      </body>
+      <body>{children}</body>
     </html>
-  )
+  );
 }

@@ -1,29 +1,25 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "ui": "tui",
-  "globalDependencies": [".env"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**"
+      ]
     },
-    "typecheck": {
-      "dependsOn": ["^build"]
-    },
-    "lint": {},
-    "test": {
-      "dependsOn": ["^build"]
-    },
-    "test:e2e": {
-      "dependsOn": ["build"]
-    },
-    "//#db:up": {
+    "clean": {
       "cache": false
     },
     "dev": {
-      "dependsOn": ["//#db:up"],
       "cache": false,
       "persistent": true
+    },
+    "lint": {},
+    "typecheck": {
+      "outputs": []
     }
   }
 }

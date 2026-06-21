@@ -1,1 +1,0 @@
-ALTER TABLE `sandboxes` ADD `slot_index` tinyint;
