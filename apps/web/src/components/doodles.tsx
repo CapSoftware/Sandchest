@@ -36,7 +36,7 @@ export function Logo({ className }: MarkProps) {
       <Image
         src="/sandchest-logo-dark.svg"
         alt="Sandchest"
-        width={2603}
+        width={2382}
         height={473}
         priority
         className="h-full w-auto"

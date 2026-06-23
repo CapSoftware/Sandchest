@@ -14,7 +14,7 @@ export function Header() {
         <Image
           src="/sandchest-logo-dark.svg"
           alt="Sandchest"
-          width={2603}
+          width={2382}
           height={473}
           priority
           className="h-7 w-auto"
