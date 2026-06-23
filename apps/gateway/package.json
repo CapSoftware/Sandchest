@@ -1,0 +1,22 @@
+{
+  "name": "@sandchest/gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "clean": "rm -rf dist .wrangler",
+    "dev": "wrangler dev --port 8787",
+    "gateway:dev": "wrangler dev --port 8787",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandchest/config": "workspace:*",
+    "@sandchest/shared": "workspace:*",
+    "hono": "^4.12.27"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260623.1",
+    "wrangler": "^4.104.0"
+  }
+}

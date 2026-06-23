@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sandchest-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-23",
+  "vars": {
+    "SANDCHEST_ENV": "development",
+    "WEB_ORIGIN": "http://localhost:3000",
+    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+    "LOG_LEVEL": "debug"
+  }
+}
