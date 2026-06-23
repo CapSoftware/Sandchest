@@ -9,7 +9,10 @@
   "scripts": {
     "build": "turbo build",
     "clean": "turbo clean",
+    "compose:down": "docker compose down",
+    "compose:up": "docker compose up -d postgres redis",
     "dev": "turbo dev",
+    "gateway:dev": "turbo gateway:dev --filter=@sandchest/gateway",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck"
   },
