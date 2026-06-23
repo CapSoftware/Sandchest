@@ -5,6 +5,20 @@
       "dependsOn": [
         "^build"
       ],
+      "outputs": []
+    },
+    "@sandchest/gateway#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@sandchest/web#build": {
+      "dependsOn": [
+        "^build"
+      ],
       "outputs": [
         ".next/**",
         "!.next/cache/**"
@@ -13,7 +27,17 @@
     "clean": {
       "cache": false
     },
+    "//#compose:down": {
+      "cache": false
+    },
+    "//#compose:up": {
+      "cache": false
+    },
     "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "gateway:dev": {
       "cache": false,
       "persistent": true
     },
