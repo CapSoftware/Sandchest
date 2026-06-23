@@ -1,194 +1,291 @@
-:root {
-  color-scheme: light;
-  --background: #f5f7f8;
-  --foreground: #101418;
-  --muted: #64707d;
-  --border: #d9e0e6;
-  --panel: #ffffff;
-  --panel-strong: #eef5f2;
-  --accent: #0f7b63;
+@import "tailwindcss";
+
+/* ----------------------------------------------------------------------------
+   Sandchest — Cursor-inspired. Space Grotesk (a squarish grotesque, in the
+   spirit of Cursor Gothic) for headings + body; Geist Mono kept only as a
+   technical accent. Wide, confident layout, slightly warm near-black, hairline
+   dividers, one warm accent. Larger type, generous air.
+---------------------------------------------------------------------------- */
+@theme {
+  /* grotesque for everything readable, mono only for code-like accents */
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo,
+    monospace;
+
+  /* type scale — larger and more confident, Cursor-like */
+  --text-xs: 0.75rem; /* 12 */
+  --text-sm: 0.875rem; /* 14 */
+  --text-base: 1rem; /* 16 — body */
+  --text-lg: 1.125rem; /* 18 */
+  --text-xl: 1.375rem; /* 22 */
+  --text-2xl: 1.75rem; /* 28 — section heads */
+  --text-3xl: 2.25rem; /* 36 */
+  --text-4xl: 3.25rem; /* 52 */
+  --text-5xl: 4rem; /* 64 — hero */
+
+  /* warm sand-black surfaces (Sandchest = sand + chest) */
+  --color-bg: #15120c;
+  --color-surface: #1d1912;
+  --color-surface-2: #251f17;
+
+  /* hairlines, warm */
+  --color-line: #3a342a; /* section dividers */
+  --color-line-strong: #4c453a; /* buttons, inputs, panels */
+
+  /* text, warm grays */
+  --color-fg: #f1ebe2; /* headings */
+  --color-fg-soft: #b9b1a4; /* body */
+  --color-muted: #837a6c; /* secondary */
+  --color-faint: #5f574a; /* tertiary */
+
+  /* single warm accent */
+  --color-accent: #f5853f;
+  --color-accent-2: #f5a524;
+
+  --radius-sm: 0.1875rem;
+  --radius-md: 0.3125rem;
+  --radius-lg: 0.5rem;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  min-height: 100%;
-}
-
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
-.app-shell {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  min-height: 100vh;
-}
-
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
-  padding: 24px;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-}
-
-.brand-mark {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--foreground);
-  color: white;
-  font-size: 14px;
-}
-
-.nav {
-  display: grid;
-  gap: 6px;
-}
-
-.nav a {
-  border-radius: 8px;
-  color: var(--muted);
-  padding: 10px 12px;
-}
-
-.nav a[aria-current="page"] {
-  background: var(--panel-strong);
-  color: var(--foreground);
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  padding: 18px 28px;
-}
-
-.status {
-  border: 1px solid rgba(15, 123, 99, 0.25);
-  border-radius: 999px;
-  color: var(--accent);
-  padding: 6px 10px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.content {
-  width: min(100%, 1120px);
-  padding: 48px 28px;
-}
-
-.eyebrow {
-  margin: 0 0 12px;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-h1 {
-  max-width: 760px;
-  margin: 0;
-  font-size: clamp(38px, 7vw, 72px);
-  line-height: 1;
-}
-
-.summary {
-  max-width: 680px;
-  margin: 22px 0 0;
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 1.6;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 44px;
-}
-
-.tile {
-  min-height: 150px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 20px;
-}
-
-.tile strong {
-  display: block;
-  margin-bottom: 10px;
-}
-
-.tile span {
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-@media (max-width: 760px) {
-  .app-shell {
-    grid-template-columns: 1fr;
+@layer base {
+  * {
+    border-color: var(--color-line);
   }
 
-  .sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
   }
 
-  .nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-fg-soft);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.6;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* `clip`, not `hidden`: hidden makes <body> a scroll container, which
+       breaks `position: sticky` for the chest-reveal pin. clip still trims
+       the horizontal bleed. */
+    overflow-x: clip;
   }
 
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
+  ::selection {
+    background: rgba(245, 133, 63, 0.26);
+    color: #fff;
   }
 
-  .content {
-    padding-top: 36px;
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2c2820;
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3c372d;
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /* centered page column — wide and confident, in the spirit of cursor.com
+     (~1200px max with generous but not cavernous gutters) */
+  .page {
+    width: 100%;
+    max-width: 75rem;
+    margin-inline: auto;
   }
 
-  .grid {
-    grid-template-columns: 1fr;
+  .gutter {
+    padding-inline: 1.5rem;
+  }
+  @media (min-width: 768px) {
+    .gutter {
+      padding-inline: 3rem;
+    }
+  }
+
+  /* flat surface with hairline border */
+  .panel {
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-lg);
+  }
+
+  .link-muted {
+    color: var(--color-muted);
+    transition: color 0.15s ease;
+  }
+  .link-muted:hover {
+    color: var(--color-fg);
+  }
+
+  .focusable:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--color-bg),
+      0 0 0 4px rgba(245, 133, 63, 0.55);
+  }
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Benchmark bar fill — grows from the left on load. */
+.bar-fill {
+  transform-origin: left center;
+  animation: bar-grow 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ----------------------------------------------------------------------------
+   The treasure: the one loud thing on the page. A Fortnite-style loot chest —
+   it glows gold, pours a beam of light upward and shimmers with rising sparks
+   even at rest, then erupts when you reach for it. Everything else stays quiet;
+   all the boldness lives here.
+---------------------------------------------------------------------------- */
+@layer components {
+  /* a gold pill that already glows at rest (like a chest you can see across the
+     map) and floods on hover (like standing right over it) */
+  .chest-btn {
+    position: relative;
+    isolation: isolate;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-line-strong);
+    background-color: var(--color-surface);
+    /* a real warm glow at rest — the chest is always "loot ready". Kept tight
+       and hugging the edge; the WebGPU motes do the rest. */
+    box-shadow:
+      0 0 16px -8px rgba(245, 140, 66, 0.42),
+      0 0 32px -14px rgba(245, 140, 66, 0.22);
+    transition:
+      background-color 0.2s ease,
+      box-shadow 0.4s ease;
+  }
+  .chest-btn:hover {
+    background-color: var(--color-surface-2);
+    /* goes molten when you reach for it — brighter, still tight */
+    box-shadow:
+      0 0 18px -6px rgba(245, 133, 63, 0.6),
+      0 0 44px -12px rgba(245, 140, 66, 0.5);
+  }
+
+  /* radial aura behind the button, a quiet ember pool that floods on hover.
+     Only the scale pulses (the breathe); opacity is owned by hover so the two
+     never fight over the same property. */
+  .chest-aura {
+    position: absolute;
+    inset: -42% -18%;
+    z-index: -1;
+    border-radius: inherit;
+    background: radial-gradient(
+      54% 110% at 50% 92%,
+      rgba(245, 140, 66, 0.5),
+      rgba(245, 133, 63, 0.16) 46%,
+      transparent 72%
+    );
+    filter: blur(14px);
+    opacity: 0.32;
+    animation: chest-breathe 4s ease-in-out infinite;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+  .chest-btn:hover .chest-aura {
+    opacity: 1;
+  }
+
+  /* loot beam — a soft column of light rising out of the top of the pill, the
+     Fortnite "loot beam". Only the height pulses (the rise); opacity is owned by
+     hover so the two never fight over the same property. */
+  .chest-beam {
+    position: absolute;
+    left: 50%;
+    bottom: 4%;
+    width: 54%;
+    height: 148%;
+    z-index: -1;
+    border-radius: 999px 999px 45% 45%;
+    background: linear-gradient(
+      to top,
+      rgba(245, 165, 36, 0.6) 0%,
+      rgba(245, 133, 63, 0.3) 34%,
+      rgba(254, 194, 66, 0.1) 64%,
+      transparent 100%
+    );
+    filter: blur(16px);
+    opacity: 0.32;
+    transform: translateX(-50%) scaleY(1);
+    transform-origin: 50% 100%;
+    animation: chest-beam-rise 3.6s ease-in-out infinite;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+  .chest-btn:hover .chest-beam {
+    opacity: 1;
+  }
+}
+
+@keyframes chest-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/* the loot beam gently lengthens and settles, so the light feels like it's
+   pouring up out of the chest */
+@keyframes chest-beam-rise {
+  0%,
+  100% {
+    transform: translateX(-50%) scaleY(1);
+  }
+  50% {
+    transform: translateX(-50%) scaleY(1.14);
+  }
+}
+
+/* the chest idly floats so it always feels buoyant and playful, even at rest —
+   layered under the scroll-driven transforms so the two compose */
+@keyframes chest-bob {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+.chest-bob {
+  animation: chest-bob 4.6s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
   }
 }
