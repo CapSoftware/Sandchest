@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+  --text-4xl: 3.25rem;
+  --text-5xl: 4rem;
+
+  --color-bg: #15120c;
+  --color-surface: #1d1912;
+  --color-surface-2: #251f17;
+
+  --color-line: #3a342a;
+  --color-line-strong: #4c453a;
+
+  --color-fg: #f1ebe2;
+  --color-fg-soft: #b9b1a4;
+  --color-muted: #837a6c;
+  --color-faint: #5f574a;
+
+  --color-accent: #f5853f;
+  --color-accent-2: #f5a524;
+
+  --radius-sm: 0.1875rem;
+  --radius-md: 0.3125rem;
+  --radius-lg: 0.5rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-fg-soft);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.6;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* `clip`, not `hidden`: hidden makes <body> a scroll container, which
+       breaks `position: sticky` for the chest-reveal pin. clip still trims
+       the horizontal bleed. */
+    overflow-x: clip;
+  }
+
+  ::selection {
+    background: rgba(245, 133, 63, 0.26);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2c2820;
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3c372d;
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  .gutter {
+    padding-inline: 1.5rem;
+  }
+  @media (min-width: 768px) {
+    .gutter {
+      padding-inline: 3rem;
+    }
+  }
+}
+
+/* the chest idly floats so it always feels buoyant and playful, even at rest —
+   layered under the scroll-driven transforms so the two compose */
+@keyframes chest-bob {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+.chest-bob {
+  animation: chest-bob 4.6s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

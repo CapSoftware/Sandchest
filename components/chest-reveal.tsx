@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import {
   backOut,
   easeInOut,
@@ -10,7 +11,6 @@ import {
   useTransform,
   type MotionValue,
 } from "motion/react";
-import { lineup } from "@/lib/data";
 import { useReducedMotionSafe } from "@/lib/use-reduced-motion-safe";
 import { ChestGas } from "./chest-gas";
 
@@ -20,8 +20,8 @@ import { ChestGas } from "./chest-gas";
    The real Sandchest icon, unchanged. As you scroll, the lid (the top of the
    icon) swings open on a hinge — tilting back in 3D perspective like a real
    treasure chest — a dark interior is revealed, light pours out, and the loot
-   (the models) rises up from inside. Scroll back up and the lid swings shut,
-   back to the exact logo.
+   rises up from inside. Scroll back up and the lid swings shut, back to the
+   exact logo.
 
    We render the icon twice and cut it with complementary clip-paths at the seam
    (just under the lock): a "lid" half (top) and a "body" half (bottom). Closed,
@@ -31,8 +31,8 @@ import { ChestGas } from "./chest-gas";
    The lid is the ONLY piece transformed in 3D: a rotateX about a hinge set back
    in Z (the rear seam), projected by a `perspective` on the stage. Everything
    else (interior, glow, embers, loot, body) is a flat layer ordered by z-index —
-   loot sits above the lid (so the risen models read as out in front of the open
-   lid) but below the body wall (so they emerge from within, not float on top).
+   loot sits above the lid (so the risen reveal reads as out in front of the open
+   lid) but below the body wall (so it emerges from within, not floats on top).
    The perspective + hinge depth are expressed in `cqi` units against the scene
    container, so the 3D scales with the responsive chest size without any JS.
 ---------------------------------------------------------------------------- */
@@ -162,6 +162,14 @@ function ChestRevealScrolly() {
           className="pointer-events-none relative z-40 mb-32 w-full max-w-[42rem] px-6 text-center opacity-0 sm:mb-24"
           style={{ y: headlineY }}
         >
+          <Image
+            src="/sandchest-logo-dark.svg"
+            alt="Sandchest"
+            width={2382}
+            height={473}
+            priority
+            className="mx-auto mb-6 h-7 w-auto"
+          />
           <h2 className="text-balance text-[2.25rem] font-semibold leading-[1.04] tracking-[-0.02em] text-fg md:text-5xl">
             What&rsquo;s in the{" "}
             <span className="bg-gradient-to-b from-[#FDD363] via-[#F5A524] to-[#F5853F] bg-clip-text text-transparent drop-shadow-[0_0_22px_rgba(245,165,36,0.4)]">
@@ -169,10 +177,6 @@ function ChestRevealScrolly() {
             </span>
             ?
           </h2>
-          <p className="mx-auto mt-3 max-w-[34rem] text-sm text-fg-soft md:text-base">
-            The best open coding models, all behind one open-source gateway.
-            Use the right model for each coding-agent run.
-          </p>
         </motion.div>
 
         {/* the chest scene — a container so the 3D depth scales with the
@@ -299,7 +303,7 @@ function ChestRevealScrolly() {
 
             {/* lid — the only piece that moves in 3D: it swings open on its rear
                 hinge, tilting back in perspective. Below the loot, so the risen
-                models read as out in front of the open lid. */}
+                reveal reads as out in front of the open lid. */}
             <motion.div
               aria-hidden
               className="absolute inset-0 z-[5] bg-contain bg-center bg-no-repeat"
@@ -312,23 +316,15 @@ function ChestRevealScrolly() {
               }}
             />
 
-            {/* the loot — the models, rising up out of the open chest. Sits
-                ABOVE the gas (z-9) so the chips stay crisp and legible while the
-                vapour wafts behind them, the way a Fortnite item reads clearly in
+            {/* the loot — what's inside, rising up out of the open chest. Sits
+                ABOVE the gas (z-9) so it stays crisp and legible while the
+                vapour wafts behind it, the way a Fortnite item reads clearly in
                 front of its loot beam. */}
             <div
               className="absolute left-1/2 z-[9] flex w-[78%] flex-col items-center gap-3"
               style={{ top: `${SEAM}%`, transform: "translate(-50%, -112%)" }}
             >
-              {lineup.map((model, i) => (
-                <LootChip
-                  key={model.name}
-                  model={model}
-                  index={i}
-                  total={lineup.length}
-                  progress={scrollYProgress}
-                />
-              ))}
+              <NothingChip progress={scrollYProgress} />
             </div>
 
             {/* body — bottom of the icon (clipped below the seam): the fixed
@@ -349,53 +345,20 @@ function ChestRevealScrolly() {
   );
 }
 
-/* A single model "loot" chip — owns its slice of the scroll timeline so they
-   rise out staggered after the lid lifts, then hold until you scroll back up. */
-function LootChip({
-  model,
-  index,
-  total,
-  progress,
-}: {
-  model: (typeof lineup)[number];
-  index: number;
-  total: number;
-  progress: MotionValue<number>;
-}) {
-  // hold on the open, lit chest for a beat, then the loot springs out of it,
-  // each chip popping past its mark and settling (backOut) for a playful bounce;
-  // top chip rises last
-  const start = 0.5 + (total - 1 - index) * 0.06;
-  const y = useTransform(progress, [start, start + 0.26], [98, 0], {
-    ease: backOut,
-  });
-  const opacity = useTransform(progress, [start, start + 0.12], [0, 1]);
-  const scale = useTransform(progress, [start, start + 0.24], [0.5, 1], {
-    ease: backOut,
-  });
+function NothingChip({ progress }: { progress: MotionValue<number> }) {
+  const y = useTransform(progress, [0.5, 0.76], [98, 0], { ease: backOut });
+  const opacity = useTransform(progress, [0.5, 0.62], [0, 1]);
+  const scale = useTransform(progress, [0.5, 0.74], [0.5, 1], { ease: backOut });
   const ref = useOpacity(opacity);
-
-  const live = model.status === "live";
 
   return (
     <motion.div
       ref={ref}
       style={{ y, scale }}
-      className="flex w-full items-center gap-2.5 rounded-md border border-line-strong bg-surface px-3 py-2 opacity-0 shadow-[0_12px_34px_-12px_rgba(245,140,66,0.75)]"
+      className="flex w-full items-center justify-center rounded-md border border-line-strong bg-surface px-3 py-2 opacity-0 shadow-[0_12px_34px_-12px_rgba(245,140,66,0.75)]"
     >
-      <span
-        aria-hidden
-        className={`h-2 w-2 shrink-0 rounded-full ${
-          live ? "bg-accent shadow-[0_0_10px_1px_rgba(245,133,63,0.9)]" : "bg-faint"
-        }`}
-      />
-      <span className="text-sm font-semibold text-fg">{model.name}</span>
-      <span
-        className={`ml-auto rounded-[3px] border px-1.5 py-0.5 font-mono text-[0.65rem] ${
-          live ? "border-accent/50 text-accent" : "border-line-strong text-muted"
-        }`}
-      >
-        {live ? "live" : "soon"}
+      <span className="text-sm font-semibold text-fg">
+        Nothing yet. Check back soon.
       </span>
     </motion.div>
   );
@@ -407,9 +370,17 @@ function ChestRevealStatic() {
     <section
       id="chest"
       aria-label="What's in the chest"
-      className="gutter border-t border-line py-16 md:py-20"
+      className="gutter py-16 md:py-20"
     >
       <div className="relative mx-auto flex max-w-[40rem] flex-col items-center text-center">
+        <Image
+          src="/sandchest-logo-dark.svg"
+          alt="Sandchest"
+          width={2382}
+          height={473}
+          priority
+          className="mb-6 h-7 w-auto"
+        />
         <h2 className="text-balance text-[2.25rem] font-semibold leading-[1.04] tracking-[-0.02em] text-fg md:text-4xl">
           What&rsquo;s in the{" "}
           <span className="bg-gradient-to-b from-[#FDD363] via-[#F5A524] to-[#F5853F] bg-clip-text text-transparent drop-shadow-[0_0_22px_rgba(245,165,36,0.4)]">
@@ -417,34 +388,11 @@ function ChestRevealStatic() {
           </span>
           ?
         </h2>
-        <p className="mx-auto mt-3 max-w-[34rem] text-sm text-fg-soft md:text-base">
-          The best open coding models, all behind one open-source gateway. Use
-          the right model for each coding-agent run.
-        </p>
 
-        <div className="mt-10 flex flex-col items-center gap-2">
-          {lineup.map((model) => {
-            const live = model.status === "live";
-            return (
-              <div
-                key={model.name}
-                className="flex items-center gap-2.5 rounded-md border border-line-strong bg-surface px-3 py-2"
-              >
-                <span
-                  aria-hidden
-                  className={`h-2 w-2 shrink-0 rounded-full ${live ? "bg-accent" : "bg-faint"}`}
-                />
-                <span className="font-mono text-sm font-semibold text-fg">{model.name}</span>
-                <span
-                  className={`ml-auto rounded-[3px] border px-1.5 py-0.5 font-mono text-[0.65rem] ${
-                    live ? "border-accent/50 text-accent" : "border-line-strong text-muted"
-                  }`}
-                >
-                  {live ? "live" : "soon"}
-                </span>
-              </div>
-            );
-          })}
+        <div className="mt-10 flex items-center rounded-md border border-line-strong bg-surface px-3 py-2">
+          <span className="text-sm font-semibold text-fg">
+            Nothing yet. Check back soon.
+          </span>
         </div>
 
         <div className="relative mt-10 w-[clamp(15rem,58vw,20rem)]">
