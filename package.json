@@ -8,7 +8,9 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "indexer:build": "cargo build --release -p sandchest-indexer",
+    "scan": "bun run --cwd packages/engine scan"
   },
   "devDependencies": {
     "turbo": "^2.11.10"

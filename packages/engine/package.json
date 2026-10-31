@@ -5,14 +5,18 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./llm": "./src/llm/index.ts"
+    "./llm": "./src/llm/index.ts",
+    "./indexer": "./src/indexer/index.ts",
+    "./scan": "./src/scan/index.ts"
   },
   "scripts": {
+    "scan": "bun --env-file=../../.env.local src/cli.ts",
     "sanity": "bun --env-file=../../.env.local src/sanity.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sandchest/workspace": "workspace:*",
     "zod": "^4.6.7"
   },
   "devDependencies": {
