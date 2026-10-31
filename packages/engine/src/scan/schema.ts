@@ -35,6 +35,9 @@ export const CATEGORIES = [
   "csrf",
   "unrestricted_file_upload",
   "denial_of_service",
+  "business_logic",
+  "race_condition",
+  "resource_abuse",
   "prompt_injection",
   "other",
 ] as const;
@@ -164,6 +167,10 @@ export const ThreatModelSchema = z.object({
   sensitiveAssets: z.array(z.string()),
   dangerousSinks: z.array(z.object({ kind: z.string(), location: z.string(), note: z.string() })).max(30),
   frameworkProtections: z.array(z.string()).describe("Protections the framework or code applies by default"),
+  abuseSurfaces: z
+    .array(z.string())
+    .max(20)
+    .describe("Flows worth abusing, with where they live: payments, plans, credits, quotas, coupons, invites, sharing, messaging, and per-request costs (AI, transcoding, storage, exports)"),
   subsystems: z
     .array(
       z.object({

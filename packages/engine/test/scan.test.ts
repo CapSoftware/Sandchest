@@ -2,8 +2,12 @@ import { describe, expect, test } from "bun:test";
 import type { IndexerClient } from "../src/indexer";
 import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate, type Located } from "../src/scan/gate";
 import { fixPrompt } from "../src/scan/fix-prompt";
-import { planAssignments } from "../src/scan/hunt";
-import { UsageMeter } from "../src/scan/metrics";
+import { planAssignments, planCoverage } from "../src/scan/hunt";
+import { Limiter, UsageMeter } from "../src/scan/metrics";
+import { runAgent } from "../src/scan/agent";
+import { agentTool } from "../src/scan/tools";
+import { defineTool, type LlmClient } from "../src/llm";
+import { z } from "zod";
 import { compareVersions, fixedVersionFor } from "../src/scan/osv";
 import type { Candidate, Finding, ThreatModel } from "../src/scan/schema";
 import { createWrap, numberLines } from "../src/scan/tools";
@@ -140,6 +144,7 @@ describe("hunt plan", () => {
     sensitiveAssets: [],
     dangerousSinks: [],
     frameworkProtections: [],
+    abuseSurfaces: ["Credits are spent per export"],
     subsystems: [
       { name: "billing", paths: ["src/billing"], description: "", risk: "medium" },
       { name: "auth", paths: ["src/auth/"], description: "", risk: "high" },
@@ -151,17 +156,18 @@ describe("hunt plan", () => {
     { method: "GET", path: "/invoices", at: "src/billing/routes.ts:9", chain: ["auth"], handlers: [], framework: "express" },
   ];
 
-  test("riskiest subsystems first, then access control and leads", () => {
+  test("riskiest subsystems first, then access control, abuse and leads", () => {
     const leads = [{ id: "L1", kind: "secret" as const, title: "key", at: "config.ts:1", detail: "" }];
     const plan = planAssignments(model, routes, leads, 8, createWrap("t"));
-    expect(plan.map((a) => a.name)).toEqual(["auth", "billing", "access control", "leads"]);
+    expect(plan.map((a) => a.name)).toEqual(["auth", "billing", "access control", "abuse", "leads"]);
+    expect(plan[3]!.brief).toContain("Credits are spent per export");
     expect(plan[0]!.brief).toContain("POST /login");
     expect(plan[0]!.brief).not.toContain("/invoices");
   });
 
   test("respects the hunter budget and wraps repository text", () => {
     const plan = planAssignments(model, routes, [], 3, createWrap("t"));
-    expect(plan.map((a) => a.name)).toEqual(["auth", "access control"]);
+    expect(plan.map((a) => a.name)).toEqual(["auth", "access control", "abuse"]);
     expect(plan[1]!.brief).toContain("<t>\n- POST /login");
   });
 });
@@ -224,5 +230,69 @@ describe("advisories", () => {
   test("compares versions numerically", () => {
     expect(compareVersions("16.3.10", "16.3.8")).toBeGreaterThan(0);
     expect(compareVersions("v1.2", "1.2.0")).toBe(0);
+  });
+});
+
+describe("agent budget", () => {
+  /** A model that calls the `ping` tool forever. */
+  const looping: LlmClient = {
+    config: { baseUrl: "http://fake", apiKey: "k", model: "m" },
+    async chat() {
+      const call = { id: "c", type: "function" as const, function: { name: "ping", arguments: "{}" } };
+      return {
+        content: "",
+        reasoning: "",
+        toolCalls: [call],
+        finishReason: "tool_calls",
+        usage: { inputTokens: 1, cachedTokens: 0, outputTokens: 1, reasoningTokens: 0 },
+        message: { role: "assistant" as const, content: null, tool_calls: [call] },
+        retries: 0,
+      };
+    },
+  };
+
+  test("a turn budget can grow while the agent runs", async () => {
+    let earned = 0;
+    const ping = agentTool(defineTool({ name: "ping", description: "", args: z.object({}) }), async () => {
+      earned++;
+      return "pong";
+    });
+    const result = await runAgent({
+      client: looping,
+      role: "hunt",
+      messages: [{ role: "user", content: "go" }],
+      tools: [ping],
+      limiter: new Limiter(1),
+      meter: new UsageMeter(),
+      // Two turns, plus one for every two pings, capped at six.
+      maxTurns: () => Math.min(6, 2 + Math.floor(earned / 2)),
+    });
+    expect(result.turns).toBe(3);
+  });
+});
+
+describe("coverage pass", () => {
+  const sink = (id: string, title: string, at: string) => ({ id, kind: "sink" as const, title, at, detail: "" });
+  const leads = [
+    sink("L1", "sql sink with built input", "routes/search.ts:23"),
+    sink("L2", "sql sink with built input", "routes/login.ts:34"),
+    sink("L3", "redirect sink with built input", "routes/redirect.ts:9"),
+    sink("L4", "command sink with built input (no route reaches it)", "scripts/build.ts:3"),
+    sink("L5", "path sink with variable input", "routes/files.ts:12"),
+  ];
+  const read = new Set(["routes/search.ts", "routes/login.ts", "routes/redirect.ts"]);
+
+  test("rules on uncited injection sinks even in files someone read", () => {
+    const [plan] = planCoverage([], leads, read, [{ file: "routes/login.ts", line: 35 }], createWrap("t"));
+    expect(plan!.brief).toContain("routes/search.ts:23");
+    expect(plan!.brief).toContain("routes/files.ts:12");
+    expect(plan!.brief).not.toContain("routes/login.ts:34");
+    expect(plan!.brief).not.toContain("routes/redirect.ts:9");
+    expect(plan!.brief).not.toContain("scripts/build.ts");
+  });
+
+  test("plans nothing when everything is covered", () => {
+    const cited = [{ file: "routes/search.ts", line: 23 }, { file: "routes/login.ts", line: 34 }, { file: "routes/files.ts", line: 12 }];
+    expect(planCoverage([], leads, read, cited, createWrap("t"))).toEqual([]);
   });
 });

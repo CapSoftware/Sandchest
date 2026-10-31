@@ -31,7 +31,9 @@ const MAX_ROUTES_LISTED = 150;
 const MAX_LEADS_LISTED = 80;
 /** Entry points one access-control hunter reviews; more are split across hunters. */
 const ROUTES_PER_ACCESS_HUNTER = 60;
-const MAX_ACCESS_HUNTERS = 3;
+const MAX_ACCESS_HUNTERS = 2;
+/** Sinks every scan must rule on when a route reaches them: the classic injection shapes. */
+const HIGH_SIGNAL_SINK = /^(sql|nosql|command|code_eval|deserialization|xxe|template|ssrf|path) sink with (built|variable) input$/;
 /** Items one coverage hunter checks. */
 const COVERAGE_ITEMS_PER_HUNTER = 30;
 const MAX_COVERAGE_HUNTERS = 2;
@@ -56,7 +58,8 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
     !!at && prefixes.some((prefix) => prefix === "" || at === prefix || at.startsWith(`${prefix}/`) || at.startsWith(`${prefix}:`));
 
   const accessGroups = chunk(routes, ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
-  const reserved = Math.max(1, accessGroups.length) + 1;
+  // Access control, abuse and leads hunters always run; subsystems share the rest.
+  const reserved = Math.max(1, accessGroups.length) + 2;
   for (const subsystem of subsystems.slice(0, Math.max(1, maxHunters - reserved))) {
     const prefixes = subsystem.paths.map((p) => normalizePath(p).replace(/\/+$/, ""));
     covered.push(...prefixes);
@@ -96,6 +99,18 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
     }
   }
 
+  assignments.push({
+    name: "abuse",
+    brief: [
+      "Your scope: how the product can be abused, rather than broken into. Think like a fraudster and an abusive customer: what does this application let people get, spend, send or trigger, and how can you get more of it than you should, at someone else's expense?",
+      "Look for: payments, plans and credits that can be skipped, reused, reversed or set by the client; coupons, referrals and trials that stack or reset; quantities, prices and currencies the client controls; steps that can be skipped, repeated or raced (two requests at once); invites, sharing and notifications that send attacker-chosen content to others; brute-forceable codes, passwords and tokens with no rate limit or lockout; user enumeration; and endpoints that make the owner pay per request (AI calls, transcoding, exports, storage, email) with no limit.",
+      model.abuseSurfaces.length ? section("Worth abusing (from recon)", model.abuseSurfaces, "") : "",
+      section("Entry points", routes.slice(0, MAX_ROUTES_LISTED).map(formatRoute), "None found by the index. Use search() to find handlers."),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+
   const unscoped = leads
     .filter((lead) => lead.kind !== "sink" || !under(covered, lead.at))
     .filter((lead) => lead.kind !== "vulnerable_dependency" || lead.detail.startsWith("imported"))
@@ -113,13 +128,30 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
 }
 
 /**
- * A second pass over what the first hunters never opened: reachable sinks
- * and route handlers in files no agent read. Hunters reach different code
- * from run to run; this closes the gaps deterministically.
+ * A second pass over what the first hunters left open: route handlers in
+ * files no agent read, reachable sinks in such files, and high-signal sinks
+ * (injection shapes) that no candidate cites even if someone read the file.
+ * Hunters reach different code from run to run; this closes the gaps
+ * deterministically.
  */
-export function planCoverage(routes: RouteInfo[], leads: Lead[], read: ReadonlySet<string>, wrap: Wrap): Assignment[] {
+export function planCoverage(
+  routes: RouteInfo[],
+  leads: Lead[],
+  read: ReadonlySet<string>,
+  cited: ReadonlyArray<{ file: string; line: number }>,
+  wrap: Wrap,
+): Assignment[] {
   const unread = (at: string | undefined) => !!at && !read.has(fileOf(at));
-  const sinks = leads.filter((lead) => lead.kind === "sink" && !lead.title.includes("no route reaches it") && unread(lead.at)).map(formatLead);
+  const uncited = (at: string | undefined) => {
+    if (!at) return false;
+    const file = fileOf(at);
+    const line = Number(at.slice(file.length + 1));
+    return !cited.some((hop) => hop.file === file && Math.abs(hop.line - line) <= 3);
+  };
+  const sinks = leads
+    .filter((lead) => lead.kind === "sink" && !lead.title.includes("no route reaches it"))
+    .filter((lead) => uncited(lead.at) && (unread(lead.at) || HIGH_SIGNAL_SINK.test(lead.title)))
+    .map(formatLead);
   const handlers = routes
     // PHP scripts are their own handler; elsewhere an unresolved handler is usually third-party middleware.
     .filter((route) => (route.framework === "php" ? unread(route.at) : route.handlers.length > 0 && route.handlers.every((h) => unread(h.split(" @ ")[1]))))
@@ -130,13 +162,17 @@ export function planCoverage(routes: RouteInfo[], leads: Lead[], read: ReadonlyS
     .map((group, i, all) => ({
       name: all.length > 1 ? `coverage ${i + 1}/${all.length}` : "coverage",
       brief: [
-        "Your scope: code the other hunters never opened. Each item below is a dangerous sink a route can reach, or an entry point whose handler nobody read. Read each one, decide quickly whether an attacker can exploit it, and report what is real. Skip anything that is clearly safe.",
+        "Your scope: what the first pass left open. Each item below is a dangerous sink a route can reach that nobody has reported on, or an entry point whose handler nobody read. Rule on every one: read it, decide whether an attacker can exploit it, and report what is real. Skip anything that is clearly safe.",
         `## Unreviewed\n${wrap(group.join("\n"))}`,
       ].join("\n\n"),
     }));
 }
 
 export interface HunterLimits {
+  /** Turns every hunter gets. */
+  turns: number;
+  /** Extra turns earned per accepted candidate: productive hunters keep digging, idle ones stop. */
+  turnsPerFinding: number;
   maxTurns: number;
   /** Epoch ms by which the hunter must finish. */
   deadline: number;
@@ -163,7 +199,7 @@ export async function runHunter(
     tools: [...ctx.tools, reportTool(ctx, assignment.name, registry, stats, onCandidate)],
     limiter: ctx.limiter,
     meter: ctx.meter,
-    maxTurns: limits.maxTurns,
+    maxTurns: () => Math.min(limits.maxTurns, limits.turns + limits.turnsPerFinding * stats.accepted),
     deadline: limits.deadline,
     signal: ctx.signal,
   });

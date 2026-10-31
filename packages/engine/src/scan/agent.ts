@@ -18,7 +18,8 @@ export interface AgentOptions {
   limiter: Limiter;
   meter: UsageMeter;
   /** Model turns before the agent must stop. */
-  maxTurns: number;
+  /** Model turns before the agent must stop. A function is re-read every turn, so the budget can grow. */
+  maxTurns: number | (() => number);
   /** Rough context budget in characters (about 4 per token). Past it, the agent is told to finish. */
   maxContextChars?: number;
   /** Output tokens per turn, reasoning included. Default 16,000: room to think, never runaway generation. */
@@ -46,7 +47,8 @@ const DEFAULT_MAX_TOKENS = 16_000;
 const WRAP_UP_MS = 45_000;
 /** Longest tool result kept in the conversation. */
 const MAX_TOOL_RESULT = 24_000;
-const DEFAULT_CONTEXT_CHARS = 400_000;
+/** About 80k tokens. Every turn resends the whole conversation, so this bounds the cost of each one. */
+const DEFAULT_CONTEXT_CHARS = 320_000;
 
 export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const { client, role, limiter, meter, signal } = options;
@@ -60,7 +62,10 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let warned = false;
 
   const deadline = options.deadline ?? Number.POSITIVE_INFINITY;
-  for (let turn = 1; turn <= options.maxTurns; turn++) {
+  const turnLimit = typeof options.maxTurns === "function" ? options.maxTurns : () => options.maxTurns as number;
+  let warnedAtLimit = 0;
+  let turn = 1;
+  for (; turn <= turnLimit(); turn++) {
     if (Date.now() >= deadline) {
       return { messages, content: "", turns: turn - 1, toolCalls };
     }
@@ -90,16 +95,19 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     if (size > budget * 1.5) {
       return { messages, content: "", turns: turn, toolCalls };
     }
-    const remaining = options.maxTurns - turn;
+    // A budget that grew since the warning makes the warning stale.
+    if (warned && turnLimit() > warnedAtLimit && size <= budget && Date.now() < deadline - WRAP_UP_MS) warned = false;
+    const remaining = turnLimit() - turn;
     if (!warned && (remaining <= 2 || size > budget || Date.now() >= deadline - WRAP_UP_MS)) {
       warned = true;
+      warnedAtLimit = turnLimit();
       messages.push({
         role: "user",
         content: `You are almost out of budget. Report anything you have confirmed now, then finish.`,
       });
     }
   }
-  return { messages, content: "", turns: options.maxTurns, toolCalls };
+  return { messages, content: "", turns: turn - 1, toolCalls };
 
   async function execute(call: ToolCall): Promise<string> {
     const parsed = parseToolCall(toolMap, call);

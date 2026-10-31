@@ -96,6 +96,11 @@ export class CandidateRegistry {
     this.accepted.push(candidate);
   }
 
+  /** Every location an accepted candidate cites. */
+  cited(): Array<{ file: string; line: number }> {
+    return this.accepted.flatMap((candidate) => [candidate.entry, ...candidate.path]);
+  }
+
   get size(): number {
     return this.accepted.length;
   }

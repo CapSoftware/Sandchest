@@ -47,6 +47,7 @@ const threatModel: ThreatModel = {
   sensitiveAssets: [],
   dangerousSinks: [],
   frameworkProtections: [],
+  abuseSurfaces: [],
   subsystems: [{ name: "auth", paths: ["src"], description: "Login.", risk: "high" }],
 };
 

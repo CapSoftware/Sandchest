@@ -99,6 +99,7 @@ function fallbackThreatModel(overview: Overview, notes: string): ThreatModel {
     sensitiveAssets: [],
     dangerousSinks: [],
     frameworkProtections: [],
+    abuseSurfaces: [],
     subsystems: dirs.map((d) => ({ name: d.path, paths: [d.path === "." ? "" : d.path], description: `${d.files} files`, risk: "medium" as const })),
   };
 }

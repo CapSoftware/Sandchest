@@ -7,11 +7,20 @@ import type { AgentTool, Wrap } from "./tools";
 export interface ScanLimits {
   /** Parallel hunters in the main pass, including access-control and leads hunters. Default 8. */
   maxHunters: number;
-  /** Model turns per hunter. Default 40. */
+  /**
+   * Model turns every hunter gets. Default 24. Each candidate it gets past
+   * the evidence gate earns `turnsPerFinding` more, up to `hunterMaxTurns`:
+   * hunters that keep finding bugs keep digging, while on clean code they
+   * stop before the costly long tail (every turn resends the conversation).
+   */
   hunterTurns: number;
+  /** Default 6. */
+  turnsPerFinding: number;
+  /** Default 40. */
+  hunterMaxTurns: number;
   /** Model turns per coverage hunter. Default 20. */
   coverageTurns: number;
-  /** Model turns per skeptic review. Default 12. */
+  /** Model turns per skeptic review. Default 10. */
   skepticTurns: number;
   /** Model turns for recon exploration. Default 10. */
   reconTurns: number;
@@ -30,9 +39,11 @@ export interface ScanLimits {
 
 export const DEFAULT_LIMITS: ScanLimits = {
   maxHunters: 8,
-  hunterTurns: 40,
+  hunterTurns: 24,
+  turnsPerFinding: 6,
+  hunterMaxTurns: 40,
   coverageTurns: 20,
-  skepticTurns: 12,
+  skepticTurns: 10,
   reconTurns: 10,
   concurrency: 12,
   maxLoc: 1_000_000,

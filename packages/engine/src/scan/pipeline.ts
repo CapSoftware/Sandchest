@@ -208,13 +208,13 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
 
   const assignments = planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap);
   emit({ type: "stage", stage: "hunt", message: `Digging with ${assignments.length} hunters: ${assignments.map((a) => a.name).join(", ")}.` });
-  const [hunters, huntMs] = await time(() => hunt(assignments, { maxTurns: limits.hunterTurns, deadline: at(0.55) }));
+  const [hunters, huntMs] = await time(() => hunt(assignments, { turns: limits.hunterTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.55) }));
 
   let coverageMs = 0;
-  const gaps = fatal || Date.now() >= at(0.6) ? [] : planCoverage(routes, signals.leads, read, wrap);
+  const gaps = fatal || Date.now() >= at(0.6) ? [] : planCoverage(routes, signals.leads, read, registry.cited(), wrap);
   if (gaps.length > 0) {
     emit({ type: "stage", stage: "coverage", message: `Checking code the first pass never opened with ${gaps.length} more ${gaps.length === 1 ? "hunter" : "hunters"}…` });
-    const [extra, ms] = await time(() => hunt(gaps, { maxTurns: limits.coverageTurns, deadline: at(0.75) }));
+    const [extra, ms] = await time(() => hunt(gaps, { turns: limits.coverageTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.75) }));
     hunters.push(...extra);
     coverageMs = ms;
   }
