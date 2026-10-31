@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import type { IndexerClient } from "../indexer/client";
 import type { LlmClient } from "../llm";
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent, type ScanLimits } from "./context";
-import { CandidateRegistry, type GatedCandidate } from "./gate";
+import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate } from "./gate";
 import { isFatal, errorMessage } from "./errors";
 import { planAssignments, planCoverage, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
 import { buildLeads, codeSignals, persistentLeads, vulnerabilities, type Signals } from "./leads";
@@ -23,7 +23,7 @@ import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
 import { renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
-import { severityRank, type Finding, type Lead, type ThreatModel } from "./schema";
+import { severityRank, type Candidate, type Finding, type Lead, type ThreatModel } from "./schema";
 import { review, unreviewed, type Review } from "./skeptic";
 import { structure } from "./structure";
 import { createWrap, repoTools, type RouteInfo } from "./tools";
@@ -256,6 +256,90 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     timings: { indexMs: overview.indexMs, sweepMs, reconMs, huntMs, coverageMs, verifyTailMs, totalMs },
     usage: { byRole: meter.byRole, total: meter.total(), costUsd: options.pricing ? meter.cost(options.pricing) : undefined },
     warnings,
+  };
+}
+
+export interface VerifyOptions {
+  client: LlmClient;
+  indexer: IndexerClient;
+  threatModel: ThreatModel;
+  /** Findings from an earlier scan, or candidates in their own shape. */
+  findings: Array<Finding | Candidate>;
+  limits?: Partial<ScanLimits>;
+  pricing?: Pricing;
+  signal?: AbortSignal;
+}
+
+export interface Verification {
+  candidate: Candidate;
+  /** Why the evidence gate rejected it (its cited lines no longer exist), if it did. */
+  rejected?: string[];
+  review?: Review;
+  error?: string;
+}
+
+/**
+ * Re-runs the evidence gate and the skeptic on findings against a checkout:
+ * for checking whether a finding still holds on a later commit, and for
+ * measuring the skeptic against labelled findings.
+ */
+export async function verifyFindings(options: VerifyOptions): Promise<{ results: Verification[]; usage: RoleUsage; costUsd?: number }> {
+  const limits: ScanLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const tag = `repo-data-${randomBytes(6).toString("hex")}`;
+  const wrap = createWrap(tag);
+  const signal = options.signal;
+  const ctx: ScanContext = {
+    client: options.client,
+    indexer: options.indexer,
+    tools: repoTools({ indexer: options.indexer, wrap, signals: { leads: [], vulns: [] } }),
+    limiter: new Limiter(limits.concurrency),
+    meter: new UsageMeter(),
+    options: limits,
+    signal,
+    tag,
+    wrap,
+    counters: { rejected: 0, duplicates: 0 },
+    emit: () => {},
+    threatModelText: renderThreatModel(options.threatModel),
+  };
+
+  const results = await Promise.all(
+    options.findings.map(async (input, i): Promise<Verification> => {
+      const candidate = toCandidate(input);
+      try {
+        const gate = await checkEvidence(ctx.indexer, candidate, signal);
+        if (!gate.ok) return { candidate, rejected: gate.problems };
+        const gated: GatedCandidate = {
+          id: `C${i + 1}`,
+          candidate,
+          entry: gate.entry,
+          path: gate.path,
+          fingerprint: fingerprint(candidate.category, gate.path.at(-1)!),
+          hunter: "verify",
+        };
+        return { candidate, review: await review(ctx, gated) };
+      } catch (error) {
+        if (isFatal(error, signal)) throw error;
+        return { candidate, error: errorMessage(error) };
+      }
+    }),
+  );
+  return { results, usage: ctx.meter.total(), costUsd: options.pricing ? ctx.meter.cost(options.pricing) : undefined };
+}
+
+/** A finding back into the shape hunters report. */
+function toCandidate(input: Finding | Candidate): Candidate {
+  if (!("attackPath" in input)) return input;
+  return {
+    title: input.title,
+    category: input.category,
+    severity: input.severity,
+    entryPoint: input.entryPoint,
+    path: input.attackPath.map(({ file, line, note }) => ({ file, line, note })),
+    preconditions: { attacker: input.attacker, details: input.preconditions },
+    proofOfConcept: input.proofOfConcept,
+    impact: input.impact,
+    leads: input.leads,
   };
 }
 

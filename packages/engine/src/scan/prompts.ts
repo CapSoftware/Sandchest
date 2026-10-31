@@ -113,9 +113,12 @@ export const STRUCTURE_SYSTEM_PROMPT = `You write up confirmed security findings
 
 ${RUBRIC}`;
 
-/** Renders the threat model for prompts. Deterministic, so the prefix caches. */
+/**
+ * Renders the threat model for prompts. Deterministic, so the prefix caches.
+ * Tolerates fields missing from models stored by older engine versions.
+ */
 export function renderThreatModel(model: ThreatModel): string {
-  const list = (items: string[]) => (items.length ? items.map((item) => `- ${item}`).join("\n") : "- (none identified)");
+  const list = (items: string[] | undefined) => (items?.length ? items.map((item) => `- ${item}`).join("\n") : "- (none identified)");
   return `# Threat model
 
 ${model.summary}
@@ -124,7 +127,7 @@ ${model.summary}
 ${list(model.stack)}
 
 ## Entry points
-${list(model.entryPoints.map((entry) => `[${entry.kind}, ${entry.auth}] ${entry.location}: ${entry.description}`))}
+${list(model.entryPoints?.map((entry) => `[${entry.kind}, ${entry.auth}] ${entry.location}: ${entry.description}`))}
 
 ## Authentication and authorisation
 ${model.authModel}
@@ -136,7 +139,7 @@ ${list(model.trustBoundaries)}
 ${list(model.sensitiveAssets)}
 
 ## Dangerous sinks
-${list(model.dangerousSinks.map((sink) => `${sink.kind} at ${sink.location}: ${sink.note}`))}
+${list(model.dangerousSinks?.map((sink) => `${sink.kind} at ${sink.location}: ${sink.note}`))}
 
 ## Framework protections
 ${list(model.frameworkProtections)}
@@ -145,5 +148,5 @@ ${list(model.frameworkProtections)}
 ${list(model.abuseSurfaces)}
 
 ## Subsystems
-${list(model.subsystems.map((s) => `${s.name} (${s.risk} risk; ${s.paths.join(", ")}): ${s.description}`))}`;
+${list(model.subsystems?.map((s) => `${s.name} (${s.risk} risk; ${s.paths.join(", ")}): ${s.description}`))}`;
 }

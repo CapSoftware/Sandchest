@@ -104,7 +104,7 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
     brief: [
       "Your scope: how the product can be abused, rather than broken into. Think like a fraudster and an abusive customer: what does this application let people get, spend, send or trigger, and how can you get more of it than you should, at someone else's expense?",
       "Look for: payments, plans and credits that can be skipped, reused, reversed or set by the client; coupons, referrals and trials that stack or reset; quantities, prices and currencies the client controls; steps that can be skipped, repeated or raced (two requests at once); invites, sharing and notifications that send attacker-chosen content to others; brute-forceable codes, passwords and tokens with no rate limit or lockout; user enumeration; and endpoints that make the owner pay per request (AI calls, transcoding, exports, storage, email) with no limit.",
-      model.abuseSurfaces.length ? section("Worth abusing (from recon)", model.abuseSurfaces, "") : "",
+      model.abuseSurfaces?.length ? section("Worth abusing (from recon)", model.abuseSurfaces, "") : "",
       section("Entry points", routes.slice(0, MAX_ROUTES_LISTED).map(formatRoute), "None found by the index. Use search() to find handlers."),
     ]
       .filter(Boolean)

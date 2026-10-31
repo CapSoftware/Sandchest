@@ -9,6 +9,7 @@ import { agentTool } from "../src/scan/tools";
 import { defineTool, type LlmClient } from "../src/llm";
 import { z } from "zod";
 import { compareVersions, fixedVersionFor } from "../src/scan/osv";
+import { renderThreatModel } from "../src/scan/prompts";
 import type { Candidate, Finding, ThreatModel } from "../src/scan/schema";
 import { createWrap, numberLines } from "../src/scan/tools";
 
@@ -294,5 +295,12 @@ describe("coverage pass", () => {
   test("plans nothing when everything is covered", () => {
     const cited = [{ file: "routes/search.ts", line: 23 }, { file: "routes/login.ts", line: 34 }, { file: "routes/files.ts", line: 12 }];
     expect(planCoverage([], leads, read, cited, createWrap("t"))).toEqual([]);
+  });
+});
+
+describe("threat model rendering", () => {
+  test("tolerates models stored before newer fields existed", () => {
+    const old = { summary: "An app.", stack: [], entryPoints: [], authModel: "", trustBoundaries: [], sensitiveAssets: [], dangerousSinks: [], frameworkProtections: [], subsystems: [] };
+    expect(renderThreatModel(old as unknown as ThreatModel)).toContain("## Worth abusing\n- (none identified)");
   });
 });
