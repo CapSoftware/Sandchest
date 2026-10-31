@@ -907,7 +907,7 @@ pub fn normalize_callee(raw: &str) -> String {
         out = out.replace("..", ".");
     }
     if out.len() > MAX_CALLEE {
-        let cut = out.len() - MAX_CALLEE;
+        let cut = out.ceil_char_boundary(out.len() - MAX_CALLEE);
         let start = out[cut..].find('.').map_or(cut, |i| cut + i + 1);
         out = out[start..].to_owned();
     }
@@ -971,6 +971,9 @@ mod tests {
         assert_eq!(normalize_callee("a?.b!.c"), "a.b.c");
         assert_eq!(normalize_callee("Foo::bar"), "Foo.bar");
         assert_eq!(normalize_callee("require('fs').readFileSync"), "require.readFileSync");
+        // Long chains of multi-byte names are cut on a character boundary.
+        let long = "ünïcödé.".repeat(30) + "call";
+        assert!(normalize_callee(&long).ends_with(".call"));
     }
 
     #[test]

@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use sandchest_indexer::files::Store;
-use sandchest_indexer::index::Index;
 use sandchest_indexer::tools::{self, State};
 use serde_json::{Value, json};
 
@@ -12,8 +11,8 @@ fn state() -> &'static State {
     static STATE: OnceLock<State> = OnceLock::new();
     STATE.get_or_init(|| {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/app");
-        let state = State { store: Store::load(&root), index: OnceLock::new() };
-        let _ = state.index.set(Index::build(&state.store));
+        let state = State::new(Store::load(&root));
+        state.build_index();
         state
     })
 }

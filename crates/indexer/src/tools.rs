@@ -2,6 +2,7 @@
 //! lives in `server`. Paths are always repository-relative.
 
 use std::collections::BTreeMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -18,13 +19,32 @@ const MAX_READ_BYTES: usize = 40_000;
 
 pub struct State {
     pub store: Store,
-    pub index: OnceLock<Index>,
+    /// Set once by `build_index`; an error if building panicked.
+    index: OnceLock<Result<Index, String>>,
 }
 
 impl State {
-    /// Blocks until the index is built. File tools never wait.
+    pub fn new(store: Store) -> State {
+        State { store, index: OnceLock::new() }
+    }
+
+    /// Builds the index. A panic is recorded rather than leaving index tools waiting forever.
+    pub fn build_index(&self) {
+        let built = catch_unwind(AssertUnwindSafe(|| Index::build(&self.store))).map_err(|panic| {
+            let message = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
+            format!("indexing failed: {}", message.unwrap_or_else(|| "unknown error".to_owned()))
+        });
+        let _ = self.index.set(built);
+    }
+
+    /// `None` while indexing, then whether it succeeded.
+    pub fn index_status(&self) -> Option<Result<(), &str>> {
+        self.index.get().map(|built| built.as_ref().map(|_| ()).map_err(String::as_str))
+    }
+
+    /// The built index. Only called after `call` has waited for a successful build.
     fn index(&self) -> &Index {
-        self.index.wait()
+        self.index.wait().as_ref().expect("index checked before dispatch")
     }
 
     fn path(&self, file: u32) -> &str {
@@ -52,7 +72,15 @@ pub const NAMES: &[&str] = &[
     "locate",
 ];
 
+/// Tools that work from the file store alone and never wait for the index.
+const FILE_TOOLS: &[&str] = &["search", "read_file", "list_dir"];
+
 pub fn call(state: &State, tool: &str, args: Value) -> Result<Value, String> {
+    if NAMES.contains(&tool) && !FILE_TOOLS.contains(&tool) {
+        if let Err(error) = state.index.wait() {
+            return Err(error.clone());
+        }
+    }
     match tool {
         "overview" => Ok(overview(state)),
         "search" => search(state, parse(args)?),

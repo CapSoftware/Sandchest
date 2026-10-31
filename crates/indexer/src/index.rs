@@ -37,6 +37,10 @@ pub struct Index {
     file_imports: Vec<Vec<u32>>,
     /// Symbols some route handler can reach through the call graph.
     reachable: HashSet<u32>,
+    /// Sink ids by enclosing symbol.
+    sinks_by_caller: HashMap<u32, Vec<u32>>,
+    /// Files that are entry points in their own right (PHP scripts reading request input).
+    script_files: HashSet<u32>,
     pub build_ms: u128,
 }
 
@@ -104,6 +108,8 @@ impl Index {
             file_symbols: vec![Vec::new(); store.files.len()],
             file_imports: Vec::new(),
             reachable: HashSet::new(),
+            sinks_by_caller: HashMap::new(),
+            script_files: HashSet::new(),
             build_ms: 0,
         };
         let mut imports = Vec::new();
@@ -159,6 +165,12 @@ impl Index {
         index.deps = deps::collect(store, &sites);
         index.file_imports = resolve_imports(store, &imports);
         index.reachable = index.reachable_from_routes();
+        for (id, sink) in index.sinks.iter().enumerate() {
+            if let Some(caller) = sink.caller {
+                index.sinks_by_caller.entry(caller).or_default().push(id as u32);
+            }
+        }
+        index.script_files = index.routes.iter().filter(|route| route.route.handlers.is_empty()).map(|route| route.file).collect();
         index.build_ms = started.elapsed().as_millis();
         index
     }
@@ -342,8 +354,7 @@ impl Index {
 
     /// Whether code at this sink runs when some route is called. Unknown callers count as unreachable.
     pub fn is_reachable(&self, sink: &SinkAt) -> bool {
-        sink.caller.is_some_and(|caller| self.reachable.contains(&caller))
-            || self.routes.iter().any(|route| route.file == sink.file && route.route.handlers.is_empty())
+        sink.caller.is_some_and(|caller| self.reachable.contains(&caller)) || self.script_files.contains(&sink.file)
     }
 
     fn reachable_from_routes(&self) -> HashSet<u32> {
@@ -362,7 +373,7 @@ impl Index {
     }
 
     pub fn sinks_in(&self, symbol: u32) -> impl Iterator<Item = &SinkAt> {
-        self.sinks.iter().filter(move |sink| sink.caller == Some(symbol))
+        self.sinks_by_caller.get(&symbol).into_iter().flatten().map(|&id| &self.sinks[id as usize])
     }
 
     /// Sink count per kind and input.

@@ -9,10 +9,9 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use sandchest_indexer::files::Store;
-use sandchest_indexer::index::Index;
 use sandchest_indexer::server;
 use sandchest_indexer::tools::{self, State};
 
@@ -56,13 +55,13 @@ fn serve(args: &[String]) -> Result<(), String> {
 
     // Load files before listening (fast), then index in the background while
     // file tools already answer.
-    let state = Arc::new(State { store: Store::load(&root), index: OnceLock::new() });
+    let state = Arc::new(State::new(Store::load(&root)));
     let server = tiny_http::Server::http((host.as_str(), port)).map_err(|error| format!("cannot listen on {host}:{port}: {error}"))?;
     let port = server.server_addr().to_ip().map(|addr| addr.port()).unwrap_or(port);
 
     let indexing = Arc::clone(&state);
     std::thread::spawn(move || {
-        let _ = indexing.index.set(Index::build(&indexing.store));
+        indexing.build_index();
     });
 
     if exit_on_stdin_close {
@@ -85,8 +84,8 @@ fn query(args: &[String]) -> Result<(), String> {
         Some(json) => serde_json::from_str(json).map_err(|error| format!("invalid JSON arguments: {error}"))?,
         None => serde_json::Value::Null,
     };
-    let state = State { store: Store::load(&root), index: OnceLock::new() };
-    let _ = state.index.set(Index::build(&state.store));
+    let state = State::new(Store::load(&root));
+    state.build_index();
     let output = tools::call(&state, tool, input)?;
     println!("{}", serde_json::to_string_pretty(&output).unwrap());
     Ok(())

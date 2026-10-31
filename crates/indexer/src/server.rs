@@ -2,6 +2,7 @@
 //! thread per core; index-backed tools block until the index is ready.
 
 use std::io::Read;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -44,8 +45,12 @@ fn handle(mut request: Request, state: &State, token: Option<&str>) {
 
     let tool = request.url().trim_start_matches('/').split('?').next().unwrap_or("").to_owned();
     if tool == "health" {
-        let ready = state.index.get().is_some();
-        return respond(request, 200, json!({ "status": if ready { "ready" } else { "indexing" }, "files": state.store.files.len() }));
+        let status = match state.index_status() {
+            None => json!("indexing"),
+            Some(Ok(())) => json!("ready"),
+            Some(Err(error)) => json!({ "failed": error }),
+        };
+        return respond(request, 200, json!({ "status": status, "files": state.store.files.len() }));
     }
     if *request.method() != Method::Post {
         return respond(request, 405, json!({ "error": "use POST /<tool>" }));
@@ -65,7 +70,12 @@ fn handle(mut request: Request, state: &State, token: Option<&str>) {
     };
 
     let started = Instant::now();
-    match tools::call(state, &tool, args) {
+    // A bug in one tool must not take down the daemon: report it and keep serving.
+    let outcome = catch_unwind(AssertUnwindSafe(|| tools::call(state, &tool, args)));
+    let Ok(outcome) = outcome else {
+        return respond(request, 500, json!({ "error": format!("internal error in {tool}") }));
+    };
+    match outcome {
         Ok(mut result) => {
             if let Value::Object(map) = &mut result {
                 map.insert("ms".to_owned(), json!(started.elapsed().as_secs_f64() * 1000.0));
