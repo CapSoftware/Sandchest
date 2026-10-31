@@ -1,0 +1,37 @@
+# Real-world scan targets and results. Never commit these:
+# they can contain live vulnerabilities, code excerpts and personal data.
+evals/private/
+evals/results/
+*.scan.json
+*.findings.json
+
+# Internal planning docs (local only)
+SPEC.md
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies and build output
+node_modules/
+.next/
+.turbo/
+.vercel/
+dist/
+build/
+out/
+coverage/
+target/
+
+# Workspaces created by local scans
+.sandchest/
+tmp/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
