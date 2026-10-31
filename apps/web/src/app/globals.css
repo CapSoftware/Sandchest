@@ -1,0 +1,1014 @@
+@import "tailwindcss";
+
+@theme {
+  --color-void: #0d0a07;
+  --color-soot: #15100b;
+  --color-seam: #2c2219;
+  --color-edge: #4a3b2c;
+  --color-sand: #f3e5c8;
+  --color-bright: #fff3dc;
+  --color-muted: #c2b293;
+  --color-dust: #a69479;
+  --color-gold: #fec242;
+  --color-gold-light: #fdd363;
+  --color-amber: #ff9f19;
+  --color-honey: #fea121;
+  --color-ember: #d76839;
+  --color-rust: #c25a2c;
+  --font-display: var(--font-jersey), ui-monospace, monospace;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    background: var(--color-void);
+    color: var(--color-sand);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-mono);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 3px;
+  }
+
+  ::selection {
+    background: var(--color-gold);
+    color: var(--color-void);
+  }
+}
+
+/* One narrow, left-aligned column for the whole page. */
+
+.page {
+  --gutter: clamp(1.25rem, 4vw, 2rem);
+  width: 100%;
+  max-width: calc(46rem + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 0;
+}
+
+.wordmark img {
+  display: block;
+  height: 2.25rem;
+  width: auto;
+  /* The artwork has generous padding for its glow. */
+  margin-left: -0.4rem;
+}
+
+.header-nav {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.header-nav a,
+.site-footer a {
+  color: var(--color-dust);
+  text-decoration: none;
+}
+
+.header-nav a:hover,
+.site-footer a:hover {
+  color: var(--color-sand);
+}
+
+/* Hero */
+
+.hero {
+  padding-top: clamp(2.5rem, 8vh, 5rem);
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.75rem, 8vw, 4.5rem);
+  font-weight: 400;
+  line-height: 0.9;
+  color: var(--color-bright);
+  text-wrap: balance;
+}
+
+.hero-lede {
+  max-width: 58ch;
+  margin-top: 1.25rem;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+/*
+ * Buttons. The link carries the glow; the inner face carries the shape, cut
+ * to stepped pixel corners so it matches the dithered chest.
+ */
+
+.button {
+  --notch: 2px;
+  position: relative;
+  display: inline-flex;
+  text-decoration: none;
+  isolation: isolate;
+}
+
+.button-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  height: 3rem;
+  padding: 0 1.375rem;
+  font-weight: 500;
+  clip-path: polygon(
+    var(--notch) 0,
+    calc(100% - var(--notch)) 0,
+    calc(100% - var(--notch)) var(--notch),
+    100% var(--notch),
+    100% calc(100% - var(--notch)),
+    calc(100% - var(--notch)) calc(100% - var(--notch)),
+    calc(100% - var(--notch)) 100%,
+    var(--notch) 100%,
+    var(--notch) calc(100% - var(--notch)),
+    0 calc(100% - var(--notch)),
+    0 var(--notch),
+    var(--notch) var(--notch)
+  );
+  transition:
+    transform 80ms,
+    background-color 120ms,
+    box-shadow 120ms,
+    color 120ms;
+}
+
+.button:hover .button-face {
+  transform: translateY(-1px);
+}
+
+.button:active .button-face {
+  transform: translateY(1px);
+}
+
+/* Gold key: lit top edge, rust underside. */
+.button-primary .button-face {
+  background: var(--color-gold);
+  color: var(--color-void);
+  box-shadow:
+    inset 0 2px 0 var(--color-gold-light),
+    inset 0 -3px 0 var(--color-rust);
+}
+
+.button-primary:hover .button-face {
+  background: var(--color-gold-light);
+}
+
+.button-primary:active .button-face {
+  box-shadow:
+    inset 0 2px 0 var(--color-gold-light),
+    inset 0 -1px 0 var(--color-rust);
+}
+
+/* A dithered gold glow behind the key, brighter on hover. */
+.button-primary::before {
+  content: "";
+  position: absolute;
+  inset: -0.875rem -1.25rem;
+  z-index: -1;
+  background: repeating-conic-gradient(var(--color-amber) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+  mask-image: radial-gradient(closest-side, #000 35%, transparent);
+  opacity: 0.28;
+  transition: opacity 160ms;
+  pointer-events: none;
+}
+
+.button-primary:hover::before {
+  opacity: 0.55;
+}
+
+/* Pixel outline: 2px border with the corner pixels cut away. */
+.button-secondary .button-face {
+  color: var(--color-sand);
+  box-shadow: inset 0 0 0 2px var(--color-edge);
+}
+
+.button-secondary:hover .button-face {
+  color: var(--color-bright);
+  box-shadow: inset 0 0 0 2px var(--color-sand);
+}
+
+.button-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button:hover .button-face,
+  .button:active .button-face {
+    transform: none;
+  }
+}
+
+/* The chest panel, with the finding hanging off it. */
+
+.chest-stage {
+  --cell: 2px;
+  /* Must match SCENE_ROWS in chest-dither.ts. */
+  --scene-rows: 136;
+  margin-top: clamp(3rem, 8vh, 4.5rem);
+}
+
+@media (min-width: 48rem) {
+  .chest-stage {
+    --cell: 3px;
+  }
+}
+
+.scene {
+  position: relative;
+  height: calc(var(--scene-rows) * var(--cell) + 2px);
+  overflow: hidden;
+  border: 1px solid var(--color-seam);
+  background: var(--color-void);
+}
+
+.scene-fallback,
+.scene-canvas {
+  position: absolute;
+  top: 0;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.scene-fallback {
+  left: 50%;
+  width: calc(256 * var(--cell));
+  max-width: none;
+  height: calc(var(--scene-rows) * var(--cell));
+  margin-left: calc(-128 * var(--cell));
+}
+
+.scene-canvas {
+  display: none;
+}
+
+html[data-js] .scene-fallback {
+  visibility: hidden;
+}
+
+html[data-js] [data-canvas="ready"] .scene-canvas {
+  display: block;
+}
+
+html[data-js] [data-canvas="failed"] .scene-fallback {
+  visibility: visible;
+}
+
+/* Finding strip: a review comment on a pull request. */
+
+.strip {
+  overflow: hidden;
+  margin-top: 2rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+  font-size: 0.875rem;
+}
+
+.strip code,
+.strip pre {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.strip-pr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-seam);
+  font-size: 0.8125rem;
+}
+
+.strip-file {
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--color-seam);
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.strip-diff {
+  margin: 0;
+  padding: 0.5rem 0;
+  overflow-x: auto;
+  line-height: 1.75;
+}
+
+.diff-line {
+  display: block;
+  padding-right: 1rem;
+  white-space: pre;
+}
+
+.diff-added {
+  background: color-mix(in oklab, var(--color-gold) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-gold);
+}
+
+.diff-n {
+  display: inline-block;
+  width: 4ch;
+  padding-right: 1ch;
+  text-align: right;
+  color: color-mix(in oklab, var(--color-dust) 60%, var(--color-soot));
+  user-select: none;
+}
+
+.diff-sign {
+  display: inline-block;
+  width: 2ch;
+  color: var(--color-gold);
+  user-select: none;
+}
+
+.comment {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: 0.875rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+  border-top: 1px solid var(--color-seam);
+  background: var(--color-void);
+}
+
+.comment-avatar {
+  width: 1.75rem;
+  height: auto;
+  margin-top: 0.1rem;
+}
+
+.comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bot-badge {
+  padding: 0 0.45em;
+  border: 1px solid var(--color-seam);
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.finding-rating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin-top: 0.875rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.severity {
+  padding: 0 0.5rem;
+  background: var(--color-ember);
+  color: var(--color-void);
+  font-weight: 700;
+}
+
+.finding-title {
+  margin-top: 0.75rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-bright);
+  text-wrap: balance;
+}
+
+.finding-label {
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.attack-path {
+  display: grid;
+  gap: 0.75rem;
+  padding-left: 1.4rem;
+  list-style: decimal;
+}
+
+.attack-path li {
+  padding-left: 0.25rem;
+}
+
+.attack-path li::marker {
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+}
+
+.attack-path li > * {
+  display: block;
+}
+
+.file-ref {
+  color: var(--color-gold);
+  overflow-wrap: anywhere;
+}
+
+.excerpt {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+  overflow-x: auto;
+}
+
+.poc {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+  overflow-x: auto;
+  line-height: 1.7;
+}
+
+.redacted {
+  display: inline-block;
+  height: 1.05em;
+  vertical-align: -0.18em;
+  background: color-mix(in oklab, var(--color-sand) 82%, var(--color-void));
+}
+
+.fix-prompt {
+  margin-top: 1.25rem;
+  border: 1px solid var(--color-seam);
+}
+
+.fix-prompt summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.fix-prompt summary::-webkit-details-marker {
+  display: none;
+}
+
+.fix-prompt summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-block: 0.3em solid transparent;
+  border-inline-start: 0.45em solid var(--color-gold);
+  transition: rotate 150ms;
+}
+
+.fix-prompt[open] summary::before {
+  rotate: 90deg;
+}
+
+.fix-prompt pre {
+  margin: 0;
+  padding: 0.25rem 0.9rem 0.9rem;
+  white-space: pre-wrap;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.strip-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid var(--color-seam);
+}
+
+.check-mark {
+  color: var(--color-ember);
+  font-weight: 700;
+}
+
+.check-cost {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.strip-caption {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+/* Sections below the chest */
+
+.section {
+  margin-top: clamp(5rem, 13vw, 8rem);
+}
+
+.section-title {
+  max-width: 16em;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  font-weight: 400;
+  line-height: 0.95;
+  color: var(--color-bright);
+  text-wrap: balance;
+}
+
+.pitch-body {
+  max-width: 58ch;
+  margin-top: 1.25rem;
+  color: var(--color-muted);
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.pitch-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.pitch-list li {
+  position: relative;
+  padding-left: 1.5rem;
+  color: var(--color-sand);
+}
+
+/* A single gold pixel for a bullet. */
+.pitch-list li::before {
+  content: "";
+  position: absolute;
+  left: 0.25rem;
+  top: 0.65em;
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--color-gold);
+}
+
+/* How it works: four steps, each with a small illustration. */
+
+.steps {
+  display: grid;
+  gap: clamp(3.5rem, 8vw, 5rem);
+  margin-top: 2.5rem;
+}
+
+.step {
+  display: grid;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+@media (min-width: 44rem) {
+  .step {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 2.5rem;
+  }
+}
+
+.step-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--font-display);
+  font-size: 1.875rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.step-n {
+  color: var(--color-gold);
+}
+
+.step-body {
+  margin-top: 0.875rem;
+  color: var(--color-muted);
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.vis {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  min-height: 15rem;
+  padding: 1.25rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.vis code {
+  font-family: var(--font-mono);
+}
+
+.vis-label {
+  color: var(--color-dust);
+}
+
+.vis-gap {
+  margin-top: 0.75rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--color-seam);
+}
+
+.pixel {
+  display: inline-block;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--color-gold);
+}
+
+/* Two labels sharing one spot, so one can replace the other. */
+.swap {
+  display: inline-grid;
+}
+
+.swap > * {
+  grid-area: 1 / 1;
+}
+
+/* 1. Connect */
+
+.repos {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.repos li {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.box {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid var(--color-edge);
+}
+
+.box-on {
+  border-color: var(--color-gold);
+  background: var(--color-gold);
+}
+
+.map {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.map li {
+  display: flex;
+  align-items: baseline;
+}
+
+.leader {
+  flex: 1;
+  margin: 0 0.5rem;
+  border-bottom: 1px dotted var(--color-edge);
+  transform-origin: left;
+}
+
+.map-value {
+  color: var(--color-gold);
+}
+
+/* 2. Review */
+
+.vis-pr {
+  color: var(--color-sand);
+}
+
+.vis-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.875rem;
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.check-found {
+  color: var(--color-ember);
+}
+
+.trace {
+  position: relative;
+  margin-top: 0.5rem;
+  padding-left: 1.5rem;
+}
+
+.trace-rail {
+  position: absolute;
+  top: 0.6rem;
+  bottom: 1.6rem;
+  left: 0.2rem;
+  width: 1px;
+  background: var(--color-gold);
+  transform-origin: top;
+}
+
+.trace ol {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.trace-hop {
+  position: relative;
+  display: grid;
+}
+
+.trace-hop::before {
+  content: "";
+  position: absolute;
+  top: 0.4rem;
+  left: -1.5rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--color-gold);
+}
+
+.trace-hop code {
+  color: var(--color-sand);
+}
+
+.trace-hop span {
+  color: var(--color-dust);
+}
+
+.trace-hit::before {
+  background: var(--color-ember);
+}
+
+.trace-hit span {
+  color: var(--color-ember);
+}
+
+/* 3. Prove */
+
+.leads {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.lead {
+  display: grid;
+}
+
+.lead-name {
+  position: relative;
+  justify-self: start;
+}
+
+.lead-proven .lead-name {
+  color: var(--color-gold);
+}
+
+.lead-dropped .lead-name {
+  color: var(--color-dust);
+}
+
+/* Struck through once disproved. */
+.lead-dropped .lead-name::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 52%;
+  height: 1px;
+  background: var(--color-dust);
+  transform-origin: left;
+}
+
+.lead-result {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.lead-proven .lead-result {
+  color: var(--color-sand);
+}
+
+/* 4. Fix */
+
+.mini-comment {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.875rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-void);
+}
+
+.mini-title {
+  color: var(--color-bright);
+}
+
+.mini-title .severity {
+  margin-right: 0.375rem;
+}
+
+.mini-button {
+  justify-self: start;
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--color-gold);
+  color: var(--color-void);
+  font-weight: 500;
+}
+
+.mini-button .swap {
+  justify-items: center;
+}
+
+.mini-term {
+  margin-top: 0.5rem;
+  color: var(--color-sand);
+}
+
+.mini-fixed {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-gold);
+}
+
+/*
+ * Step animations. Without html[data-motion] (reduced motion, or before the
+ * boot script runs) every element simply shows its final state. With it, each
+ * step waits in its first frame until PlayOnView sets data-play, then plays
+ * once. --d is each element's start delay.
+ */
+
+.fx-out {
+  opacity: 0;
+}
+
+html[data-motion] .play:not([data-play]) .fx-in {
+  opacity: 0;
+}
+
+html[data-motion] .play:not([data-play]) .fx-out {
+  opacity: 1;
+}
+
+html[data-motion] .play:not([data-play]) .fx-fill {
+  border-color: var(--color-edge);
+  background: transparent;
+}
+
+html[data-motion] .play:not([data-play]) :is(.fx-grow-x, .fx-grow-y) {
+  transform: scale(0);
+}
+
+html[data-motion] .play:not([data-play]) .lead-name {
+  color: var(--color-sand);
+}
+
+html[data-motion] .play:not([data-play]) .lead-dropped .lead-name::after {
+  transform: scaleX(0);
+}
+
+html[data-motion] .play[data-play] .fx-in {
+  animation: fx-in 360ms ease-out var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .fx-out {
+  animation: fx-out 200ms ease-in var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .fx-fill {
+  animation: fx-fill 200ms steps(2) var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .fx-grow-x {
+  animation: fx-grow-x 500ms steps(12) var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .fx-grow-y {
+  animation: fx-grow-y 1500ms steps(18) var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .fx-blink {
+  animation: fx-blink 500ms steps(1) var(--d, 0s) 4;
+}
+
+html[data-motion] .play[data-play] .fx-press {
+  animation: fx-press 220ms ease-out var(--d, 0s);
+}
+
+html[data-motion] .play[data-play] .lead-name {
+  animation: fx-settle 300ms ease-out var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .lead-dropped .lead-name::after {
+  animation: fx-grow-x 350ms steps(10) var(--d, 0s) both;
+}
+
+@keyframes fx-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes fx-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes fx-fill {
+  from {
+    border-color: var(--color-edge);
+    background: transparent;
+  }
+}
+
+@keyframes fx-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fx-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes fx-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes fx-press {
+  50% {
+    transform: translateY(2px);
+    filter: brightness(1.15);
+  }
+}
+
+@keyframes fx-settle {
+  from {
+    color: var(--color-sand);
+  }
+}
+
+/* Footer */
+
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: clamp(4rem, 10vw, 6rem);
+  padding: 1.5rem 0 2rem;
+  border-top: 1px solid var(--color-seam);
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.site-footer ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+  }
+}
