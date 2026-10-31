@@ -1,0 +1,22 @@
+{
+  "name": "@sandchest/engine",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./llm": "./src/llm/index.ts"
+  },
+  "scripts": {
+    "sanity": "bun --env-file=../../.env.local src/sanity.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^5.9.3"
+  }
+}
