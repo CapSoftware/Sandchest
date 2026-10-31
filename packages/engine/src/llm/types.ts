@@ -75,6 +75,8 @@ export interface ChatResult {
   usage: Usage;
   /** The reply as a message, ready to append to the conversation. */
   message: AssistantMessage;
+  /** Transient failures retried before this result. */
+  retries: number;
 }
 
 /** Incremental output from a streaming request. */

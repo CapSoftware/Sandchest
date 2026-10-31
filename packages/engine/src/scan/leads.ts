@@ -18,11 +18,18 @@ export interface DependencyVulns {
   advisories: Advisory[];
 }
 
-export interface Sweep {
+/**
+ * Leads and advisories, shared by every agent's tools. Starts with what the
+ * indexer found and gains vulnerable dependencies once the lookup returns.
+ */
+export interface Signals {
   leads: Lead[];
   vulns: DependencyVulns[];
-  /** Set when the vulnerability lookup failed; the scan continues without it. */
-  osvError?: string;
+}
+
+export interface CodeSignals {
+  found: LeadsResult;
+  dependencies: Dependency[];
 }
 
 interface LeadsResult {
@@ -34,27 +41,37 @@ interface LeadsResult {
 /** Riskiest sinks handed to hunters as leads. */
 const MAX_SINK_LEADS = 60;
 
-export async function sweep(indexer: IndexerClient, osv: OsvClient | undefined, signal?: AbortSignal): Promise<Sweep> {
+/** What the index found: secrets, markers, sinks and dependencies. Milliseconds. */
+export async function codeSignals(indexer: IndexerClient, signal?: AbortSignal): Promise<CodeSignals> {
   const [found, { dependencies }] = await Promise.all([
     indexer.call<LeadsResult>("leads", {}, signal),
     indexer.call<{ dependencies: Dependency[] }>("deps", {}, signal),
   ]);
+  return { found, dependencies };
+}
 
-  let vulns: DependencyVulns[] = [];
-  let osvError: string | undefined;
-  if (osv && dependencies.length > 0) {
-    try {
-      const advisories = await osv.query(dependencies, signal);
-      vulns = dependencies
-        .map((dep, i) => ({ ...dep, importedAt: dep.importedAt ?? [], advisories: advisories[i] ?? [] }))
-        .filter((dep) => dep.advisories.length > 0)
-        .map(({ ecosystem, name, version, reachability, importedAt, advisories }) => ({ ecosystem, name, version, reachability, importedAt, advisories }));
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      osvError = (error as Error).message;
-    }
+/** Known vulnerabilities for the dependencies. Network-bound; a failure leaves the scan without them. */
+export async function vulnerabilities(
+  osv: OsvClient | undefined,
+  dependencies: Dependency[],
+  signal?: AbortSignal,
+): Promise<{ vulns: DependencyVulns[]; error?: string }> {
+  if (!osv || dependencies.length === 0) return { vulns: [] };
+  try {
+    const advisories = await osv.query(dependencies, signal);
+    const vulns = dependencies
+      .map((dep, i) => ({ ...dep, importedAt: dep.importedAt ?? [], advisories: advisories[i] ?? [] }))
+      .filter((dep) => dep.advisories.length > 0)
+      .map(({ ecosystem, name, version, reachability, importedAt, advisories }) => ({ ecosystem, name, version, reachability, importedAt, advisories }));
+    return { vulns };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { vulns: [], error: (error as Error).message };
   }
+}
 
+/** Numbers the leads: secrets, markers, vulnerable dependencies, then sinks. */
+export function buildLeads({ found }: CodeSignals, vulns: DependencyVulns[]): Lead[] {
   const leads: Lead[] = [];
   const add = (lead: Omit<Lead, "id">) => leads.push({ id: `L${leads.length + 1}`, ...lead });
 
@@ -81,7 +98,7 @@ export async function sweep(indexer: IndexerClient, osv: OsvClient | undefined, 
     add({ kind: "sink", title: `${sink.kind} sink with ${sink.input} input${reach}`, at: sink.at, detail: `in ${sink.in}: ${sink.code}` });
   }
 
-  return { leads, vulns, osvError };
+  return leads;
 }
 
 /** Leads that must be reported whatever the hunters conclude. */

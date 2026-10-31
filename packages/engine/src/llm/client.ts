@@ -10,6 +10,8 @@ export interface LlmClientOptions {
   maxAttempts?: number;
   /** Longest silence tolerated while waiting for the next byte. Default 120s. */
   idleTimeoutMs?: number;
+  /** Longest a single attempt may take, even while bytes keep arriving. Default 10 minutes. */
+  requestTimeoutMs?: number;
   /** First backoff delay; doubles per attempt with full jitter. Default 1s. */
   retryBaseMs?: number;
   /** Upper bound for any single backoff, including server-requested delays. Default 60s. */
@@ -33,6 +35,7 @@ export function createLlmClient(config: LlmConfig, options: LlmClientOptions = {
   const fetchImpl = options.fetch ?? fetch;
   const maxAttempts = options.maxAttempts ?? 5;
   const idleTimeoutMs = options.idleTimeoutMs ?? 120_000;
+  const requestTimeoutMs = options.requestTimeoutMs ?? 600_000;
   const retryBaseMs = options.retryBaseMs ?? 1_000;
   const retryMaxMs = options.retryMaxMs ?? 60_000;
 
@@ -45,7 +48,8 @@ export function createLlmClient(config: LlmConfig, options: LlmClientOptions = {
 
   async function attempt(request: ChatRequest, body: string, onDelta?: (delta: ChatDelta) => void) {
     const idle = new AbortController();
-    const signal = request.signal ? AbortSignal.any([request.signal, idle.signal]) : idle.signal;
+    const overall = AbortSignal.timeout(requestTimeoutMs);
+    const signal = AbortSignal.any(request.signal ? [request.signal, idle.signal, overall] : [idle.signal, overall]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const touch = () => {
       clearTimeout(timer);
@@ -70,6 +74,9 @@ export function createLlmClient(config: LlmConfig, options: LlmClientOptions = {
       if (idle.signal.aborted) {
         throw new LlmError(`Model sent nothing for ${idleTimeoutMs}ms`, { retryable: true, cause: error });
       }
+      if (overall.aborted) {
+        throw new LlmError(`Model response took longer than ${requestTimeoutMs}ms`, { retryable: true, cause: error });
+      }
       if (error instanceof LlmError) throw error;
       throw new LlmError(`Model request failed: ${(error as Error).message}`, { retryable: true, cause: error });
     } finally {
@@ -91,7 +98,7 @@ export function createLlmClient(config: LlmConfig, options: LlmClientOptions = {
 
       for (let attemptNumber = 1; ; attemptNumber++) {
         try {
-          return await attempt(request, body, emit);
+          return { ...(await attempt(request, body, emit)), retries: attemptNumber - 1 };
         } catch (error) {
           if (!(error instanceof LlmError) || !error.retryable || delivered || attemptNumber >= maxAttempts) {
             throw error;
@@ -221,6 +228,7 @@ class StreamAccumulator {
       finishReason: this.finishReason,
       usage: this.usage,
       message,
+      retries: 0,
     };
   }
 }

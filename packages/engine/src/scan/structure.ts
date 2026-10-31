@@ -3,8 +3,9 @@
  * confirmed candidate and the skeptic's notes into the finding developers
  * read. Locations and code excerpts come from the checkout, never the model.
  */
-import { generateObject, StructuredOutputError } from "../llm";
+import { generateObject } from "../llm";
 import type { ScanContext } from "./context";
+import { isFatal } from "./errors";
 import { fixPrompt } from "./fix-prompt";
 import type { GatedCandidate } from "./gate";
 import { STRUCTURE_SYSTEM_PROMPT } from "./prompts";
@@ -56,11 +57,13 @@ async function writeUpFor(ctx: ScanContext, gated: GatedCandidate, review: Revie
         ],
         signal: ctx.signal,
       }),
+      "urgent",
     );
-    ctx.meter.add("structure", result.usage, result.attempts);
+    ctx.meter.add("structure", result.usage, result.attempts, result.retries);
     return result.value;
   } catch (error) {
-    if (!(error instanceof StructuredOutputError)) throw error;
+    // Invalid output or a model failure: the hunter's report is a complete write-up on its own.
+    if (isFatal(error, ctx.signal)) throw error;
     ctx.emit({ type: "warning", message: `Could not write up ${gated.id}; using the hunter's report as is.` });
     return fallbackWriteUp(gated, review);
   }

@@ -33,7 +33,7 @@ interface OsvVuln {
   summary?: string;
   details?: string;
   database_specific?: { severity?: string };
-  affected?: Array<{ package?: { name?: string; ecosystem?: string }; ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
+  affected?: Array<{ package?: { name?: string; ecosystem?: string }; ranges?: Array<{ events?: Array<{ introduced?: string; fixed?: string }> }> }>;
 }
 
 export function createOsvClient(options: { fetch?: typeof fetch; timeoutMs?: number } = {}): OsvClient {
@@ -93,9 +93,38 @@ export function createOsvClient(options: { fetch?: typeof fetch; timeoutMs?: num
 
 function toAdvisory(vuln: OsvVuln, pkg: PackageRef): Advisory {
   const affected = vuln.affected?.find((a) => a.package?.name === pkg.name) ?? vuln.affected?.[0];
-  const fixed = affected?.ranges?.flatMap((r) => r.events ?? []).find((e) => e.fixed)?.fixed;
+  const fixed = fixedVersionFor(affected?.ranges?.flatMap((r) => r.events ?? []) ?? [], pkg.version);
   const summary = (vuln.summary || vuln.details || "").split("\n")[0]!.slice(0, 200);
   return { id: vuln.id, aliases: vuln.aliases ?? [], summary, severity: severityOf(vuln), fixed };
+}
+
+/**
+ * The fix for the release line the installed version is on. Advisories list
+ * one range per line (e.g. 15.x fixed in 15.5.28, 16.x in 16.3.8); suggesting
+ * another line's fix is wrong.
+ */
+export function fixedVersionFor(events: Array<{ introduced?: string; fixed?: string }>, installed: string): string | undefined {
+  let introduced: string | undefined;
+  let fallback: string | undefined;
+  for (const event of events) {
+    if (event.introduced !== undefined) introduced = event.introduced;
+    if (event.fixed === undefined) continue;
+    fallback ??= event.fixed;
+    const inRange = (introduced === undefined || compareVersions(installed, introduced) >= 0) && compareVersions(installed, event.fixed) < 0;
+    if (inRange) return event.fixed;
+  }
+  return fallback;
+}
+
+/** Compares dotted numeric versions, ignoring pre-release suffixes. Good enough to pick a range. */
+export function compareVersions(a: string, b: string): number {
+  const parts = (v: string) => v.replace(/^v/, "").split(/[.+-]/).map((p) => Number.parseInt(p, 10)).map((n) => (Number.isNaN(n) ? 0 : n));
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const diff = (x[i] ?? 0) - (y[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 function severityOf(vuln: OsvVuln): Advisory["severity"] {

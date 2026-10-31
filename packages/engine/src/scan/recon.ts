@@ -2,9 +2,10 @@
  * Recon: builds the threat model. A short exploration (no reasoning) over the
  * deterministic inventory, then one structured call that writes the model.
  */
-import { generateObject, StructuredOutputError } from "../llm";
+import { generateObject } from "../llm";
 import { runAgent } from "./agent";
 import type { ScanContext } from "./context";
+import { errorMessage, isFatal } from "./errors";
 import { reconSystemPrompt } from "./prompts";
 import { ThreatModelSchema, type Lead, type ThreatModel } from "./schema";
 import { formatLead, type RouteInfo } from "./tools";
@@ -36,28 +37,30 @@ export async function recon(
 ): Promise<ThreatModel> {
   const inventory = ctx.wrap(renderInventory(overview, routes, leads));
   const system = { role: "system" as const, content: reconSystemPrompt(ctx.tag) };
+  let notes = "";
 
-  const exploration = await runAgent({
-    client: ctx.client,
-    role: "recon",
-    messages: [
-      system,
-      {
-        role: "user",
-        content: `${inventory}\n\nExplore what you need to understand the attack surface, then reply with concise notes (under 800 words): stack, entry points and their auth, how auth works and where it is enforced, sensitive data, sinks, protections, and the subsystems to review separately.`,
-      },
-    ],
-    tools: ctx.tools,
-    limiter: ctx.limiter,
-    meter: ctx.meter,
-    maxTurns: ctx.options.reconTurns,
-    // Notes, not an essay: the structured pass below does the writing.
-    maxTokens: 4_000,
-    signal: ctx.signal,
-  });
-
-  ctx.emit({ type: "progress", message: `Explored ${exploration.toolCalls} times in ${exploration.turns} turns. Writing the threat model…` });
   try {
+    const exploration = await runAgent({
+      client: ctx.client,
+      role: "recon",
+      messages: [
+        system,
+        {
+          role: "user",
+          content: `${inventory}\n\nExplore what you need to understand the attack surface, then reply with concise notes (under 800 words): stack, entry points and their auth, how auth works and where it is enforced, sensitive data, sinks, protections, and the subsystems to review separately.`,
+        },
+      ],
+      tools: ctx.tools,
+      limiter: ctx.limiter,
+      meter: ctx.meter,
+      maxTurns: ctx.options.reconTurns,
+      // Notes, not an essay: the structured pass below does the writing.
+      maxTokens: 4_000,
+      signal: ctx.signal,
+    });
+    notes = exploration.content;
+    ctx.emit({ type: "progress", message: `Explored in ${exploration.turns} turns. Writing the threat model…` });
+
     const result = await ctx.limiter.run(() =>
       generateObject(ctx.client, {
         role: "recon",
@@ -68,18 +71,19 @@ export async function recon(
           system,
           {
             role: "user",
-            content: `${inventory}\n\nExploration notes:\n${exploration.content || "(none)"}\n\nWrite the threat model. Subsystems must use real directory or file paths from the inventory, and together cover the code an attacker can reach.`,
+            content: `${inventory}\n\nExploration notes:\n${notes || "(none)"}\n\nWrite the threat model. Subsystems must use real directory or file paths from the inventory, and together cover the code an attacker can reach.`,
           },
         ],
         signal: ctx.signal,
       }),
     );
-    ctx.meter.add("recon", result.usage, result.attempts);
+    ctx.meter.add("recon", result.usage, result.attempts, result.retries);
     return result.value;
   } catch (error) {
-    if (!(error instanceof StructuredOutputError)) throw error;
-    ctx.emit({ type: "warning", message: "Could not write a threat model; hunting by directory instead." });
-    return fallbackThreatModel(overview, exploration.content);
+    // Hunting without a map is worse, but still far better than no scan.
+    if (isFatal(error, ctx.signal)) throw error;
+    ctx.emit({ type: "warning", message: `Could not build a threat model (${errorMessage(error)}); hunting by directory instead.` });
+    return fallbackThreatModel(overview, notes);
   }
 }
 

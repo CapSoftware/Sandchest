@@ -3,22 +3,28 @@
  *
  *   signal sweep → recon → hunt → evidence gate → skeptic → structure → fingerprint
  *
- * Hunters run in parallel. Each candidate goes to the skeptic the moment a
- * hunter reports it, so findings stream out while hunting continues.
+ * The dependency lookup overlaps recon. Hunters run in parallel, then a
+ * coverage pass sends a few more at reachable code nobody opened. Each
+ * candidate goes to the skeptic the moment it is reported, so findings
+ * stream out while hunting continues.
+ *
+ * Failures are contained: a hunter or review that fails costs only its own
+ * work. Cancellation, quota exhaustion or a dead indexer stop everything.
  */
 import { randomBytes } from "node:crypto";
 import type { IndexerClient } from "../indexer/client";
 import type { LlmClient } from "../llm";
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent, type ScanLimits } from "./context";
 import { CandidateRegistry, type GatedCandidate } from "./gate";
-import { planAssignments, runHunter, type HunterStats } from "./hunt";
-import { persistentLeads, sweep } from "./leads";
+import { isFatal, errorMessage } from "./errors";
+import { planAssignments, planCoverage, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
+import { buildLeads, codeSignals, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
 import { renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
 import { severityRank, type Finding, type Lead, type ThreatModel } from "./schema";
-import { review } from "./skeptic";
+import { review, unreviewed, type Review } from "./skeptic";
 import { structure } from "./structure";
 import { createWrap, repoTools, type RouteInfo } from "./tools";
 
@@ -62,8 +68,10 @@ export interface ScanReport {
     duplicates: number;
     survivors: number;
     hunters: HunterStats[];
+    /** Distinct files agents read. */
+    filesRead: number;
   };
-  timings: { indexMs: number; sweepMs: number; reconMs: number; huntMs: number; verifyTailMs: number; totalMs: number };
+  timings: { indexMs: number; sweepMs: number; reconMs: number; huntMs: number; coverageMs: number; verifyTailMs: number; totalMs: number };
   usage: { byRole: Record<string, RoleUsage>; total: RoleUsage; costUsd?: number };
   warnings: string[];
 }
@@ -75,6 +83,7 @@ export class ScanRefusedError extends Error {
 export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const started = Date.now();
   const limits: ScanLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const at = (share: number) => started + limits.timeBudgetMs * share;
   const warnings: string[] = [];
   const emit = (event: ScanEvent) => {
     if (event.type === "warning") warnings.push(event.message);
@@ -85,26 +94,51 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     const value = await task();
     return [value, Date.now() - t];
   };
-  const { indexer, signal } = options;
+
+  // One fatal error (cancelled, out of quota, indexer gone) stops every agent at once.
+  const controller = new AbortController();
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  let fatal: { error: unknown } | undefined;
+  const contain = (error: unknown, what: string): string => {
+    if (isFatal(error, signal)) {
+      fatal ??= { error: signal.aborted && !controller.signal.aborted ? signal.reason : error };
+      controller.abort(fatal.error);
+    } else {
+      emit({ type: "warning", message: `${what}: ${errorMessage(error)}` });
+    }
+    return errorMessage(error);
+  };
+  const { indexer } = options;
 
   emit({ type: "stage", stage: "index", message: "Indexing the code…" });
-  const overview = await indexer.call<Overview>("overview", {}, signal);
+  const [overview, { routes }] = await Promise.all([
+    indexer.call<Overview>("overview", {}, signal),
+    indexer.call<{ routes: RouteInfo[] }>("routes", { limit: 1000 }, signal),
+  ]);
   if (overview.loc > limits.maxLoc) {
     throw new ScanRefusedError(`This repository has ${overview.loc.toLocaleString("en")} lines of code; the limit is ${limits.maxLoc.toLocaleString("en")}.`);
   }
-  const { routes } = await indexer.call<{ routes: RouteInfo[] }>("routes", { limit: 1000 }, signal);
   emit({ type: "progress", message: `Indexed ${overview.sourceFiles} files and mapped ${overview.routes} entry points.` });
 
   emit({ type: "stage", stage: "sweep", message: "Sweeping for secrets, vulnerable dependencies and dangerous sinks…" });
-  const [swept, sweepMs] = await time(() => sweep(indexer, options.osv, signal));
-  if (swept.osvError) emit({ type: "warning", message: `Dependency vulnerability lookup failed: ${swept.osvError}` });
+  const sweepStarted = Date.now();
+  const code = await codeSignals(indexer, signal);
+  const signals: Signals = { leads: buildLeads(code, []), vulns: [] };
+  // The advisory lookup is network-bound: let it run while recon maps the code.
+  const advisories = vulnerabilities(options.osv, code.dependencies, signal).then((result) => {
+    if (result.error) emit({ type: "warning", message: `Dependency vulnerability lookup failed: ${result.error}` });
+    signals.vulns = result.vulns;
+    signals.leads = buildLeads(code, result.vulns);
+    return Date.now() - sweepStarted;
+  }, () => Date.now() - sweepStarted); // Only rejects on cancellation, which the scan reports itself.
 
   const tag = `repo-data-${randomBytes(6).toString("hex")}`;
   const wrap = createWrap(tag);
+  const read = new Set<string>();
   const base: Omit<ScanContext, "threatModelText"> = {
     client: options.client,
     indexer,
-    tools: repoTools({ indexer, wrap, leads: swept.leads, vulns: swept.vulns }),
+    tools: repoTools({ indexer, wrap, signals, onRead: (path) => read.add(path) }),
     limiter: new Limiter(limits.concurrency),
     meter: new UsageMeter(),
     options: limits,
@@ -118,11 +152,9 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   emit({ type: "stage", stage: "recon", message: "Mapping the attack surface…" });
   const [threatModel, reconMs] = options.threatModel
     ? [options.threatModel, 0]
-    : await time(() => recon(base, overview, routes, swept.leads));
+    : await time(() => recon(base, overview, routes, signals.leads));
+  const sweepMs = await advisories;
   const ctx: ScanContext = { ...base, threatModelText: renderThreatModel(threatModel) };
-
-  const assignments = planAssignments(threatModel, routes, swept.leads, limits.maxHunters, wrap);
-  emit({ type: "stage", stage: "hunt", message: `Digging with ${assignments.length} hunters: ${assignments.map((a) => a.name).join(", ")}.` });
 
   const registry = new CandidateRegistry();
   const findings: Finding[] = [];
@@ -130,7 +162,17 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const verifying: Promise<void>[] = [];
 
   const verify = async (gated: GatedCandidate) => {
-    const ruling = await review(ctx, gated);
+    let ruling: Review;
+    if (Date.now() >= at(0.9)) {
+      ruling = unreviewed(gated, "The time budget ran out before review");
+    } else {
+      try {
+        ruling = await review(ctx, gated, at(0.95));
+      } catch (error) {
+        ruling = unreviewed(gated, `Review failed (${contain(error, `Review of ${gated.id} failed`)})`);
+        if (fatal) return;
+      }
+    }
     if (ruling.verdict.verdict === "disproved") {
       dismissed.push({
         id: gated.id,
@@ -148,22 +190,48 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     emit({ type: "finding", finding });
   };
 
-  const [hunters, huntMs] = await time(() =>
+  const onCandidate = (gated: GatedCandidate) => {
+    emit({ type: "progress", message: `${gated.id} reported by the ${gated.hunter} hunter: ${gated.candidate.title}. Verifying…` });
+    // Handled here, at once: a failure must never surface as an unhandled rejection.
+    verifying.push(verify(gated).catch((error) => void contain(error, `Could not finish ${gated.id}`)));
+  };
+
+  const hunt = (assignments: Assignment[], hunterLimits: HunterLimits) =>
     Promise.all(
       assignments.map((assignment) =>
-        runHunter(ctx, assignment, registry, (gated) => {
-          emit({ type: "progress", message: `${gated.id} reported by the ${gated.hunter} hunter: ${gated.candidate.title}. Verifying…` });
-          verifying.push(verify(gated));
+        runHunter(ctx, assignment, registry, hunterLimits, onCandidate).catch((error): HunterStats => {
+          const message = contain(error, `The ${assignment.name} hunter stopped early`);
+          return { name: assignment.name, turns: 0, toolCalls: 0, reported: 0, accepted: 0, ms: 0, error: message };
         }),
       ),
-    ),
-  );
+    );
+
+  const assignments = planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap);
+  emit({ type: "stage", stage: "hunt", message: `Digging with ${assignments.length} hunters: ${assignments.map((a) => a.name).join(", ")}.` });
+  const [hunters, huntMs] = await time(() => hunt(assignments, { maxTurns: limits.hunterTurns, deadline: at(0.55) }));
+
+  let coverageMs = 0;
+  const gaps = fatal || Date.now() >= at(0.6) ? [] : planCoverage(routes, signals.leads, read, wrap);
+  if (gaps.length > 0) {
+    emit({ type: "stage", stage: "coverage", message: `Checking code the first pass never opened with ${gaps.length} more ${gaps.length === 1 ? "hunter" : "hunters"}…` });
+    const [extra, ms] = await time(() => hunt(gaps, { maxTurns: limits.coverageTurns, deadline: at(0.75) }));
+    hunters.push(...extra);
+    coverageMs = ms;
+  }
 
   emit({ type: "stage", stage: "verify", message: `Hunting done; ${registry.size} candidates. Finishing verification…` });
-  const [, verifyTailMs] = await time(() => Promise.all(verifying));
+  // Verification can add more work while it runs; wait until the list stops growing.
+  const [, verifyTailMs] = await time(async () => {
+    for (let settled = 0; settled < verifying.length; ) {
+      const batch = verifying.slice(settled);
+      settled = verifying.length;
+      await Promise.all(batch);
+    }
+  });
+  if (fatal) throw fatal.error;
 
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || confidenceRank(a) - confidenceRank(b));
-  const leads = persistentLeads(swept.leads);
+  const leads = persistentLeads(signals.leads);
   const totalMs = Date.now() - started;
   emit({ type: "stage", stage: "done", message: summary(findings) });
 
@@ -183,8 +251,9 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       duplicates: base.counters.duplicates,
       survivors: findings.length,
       hunters,
+      filesRead: read.size,
     },
-    timings: { indexMs: overview.indexMs, sweepMs, reconMs, huntMs, verifyTailMs, totalMs },
+    timings: { indexMs: overview.indexMs, sweepMs, reconMs, huntMs, coverageMs, verifyTailMs, totalMs },
     usage: { byRole: meter.byRole, total: meter.total(), costUsd: options.pricing ? meter.cost(options.pricing) : undefined },
     warnings,
   };

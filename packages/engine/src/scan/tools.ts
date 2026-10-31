@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 import type { IndexerClient } from "../indexer/client";
-import type { DependencyVulns } from "./leads";
+import type { Signals } from "./leads";
 import { defineTool, type Tool } from "../llm";
 import type { Lead } from "./schema";
 
@@ -29,8 +29,10 @@ export function createWrap(tag: string): Wrap {
 export interface RepoToolContext {
   indexer: IndexerClient;
   wrap: Wrap;
-  leads: Lead[];
-  vulns: DependencyVulns[];
+  /** Read at call time: vulnerable dependencies arrive after the tools are created. */
+  signals: Signals;
+  /** Called with each file an agent reads, to track coverage. */
+  onRead?: (path: string) => void;
 }
 
 const SINK_KINDS = ["sql", "nosql", "command", "code_eval", "path", "ssrf", "deserialization", "xxe", "xss", "template", "redirect", "weak_crypto", "jwt"] as const;
@@ -135,6 +137,7 @@ export function repoTools(ctx: RepoToolContext): AgentTool[] {
     }),
     agentTool(readFile, async (args, signal) => {
       const result = await call<ReadResult>("read_file", args, signal);
+      ctx.onRead?.(result.path);
       const numbered = numberLines(result.content, result.startLine);
       const more = result.truncated || result.endLine < result.totalLines ? `, more from line ${result.endLine + 1}` : "";
       return ctx.wrap(`${result.path} (lines ${result.startLine}-${result.endLine} of ${result.totalLines}${more})\n${numbered}`);
@@ -192,7 +195,7 @@ export function repoTools(ctx: RepoToolContext): AgentTool[] {
     }),
     agentTool(deps, async (args, signal) => {
       const result = await call<{ dependencies: Dependency[] }>("deps", {}, signal);
-      const vulns = new Map(ctx.vulns.map((v) => [`${v.ecosystem}:${v.name}@${v.version}`, v]));
+      const vulns = new Map(ctx.signals.vulns.map((v) => [`${v.ecosystem}:${v.name}@${v.version}`, v]));
       const rows = result.dependencies
         .map((dep) => ({ dep, vuln: vulns.get(`${dep.ecosystem}:${dep.name}@${dep.version}`) }))
         .filter(({ vuln }) => !args.vulnerableOnly || vuln)
@@ -208,7 +211,7 @@ export function repoTools(ctx: RepoToolContext): AgentTool[] {
       return ctx.wrap(rows.join("\n"));
     }),
     agentTool(leads, async (args) => {
-      const all = ctx.leads.filter((lead) => !args.kind || lead.kind === args.kind);
+      const all = ctx.signals.leads.filter((lead) => !args.kind || lead.kind === args.kind);
       if (all.length === 0) return "No leads.";
       return ctx.wrap(all.map(formatLead).join("\n"));
     }),

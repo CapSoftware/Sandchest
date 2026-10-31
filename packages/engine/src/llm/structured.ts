@@ -20,6 +20,8 @@ export interface GenerateObjectResult<T> {
   value: T;
   attempts: number;
   usage: Usage;
+  /** Transport retries across all attempts. */
+  retries: number;
 }
 
 export class StructuredOutputError extends Error {
@@ -48,6 +50,7 @@ export async function generateObject<T>(client: LlmClient, options: GenerateObje
   const maxAttempts = options.maxAttempts ?? 3;
   const usage: Usage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   const messages = [...options.messages];
+  let retries = 0;
   let lastOutput = "";
   let lastError = "";
 
@@ -61,9 +64,10 @@ export async function generateObject<T>(client: LlmClient, options: GenerateObje
       signal: options.signal,
     });
     addUsage(usage, result.usage);
+    retries += result.retries;
 
     const parsed = parseOutput(result.content, options.schema);
-    if (parsed.ok) return { value: parsed.value, attempts: attempt, usage };
+    if (parsed.ok) return { value: parsed.value, attempts: attempt, usage, retries };
 
     lastOutput = result.content;
     lastError = parsed.error;

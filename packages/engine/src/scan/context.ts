@@ -5,32 +5,43 @@ import type { Finding } from "./schema";
 import type { AgentTool, Wrap } from "./tools";
 
 export interface ScanLimits {
-  /** Parallel hunters, including the access-control and leads hunters. Default 8. */
+  /** Parallel hunters in the main pass, including access-control and leads hunters. Default 8. */
   maxHunters: number;
   /** Model turns per hunter. Default 40. */
   hunterTurns: number;
+  /** Model turns per coverage hunter. Default 20. */
+  coverageTurns: number;
   /** Model turns per skeptic review. Default 12. */
   skepticTurns: number;
   /** Model turns for recon exploration. Default 10. */
   reconTurns: number;
-  /** Model requests in flight at once across the scan. Default 8. */
+  /** Model requests in flight at once across the scan. Default 12. */
   concurrency: number;
   /** Largest repository scanned, in lines of hand-written code. Default 1,000,000. */
   maxLoc: number;
+  /**
+   * Wall-clock ceiling for the scan. Typical scans finish far inside it; it
+   * bounds the worst case. The main hunt stops at 55% of it, the coverage
+   * pass at 75%, and candidates still unreviewed at 90% are kept at low
+   * confidence. Default 15 minutes.
+   */
+  timeBudgetMs: number;
 }
 
 export const DEFAULT_LIMITS: ScanLimits = {
   maxHunters: 8,
   hunterTurns: 40,
+  coverageTurns: 20,
   skepticTurns: 12,
   reconTurns: 10,
-  concurrency: 8,
+  concurrency: 12,
   maxLoc: 1_000_000,
+  timeBudgetMs: 15 * 60_000,
 };
 
 /** Progress for the live feed: calm, readable, never code. */
 export type ScanEvent =
-  | { type: "stage"; stage: "index" | "sweep" | "recon" | "hunt" | "verify" | "done"; message: string }
+  | { type: "stage"; stage: "index" | "sweep" | "recon" | "hunt" | "coverage" | "verify" | "done"; message: string }
   | { type: "progress"; message: string }
   | { type: "finding"; finding: Finding }
   | { type: "warning"; message: string };

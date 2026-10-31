@@ -5,6 +5,7 @@
  * The conversation only ever grows by appending, so the system prompt and
  * threat model at its head stay a cacheable prefix.
  */
+import { isIndexerDown } from "../indexer/client";
 import { parseToolCall, type LlmClient, type Message, type Role, type Tool, type ToolCall } from "../llm";
 import type { Limiter, UsageMeter } from "./metrics";
 import type { AgentTool } from "./tools";
@@ -20,8 +21,12 @@ export interface AgentOptions {
   maxTurns: number;
   /** Rough context budget in characters (about 4 per token). Past it, the agent is told to finish. */
   maxContextChars?: number;
-  /** Output tokens per turn. */
+  /** Output tokens per turn, reasoning included. Default 16,000: room to think, never runaway generation. */
   maxTokens?: number;
+  /** Wall-clock time (epoch ms) by which the agent must finish. It is told to wrap up shortly before. */
+  deadline?: number;
+  /** Queue position for model requests. Default "routine". */
+  priority?: "urgent" | "routine";
   /** Stops the loop early, e.g. once the skeptic has ruled. */
   done?: () => boolean;
   onToolCall?: (name: string, args: unknown) => void;
@@ -36,6 +41,9 @@ export interface AgentResult {
   toolCalls: number;
 }
 
+const DEFAULT_MAX_TOKENS = 16_000;
+/** How long before the deadline the agent is told to wrap up. */
+const WRAP_UP_MS = 45_000;
 /** Longest tool result kept in the conversation. */
 const MAX_TOOL_RESULT = 24_000;
 const DEFAULT_CONTEXT_CHARS = 400_000;
@@ -51,9 +59,16 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let toolCalls = 0;
   let warned = false;
 
+  const deadline = options.deadline ?? Number.POSITIVE_INFINITY;
   for (let turn = 1; turn <= options.maxTurns; turn++) {
-    const result = await limiter.run(() => client.chat({ role, messages, tools: specs, toolChoice: "auto", maxTokens: options.maxTokens, signal }));
-    meter.add(role, result.usage);
+    if (Date.now() >= deadline) {
+      return { messages, content: "", turns: turn - 1, toolCalls };
+    }
+    const result = await limiter.run(
+      () => client.chat({ role, messages, tools: specs, toolChoice: "auto", maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal }),
+      options.priority,
+    );
+    meter.add(role, result.usage, 1, result.retries);
     messages.push(result.message);
     size += messageSize(result.message);
 
@@ -76,11 +91,11 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       return { messages, content: "", turns: turn, toolCalls };
     }
     const remaining = options.maxTurns - turn;
-    if (!warned && (remaining <= 2 || size > budget)) {
+    if (!warned && (remaining <= 2 || size > budget || Date.now() >= deadline - WRAP_UP_MS)) {
       warned = true;
       messages.push({
         role: "user",
-        content: `You are almost out of budget (${remaining} turns left). Report anything you have confirmed now, then finish.`,
+        content: `You are almost out of budget. Report anything you have confirmed now, then finish.`,
       });
     }
   }
@@ -94,8 +109,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       const output = await tools.get(parsed.tool.name)!.run(parsed.args, signal);
       return output.length > MAX_TOOL_RESULT ? `${output.slice(0, MAX_TOOL_RESULT)}\n… (output truncated; narrow the request)` : output;
     } catch (error) {
-      // A failed tool is the model's problem to work around, not a reason to lose the scan.
-      if (signal?.aborted) throw error;
+      // A failed call is the model's to work around; a dead indexer or a cancelled scan is not.
+      if (signal?.aborted || isIndexerDown(error)) throw error;
       return `Error: ${(error as Error).message}`;
     }
   }

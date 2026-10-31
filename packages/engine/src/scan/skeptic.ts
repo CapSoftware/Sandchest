@@ -27,7 +27,8 @@ export interface Review {
   ruled: boolean;
 }
 
-export async function review(ctx: ScanContext, gated: GatedCandidate): Promise<Review> {
+/** Rules on a candidate. `deadline` bounds the review; a candidate not ruled on in time is kept at low confidence. */
+export async function review(ctx: ScanContext, gated: GatedCandidate, deadline?: number): Promise<Review> {
   let verdict: Verdict | undefined;
   const verdictTool = agentTool(submitVerdict, async (args: Verdict) => {
     if (args.verdict === "disproved") {
@@ -57,10 +58,16 @@ export async function review(ctx: ScanContext, gated: GatedCandidate): Promise<R
     meter: ctx.meter,
     maxTurns: ctx.options.skepticTurns,
     done: () => verdict !== undefined,
+    deadline,
+    priority: "urgent",
     signal: ctx.signal,
   });
 
-  if (verdict) return { verdict, ruled: true };
+  return verdict ? { verdict, ruled: true } : unreviewed(gated, "The reviewer did not reach a verdict");
+}
+
+/** Keeps a candidate the skeptic could not rule on, at low confidence so it is hidden by default. */
+export function unreviewed(gated: GatedCandidate, reason: string): Review {
   return {
     ruled: false,
     verdict: {
@@ -68,7 +75,7 @@ export async function review(ctx: ScanContext, gated: GatedCandidate): Promise<R
       confidence: "low",
       disproof: [],
       severity: gated.candidate.severity,
-      reasoning: "The reviewer did not reach a verdict, so the finding is kept at low confidence.",
+      reasoning: `${reason}, so the finding is kept at low confidence.`,
     },
   };
 }

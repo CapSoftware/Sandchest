@@ -4,6 +4,7 @@ import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate, typ
 import { fixPrompt } from "../src/scan/fix-prompt";
 import { planAssignments } from "../src/scan/hunt";
 import { UsageMeter } from "../src/scan/metrics";
+import { compareVersions, fixedVersionFor } from "../src/scan/osv";
 import type { Candidate, Finding, ThreatModel } from "../src/scan/schema";
 import { createWrap, numberLines } from "../src/scan/tools";
 
@@ -209,5 +210,19 @@ describe("helpers", () => {
     meter.add("skeptic", { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 });
     expect(meter.total().requests).toBe(2);
     expect(meter.cost({ input: 1, cachedInput: 0.1, output: 4 })).toBeCloseTo(0.2 + 0.08 + 0.4);
+  });
+});
+
+describe("advisories", () => {
+  const events = [{ introduced: "0" }, { fixed: "15.5.28" }, { introduced: "16.0.0" }, { fixed: "16.3.8" }];
+
+  test("picks the fix on the installed release line", () => {
+    expect(fixedVersionFor(events, "16.3.0")).toBe("16.3.8");
+    expect(fixedVersionFor(events, "15.1.0")).toBe("15.5.28");
+  });
+
+  test("compares versions numerically", () => {
+    expect(compareVersions("16.3.10", "16.3.8")).toBeGreaterThan(0);
+    expect(compareVersions("v1.2", "1.2.0")).toBe(0);
   });
 });

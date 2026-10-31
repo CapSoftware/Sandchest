@@ -22,14 +22,27 @@ export interface HunterStats {
   toolCalls: number;
   reported: number;
   accepted: number;
+  ms: number;
+  /** Why the hunter stopped early, if it did. */
+  error?: string;
 }
 
 const MAX_ROUTES_LISTED = 150;
 const MAX_LEADS_LISTED = 80;
+/** Entry points one access-control hunter reviews; more are split across hunters. */
+const ROUTES_PER_ACCESS_HUNTER = 60;
+const MAX_ACCESS_HUNTERS = 3;
+/** Items one coverage hunter checks. */
+const COVERAGE_ITEMS_PER_HUNTER = 30;
+const MAX_COVERAGE_HUNTERS = 2;
+
+const ACCESS_CONTROL_BRIEF =
+  "For each entry point, work out who can call it (anonymous, any user, admin) and whether it checks that the caller may act on the specific object it reads or changes. Look for missing auth middleware, inconsistent guards between similar routes, IDs taken from the request without an ownership check, role or ownership fields an attacker can set, broken session or token handling, and password reset or login flaws.";
 
 /**
- * Splits the attack surface: one hunter per risky subsystem, one for access
- * control across every entry point, and one for the deterministic leads.
+ * Splits the attack surface: one hunter per risky subsystem, access-control
+ * hunters across every entry point (several when there are many, so no one
+ * hunter becomes the long pole), and one for the deterministic leads.
  */
 export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: Lead[], maxHunters: number, wrap: Wrap): Assignment[] {
   // Route paths and lead details come from the repository.
@@ -42,7 +55,9 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
   const under = (prefixes: string[], at: string | undefined) =>
     !!at && prefixes.some((prefix) => prefix === "" || at === prefix || at.startsWith(`${prefix}/`) || at.startsWith(`${prefix}:`));
 
-  for (const subsystem of subsystems.slice(0, Math.max(1, maxHunters - 2))) {
+  const accessGroups = chunk(routes, ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
+  const reserved = Math.max(1, accessGroups.length) + 1;
+  for (const subsystem of subsystems.slice(0, Math.max(1, maxHunters - reserved))) {
     const prefixes = subsystem.paths.map((p) => normalizePath(p).replace(/\/+$/, ""));
     covered.push(...prefixes);
     const inScope = (at: string | undefined) => under(prefixes, at);
@@ -59,14 +74,27 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
     });
   }
 
-  assignments.push({
-    name: "access control",
-    brief: [
-      "Your scope: authentication and authorisation across every entry point.",
-      "For each entry point, work out who can call it (anonymous, any user, admin) and whether it checks that the caller may act on the specific object it reads or changes. Look for missing auth middleware, inconsistent guards between similar routes, IDs taken from the request without an ownership check, role or ownership fields an attacker can set, broken session or token handling, and password reset or login flaws.",
-      section("Entry points", routes.slice(0, MAX_ROUTES_LISTED * 2).map(formatRoute), "None found by the index. Use search() to find handlers."),
-    ].join("\n\n"),
-  });
+  if (accessGroups.length <= 1) {
+    assignments.push({
+      name: "access control",
+      brief: [
+        "Your scope: authentication and authorisation across every entry point.",
+        ACCESS_CONTROL_BRIEF,
+        section("Entry points", routes.map(formatRoute), "None found by the index. Use search() to find handlers."),
+      ].join("\n\n"),
+    });
+  } else {
+    for (const [i, group] of accessGroups.entries()) {
+      assignments.push({
+        name: `access control ${i + 1}/${accessGroups.length}`,
+        brief: [
+          "Your scope: authentication and authorisation for the entry points below. Other hunters cover the rest; compare with similar routes elsewhere (routes()) when a guard looks inconsistent.",
+          ACCESS_CONTROL_BRIEF,
+          section("Entry points", group.map(formatRoute), ""),
+        ].join("\n\n"),
+      });
+    }
+  }
 
   const unscoped = leads
     .filter((lead) => lead.kind !== "sink" || !under(covered, lead.at))
@@ -84,14 +112,46 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
   return assignments;
 }
 
+/**
+ * A second pass over what the first hunters never opened: reachable sinks
+ * and route handlers in files no agent read. Hunters reach different code
+ * from run to run; this closes the gaps deterministically.
+ */
+export function planCoverage(routes: RouteInfo[], leads: Lead[], read: ReadonlySet<string>, wrap: Wrap): Assignment[] {
+  const unread = (at: string | undefined) => !!at && !read.has(fileOf(at));
+  const sinks = leads.filter((lead) => lead.kind === "sink" && !lead.title.includes("no route reaches it") && unread(lead.at)).map(formatLead);
+  const handlers = routes
+    // PHP scripts are their own handler; elsewhere an unresolved handler is usually third-party middleware.
+    .filter((route) => (route.framework === "php" ? unread(route.at) : route.handlers.length > 0 && route.handlers.every((h) => unread(h.split(" @ ")[1]))))
+    .map(formatRoute);
+  const items = [...sinks, ...handlers];
+  return chunk(items, COVERAGE_ITEMS_PER_HUNTER)
+    .slice(0, MAX_COVERAGE_HUNTERS)
+    .map((group, i, all) => ({
+      name: all.length > 1 ? `coverage ${i + 1}/${all.length}` : "coverage",
+      brief: [
+        "Your scope: code the other hunters never opened. Each item below is a dangerous sink a route can reach, or an entry point whose handler nobody read. Read each one, decide quickly whether an attacker can exploit it, and report what is real. Skip anything that is clearly safe.",
+        `## Unreviewed\n${wrap(group.join("\n"))}`,
+      ].join("\n\n"),
+    }));
+}
+
+export interface HunterLimits {
+  maxTurns: number;
+  /** Epoch ms by which the hunter must finish. */
+  deadline: number;
+}
+
 /** Runs one hunter to completion. `onCandidate` receives each candidate that passes the gate. */
 export async function runHunter(
   ctx: ScanContext,
   assignment: Assignment,
   registry: CandidateRegistry,
+  limits: HunterLimits,
   onCandidate: (candidate: GatedCandidate) => void,
 ): Promise<HunterStats> {
-  const stats: HunterStats = { name: assignment.name, turns: 0, toolCalls: 0, reported: 0, accepted: 0 };
+  const started = Date.now();
+  const stats: HunterStats = { name: assignment.name, turns: 0, toolCalls: 0, reported: 0, accepted: 0, ms: 0 };
   const messages: Message[] = [
     { role: "system", content: `${huntSystemPrompt(ctx.tag)}\n\n${ctx.threatModelText}` },
     { role: "user", content: assignment.brief },
@@ -103,11 +163,13 @@ export async function runHunter(
     tools: [...ctx.tools, reportTool(ctx, assignment.name, registry, stats, onCandidate)],
     limiter: ctx.limiter,
     meter: ctx.meter,
-    maxTurns: ctx.options.hunterTurns,
+    maxTurns: limits.maxTurns,
+    deadline: limits.deadline,
     signal: ctx.signal,
   });
   stats.turns = result.turns;
   stats.toolCalls = result.toolCalls;
+  stats.ms = Date.now() - started;
   return stats;
 }
 
@@ -153,6 +215,18 @@ function reportTool(
     onCandidate(gated);
     return `Recorded as ${gated.id}. Keep hunting.`;
   });
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const groups: T[][] = [];
+  for (let i = 0; i < items.length; i += size) groups.push(items.slice(i, i + size));
+  return groups;
+}
+
+/** `src/a.ts:12` → `src/a.ts`. */
+function fileOf(at: string): string {
+  const colon = at.lastIndexOf(":");
+  return colon === -1 ? at : at.slice(0, colon);
 }
 
 function formatRoute(route: RouteInfo): string {

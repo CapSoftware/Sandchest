@@ -171,3 +171,27 @@ describe("failures", () => {
     expect((error as LlmError).message).toContain("overloaded");
   });
 });
+
+describe("timeouts", () => {
+  test("gives up on a response that streams for too long, and retries", async () => {
+    let calls = 0;
+    endpoint.respond(
+      () => {
+        calls++;
+        // Keeps sending bytes: the idle timer never fires, the overall limit does.
+        const stream = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            await Bun.sleep(5);
+            controller.enqueue(new TextEncoder().encode(": keep-alive\n\n"));
+          },
+        });
+        return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+      },
+      () => sse(textReply("ok")),
+    );
+    const result = await endpoint.client({ requestTimeoutMs: 50, idleTimeoutMs: 1_000 }).chat(ask);
+    expect(result.content).toBe("ok");
+    expect(result.retries).toBe(1);
+    expect(calls).toBe(1);
+  });
+});
