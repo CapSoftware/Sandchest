@@ -7,6 +7,7 @@ evals/results/
 
 # Internal planning docs (local only)
 SPEC.md
+FINDINGS.md
 
 # Secrets and local config
 .env
@@ -35,3 +36,7 @@ tmp/
 *.log
 .idea/
 .vscode/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
