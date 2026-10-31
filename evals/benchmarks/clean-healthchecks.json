@@ -1,0 +1,11 @@
+{
+  "name": "clean-healthchecks",
+  "description": "Healthchecks, a maintained Django cron-monitoring service, used to measure false positives on clean code.",
+  "kind": "clean",
+  "source": { "repo": "https://github.com/healthchecks/healthchecks.git", "commit": "f6c46b594dec66c92bca7dd56db58fbd1e4ce9fe" },
+  "expected": [],
+  "decoys": [
+    { "file": "hc/integrations/shell/transport.py", "startLine": 23, "endLine": 44, "note": "shell=True runs a project-configured command by design; the integration is off unless the operator sets SHELL_ENABLED, and check data is passed as environment variables, not interpolated." },
+    { "file": "hc/lib/curl.py", "startLine": 128, "endLine": 145, "note": "Outbound webhook requests check the resolved IP at socket-open time (covering redirects and DNS rebinding) and reject private addresses unless INTEGRATIONS_ALLOW_PRIVATE_IPS is set; only http/https are allowed." }
+  ]
+}

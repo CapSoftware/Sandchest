@@ -27,6 +27,17 @@
         "typescript": "^5.9.3",
       },
     },
+    "evals": {
+      "name": "@sandchest/evals",
+      "dependencies": {
+        "@sandchest/engine": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "typescript": "^5.9.3",
+      },
+    },
     "packages/engine": {
       "name": "@sandchest/engine",
       "dependencies": {
@@ -163,6 +174,8 @@
     "@resvg/resvg-js-win32-x64-msvc": ["@resvg/resvg-js-win32-x64-msvc@2.6.2", "", { "os": "win32", "cpu": "x64" }, "sha512-ZXtYhtUr5SSaBrUDq7DiyjOFJqBVL/dOBN7N/qmi/pO0IgiWW/f/ue3nbvu9joWE5aAKDoIzy/CxsY0suwGosQ=="],
 
     "@sandchest/engine": ["@sandchest/engine@workspace:packages/engine"],
+
+    "@sandchest/evals": ["@sandchest/evals@workspace:evals"],
 
     "@sandchest/web": ["@sandchest/web@workspace:apps/web"],
 

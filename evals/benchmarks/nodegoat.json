@@ -1,0 +1,209 @@
+{
+  "name": "nodegoat",
+  "description": "OWASP NodeGoat, a deliberately vulnerable Node.js/Express and MongoDB app; measures recall on OWASP Top 10 issues in server-side JavaScript.",
+  "kind": "vulnerable",
+  "source": { "repo": "https://github.com/OWASP/NodeGoat.git", "commit": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8" },
+  "expected": [
+    {
+      "id": "contributions-eval",
+      "title": "Server-side JavaScript injection via eval() of contribution form fields",
+      "severity": "critical",
+      "category": "code_injection",
+      "cwe": ["CWE-95", "CWE-94", "CWE-78"],
+      "locations": [
+        { "file": "app/routes/contributions.js", "startLine": 28, "endLine": 34 },
+        { "file": "app/routes/index.js", "startLine": 52, "endLine": 52 }
+      ]
+    },
+    {
+      "id": "allocations-where-injection",
+      "title": "NoSQL injection through the threshold parameter interpolated into a $where clause",
+      "severity": "high",
+      "category": "nosql_injection",
+      "cwe": ["CWE-943", "CWE-89", "CWE-94"],
+      "locations": [
+        { "file": "app/data/allocations-dao.js", "startLine": 57, "endLine": 86 },
+        { "file": "app/routes/allocations.js", "startLine": 19, "endLine": 23 }
+      ]
+    },
+    {
+      "id": "allocations-idor",
+      "title": "Allocations page reads userId from the URL instead of the session (IDOR)",
+      "severity": "high",
+      "category": "broken_access_control",
+      "cwe": ["CWE-639", "CWE-284", "CWE-862", "CWE-285"],
+      "locations": [
+        { "file": "app/routes/allocations.js", "startLine": 11, "endLine": 23 },
+        { "file": "app/routes/index.js", "startLine": 63, "endLine": 63 }
+      ]
+    },
+    {
+      "id": "benefits-missing-admin-check",
+      "title": "Admin-only benefits pages lack the isAdmin check, letting any user list users and change their benefit dates",
+      "severity": "high",
+      "category": "broken_access_control",
+      "cwe": ["CWE-285", "CWE-862", "CWE-284", "CWE-269"],
+      "locations": [
+        { "file": "app/routes/index.js", "startLine": 54, "endLine": 56 },
+        { "file": "app/routes/benefits.js", "startLine": 13, "endLine": 35 }
+      ]
+    },
+    {
+      "id": "research-ssrf",
+      "title": "SSRF in the research page: server fetches a user-supplied URL and returns the body as HTML",
+      "severity": "high",
+      "category": "ssrf",
+      "cwe": ["CWE-918"],
+      "locations": [
+        { "file": "app/routes/research.js", "startLine": 12, "endLine": 28 }
+      ]
+    },
+    {
+      "id": "stored-xss-profile-names",
+      "title": "Stored XSS via profile first/last name rendered with template autoescaping disabled (shown to admin on benefits page)",
+      "severity": "high",
+      "category": "xss",
+      "cwe": ["CWE-79", "CWE-80", "CWE-116"],
+      "locations": [
+        { "file": "server.js", "startLine": 134, "endLine": 142 },
+        { "file": "app/views/benefits.html", "startLine": 50, "endLine": 52 },
+        { "file": "app/views/layout.html", "startLine": 75, "endLine": 75 }
+      ]
+    },
+    {
+      "id": "stored-xss-memos-marked",
+      "title": "Stored XSS in memos rendered with marked 0.3.5, whose sanitize option is bypassable",
+      "severity": "high",
+      "category": "xss",
+      "cwe": ["CWE-79", "CWE-80", "CWE-1104", "CWE-1395", "CWE-937"],
+      "locations": [
+        { "file": "app/views/memos.html", "startLine": 31, "endLine": 31 },
+        { "file": "server.js", "startLine": 124, "endLine": 129 },
+        { "file": "package.json", "startLine": 20, "endLine": 20 }
+      ]
+    },
+    {
+      "id": "reflected-xss-form-rerender",
+      "title": "Reflected XSS when login and profile forms re-render raw request values (no autoescape, no CSRF token)",
+      "severity": "medium",
+      "category": "xss",
+      "cwe": ["CWE-79", "CWE-80"],
+      "locations": [
+        { "file": "app/views/login.html", "startLine": 110, "endLine": 110 },
+        { "file": "app/views/profile.html", "startLine": 41, "endLine": 41 },
+        { "file": "app/views/profile.html", "startLine": 78, "endLine": 78 }
+      ]
+    },
+    {
+      "id": "learn-open-redirect",
+      "title": "Open redirect on /learn using the url query parameter",
+      "severity": "medium",
+      "category": "open_redirect",
+      "cwe": ["CWE-601"],
+      "locations": [
+        { "file": "app/routes/index.js", "startLine": 69, "endLine": 73 }
+      ]
+    },
+    {
+      "id": "no-csrf-protection",
+      "title": "No CSRF protection on state-changing POST routes (profile, contributions, benefits, memos)",
+      "severity": "medium",
+      "category": "csrf",
+      "cwe": ["CWE-352"],
+      "locations": [
+        { "file": "server.js", "startLine": 77, "endLine": 113 },
+        { "file": "app/routes/index.js", "startLine": 48, "endLine": 67 }
+      ]
+    },
+    {
+      "id": "plaintext-passwords",
+      "title": "Passwords stored and compared in plaintext",
+      "severity": "medium",
+      "category": "weak_cryptography",
+      "cwe": ["CWE-256", "CWE-257", "CWE-916", "CWE-522", "CWE-312"],
+      "locations": [
+        { "file": "app/data/user-dao.js", "startLine": 17, "endLine": 31 },
+        { "file": "app/data/user-dao.js", "startLine": 59, "endLine": 61 }
+      ]
+    },
+    {
+      "id": "login-session-fixation",
+      "title": "Session ID not regenerated on login (session fixation)",
+      "severity": "medium",
+      "category": "broken_authentication",
+      "cwe": ["CWE-384"],
+      "locations": [
+        { "file": "app/routes/session.js", "startLine": 104, "endLine": 117 }
+      ]
+    },
+    {
+      "id": "bank-routing-redos",
+      "title": "ReDoS in bank routing number validation regex /([0-9]+)+\\#/",
+      "severity": "medium",
+      "category": "denial_of_service",
+      "cwe": ["CWE-1333", "CWE-400", "CWE-185"],
+      "locations": [
+        { "file": "app/routes/profile.js", "startLine": 59, "endLine": 61 }
+      ]
+    },
+    {
+      "id": "pii-cleartext",
+      "title": "SSN, DOB and bank details stored unencrypted and served over plain HTTP",
+      "severity": "medium",
+      "category": "sensitive_data_exposure",
+      "cwe": ["CWE-311", "CWE-312", "CWE-319"],
+      "locations": [
+        { "file": "app/data/profile-dao.js", "startLine": 55, "endLine": 66 },
+        { "file": "server.js", "startLine": 144, "endLine": 147 }
+      ]
+    },
+    {
+      "id": "hardcoded-session-secret",
+      "title": "Hardcoded session cookie secret and crypto key in config",
+      "severity": "medium",
+      "category": "hardcoded_secret",
+      "cwe": ["CWE-798", "CWE-321", "CWE-547"],
+      "locations": [
+        { "file": "config/env/all.js", "startLine": 8, "endLine": 9 },
+        { "file": "server.js", "startLine": 82, "endLine": 82 }
+      ]
+    },
+    {
+      "id": "login-user-enumeration",
+      "title": "Login returns distinct errors for unknown username vs wrong password",
+      "severity": "low",
+      "category": "broken_authentication",
+      "cwe": ["CWE-203", "CWE-204", "CWE-200"],
+      "locations": [
+        { "file": "app/routes/session.js", "startLine": 59, "endLine": 98 }
+      ]
+    },
+    {
+      "id": "weak-password-policy",
+      "title": "Signup accepts any 1-20 character password",
+      "severity": "low",
+      "category": "broken_authentication",
+      "cwe": ["CWE-521"],
+      "locations": [
+        { "file": "app/routes/session.js", "startLine": 144, "endLine": 144 }
+      ]
+    },
+    {
+      "id": "login-log-injection",
+      "title": "Unsanitised username written to logs on failed login (log forging)",
+      "severity": "low",
+      "category": "other",
+      "cwe": ["CWE-117", "CWE-93"],
+      "locations": [
+        { "file": "app/routes/session.js", "startLine": 64, "endLine": 64 }
+      ]
+    }
+  ],
+  "decoys": [
+    { "file": "app/data/user-dao.js", "startLine": 97, "endLine": 107, "note": "Lookups by id use parseInt and by username use an equality query; userId comes from the session." },
+    { "file": "app/routes/profile.js", "startLine": 13, "endLine": 20, "note": "Profile view and update take userId from the session, not from the request, so there is no IDOR." },
+    { "file": "app/routes/contributions.js", "startLine": 12, "endLine": 17, "note": "Contributions display uses the session userId." },
+    { "file": "app/data/benefits-dao.js", "startLine": 15, "endLine": 21, "note": "Static query with a literal $ne operator; no user input reaches the filter." },
+    { "file": "app/data/allocations-dao.js", "startLine": 81, "endLine": 83, "note": "Without a threshold the query is a plain equality match on a parseInt'd id." }
+  ]
+}

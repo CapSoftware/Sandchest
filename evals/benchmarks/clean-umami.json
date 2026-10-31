@@ -1,0 +1,11 @@
+{
+  "name": "clean-umami",
+  "description": "Umami, a maintained Next.js/TypeScript web analytics app, used to measure false positives on clean code.",
+  "kind": "clean",
+  "source": { "repo": "https://github.com/umami-software/umami.git", "commit": "559e3c607c23d2c72d9bd4f6481bda428255323c" },
+  "expected": [],
+  "decoys": [
+    { "file": "src/lib/prisma.ts", "startLine": 713, "endLine": 746, "note": "$queryRawUnsafe is called with bound parameters: {{name}} placeholders are rewritten to $n and values passed separately; search_path comes from the operator's DATABASE_URL." },
+    { "file": "src/lib/prisma.ts", "startLine": 780, "endLine": 797, "note": "orderBy is interpolated into SQL, but every route that reaches pagedRawQuery uses a Zod schema without sortingParams, so orderBy is stripped; page and size are coerced to numbers." }
+  ]
+}
