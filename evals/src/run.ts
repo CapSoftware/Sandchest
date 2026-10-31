@@ -49,9 +49,6 @@ interface Outcome {
   error?: string;
 }
 
-// `bun run evals` runs from evals/; paths on the command line are relative to where it was typed.
-const run = values.rescore ? await rescore(resolve(process.env.INIT_CWD ?? REPO_ROOT, values.rescore)) : await scanAll();
-await summarise(run.outcomes, run.dir);
 
 async function scanAll(): Promise<{ outcomes: Outcome[]; dir: string }> {
   const benchmarks = values.private ? await privateTargets() : await selectBenchmarks(positionals);
@@ -201,3 +198,8 @@ function kilo(n: number): string {
 function mark(value: number | null, meets: (value: number) => boolean): string {
   return value === null ? " " : meets(value) ? "✓" : "✗";
 }
+
+// Last, so every declaration above is initialised before the top-level await runs.
+// `bun run evals` runs from evals/; paths on the command line are relative to where it was typed.
+const run = values.rescore ? await rescore(resolve(process.env.INIT_CWD ?? REPO_ROOT, values.rescore)) : await scanAll();
+await summarise(run.outcomes, run.dir);
