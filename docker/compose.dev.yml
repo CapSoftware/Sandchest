@@ -1,0 +1,22 @@
+# Local development services. Usage: docker compose -f docker/compose.dev.yml up -d
+name: sandchest-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: sandchest
+      POSTGRES_PASSWORD: sandchest
+      POSTGRES_DB: sandchest
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandchest -d sandchest"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres:
