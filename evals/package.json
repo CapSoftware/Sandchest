@@ -6,7 +6,8 @@
   "scripts": {
     "evals": "bun --env-file=../.env.local src/run.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "reverify": "bun --env-file=../.env.local src/reverify.ts"
   },
   "dependencies": {
     "@sandchest/engine": "workspace:*",

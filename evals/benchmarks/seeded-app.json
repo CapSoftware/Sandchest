@@ -320,12 +320,6 @@
       "note": "Resolves the path and checks it stays inside the org directory"
     },
     {
-      "file": "src/lib/webhooks.ts",
-      "startLine": 32,
-      "endLine": 43,
-      "note": "Delivery checks the resolved address is public and disables redirects"
-    },
-    {
       "file": "src/lib/pdf.ts",
       "startLine": 44,
       "endLine": 48,
