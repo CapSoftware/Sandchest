@@ -43,6 +43,13 @@
       "when": 1793530548741,
       "tag": "0005_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793545002721,
+      "tag": "0006_free_first_dig",
+      "breakpoints": true
     }
   ]
 }

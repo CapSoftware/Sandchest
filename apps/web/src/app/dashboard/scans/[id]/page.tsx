@@ -95,7 +95,8 @@ export default async function ScanPage({ params }: Params) {
             <dd>{compactNumber(stats.loc)}</dd>
           </div>
         )}
-        {scan.credits > 0 && (
+        {/* What was charged, once it was: a free Dig, or a scan still running, shows no cost. */}
+        {scan.billing === "charged" && scan.credits > 0 && (
           <div className="stat">
             <dt>Cost</dt>
             <dd>{plural(scan.credits, "credit")}</dd>

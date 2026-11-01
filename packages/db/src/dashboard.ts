@@ -104,7 +104,14 @@ export interface DashboardRepo {
   open: Record<Severity, number>;
   lastScan: { id: string; kind: string; status: string; at: Date } | null;
   activeDeepScanId: string | null;
+  /** Whether the org's next Dig is its free first one. */
+  freeDig: boolean;
 }
+
+/** Whether an org's free first Dig is still to come: SQL over `orgs` as `o`. Mirrors `claimFreeDig`. */
+export const FREE_DIG_AVAILABLE = sql`(o.free_dig_scan_id is null or not exists (
+  select 1 from scans fd where fd.id = o.free_dig_scan_id and fd.status in ('queued', 'running', 'publishing', 'completed')
+))`;
 
 /** Enabled repos the user can see, with open findings by severity and their latest scan. One query. */
 export async function dashboardRepos(database: Db, userId: string): Promise<DashboardRepo[]> {
@@ -129,6 +136,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     scan_status: string | null;
     scan_at: string | null;
     active_deep_id: string | null;
+    free_dig: boolean;
   }>(sql`
     select r.id, r.full_name, r.private, o.id as org_id, o.github_login as org_login,
       exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id) as org_admin,
@@ -136,7 +144,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
       coalesce(f.critical, 0)::int as critical, coalesce(f.high, 0)::int as high,
       coalesce(f.medium, 0)::int as medium, coalesce(f.low, 0)::int as low,
       s.id as scan_id, s.kind as scan_kind, s.status as scan_status, coalesce(s.finished_at, s.started_at, s.created_at) as scan_at,
-      d.id as active_deep_id
+      d.id as active_deep_id, ${FREE_DIG_AVAILABLE} as free_dig
     from ${repos} r
     join ${orgs} o on o.id = r.org_id
     join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
@@ -171,6 +179,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     open: { critical: row.critical, high: row.high, medium: row.medium, low: row.low },
     lastScan: row.scan_id ? { id: row.scan_id, kind: row.scan_kind!, status: row.scan_status!, at: new Date(row.scan_at!) } : null,
     activeDeepScanId: row.active_deep_id,
+    freeDig: row.free_dig,
   }));
 }
 

@@ -46,6 +46,12 @@ export const orgs = pgTable("orgs", {
   /** Null once uninstalled. */
   installationId: bigint("installation_id", { mode: "number" }).unique(),
   settings: jsonb("settings").$type<OrgSettings>().notNull().default({ checkThreshold: "high" }),
+  /**
+   * The deep scan that used the org's free first Dig. It stays used while
+   * that scan is queued, running or completed; if it failed, was refused or
+   * is gone, the next Dig is free again. (No foreign key: scans point here.)
+   */
+  freeDigScanId: uuid("free_dig_scan_id"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

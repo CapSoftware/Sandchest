@@ -100,7 +100,8 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
 
 /** What a scan costs, before it runs. A PR review costs what the engine will report for the same files. */
 async function scanCredits(scan: LoadedScan): Promise<number> {
-  if (scan.kind === "deep") return deepScanCredits(scan.repo.loc ?? 0) ?? DEEP_SCAN_TIERS.at(-1)!.credits;
+  // Not sized yet: hold the most a deep scan can cost; the charge is what it measures.
+  if (scan.kind === "deep") return (scan.repo.loc === null ? undefined : deepScanCredits(scan.repo.loc)) ?? DEEP_SCAN_TIERS.at(-1)!.credits;
   if (scan.kind !== "pr_review" || !scan.prNumber || !scan.repo.org.installationId) return 0;
   const files = await githubApp().installation(scan.repo.org.installationId).pullFiles(scan.repo.fullName, scan.prNumber);
   const relevant = relevantChanges(files.map(toChangedFile));

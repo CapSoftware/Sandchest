@@ -12,7 +12,7 @@ Sandchest runs four kinds of scan. All of them read your code in a temporary wor
 | Deep scan | You press Dig | Hunts across the whole repository | 15, 30 or 75 credits |
 | Fix check | You push to the default branch | Re-checks open findings whose cited files the push changed | Free |
 
-An account runs at most two scans at a time. Others wait in a queue: each checks for a free slot every 20 seconds, and gives up as failed after waiting two hours.
+An account runs at most two scans at a time, and recon has two slots of its own, so a dig or a review never waits behind it. Others wait in a queue: each checks for a free slot every 10 seconds, says on its page that it is waiting, and gives up as failed after waiting two hours.
 
 Repositories of a million lines of code or more aren't scanned, by any kind of scan. Get in touch if you need one scanned.
 

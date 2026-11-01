@@ -187,8 +187,8 @@ export async function adminCostByKind(database: Db, days: AdminRange): Promise<K
       coalesce(sum(m.model_cost_usd), 0)::float8 as model_cost_usd,
       coalesce(sum(m.compute_cost_usd), 0)::float8 as compute_cost_usd,
       percentile_cont(array[0.5, 0.9, 0.99]) within group (order by m.duration_ms) as duration,
-      coalesce(sum(s.credits) filter (where s.billing = 'charged'), 0)::int as credits_charged,
-      coalesce(sum(m.model_cost_usd) filter (where s.billing = 'charged'), 0)::float8 as charged_model_cost_usd
+      coalesce(sum(s.credits) filter (where s.billing = 'charged' and s.credits_reserved > 0), 0)::int as credits_charged,
+      coalesce(sum(m.model_cost_usd) filter (where s.billing = 'charged' and s.credits_reserved > 0), 0)::float8 as charged_model_cost_usd
     from ${scans} s
     left join ${scanMetrics} m on m.scan_id = s.id
     where s.created_at >= ${since(days)}
@@ -256,8 +256,8 @@ export async function adminPlanCosts(database: Db, days: AdminRange): Promise<Pl
     compute_cost_usd: number;
   }>(sql`
     select ob.plan_id, count(distinct s.org_id)::int as orgs, count(*)::int as scans,
-      coalesce(sum(s.credits) filter (where s.billing = 'charged'), 0)::int as credits_charged,
-      coalesce(sum(m.model_cost_usd) filter (where s.billing = 'charged'), 0)::float8 as charged_model_cost_usd,
+      coalesce(sum(s.credits) filter (where s.billing = 'charged' and s.credits_reserved > 0), 0)::int as credits_charged,
+      coalesce(sum(m.model_cost_usd) filter (where s.billing = 'charged' and s.credits_reserved > 0), 0)::float8 as charged_model_cost_usd,
       coalesce(sum(m.model_cost_usd), 0)::float8 as model_cost_usd,
       coalesce(sum(m.compute_cost_usd), 0)::float8 as compute_cost_usd
     from ${scans} s

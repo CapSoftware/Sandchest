@@ -315,14 +315,14 @@ describe("admin aggregates", () => {
       if (metrics) await database.insert(schema.scanMetrics).values({ scanId: row!.id, inputTokens: 1000, cachedTokens: 900, outputTokens: 50, requests: 3, durationMs: 1000, candidates: 0, survivors: 0, ...metrics });
       return row!;
     };
-    const deep = await scan({ kind: "deep", status: "completed", trigger: "manual", credits: 15, billing: "charged" }, { modelCostUsd: "0.900000", durationMs: 100_000, candidates: 8, survivors: 3 });
-    await scan({ kind: "pr_review", status: "completed", credits: 2, billing: "charged", prNumber: 1 }, { modelCostUsd: "0.100000", durationMs: 20_000, candidates: 2, survivors: 1 });
+    const deep = await scan({ kind: "deep", status: "completed", trigger: "manual", credits: 15, creditsReserved: 15, billing: "charged" }, { modelCostUsd: "0.900000", durationMs: 100_000, candidates: 8, survivors: 3 });
+    await scan({ kind: "pr_review", status: "completed", credits: 2, creditsReserved: 2, billing: "charged", prNumber: 1 }, { modelCostUsd: "0.100000", durationMs: 20_000, candidates: 2, survivors: 1 });
     await scan({ kind: "pr_review", status: "failed", billing: "released", prNumber: 2 }, { modelCostUsd: "0.050000", durationMs: 30_000, candidates: 1, survivors: 0 });
     await scan({ kind: "pr_review", status: "refused", prNumber: 3 });
     const recon = await scan({ kind: "recon", status: "completed", createdAt: ago(9) }, { modelCostUsd: "0.020000", durationMs: 10_000 });
     await scan({ kind: "fix_check", status: "completed" }, { modelCostUsd: "0.010000", durationMs: 5_000, candidates: 4, survivors: 1 });
     // Outside a 7-day range, inside 30 days.
-    await scan({ kind: "deep", status: "completed", trigger: "manual", credits: 30, billing: "charged", createdAt: ago(12) }, { modelCostUsd: "1.500000", durationMs: 200_000, candidates: 5, survivors: 5 });
+    await scan({ kind: "deep", status: "completed", trigger: "manual", credits: 30, creditsReserved: 30, billing: "charged", createdAt: ago(12) }, { modelCostUsd: "1.500000", durationMs: 200_000, candidates: 5, survivors: 5 });
     // The free account ran recon only.
     await scan({ kind: "recon", status: "completed" }, { modelCostUsd: "0.030000", durationMs: 12_000 }, free);
 

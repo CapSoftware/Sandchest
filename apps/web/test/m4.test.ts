@@ -11,7 +11,7 @@ import { createDb, orgBillingRow, scanById, schema, upsertInstallation, type Db 
 import { migrate } from "@sandchest/db/migrate";
 import type { GitHubApp } from "@sandchest/github";
 import { GET as sweep } from "@/app/api/cron/sweep/route";
-import { applyAutoTopUp, hasPlan, reserveScan, setAutumn, syncBilling } from "@/server/billing";
+import { applyAutoTopUp, hasPlan, reserveScan, setAutumn, settleScan, syncBilling } from "@/server/billing";
 import { requestDeepScan } from "@/server/dig";
 import { beginScan, failScan, publishScan } from "@/server/scans";
 import { resetConfig } from "@/server/config";
@@ -198,10 +198,58 @@ describe.skipIf(!available)("billing", () => {
     expect(autumn.failNext.size).toBe(0);
   });
 
+  test("an org's first Dig is free, once: a failed one hands it on, a finished one uses it up", async () => {
+    const credits = autumn.get(acme.id).credits;
+    const [first, second] = await Promise.all(
+      [repoIds[0]!, repoIds[1]!].map((id) => database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, id), with: { org: true } })),
+    );
+    started.length = 0;
+    // Two Digs at once on different repos: exactly one is free, and the other is a paid (here refused) Dig.
+    const results = await Promise.all([requestDeepScan(first!), requestDeepScan(second!)]);
+    const free = results.filter((r) => r.ok);
+    expect(free).toHaveLength(1);
+    const freeId = (free[0] as { scanId: string }).scanId;
+    expect(await scanById(database, freeId)).toMatchObject({ billing: "reserved", creditsReserved: 0 });
+    expect(autumn.get(acme.id).credits).toBe(credits);
+    const loser = results.find((r) => !r.ok);
+    expect(loser).toMatchObject({ ok: false, reason: "out_of_credits", credits: 75 }); // unsized: holds the top tier
+
+    // An operator's Dig (admin token) is never the org's free one, and is held like any paid Dig.
+    expect(await requestDeepScan({ ...first!, loc: 50_000 }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "running" });
+
+    // It fails: the next Dig is free again.
+    await database.$client`update scans set status = 'failed' where id = ${freeId}`;
+    await settleScan((await scanById(database, freeId))!, "release");
+    const again = await requestDeepScan(first!);
+    expect(again.ok).toBe(true);
+    const againId = (again as { scanId: string }).scanId;
+    expect(await scanById(database, againId)).toMatchObject({ creditsReserved: 0 });
+
+    // It finishes and measures 340,000 lines: still charged nothing. After that, Digs are paid.
+    await database.$client`update scans set status = 'completed', credits = 75 where id = ${againId}`;
+    await settleScan((await scanById(database, againId))!, "charge", 75);
+    expect(await scanById(database, againId)).toMatchObject({ billing: "charged", credits: 0 });
+    expect(await requestDeepScan(second!)).toMatchObject({ ok: false, reason: "out_of_credits" });
+    expect(autumn.get(acme.id).credits).toBe(credits);
+  });
+
+  test("an operator's Dig never uses an org's free first Dig", async () => {
+    const before = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
+    await database.$client`update orgs set free_dig_scan_id = null where id = ${acme.id}`;
+    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[2] ?? repoIds[1]!), with: { org: true } });
+    await database.$client`update scans set status = 'completed' where repo_id = ${repo!.id} and kind = 'deep' and status in ('queued', 'running')`;
+    // No credits: an operator Dig is refused as paid, and the free one is still to come.
+    expect(await requestDeepScan({ ...repo!, loc: 50_000, lastDeepScanAt: null }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "out_of_credits", credits: 15 });
+    const after = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
+    expect(after[0]!.free).toBeNull();
+    await database.$client`update orgs set free_dig_scan_id = ${before[0]!.free} where id = ${acme.id}`;
+  });
+
   test("Dig: refused without credits leaves no scan; with credits it holds the cost shown", async () => {
     const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
     const before = (await database.query.scans.findMany()).length;
-    expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 15 });
+    // Not sized yet: a Dig holds the top tier, 75.
+    expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 75 });
     expect((await database.query.scans.findMany()).length).toBe(before);
 
     // A top-up with the card on file.

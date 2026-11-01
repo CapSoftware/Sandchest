@@ -138,7 +138,7 @@ export function kindSummary(row: KindCost): KindSummary {
 }
 
 /**
- * Model cost per credit charged: from the charged scans alone, and all in
+ * Model cost per credit charged: from the scans that held credits alone (not free Digs), and all in
  * (every scan's cost, free recon and fix checks included, over the same credits).
  */
 export function costPerCredit(total: KindCost | undefined): { paid: Rate; allIn: Rate } {

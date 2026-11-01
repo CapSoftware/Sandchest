@@ -44,7 +44,9 @@ Above 5,000 changed lines the price stops rising, and the review covers the most
 
 ### Deep scans
 
-A deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and from then on the **Dig** button shows the price before you start. Before recon has measured a repository, Dig shows no price yet, and a dig costs at most the smallest tier, 15 credits.
+Your account's first deep scan is free, whatever the repository's size: **Dig** says "Free: your first dig". If that scan fails, the next one is free instead.
+
+After that, a deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and from then on the **Dig** button shows the price before you start. Before recon has measured a repository (about a minute after you install or subscribe), Dig says "Up to 75 credits": it holds 75, and charges the tier the scan measures. With fewer than 75 credits, Dig waits for recon to size the repository and says so.
 
 | Repository size | Credits |
 | --- | --- |
@@ -89,4 +91,4 @@ Payments are processed by Stripe, through the billing service Autumn. Sandchest 
 
 ## Self-hosted
 
-A self-hosted Sandchest has billing turned off: no plans, no credits and nothing to buy. You pay only for your own servers and model usage. The operational limits still apply: the 24-hour wait between deep scans of a repository, no scans of repositories with a million lines or more, and at most two scans at a time per account. See [Self-hosting](/docs/self-hosting#limits-without-billing).
+A self-hosted Sandchest has billing turned off: no plans, no credits and nothing to buy. You pay only for your own servers and model usage. The operational limits still apply: the 24-hour wait between deep scans of a repository, no scans of repositories with a million lines or more, and at most two scans at a time per account, with two more for recon. See [Self-hosting](/docs/self-hosting#limits-without-billing).

@@ -1,7 +1,7 @@
 /** Manual deep scans ("Dig"): one at a time per repo, then a 24-hour cooldown (SPEC §4). */
 import { randomUUID } from "node:crypto";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
-import { activeDeepScan, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
+import { activeDeepScan, claimFreeDig, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
 import { digState } from "@/lib/dig-state";
 import { autumn, reserveScan } from "./billing";
 import { describeError } from "./log";
@@ -17,7 +17,8 @@ export type DigResult =
  * held before the scan exists, so a refusal leaves nothing behind and the
  * person hears about it at once.
  */
-export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" = "manual"): Promise<DigResult> {
+/** `operator`: started with the admin token, not by the org. It never uses the org's free first Dig. */
+export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" = "manual", options: { operator?: boolean } = {}): Promise<DigResult> {
   if (!repo.enabled || !repo.org.installationId) return { ok: false, reason: "not_installed" };
   const active = await activeDeepScan(db(), repo.id);
   const state = digState({ loc: repo.loc, lastDeepScanAt: repo.lastDeepScanAt, activeDeepScanId: active?.id ?? null });
@@ -25,8 +26,6 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   if (state.state === "cooling") return { ok: false, reason: "cooling", retryAt: state.retryAt };
   if (state.state === "too_large") return { ok: false, reason: "too_large" };
 
-  // A repo whose size is not known yet (no recon) costs the smallest tier: never more than was shown.
-  const credits = state.credits ?? DEEP_SCAN_TIERS[0]!.credits;
   const headSha = await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);
 
   // Claim the repo's one deep-scan slot before holding any credits, so a second
@@ -36,7 +35,13 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   if (!created) return { ok: false, reason: "running", scanId: scan.id };
 
   let gate: Awaited<ReturnType<typeof reserveScan>>;
+  let credits = 0;
   try {
+    // An org's first Dig is free (it still needs a plan). Otherwise a repo recon has not sized yet holds the
+    // most a deep scan can cost, and is charged what the scan measures (never more than it held).
+    // Inside the try: a failure here cleans up like any other, and never leaves a scan to be charged later.
+    const free = !options.operator && (await claimFreeDig(db(), repo.orgId, scan.id));
+    credits = free ? 0 : (state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
     gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits);
   } catch (error) {
     // Give back anything Autumn may hold, and the slot.
@@ -45,7 +50,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     throw error;
   }
   if (!gate.ok) {
-    // Refused: the scan never started, so it leaves nothing behind.
+    // Refused: the scan never started, so it leaves nothing behind (a free Dig it claimed is free again).
     await deleteUnstartedScan(db(), scan.id);
     return { ok: false, reason: gate.reason, credits };
   }

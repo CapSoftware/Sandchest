@@ -11,6 +11,10 @@ import { plural, SCAN_KIND_LABEL, SEVERITIES, timeUntil } from "@/lib/format";
 import { ensureAccess, viewer } from "@/server/access";
 import { digState } from "@/lib/dig-state";
 import { billingEnabled, pageBilling } from "@/server/billing";
+import { DEEP_SCAN_TIERS } from "@sandchest/billing";
+
+/** What an unsized repo holds for a Dig: the top tier. */
+const MAX_DEEP_SCAN_CREDITS = DEEP_SCAN_TIERS.at(-1)!.credits;
 import { db } from "@/server/db";
 
 /** "Deep scan failed 2 hr. ago". Completed scans need no verb. */
@@ -165,14 +169,17 @@ function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
             <span className="repo-dig-note">Needs a plan</span>
           </div>
         );
-      if (plan && plan.credits < (state.credits ?? 15))
+      // An org's first Dig is free. Otherwise an unsized repo holds the top tier and is charged what it measures.
+      if (!plan) return <DigButton repoId={repo.id} note="Full deep scan" />; // billing off: nothing to price
+      if (repo.freeDig) return <DigButton repoId={repo.id} note="Free: your first dig" />;
+      if (plan.credits < (state.credits ?? MAX_DEEP_SCAN_CREDITS))
         return (
           <div className="repo-dig">
             <HoverLink href="/dashboard/settings#billing" className="repo-dig-note">
-              Out of credits: top up
+              {state.credits === undefined ? `Needs ${MAX_DEEP_SCAN_CREDITS} credits until sized` : "Out of credits: top up"}
             </HoverLink>
           </div>
         );
-      return <DigButton repoId={repo.id} note={state.credits === undefined ? "Full deep scan" : `${state.credits} credits`} />;
+      return <DigButton repoId={repo.id} note={state.credits === undefined ? `Up to ${MAX_DEEP_SCAN_CREDITS} credits` : `${state.credits} credits`} />;
   }
 }
