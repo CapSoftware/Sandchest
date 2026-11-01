@@ -2,12 +2,12 @@
  * Billing's database side: a copy of each org's Autumn state for display,
  * the credits each scan holds, and starting recon once an org has a plan.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { orgAdmins, orgBilling, orgs, repoMemory, repos, scans } from "./schema";
+import { orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users } from "./schema";
 
 export type OrgBillingRow = typeof orgBilling.$inferSelect;
-export type OrgBillingInput = Omit<OrgBillingRow, "orgId" | "activatedAt" | "checkedAt">;
+export type OrgBillingInput = Omit<OrgBillingRow, "orgId" | "activatedAt" | "checkedAt" | "creditLevel" | "creditLevelAt">;
 
 /** Raw SQL parameters take strings, not Dates. */
 const iso = (date: Date | null) => (date ? date.toISOString() : null);
@@ -42,9 +42,10 @@ export async function saveOrgBilling(database: Db, orgId: string, state: OrgBill
   return { previousPlanId: row?.previous_plan_id ?? null, firstActivation: !!row?.first };
 }
 
-/** Records the balance a reservation reported, without waiting for a full refresh. */
-export async function setOrgCredits(database: Db, orgId: string, credits: number): Promise<void> {
-  await database.update(orgBilling).set({ credits }).where(eq(orgBilling.orgId, orgId));
+/** Records the balance a reservation reported, without waiting for a full refresh. Returns the org's billing after it. */
+export async function setOrgCredits(database: Db, orgId: string, credits: number): Promise<OrgBillingRow | undefined> {
+  const [row] = await database.update(orgBilling).set({ credits }).where(eq(orgBilling.orgId, orgId)).returning();
+  return row;
 }
 
 /** Makes the next page view read Autumn again (after a purchase or a charge). */
@@ -90,6 +91,64 @@ export async function queuePendingRecons(database: Db, orgId: string): Promise<s
       .returning({ id: scans.id });
     return created.map((scan) => scan.id);
   });
+}
+
+// ---- Billing emails ----------------------------------------------------------
+
+/**
+ * Moves the org's credit level (0 ok, 1 low, 2 exhausted) to what was just
+ * observed. True only for the one caller that raised it: that caller sends the
+ * email. A row lock serialises concurrent callers, and the second re-reads the
+ * level the first wrote, so a crossing is announced once.
+ *
+ * A lower level is stored without an email, re-arming the higher ones, but
+ * only from a balance read that started (`lowerAsOf`) no earlier than the
+ * level last rose: a slower, older answer from Autumn must not re-arm a
+ * crossing just announced, or the next scan would announce it again.
+ * Without `raise` or `lowerAsOf` the call changes nothing.
+ */
+export async function recordCreditLevel(database: Db, orgId: string, level: number, options: { raise: boolean; lowerAsOf?: Date }): Promise<boolean> {
+  if (level > 0 && options.raise) {
+    const raised = await database
+      .update(orgBilling)
+      .set({ creditLevel: level, creditLevelAt: new Date() })
+      .where(and(eq(orgBilling.orgId, orgId), lt(orgBilling.creditLevel, level)))
+      .returning({ orgId: orgBilling.orgId });
+    if (raised.length === 1) return true;
+  }
+  if (options.lowerAsOf) {
+    await database
+      .update(orgBilling)
+      .set({ creditLevel: level })
+      .where(
+        and(
+          eq(orgBilling.orgId, orgId),
+          gt(orgBilling.creditLevel, level),
+          sql`(${orgBilling.creditLevelAt} is null or ${orgBilling.creditLevelAt} <= ${options.lowerAsOf.toISOString()}::timestamptz)`,
+        ),
+      );
+  }
+  return false;
+}
+
+/** Reserves an org-wide email by a stable key. Exactly one caller gets true. */
+export async function claimOrgNotice(database: Db, orgId: string, key: string): Promise<boolean> {
+  const rows = await database.insert(orgNotices).values({ orgId, key }).onConflictDoNothing().returning({ key: orgNotices.key });
+  return rows.length === 1;
+}
+
+/**
+ * Who hears about an org's billing: its admins (the people who can change it),
+ * as GitHub reported them within 30 days, with a real address. No-reply
+ * placeholders are skipped.
+ */
+export async function billingRecipients(database: Db, orgId: string): Promise<string[]> {
+  const rows = await database
+    .selectDistinct({ email: users.email })
+    .from(orgAdmins)
+    .innerJoin(users, eq(users.id, orgAdmins.userId))
+    .where(and(eq(orgAdmins.orgId, orgId), sql`${orgAdmins.checkedAt} > now() - interval '30 days'`, sql`${users.email} not like '%@users.noreply.github.com'`));
+  return rows.map((row) => row.email);
 }
 
 // ---- Scan credits ------------------------------------------------------------

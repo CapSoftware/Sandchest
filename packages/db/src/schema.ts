@@ -14,6 +14,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -362,7 +363,31 @@ export const orgBilling = pgTable("org_billing", {
   /** First time a plan was seen active: recon starts then. */
   activatedAt: timestamp("activated_at", { withTimezone: true }),
   checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * The credit level admins were last emailed about: 0 ok, 1 low, 2 exhausted.
+   * It rises once per downward crossing (one email each) and falls when
+   * credits come back, which re-arms the emails.
+   */
+  creditLevel: smallint("credit_level").notNull().default(0),
+  /** When the level last rose. Only a balance read from Autumn after this may lower it. */
+  creditLevelAt: timestamp("credit_level_at", { withTimezone: true }),
 });
+
+/**
+ * Org-wide emails already sent, by a stable key (an auto top-up's invoice, a
+ * day's failed top-ups), so a retried webhook or step never sends one twice.
+ */
+export const orgNotices = pgTable(
+  "org_notices",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => orgs.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.orgId, table.key] })],
+);
 
 export const orgRelations = relations(orgs, ({ many }) => ({ repos: many(repos) }));
 export const repoRelations = relations(repos, ({ one, many }) => ({ org: one(orgs, { fields: [repos.orgId], references: [orgs.id] }), scans: many(scans) }));
