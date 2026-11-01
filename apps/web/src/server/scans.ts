@@ -46,6 +46,7 @@ import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
 import { config } from "./config";
+import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
 import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 
@@ -198,7 +199,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     }
     if (error instanceof LlmQuotaError) {
       // The fail step that follows gives the credits back. Email is best effort and at most once per scan.
-      await noticeScanPaused(scan).catch((failure: unknown) => console.error(`Scan-paused email for scan ${scan.id} failed: ${failure instanceof Error ? failure.name : "error"}`));
+      await noticeScanPaused(scan).catch((failure: unknown) => console.error(`Scan-paused email for scan ${scan.id} failed: ${describeError(failure)}`));
       throw new ScanFinished("The model provider refused for quota reasons; the scan is paused.");
     }
     throw error;
@@ -278,14 +279,14 @@ async function charge(scan: LoadedScan): Promise<void> {
     await settleScan(scan, "charge", scan.credits);
     if ((scan.creditsReserved ?? 0) > 0) await syncBilling({ id: scan.orgId, githubLogin: scan.repo.org.githubLogin });
   } catch (error) {
-    console.error(`Charging scan ${scan.id} failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Charging scan ${scan.id} failed: ${describeError(error)}`);
   }
 }
 
 /** Records a failure, gives back the scan's credits and never leaves a PR Check spinning. */
 export async function failScan(scanId: string, message: string): Promise<void> {
   const scan = await requireScan(scanId);
-  await settleScan(scan, "release").catch((error: unknown) => console.error(`Releasing scan ${scan.id} failed: ${error instanceof Error ? error.message : "error"}`));
+  await settleScan(scan, "release").catch((error: unknown) => console.error(`Releasing scan ${scan.id} failed: ${describeError(error)}`));
   if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
   if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
     await githubApp()

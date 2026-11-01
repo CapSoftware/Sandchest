@@ -16,6 +16,7 @@ import { viewer } from "./access";
 import { applyAutoTopUp, autumn, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
+import { describeError } from "./log";
 
 export type BillingOutcome = { error?: string; saved?: boolean };
 
@@ -55,7 +56,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
   try {
     ({ planId } = await syncBilling(row.org));
   } catch (error) {
-    console.error(`Billing read for org ${orgId} failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Billing read for org ${orgId} failed: ${describeError(error)}`);
     return { error: FAILED };
   }
   if (input.data.kind === "plan" && planId === input.data.plan) return { error: "That’s already your plan." };
@@ -86,7 +87,7 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
       successUrl,
     }));
   } catch (error) {
-    console.error(`Purchase for org ${org.id} failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Purchase for org ${org.id} failed: ${describeError(error)}`);
     return { error: FAILED };
   }
   // Checkout, or a card step (3-D Secure, a declined card): Stripe sends them back to the return page.
@@ -102,7 +103,7 @@ export async function openPortal(orgId: string): Promise<void> {
   try {
     url = await autumn()!.portal(orgId, `${appUrl()}/billing/return?org=${orgId}`);
   } catch (error) {
-    console.error(`Billing portal for org ${orgId} failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Billing portal for org ${orgId} failed: ${describeError(error)}`);
     redirect("/settings?billing=unavailable#billing");
   }
   redirect(url);
@@ -128,7 +129,7 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
     await applyAutoTopUp(orgId, plan.id, choice);
     await syncBilling(row.org);
   } catch (error) {
-    console.error(`Auto top-up for org ${orgId} failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Auto top-up for org ${orgId} failed: ${describeError(error)}`);
     return { error: "Saved here, but billing didn’t take the change. Try again in a minute." };
   }
   revalidatePath("/settings");

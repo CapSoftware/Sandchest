@@ -33,6 +33,7 @@ import { shortDate } from "@/lib/format";
 import { config } from "./config";
 import { db } from "./db";
 import { githubApp } from "./github-app";
+import { describeError } from "./log";
 import { mailer } from "./mailer";
 
 export interface NoticeOrg {
@@ -150,7 +151,7 @@ async function recipients(orgId: string, what: string, who: "fresh" | "billing")
   let chosen = admins.filter((admin) => admin.fresh);
   if (chosen.length === 0 && who === "billing" && admins.length > 0) {
     chosen = await confirmAdmins(orgId, admins).catch((error: unknown) => {
-      console.warn(`Couldn't check the admins of org ${orgId} with GitHub (${error instanceof Error ? error.name : "error"}): emailing the last known ones`);
+      console.warn(`Couldn't check the admins of org ${orgId} with GitHub (${describeError(error)}): emailing the last known ones`);
       return admins;
     });
   }
@@ -159,9 +160,30 @@ async function recipients(orgId: string, what: string, who: "fresh" | "billing")
   return null;
 }
 
-/** How long GitHub's answer about an org's stale admins is reused, in this process. */
+/**
+ * How long GitHub's answer about an org's stale admins is reused, in this
+ * process. An admin demoted on GitHub inside that minute can still get one
+ * billing email (never one naming a repository); that was judged acceptable.
+ */
 const ADMIN_CHECK_MS = 60_000;
+/** The most orgs remembered at once; the oldest answer goes first. */
+const ADMIN_CHECK_ORGS = 1_000;
 const adminChecks = new Map<string, { admins: string; confirmed: Set<string>; until: number }>();
+
+/** Drops expired answers and, to make room for one more, the oldest beyond the cap. Map order is insertion order, oldest first. */
+function pruneAdminChecks(now: number, makeRoom = false): void {
+  for (const [orgId, check] of adminChecks) if (check.until <= now) adminChecks.delete(orgId);
+  if (!makeRoom) return;
+  for (const orgId of adminChecks.keys()) {
+    if (adminChecks.size < ADMIN_CHECK_ORGS) break;
+    adminChecks.delete(orgId);
+  }
+}
+
+/** For tests: how many orgs' answers are remembered. */
+export function rememberedAdminChecks(): number {
+  return adminChecks.size;
+}
 
 /** For tests: forget GitHub's remembered answers. */
 export function forgetAdminChecks(): void {
@@ -178,11 +200,19 @@ async function confirmAdmins(orgId: string, admins: OrgAdminContact[]): Promise<
     .map((admin) => `${admin.userId}:${admin.githubUserId}:${admin.login}`)
     .sort()
     .join(",");
+  pruneAdminChecks(Date.now());
   const remembered = adminChecks.get(orgId);
-  if (remembered && remembered.admins === key && remembered.until > Date.now()) return admins.filter((admin) => remembered.confirmed.has(admin.userId));
+  if (remembered && remembered.admins === key) return admins.filter((admin) => remembered.confirmed.has(admin.userId));
   const confirmed = await askGitHub(orgId, admins);
-  adminChecks.set(orgId, { admins: key, confirmed: new Set(confirmed.map((admin) => admin.userId)), until: Date.now() + ADMIN_CHECK_MS });
+  rememberAdminCheck(orgId, key, confirmed.map((admin) => admin.userId));
   return confirmed;
+}
+
+/** Remembers GitHub's answer for an org, as its newest entry. Exported for tests. */
+export function rememberAdminCheck(orgId: string, admins: string, confirmed: string[], now = Date.now()): void {
+  adminChecks.delete(orgId);
+  pruneAdminChecks(now, true);
+  adminChecks.set(orgId, { admins, confirmed: new Set(confirmed), until: now + ADMIN_CHECK_MS });
 }
 
 /**
@@ -211,7 +241,7 @@ async function askGitHub(orgId: string, admins: OrgAdminContact[]): Promise<OrgA
 async function send(orgId: string, to: string[], email: RenderedEmail): Promise<void> {
   await mailer()
     .send({ to, ...email })
-    .catch((error: unknown) => console.error(`Email to the admins of org ${orgId} failed: ${error instanceof Error ? error.name : "error"}`));
+    .catch((error: unknown) => console.error(`Email to the admins of org ${orgId} failed: ${describeError(error)}`));
 }
 
 function appUrl(): string {

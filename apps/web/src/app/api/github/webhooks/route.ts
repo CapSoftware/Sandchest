@@ -1,6 +1,7 @@
 import { verifySignature } from "@sandchest/github";
 import { billingEnabled, hasPlan } from "@/server/billing";
 import { config } from "@/server/config";
+import { describeError } from "@/server/log";
 import { db, githubApp } from "@/server/services";
 import { startScan } from "@/server/start";
 import { handleWebhook } from "@/server/webhooks";
@@ -21,8 +22,8 @@ export async function POST(request: Request): Promise<Response> {
     const outcome = await handleWebhook({ db: db(), github: githubApp(), startScan, hasPlan: billingEnabled() ? hasPlan : undefined }, event, delivery, JSON.parse(body));
     return Response.json(outcome, { status: 202 });
   } catch (error) {
-    // Logged without payload contents: they can include code and user data.
-    console.error("Webhook handling failed", { event, delivery, error: (error as Error).message });
+    // Logged by delivery id and error class only: the payload and the error's message can include code and user data.
+    console.error(`Webhook ${delivery} (${event}) failed: ${describeError(error)}`);
     return Response.json({ error: "handling failed" }, { status: 500 });
   }
 }

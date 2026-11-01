@@ -6,17 +6,27 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { signWebhook } from "@sandchest/billing";
+import { AutumnError, signWebhook } from "@sandchest/billing";
 import { createDb, orgAdminContacts, orgBillingRow, saveOrgBilling, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Email, Mailer } from "@sandchest/email";
 import type { GitHubApp } from "@sandchest/github";
 import { POST as autumnWebhook } from "@/app/api/autumn/webhooks/route";
 import { money } from "@/server/autumn-webhooks";
-import { applyAutoTopUp, reserveScan, setAutumn, syncBilling } from "@/server/billing";
+import { applyAutoTopUp, pageBilling, reserveScan, setAutumn, syncBilling } from "@/server/billing";
+import { describeError } from "@/server/log";
 import { resetConfig } from "@/server/config";
 import { setMailer } from "@/server/mailer";
-import { forgetAdminChecks, noticeAutoTopUp, noticeAutoTopUpFailed, noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
+import {
+  forgetAdminChecks,
+  noticeAutoTopUp,
+  noticeAutoTopUpFailed,
+  noticeCredits,
+  noticeScanPaused,
+  rememberAdminCheck,
+  rememberedAdminChecks,
+  type PausedScan,
+} from "@/server/notices";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
 import { FakeAutumn } from "./fake-autumn";
@@ -873,5 +883,57 @@ describe.skipIf(!available)("a crossing that only exists once the lock is taken"
     expect(subjects()).toEqual(["Out of credits on lockco"]);
     expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(2);
     drain();
+  });
+});
+
+describe.skipIf(!available)("logs", () => {
+  /** Everything written to the console while `task` runs. */
+  async function captured(task: () => Promise<unknown>): Promise<string> {
+    const lines: string[] = [];
+    const original = { error: console.error, warn: console.warn, log: console.log };
+    for (const name of ["error", "warn", "log"] as const) console[name] = (...args: unknown[]) => void lines.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "));
+    try {
+      await task();
+    } finally {
+      Object.assign(console, original);
+    }
+    return lines.join("\n");
+  }
+
+  test("an error quoting an email address never reaches the logs, from the webhook route or a billing read", async () => {
+    const leak = new Error("Customer alice@example.com (Alice Example) could not be read");
+    const customer = autumn.customer;
+    autumn.customer = async () => Promise.reject(leak);
+    try {
+      let status = 0;
+      const routeLog = await captured(async () => {
+        status = (await autumnWebhook(delivery({ type: "billing.updated", data: { customer_id: acme.id } }, { id: "msg_leak" }))).status;
+      });
+      expect(status).toBe(500);
+      expect(routeLog).toBe("Autumn webhook msg_leak failed: Error");
+
+      const pageLog = await captured(() => pageBilling(acme, null));
+      expect(pageLog).toBe("Billing read failed: Error");
+      for (const log of [routeLog, pageLog]) expect(log).not.toMatch(/@|Alice/);
+    } finally {
+      autumn.customer = customer;
+    }
+  });
+
+  test("errors are described by class and status only", () => {
+    expect(describeError(new AutumnError("Autumn check: Customer bob@example.com not found", 404, "customer_not_found"))).toBe("AutumnError 404");
+    expect(describeError(new TypeError("fetch failed for carol@example.com"))).toBe("TypeError");
+    expect(describeError("dave@example.com")).toBe("error");
+  });
+
+  test("GitHub's remembered answers expire, and at most 1,000 orgs are remembered, oldest dropped first", () => {
+    forgetAdminChecks();
+    const t0 = Date.now();
+    for (let i = 0; i < 1_005; i++) rememberAdminCheck(`org-${i}`, "admins", [], t0);
+    expect(rememberedAdminChecks()).toBe(1_000);
+    // A minute later every one of them has expired, and goes on the next access.
+    rememberAdminCheck("later", "admins", [], t0 + 61_000);
+    expect(rememberedAdminChecks()).toBe(1);
+    forgetAdminChecks();
   });
 });

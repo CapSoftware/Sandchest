@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { viewer } from "./access";
 import { db } from "./db";
+import { describeError } from "./log";
 
 export type DigOutcome = { error?: string; topUp?: boolean };
 
@@ -23,7 +24,7 @@ export async function dig(repoId: string): Promise<DigOutcome> {
     result = await requestDeepScan({ ...row.repo, org: row.org });
   } catch (error) {
     // GitHub or billing unreachable. Credits held for a scan that never started are given back.
-    console.error(`Dig failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Dig failed: ${describeError(error)}`);
     return { error: "The dig couldn’t start. Nothing was charged; try again in a minute." };
   }
   if (!result.ok) {

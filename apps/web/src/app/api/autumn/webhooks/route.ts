@@ -8,6 +8,7 @@
 import { verifyWebhook } from "@sandchest/billing/webhooks";
 import { handleAutumnEvent } from "@/server/autumn-webhooks";
 import { config } from "@/server/config";
+import { describeError } from "@/server/log";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +33,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     return Response.json(await handleAutumnEvent(payload));
   } catch (error) {
-    // Autumn retries a failed delivery. Logged without the payload: it names the customer's billing.
-    console.error("Autumn webhook failed", { delivery: headers.id, error: error instanceof Error ? error.message : "error" });
+    // Autumn retries a failed delivery. Logged by delivery id and error class only: the payload and the
+    // error's message can name the customer.
+    console.error(`Autumn webhook ${headers.id} failed: ${describeError(error)}`);
     return Response.json({ error: "handling failed" }, { status: 500 });
   }
 }

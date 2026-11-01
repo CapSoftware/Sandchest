@@ -29,6 +29,7 @@ import {
 import { after } from "next/server";
 import { config } from "./config";
 import { db } from "./db";
+import { describeError } from "./log";
 import { noticeCredits } from "./notices";
 
 /** Unsettled reservations return to the org after this long (Autumn allows up to 24 hours). */
@@ -218,7 +219,7 @@ export async function settleScan(scan: { id: string; orgId: string; billing: str
 
 function logFailure(what: string) {
   return (error: unknown) => {
-    console.error(`Billing ${what} failed: ${error instanceof Error ? error.message : "error"}`);
+    console.error(`Billing ${what} failed: ${describeError(error)}`);
     return null;
   };
 }

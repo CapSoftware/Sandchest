@@ -4,6 +4,7 @@ import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { activeDeepScan, createScan, type Org, type Repo } from "@sandchest/db";
 import { digState } from "@/lib/dig-state";
 import { autumn, billingEnabled, reserveScan } from "./billing";
+import { describeError } from "./log";
 import { db, githubApp } from "./services";
 import { startScan } from "./start";
 
@@ -42,7 +43,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     }
     created = true;
     // If this start fails, the stranded-scan sweep starts it within minutes: the credits stay held for it.
-    await startScan(scan.id).catch((error: unknown) => console.error(`Starting deep scan ${scan.id} failed: ${error instanceof Error ? error.message : "error"}`));
+    await startScan(scan.id).catch((error: unknown) => console.error(`Starting deep scan ${scan.id} failed: ${describeError(error)}`));
     return { ok: true, scanId: scan.id };
   } catch (error) {
     if (!created) await autumn()?.finalize({ customerId: repo.org.id, lockId: scanId, action: "release" }).catch(() => {});
