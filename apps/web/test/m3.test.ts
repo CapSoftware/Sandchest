@@ -28,6 +28,7 @@ import { sessionUser } from "@sandchest/db";
 import { storeAccess } from "@/server/access";
 import { verifiedSessionToken } from "@/server/auth";
 import { digState } from "@/lib/dig-state";
+import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
@@ -95,6 +96,7 @@ beforeAll(async () => {
   const url = new URL(ADMIN_URL);
   url.pathname = `/${NAME}`;
   Object.assign(process.env, { DATABASE_URL: url.toString(), GITHUB_APP_ID: "1", GITHUB_APP_PRIVATE_KEY: "unused", GITHUB_WEBHOOK_SECRET: "unused", SANDCHEST_APP_URL: "https://sandchest.test" });
+  resetConfig();
   database = createDb(url.toString(), { max: 5 });
   await migrate(database);
   setServices({ db: database });

@@ -1,4 +1,5 @@
 import { verifySignature } from "@sandchest/github";
+import { billingEnabled, hasPlan } from "@/server/billing";
 import { config } from "@/server/config";
 import { db, githubApp } from "@/server/services";
 import { startScan } from "@/server/start";
@@ -17,7 +18,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!event || !delivery) return Response.json({ error: "missing event headers" }, { status: 400 });
 
   try {
-    const outcome = await handleWebhook({ db: db(), github: githubApp(), startScan }, event, delivery, JSON.parse(body));
+    const outcome = await handleWebhook({ db: db(), github: githubApp(), startScan, hasPlan: billingEnabled() ? hasPlan : undefined }, event, delivery, JSON.parse(body));
     return Response.json(outcome, { status: 202 });
   } catch (error) {
     // Logged without payload contents: they can include code and user data.

@@ -24,6 +24,9 @@ const Schema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   SMTP_URL: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(3).optional(),
+  /** Billing (Autumn). Unset means billing is off and nothing is limited, as when self-hosting. */
+  AUTUMN_SECRET_KEY: z.string().min(1).optional(),
+  AUTUMN_BASE_URL: z.url().optional(),
   /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
   SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
   /** Where repositories are cloned from. Default https://github.com. */
@@ -40,6 +43,11 @@ const Schema = z.object({
 export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" };
 
 let cached: Config | undefined;
+
+/** For tests that change the environment between files. */
+export function resetConfig(): void {
+  cached = undefined;
+}
 
 export function config(env: Record<string, string | undefined> = process.env): Config {
   if (cached && env === process.env) return cached;

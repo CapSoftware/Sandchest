@@ -3,7 +3,7 @@
  * finding text ever goes into workflow storage. Every write is idempotent,
  * because a step that dies is retried from the start.
  */
-import { deepScanCredits, prReviewCredits } from "@sandchest/billing";
+import { DEEP_SCAN_TIERS, deepScanCredits, prReviewCredits } from "@sandchest/billing";
 import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
 import {
   claimNotification,
@@ -27,7 +27,9 @@ import {
 import { createIndexerClient } from "@sandchest/engine/indexer";
 import { LlmQuotaError } from "@sandchest/engine/llm";
 import {
+  changedLines,
   checkFixes,
+  relevantChanges,
   runRecon,
   runScan,
   ScanRefusedError,
@@ -37,10 +39,11 @@ import {
   type ScanEvent,
   type ThreatModel,
 } from "@sandchest/engine/scan";
-import { checkResult, parsePatch, reviewBody, reviewComment, shown, type PullFile, type ReviewComment } from "@sandchest/github";
+import { checkResult, notReviewed, parsePatch, reviewBody, reviewComment, shown, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { IndexerBinary, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
+import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
 import { config } from "./config";
 import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 
@@ -55,10 +58,20 @@ export class ScanFinished extends Error {}
 
 export type BeginResult = { state: "running" | "queued" | "done" };
 
-/** Claims a concurrency slot and, for PRs, posts the in-progress Check straight away. */
+/**
+ * Lets the scan run (its credits held, or the org's plan checked), claims a
+ * concurrency slot and, for PRs, posts the in-progress Check straight away.
+ */
 export async function beginScan(scanId: string): Promise<BeginResult> {
   const scan = await requireScan(scanId);
   if (["completed", "failed", "cancelled", "refused", "publishing"].includes(scan.status)) return { state: "done" };
+  if (scan.status === "queued" && scan.billing === null && billingEnabled()) {
+    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, await scanCredits(scan));
+    if (!gate.ok) {
+      await refuse(scan, gate);
+      return { state: "done" };
+    }
+  }
   if (!(await claimScanSlot(db(), scan.id, scan.orgId, ORG_CONCURRENCY))) return { state: "queued" };
   if (scan.kind === "pr_review" && !scan.checkRunId && scan.repo.org.installationId) {
     const checkRunId = await githubApp()
@@ -73,6 +86,29 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
     await updateScan(db(), scan.id, { checkRunId });
   }
   return { state: "running" };
+}
+
+/** What a scan costs, before it runs. A PR review costs what the engine will report for the same files. */
+async function scanCredits(scan: LoadedScan): Promise<number> {
+  if (scan.kind === "deep") return deepScanCredits(scan.repo.loc ?? 0) ?? DEEP_SCAN_TIERS.at(-1)!.credits;
+  if (scan.kind !== "pr_review" || !scan.prNumber || !scan.repo.org.installationId) return 0;
+  const files = await githubApp().installation(scan.repo.org.installationId).pullFiles(scan.repo.fullName, scan.prNumber);
+  const relevant = relevantChanges(files.map(toChangedFile));
+  return relevant.length ? prReviewCredits(changedLines(relevant)) : 0;
+}
+
+/** A scan billing would not let run: recorded as refused, and a PR gets a neutral Check that never blocks merging. */
+async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Promise<void> {
+  const message = gate.reason === "no_plan" ? "Not run: this account has no plan." : `Not run: out of credits (needs ${gate.credits}).`;
+  // The Check first: once the scan is marked refused, a retried step would never post it.
+  let checkRunId = scan.checkRunId;
+  if (scan.kind === "pr_review" && scan.repo.org.installationId) {
+    const installation = githubApp().installation(scan.repo.org.installationId);
+    const { conclusion, output } = notReviewed(gate.reason, `${appUrl()}/settings`, gate.credits);
+    checkRunId ??= await installation.createCheckRun(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
+    await installation.completeCheckRun(scan.repo.fullName, checkRunId, conclusion, output);
+  }
+  await updateScan(db(), scan.id, { status: "refused", error: message, finishedAt: new Date(), checkRunId });
 }
 
 /** Clones, indexes and runs the engine; persists findings and the feed as they happen. */
@@ -196,6 +232,7 @@ export async function publishScan(scanId: string): Promise<void> {
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);
   }
   await updateScan(db(), scan.id, { status: "completed", finishedAt: new Date() });
+  await charge(scan);
   // Email is best effort and at most once: it never fails or repeats a scan.
   await notifyScan(scan).catch((error: unknown) => console.error(`Notifications for scan ${scan.id} failed: ${error instanceof Error ? error.name : "error"}`));
 }
@@ -223,9 +260,24 @@ async function notifyScan(scan: NonNullable<Awaited<ReturnType<typeof scanById>>
   await mailer().send({ to: recipients, ...email });
 }
 
-/** Records a failure and never leaves a PR Check spinning. */
+/**
+ * Charges a completed scan's credits. A failure here never fails the scan: the
+ * reservation stays and the sweep settles it later.
+ */
+async function charge(scan: LoadedScan): Promise<void> {
+  if (scan.billing !== "reserved") return;
+  try {
+    await settleScan(scan, "charge", scan.credits);
+    if ((scan.creditsReserved ?? 0) > 0) await syncBilling({ id: scan.orgId, githubLogin: scan.repo.org.githubLogin });
+  } catch (error) {
+    console.error(`Charging scan ${scan.id} failed: ${error instanceof Error ? error.message : "error"}`);
+  }
+}
+
+/** Records a failure, gives back the scan's credits and never leaves a PR Check spinning. */
 export async function failScan(scanId: string, message: string): Promise<void> {
   const scan = await requireScan(scanId);
+  await settleScan(scan, "release").catch((error: unknown) => console.error(`Releasing scan ${scan.id} failed: ${error instanceof Error ? error.message : "error"}`));
   if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
   if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
     await githubApp()
@@ -237,14 +289,20 @@ export async function failScan(scanId: string, message: string): Promise<void> {
   }
 }
 
-async function requireScan(scanId: string) {
+type LoadedScan = NonNullable<Awaited<ReturnType<typeof scanById>>>;
+
+async function requireScan(scanId: string): Promise<LoadedScan> {
   const scan = await scanById(db(), scanId);
   if (!scan) throw new ScanFinished(`Scan ${scanId} not found`);
   return scan;
 }
 
+function appUrl(): string {
+  return config().SANDCHEST_APP_URL.replace(/\/$/, "");
+}
+
 function detailsUrl(scanId: string): string {
-  return `${config().SANDCHEST_APP_URL.replace(/\/$/, "")}/scans/${scanId}`;
+  return `${appUrl()}/scans/${scanId}`;
 }
 
 function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {

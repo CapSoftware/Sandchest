@@ -12,18 +12,18 @@ const MAX_QUEUE_POLLS = 360; // × 20 s = 2 hours
 export async function scanWorkflow(scanId: string): Promise<{ state: string }> {
   "use workflow";
 
-  let { state } = await beginStep(scanId);
-  for (let polls = 0; state === "queued"; polls++) {
-    if (polls >= MAX_QUEUE_POLLS) {
-      await failStep(scanId, "Waited too long for a free scan slot.");
-      return { state: "failed" };
-    }
-    await sleep("20s");
-    ({ state } = await beginStep(scanId));
-  }
-  if (state === "done") return { state };
-
   try {
+    let { state } = await beginStep(scanId);
+    for (let polls = 0; state === "queued"; polls++) {
+      if (polls >= MAX_QUEUE_POLLS) {
+        await failStep(scanId, "Waited too long for a free scan slot.");
+        return { state: "failed" };
+      }
+      await sleep("20s");
+      ({ state } = await beginStep(scanId));
+    }
+    if (state === "done") return { state };
+
     await executeStep(scanId);
     await publishStep(scanId);
     return { state: "completed" };

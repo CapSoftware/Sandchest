@@ -25,6 +25,9 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ error: "a deep scan is already running", scanId: result.scanId }, { status: 409 });
     case "too_large":
       return Response.json({ error: "repository is over 1M lines; deep scans are refused" }, { status: 422 });
+    case "no_plan":
+    case "out_of_credits":
+      return Response.json({ error: result.reason === "no_plan" ? "this account has no plan" : "out of credits", credits: result.credits }, { status: 402 });
     case "cooling":
       return Response.json(
         { error: "cooling down", retryAt: result.retryAt!.toISOString() },

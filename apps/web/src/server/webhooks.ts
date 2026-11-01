@@ -7,6 +7,7 @@ import {
   createScan,
   disableRepos,
   openFindings,
+  queuePendingRecons,
   removeInstallation,
   repoByGithubId,
   threatModel,
@@ -29,6 +30,11 @@ export interface WebhookDeps {
   github: GitHubApp;
   /** Starts the scan workflow for a scan record. */
   startScan(scanId: string): Promise<void>;
+  /**
+   * Whether the org may scan (has a plan). Recon waits until it does: buying a
+   * plan starts it. Omitted means billing is off.
+   */
+  hasPlan?(org: { id: string; githubLogin: string }): Promise<boolean>;
 }
 
 export type WebhookOutcome = { status: "duplicate" | "ignored" | "handled"; detail?: string; scans?: string[] };
@@ -84,8 +90,7 @@ async function onInstallation(deps: WebhookDeps, payload: InstallationEvent): Pr
     { githubAccountId: installation.account.id, githubLogin: installation.account.login, type: installation.account.type },
     repositories.map((r) => ({ githubRepoId: r.id, fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })),
   );
-  const scans = await startRecon(deps, org.id, repos.map((r) => r.id));
-  return { status: "handled", scans };
+  return startRecon(deps, org);
 }
 
 async function onInstallationRepositories(deps: WebhookDeps, payload: InstallationRepositoriesEvent): Promise<WebhookOutcome> {
@@ -94,19 +99,23 @@ async function onInstallationRepositories(deps: WebhookDeps, payload: Installati
   const added = new Set(payload.repositories_added.map((r) => r.id));
   const details = (await deps.github.installation(payload.installation.id).repositories()).filter((r) => added.has(r.id));
   const existing = await repoByGithubId(deps.db, payload.repositories_added[0]!.id);
-  const orgId = existing?.orgId ?? (await deps.db.query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.installationId, payload.installation.id) }))?.id;
-  if (!orgId) return { status: "ignored", detail: "unknown installation" };
-  const repos = await upsertRepos(deps.db, orgId, details.map((r) => ({ githubRepoId: r.id, fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })));
-  return { status: "handled", scans: await startRecon(deps, orgId, repos.map((r) => r.id)) };
+  const org = existing?.org ?? (await deps.db.query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.installationId, payload.installation.id) }));
+  if (!org) return { status: "ignored", detail: "unknown installation" };
+  await upsertRepos(deps.db, org.id, details.map((r) => ({ githubRepoId: r.id, fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })));
+  return startRecon(deps, org);
 }
 
-async function startRecon(deps: WebhookDeps, orgId: string, repoIds: string[]): Promise<string[]> {
-  const ids: string[] = [];
-  for (const repoId of repoIds) {
-    // "HEAD" is resolved to the default branch's commit when the scan clones.
-    ids.push(await newScan(deps, { repoId, orgId, kind: "recon", headSha: "HEAD" }));
-  }
-  return ids.filter(Boolean);
+/**
+ * Recon for every repo of the org that has no threat model and none on the
+ * way, once the org has a plan. Queued in one serialised step, so it never
+ * doubles up with the recon that buying a plan starts.
+ */
+async function startRecon(deps: WebhookDeps, org: { id: string; githubLogin: string }): Promise<WebhookOutcome> {
+  if (deps.hasPlan && !(await deps.hasPlan(org))) return { status: "handled", scans: [], detail: "recon waits for a plan" };
+  // "HEAD" is resolved to the default branch's commit when the scan clones.
+  const scans = await queuePendingRecons(deps.db, org.id);
+  for (const id of scans) await deps.startScan(id);
+  return { status: "handled", scans };
 }
 
 async function onPullRequest(deps: WebhookDeps, payload: PullRequestEvent): Promise<WebhookOutcome> {

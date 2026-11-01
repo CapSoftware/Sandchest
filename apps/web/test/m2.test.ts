@@ -14,9 +14,13 @@ import { createDb, openFindings, scanById, threatModel, type Db } from "@sandche
 import { migrate } from "@sandchest/db/migrate";
 import type { ChatRequest, ChatResult, LlmClient, ToolCall } from "@sandchest/engine/llm";
 import type { GitHubApp } from "@sandchest/github";
+import { setAutumn } from "@/server/billing";
 import { beginScan, executeScan, publishScan } from "@/server/scans";
+import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
+import { setScanStarter } from "@/server/start";
 import { handleWebhook } from "@/server/webhooks";
+import { FakeAutumn } from "./fake-autumn";
 
 const INDEXER = resolve(import.meta.dirname, "../../../target/release/sandchest-index");
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
@@ -193,12 +197,18 @@ beforeAll(async () => {
     SANDCHEST_INDEXER_BIN: INDEXER,
     SANDCHEST_GIT_HOST: `file://${gitRoot}`,
   });
+  resetConfig();
   database = createDb(url.toString(), { max: 5 });
   await migrate(database);
   setServices({ db: database, github: fakeGithub, llm: fakeLlm, osv: undefined, pricing: undefined });
+  // Billing on, and the org already on the Chest plan: every scan goes through the credit gate.
+  setAutumn(autumn);
+  setScanStarter(async (id) => void started.push(id));
 });
 
 afterAll(async () => {
+  setAutumn(undefined);
+  setScanStarter(undefined);
   rmSync(gitRoot, { recursive: true, force: true });
   if (!available || !admin) return;
   await database.$client.end();
@@ -207,6 +217,7 @@ afterAll(async () => {
 });
 
 const started: string[] = [];
+const autumn = new FakeAutumn("chest");
 const deps = () => ({ db: database, github: fakeGithub, startScan: async (id: string) => void started.push(id) });
 
 /** What the workflow does, step by step. */
@@ -256,7 +267,10 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(review.comments[0]!.body).toContain("Fix prompt for your coding agent");
     expect(recorded.completed.at(-1)).toMatchObject({ repo: "acme/private-app", conclusion: "failure" });
     const scan = await scanById(database, scanId!);
-    expect(scan).toMatchObject({ status: "completed", credits: 1 });
+    expect(scan).toMatchObject({ status: "completed", credits: 1, billing: "charged", creditsReserved: 1 });
+    // 350 a month on Chest, less this review.
+    expect(autumn.get(scan!.orgId).credits).toBe(349);
+    expect(autumn.get(scan!.orgId).locks.size).toBe(0);
     expect(await openFindings(database, scan!.repoId)).toHaveLength(1);
   }, 60_000);
 
@@ -281,6 +295,8 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     await runWorkflow(fixCheck);
     const scan = await scanById(database, fixCheck);
     expect(scan?.kind).toBe("fix_check");
+    // Free: it needed the plan but held no credits.
+    expect(scan).toMatchObject({ billing: "charged", creditsReserved: 0, credits: 0 });
     expect(await openFindings(database, scan!.repoId)).toHaveLength(0);
   }, 60_000);
 
