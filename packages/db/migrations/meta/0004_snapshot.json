@@ -1,6 +1,6 @@
 {
-  "id": "21686933-cfa9-47bd-97d7-51084b2572d9",
-  "prevId": "998688e2-43cc-4257-a7ef-17e7a9fa1b29",
+  "id": "9856ddcc-87c6-4ee7-84b8-b7d05e1688c5",
+  "prevId": "14fd34c8-ef14-4fc7-95f3-d5c2947a23a4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1476,6 +1476,22 @@
           ],
           "isUnique": true,
           "where": "\"scans\".\"kind\" = 'pr_review'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "scans_active_deep_unique": {
+          "name": "scans_active_deep_unique",
+          "columns": [
+            {
+              "expression": "repo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"scans\".\"kind\" = 'deep' and \"scans\".\"status\" in ('queued', 'running', 'publishing')",
           "concurrently": false,
           "method": "btree",
           "with": {}
