@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { currentUser } from "@/server/access";
 import { authConfigured } from "@/server/auth";
 import { signIn } from "@/server/actions";
+import { setupNeeded } from "@/server/setup";
 import "../app.css";
 
 export const metadata: Metadata = { title: "Sign in · Sandchest" };
@@ -10,9 +11,11 @@ export const metadata: Metadata = { title: "Sign in · Sandchest" };
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ expired?: string; error?: string; next?: string }> }) {
   const { expired, error, next } = await searchParams;
   const destination = safeNext(next);
-  const configured = authConfigured();
+  // A new self-hosted server has no GitHub App yet, and nothing to sign in with.
+  const connected = !setupNeeded();
+  const configured = connected && authConfigured();
   // After an expired grant the old session can live on in its cookie cache for a few minutes: stay here.
-  if (!expired && (await currentUser())) redirect(destination);
+  if (connected && !expired && (await currentUser())) redirect(destination);
   return (
     <main className="sign-in">
       <div className="shell">
@@ -25,7 +28,12 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         </p>
         {expired && <p className="notice">Your GitHub sign-in expired. Sign in again to carry on.</p>}
         {error && !expired && <p className="notice">GitHub didn’t complete the sign-in. Try again.</p>}
-        {!configured && <p className="notice">Sign-in isn’t set up on this deployment yet. Set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and BETTER_AUTH_SECRET.</p>}
+        {!connected && (
+          <p className="notice">
+            This server isn’t connected to GitHub yet. Whoever runs it finishes that at <a href="/setup">/setup</a>.
+          </p>
+        )}
+        {connected && !configured && <p className="notice">Sign-in isn’t set up on this deployment yet. Set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and BETTER_AUTH_SECRET.</p>}
         <form action={signIn.bind(null, destination)} hidden={!configured}>
           <button type="submit" className="key key-primary key-large key-glow">
             <span className="key-face">

@@ -1449,6 +1449,151 @@ html:not([data-js]) .no-js-submit {
   font-size: 0.875rem;
 }
 
+/* ---- Setup (first run) --------------------------------------------------- */
+/* The sign-in page's frame, a little wider for the form and the keys. */
+
+.setup .shell {
+  max-width: calc(40rem + 2 * var(--gutter));
+}
+
+.setup code {
+  color: var(--color-bright);
+  overflow-wrap: anywhere;
+}
+
+.setup a:not(.key, .sign-in-mark) {
+  color: var(--color-gold);
+  text-underline-offset: 3px;
+}
+
+.setup-form {
+  margin-top: 2.25rem;
+}
+
+.setup-cta,
+.setup-unlock {
+  margin-top: 2rem;
+}
+
+.setup-command,
+.setup-env {
+  margin-top: 1.5rem;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.setup-env {
+  max-height: 22rem;
+  overflow: auto;
+  user-select: all;
+}
+
+.setup-copy {
+  margin-top: 1rem;
+}
+
+.text-field {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.setup-unlock .text-field {
+  flex: 1 1 16rem;
+  margin-top: 0;
+}
+
+.text-field-label {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.text-field input {
+  width: 100%;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+  background: transparent;
+  color: var(--color-bright);
+  font: inherit;
+}
+
+.text-field input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-gold);
+}
+
+.text-field .field-help {
+  margin: 0;
+}
+
+.inline-form.setup-unlock {
+  align-items: end;
+}
+
+.setup-list,
+.setup-steps {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.setup-steps {
+  counter-reset: step;
+}
+
+.setup-steps li {
+  position: relative;
+  padding-left: 2rem;
+  counter-increment: step;
+}
+
+.setup-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.1;
+  color: var(--color-gold);
+}
+
+.setup-asks {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-seam);
+}
+
+.setup-dl {
+  display: grid;
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.setup-dl div {
+  display: grid;
+  gap: 0.15rem 1.5rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.setup-dl dt {
+  color: var(--color-sand);
+}
+
+.setup-dl dd {
+  color: var(--color-dust);
+}
+
+@media (min-width: 40rem) {
+  .setup-dl div {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+}
+
 /* ---- Loading ------------------------------------------------------------- */
 /* Skeletons are dithered: the same 2px checker the chest is drawn with. */
 
