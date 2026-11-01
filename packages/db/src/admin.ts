@@ -283,7 +283,8 @@ export interface Funnel {
   signedUp: number;
   /** Can see an account with the App installed. */
   installed: number;
-  plan: number;
+  /** ...with a plan. Null when billing is off (self-hosted), where there are no plans and recon starts at install. */
+  plan: number | null;
   /** ...whose recon finished. */
   recon: number;
   /** ...and someone started a deep scan by hand. */
@@ -295,9 +296,10 @@ export interface Funnel {
 
 /**
  * People who signed up in the range and how far they got. Each step counts
- * only people who reached every step before it, on the same account.
+ * only people who reached every step before it, on the same account. With
+ * billing off there is no plan step: recon and dig follow from install.
  */
-export async function adminFunnel(database: Db, days: AdminRange): Promise<Funnel> {
+export async function adminFunnel(database: Db, days: AdminRange, options: { billing: boolean }): Promise<Funnel> {
   const [row] = await database.execute<{ signed_up: number; installed: number; plan: number; recon: number; dig: number; active30: number; active7: number }>(sql`
     with cohort as (
       select u.id, u.created_at from ${users} u where u.created_at >= ${since(days)}
@@ -309,7 +311,7 @@ export async function adminFunnel(database: Db, days: AdminRange): Promise<Funne
     ),
     org_steps as (
       select o.id,
-        ob.activated_at is not null as plan,
+        (${!options.billing}::boolean or ob.activated_at is not null) as plan,
         exists (select 1 from ${scans} s where s.org_id = o.id and s.kind = 'recon' and s.status = 'completed') as recon,
         exists (select 1 from ${scans} s where s.org_id = o.id and s.kind = 'deep' and s.trigger = 'manual' and s.status not in ('refused', 'cancelled')) as dig
       from ${orgs} o
@@ -342,7 +344,7 @@ export async function adminFunnel(database: Db, days: AdminRange): Promise<Funne
   return {
     signedUp: row?.signed_up ?? 0,
     installed: row?.installed ?? 0,
-    plan: row?.plan ?? 0,
+    plan: options.billing ? (row?.plan ?? 0) : null,
     recon: row?.recon ?? 0,
     dig: row?.dig ?? 0,
     active30: row?.active30 ?? 0,

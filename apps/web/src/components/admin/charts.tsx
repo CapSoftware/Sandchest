@@ -5,7 +5,7 @@
  * screen-reader use. One hue per chart (gold); kinds are small multiples,
  * not a stack of colours.
  */
-import { dayLabel, niceMax } from "@/lib/admin-format";
+import { dayLabel, niceCountMax, niceMax } from "@/lib/admin-format";
 
 interface ColumnChartProps {
   title: string;
@@ -16,11 +16,13 @@ interface ColumnChartProps {
   format: (value: number) => string;
   /** Smaller, for small multiples. */
   compact?: boolean;
+  /** Whole numbers (scans, people): the axis top is even, so the middle gridline is a whole number too. */
+  counts?: boolean;
 }
 
 /** One column per day from a shared baseline, with three gridlines. */
-export function ColumnChart({ title, note, days, values, format, compact = false }: ColumnChartProps) {
-  const top = niceMax(Math.max(0, ...values));
+export function ColumnChart({ title, note, days, values, format, compact = false, counts = false }: ColumnChartProps) {
+  const top = (counts ? niceCountMax : niceMax)(Math.max(0, ...values));
   const ticks = compact ? [top] : [top / 2, top];
   const label = `${title}${note ? `, ${note}` : ""}. ${days.length} days from ${dayLabel(days[0]!)} to ${dayLabel(days.at(-1)!)}; highest ${format(Math.max(0, ...values))}.`;
   return (

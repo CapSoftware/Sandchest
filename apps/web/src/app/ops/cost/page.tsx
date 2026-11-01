@@ -46,14 +46,14 @@ export default async function CostPage({ searchParams }: Props) {
           <dd className="stat-note">{percent(summary?.cachedShare ?? null)} of input cached</dd>
         </div>
         <div className="stat">
-          <dt>Per credit charged</dt>
+          <dt>Model cost per credit</dt>
           <dd>{money(perCredit.paid)}</dd>
           <dd className="stat-note">{count(total?.creditsCharged ?? 0)} credits, paid scans only</dd>
         </div>
         <div className="stat">
-          <dt>Per credit, all in</dt>
+          <dt>Model cost per credit, all in</dt>
           <dd>{money(perCredit.allIn)}</dd>
-          <dd className="stat-note">with free recon and fix checks</dd>
+          <dd className="stat-note">free recon and fix checks included</dd>
         </div>
         <div className="stat">
           <dt>Median scan</dt>
@@ -138,7 +138,7 @@ export default async function CostPage({ searchParams }: Props) {
           </table>
         </div>
         <p className="admin-footnote">
-          By each account’s plan today. Cost per credit is the model and compute cost of every scan the plan’s accounts ran, free ones included, over the credits they were charged.
+          By each account’s plan today. Cost per credit is the model cost of every scan the plan’s accounts ran, free ones included, over the credits they were charged. Compute (sandboxes) is not recorded yet, so it is not in any figure here.
           Price is the plan’s list price per credit; top-ups sell for more.
         </p>
       </section>
@@ -150,9 +150,9 @@ export default async function CostPage({ searchParams }: Props) {
         <div className="admin-multiples">
           {KINDS.map((kind) => {
             const values = series.byKind(kind);
-            return <ColumnChart key={kind} compact title={SCAN_KIND_LABEL[kind]!} note={count(values.reduce((a, b) => a + b, 0))} days={days} values={values} format={count} />;
+            return <ColumnChart key={kind} compact counts title={SCAN_KIND_LABEL[kind]!} note={count(values.reduce((a, b) => a + b, 0))} days={days} values={values} format={count} />;
           })}
-          <ColumnChart compact title="Failed" note={count(series.failed.reduce((a, b) => a + b, 0))} days={days} values={series.failed} format={count} />
+          <ColumnChart compact counts title="Failed" note={count(series.failed.reduce((a, b) => a + b, 0))} days={days} values={series.failed} format={count} />
         </div>
         <p className="admin-footnote">Each chart has its own scale.</p>
       </section>

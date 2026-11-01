@@ -5,6 +5,7 @@ import { ColumnChart, FunnelBars } from "@/components/admin/charts";
 import { count, percent } from "@/lib/admin-format";
 import { funnelSteps, lastDays, parseRange, perDay, ratio } from "@/lib/admin-metrics";
 import { requireAdmin } from "@/server/admin";
+import { config } from "@/server/config";
 import { db } from "@/server/db";
 
 export const metadata: Metadata = { title: "Funnel · Admin · Sandchest" };
@@ -14,7 +15,9 @@ type Props = { searchParams: Promise<Record<string, string | string[] | undefine
 export default async function FunnelPage({ searchParams }: Props) {
   await requireAdmin();
   const range = parseRange((await searchParams).range);
-  const [funnel, activity, daily] = await Promise.all([adminFunnel(db(), range), adminActivity(db()), adminDailySignups(db(), range)]);
+  // Billing is on when Autumn is configured (as `billingEnabled` decides), without loading the billing client.
+  const billing = Boolean(config().AUTUMN_SECRET_KEY);
+  const [funnel, activity, daily] = await Promise.all([adminFunnel(db(), range, { billing }), adminActivity(db()), adminDailySignups(db(), range)]);
 
   const days = lastDays(range);
   const signups = perDay(days, daily, (row) => row.signups);
@@ -59,18 +62,20 @@ export default async function FunnelPage({ searchParams }: Props) {
             <dd>{count(activity.orgs30)}</dd>
             <dd className="stat-note">of {count(activity.orgs)} installed</dd>
           </div>
-          <div className="stat">
-            <dt>Accounts with a plan</dt>
-            <dd>{count(activity.paying)}</dd>
-            <dd className="stat-note">{percent(ratio(activity.paying, activity.orgs))} of installed</dd>
-          </div>
+          {billing && (
+            <div className="stat">
+              <dt>Accounts with a plan</dt>
+              <dd>{count(activity.paying)}</dd>
+              <dd className="stat-note">{percent(ratio(activity.paying, activity.orgs))} of installed</dd>
+            </div>
+          )}
         </dl>
         <p className="admin-footnote">Not affected by the range. People are active when they open the dashboard; accounts when a scan runs.</p>
       </section>
 
       <section className="block admin-block admin-multiples" aria-label="Sign-ups and sign-ins per day">
-        <ColumnChart title="Sign-ups per day" note={count(funnel.signedUp)} days={days} values={signups} format={count} />
-        <ColumnChart title="Sign-ins per day" note={count(signIns.reduce((a, b) => a + b, 0))} days={days} values={signIns} format={count} />
+        <ColumnChart counts title="Sign-ups per day" note={count(funnel.signedUp)} days={days} values={signups} format={count} />
+        <ColumnChart counts title="Sign-ins per day" note={count(signIns.reduce((a, b) => a + b, 0))} days={days} values={signIns} format={count} />
       </section>
     </>
   );

@@ -41,3 +41,15 @@ export function niceMax(max: number): number {
   for (const step of [1, 2, 2.5, 5, 10]) if (step * power >= max) return step * power;
   return 10 * power;
 }
+
+/**
+ * A round top for an axis of whole numbers: at least 2, and 2, 4, 6, 8 or 10
+ * times a power of ten, so the middle gridline (half the top) is a whole
+ * number and no two gridlines share a label.
+ */
+export function niceCountMax(max: number): number {
+  if (!(max > 2)) return 2;
+  const power = 10 ** Math.floor(Math.log10(max));
+  for (const step of [2, 4, 6, 8, 10]) if (step * power >= max) return step * power;
+  return 20 * power;
+}

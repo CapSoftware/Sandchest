@@ -202,11 +202,12 @@ export interface FunnelStep {
   fromStart: Rate;
 }
 
+/** The funnel's steps in order. Without billing (a null plan count) there is no plan step. */
 export function funnelSteps(funnel: Funnel): FunnelStep[] {
   const steps: Array<[string, number]> = [
     ["Signed up", funnel.signedUp],
     ["Installed the App", funnel.installed],
-    ["Chose a plan", funnel.plan],
+    ...(funnel.plan === null ? [] : [["Chose a plan", funnel.plan] as [string, number]]),
     ["Recon finished", funnel.recon],
     ["Started a dig", funnel.dig],
     ["Back in the last 30 days", funnel.active30],

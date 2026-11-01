@@ -27,9 +27,11 @@ import {
   type KindCost,
 } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
-import { count, dayLabel, money, niceMax, percent } from "@/lib/admin-format";
+import { count, dayLabel, money, niceCountMax, niceMax, percent } from "@/lib/admin-format";
 import { costPerCredit, funnelSteps, lastDays, outcomes, parseRange, perDay, planMargins, ratio, survival } from "@/lib/admin-metrics";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { navLinks } from "@/components/app/app-header";
 import { adminGithubIds, isAdmin } from "@/server/admin";
 import { config, resetConfig } from "@/server/config";
 import { setDb } from "@/server/db";
@@ -55,6 +57,14 @@ describe("admin access", () => {
     expect(config({ ...base, SANDCHEST_ADMIN_GITHUB_IDS: "12, 34" }).SANDCHEST_ADMIN_GITHUB_IDS).toBe("12, 34");
     expect(() => config({ ...base, SANDCHEST_ADMIN_GITHUB_IDS: "octocat" })).toThrow(/SANDCHEST_ADMIN_GITHUB_IDS/);
     expect(() => config({ ...base, SANDCHEST_ADMIN_GITHUB_IDS: "12,octocat" })).toThrow(/GitHub user ids/);
+  });
+
+  test("only operators are given the Admin link, and the client nav names no section itself", () => {
+    expect(navLinks(false).map((link) => link.href)).toEqual(["/repos", "/findings", "/settings"]);
+    expect(navLinks(true).map((link) => link.href)).toEqual(["/repos", "/findings", "/settings", "/admin"]);
+    // The nav is a client component: anything written in it ships to every signed-in person.
+    const clientNav = readFileSync(new URL("../src/components/app/nav.tsx", import.meta.url), "utf8");
+    expect(clientNav).not.toMatch(/\/admin|\/ops/);
   });
 
   test("the range comes from the URL and falls back to 30 days", () => {
@@ -96,6 +106,17 @@ describe("admin arithmetic", () => {
     expect(money(null)).toBe("–");
     expect(count(12345.4)).toBe("12,345");
     expect([0, 0.3, 1, 7, 13, 21, 260, 999].map(niceMax)).toEqual([1, 0.5, 1, 10, 20, 25, 500, 1000]);
+  });
+
+  test("count axes put both gridlines on distinct whole numbers", () => {
+    // A top of 1 labelled the middle gridline "1" as well; a top of 5 put it at 2.5, shown as "3".
+    for (const max of [0, 1, 2, 3, 5, 7, 9, 11, 13, 21, 99, 260, 999, 1_234]) {
+      const top = niceCountMax(max);
+      expect(top).toBeGreaterThanOrEqual(Math.max(max, 2));
+      expect(Number.isInteger(top / 2)).toBe(true);
+      expect(count(top / 2)).not.toBe(count(top));
+    }
+    expect([1, 3, 5, 9, 13].map(niceCountMax)).toEqual([2, 4, 6, 10, 20]);
   });
 
   test("days are whole UTC days ending today, and missing days are zero", () => {
@@ -371,8 +392,14 @@ describe("admin aggregates", () => {
       { name: "dashboard_visit", userId: person!.id, createdAt: ago(1) },
       { name: "dashboard_visit", userId: second!.id, createdAt: ago(2) },
     ]);
-    expect(await adminFunnel(database, 7)).toEqual({ signedUp: 3, installed: 2, plan: 1, recon: 1, dig: 1, active30: 1, active7: 1 });
-    expect((await adminFunnel(database, 90)).signedUp).toBe(4);
+    expect(await adminFunnel(database, 7, { billing: true })).toEqual({ signedUp: 3, installed: 2, plan: 1, recon: 1, dig: 1, active30: 1, active7: 1 });
+    expect((await adminFunnel(database, 90, { billing: true })).signedUp).toBe(4);
+    // With billing off (self-hosted) nobody has a plan and recon starts at install: no plan step,
+    // and the free account's finished recon counts.
+    const selfHosted = await adminFunnel(database, 7, { billing: false });
+    expect(selfHosted).toEqual({ signedUp: 3, installed: 2, plan: null, recon: 2, dig: 1, active30: 1, active7: 1 });
+    expect(funnelSteps(selfHosted).map((step) => step.label)).not.toContain("Chose a plan");
+    expect(funnelSteps(selfHosted)[2]).toMatchObject({ label: "Recon finished", count: 2, fromPrevious: 1 });
 
     // A visit is recorded once a day however often it is written.
     await recordDailyVisit(database, second!.id);

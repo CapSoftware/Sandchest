@@ -2,17 +2,11 @@
 import { HoverLink } from "./hover-link";
 import { usePathname } from "next/navigation";
 
-const LINKS = [
-  { href: "/repos", label: "Repos" },
-  { href: "/findings", label: "Findings" },
-  { href: "/settings", label: "Settings" },
-];
-
-export function AppNav({ admin = false }: { admin?: boolean }) {
+/** The dashboard's sections. The links come from the server, so the client code names no section it was not given. */
+export function AppNav({ links }: { links: ReadonlyArray<{ href: string; label: string }> }) {
   const path = usePathname();
-  // A scan belongs to its repo, so it lights Repos. The admin pages are served from /ops.
-  const section = path.startsWith("/scans") ? "/repos" : path.startsWith("/ops") ? "/admin" : path;
-  const links = admin ? [...LINKS, { href: "/admin", label: "Admin" }] : LINKS;
+  // A scan belongs to its repo, so it lights Repos.
+  const section = path.startsWith("/scans") ? "/repos" : path;
   return (
     <nav className="app-nav" aria-label="Main">
       {links.map((link) => (
