@@ -176,16 +176,24 @@ export class Installation {
   }
 
   /**
-   * Whether the user is an active admin of the organisation (Members: read).
-   * False when GitHub says they are not a member; other errors are thrown, since
-   * then nobody knows.
+   * The membership of whoever holds this username in the organisation now
+   * (Members: read), or null when the membership endpoint says they are not a
+   * member. A username can change hands, so callers must check `userId`
+   * against the account they mean. Any other failure, including not getting
+   * a token (an uninstalled app), is thrown: then nobody knows.
    */
-  async isOrgAdmin(org: string, username: string): Promise<boolean> {
+  async orgMembership(org: string, username: string): Promise<{ userId: number; state: string; role: string } | null> {
+    const token = await this.auth();
     try {
-      const membership = await githubRequest<{ state: string; role: string }>(this.auth, `/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(username)}`, {}, this.http);
-      return membership.state === "active" && membership.role === "admin";
+      const membership = await githubRequest<{ state: string; role: string; user: { id: number } }>(
+        async () => token,
+        `/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(username)}`,
+        {},
+        this.http,
+      );
+      return { userId: membership.user.id, state: membership.state, role: membership.role };
     } catch (error) {
-      if (error instanceof GitHubError && error.status === 404) return false;
+      if (error instanceof GitHubError && error.status === 404) return null;
       throw error;
     }
   }

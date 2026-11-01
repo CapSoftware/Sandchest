@@ -80,23 +80,25 @@ describe("app auth", () => {
     expect(await app.token(7)).toBe("new");
   });
 
-  test("reads org admin status with the installation's token: admin, member, gone, or unknown", async () => {
+  test("reads an org membership with the installation's token, with the account id behind the username", async () => {
     const later = new Date(Date.now() + 60 * 60_000).toISOString();
     const { fetch, requests } = scripted(
       json({ token: "inst", expires_at: later }),
-      json({ state: "active", role: "admin" }),
-      json({ state: "active", role: "member" }),
-      json({ state: "pending", role: "admin" }),
+      json({ state: "active", role: "admin", user: { id: 202, login: "alice" } }),
       json({ message: "Not Found" }, { status: 404 }),
       json({ message: "Resource not accessible by integration" }, { status: 403 }),
     );
     const installation = new GitHubApp(config, { fetch, ...quick }).installation(7);
-    expect(await installation.isOrgAdmin("acme", "alice")).toBe(true);
-    expect(await installation.isOrgAdmin("acme", "bob")).toBe(false);
-    expect(await installation.isOrgAdmin("acme", "carol")).toBe(false);
-    expect(await installation.isOrgAdmin("acme", "dave")).toBe(false);
-    await expect(installation.isOrgAdmin("acme", "erin")).rejects.toThrow("403");
+    expect(await installation.orgMembership("acme", "alice")).toEqual({ userId: 202, state: "active", role: "admin" });
+    expect(await installation.orgMembership("acme", "dave")).toBeNull();
+    await expect(installation.orgMembership("acme", "erin")).rejects.toThrow("403");
     expect(requests[1]!.url).toBe("https://api.github.com/orgs/acme/memberships/alice");
+  });
+
+  test("a 404 getting the token (the app was uninstalled) is an error, not 'not a member'", async () => {
+    const { fetch, requests } = scripted(json({ message: "Not Found" }, { status: 404 }));
+    await expect(new GitHubApp(config, { fetch, ...quick }).installation(7).orgMembership("acme", "alice")).rejects.toThrow("404");
+    expect(requests.map((r) => new URL(r.url).pathname)).toEqual(["/app/installations/7/access_tokens"]);
   });
 });
 

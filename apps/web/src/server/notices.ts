@@ -21,9 +21,9 @@ import { CREDIT_LEVELS, creditLevel, planById } from "@sandchest/billing/plans";
 import {
   claimNotification,
   claimOrgNotice,
+  observeCreditLevel,
   orgAdminContacts,
-  recordCreditLevel,
-  refreshOrgAdmins,
+  raiseCreditLevel,
   type BalanceSeen,
   type OrgAdminContact,
   type OrgBillingRow,
@@ -41,8 +41,7 @@ export interface NoticeOrg {
   githubLogin: string;
 }
 
-/** `creditLevel`, when known: the level stored before this balance, so a balance already announced looks no one up. */
-type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetAt" | "autoTopUp"> & { creditLevel?: number };
+type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetAt" | "autoTopUp">;
 
 /**
  * Checks a balance Sandchest just learned (a reservation's answer, or a read
@@ -54,16 +53,22 @@ type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetA
  * With auto top-up on, a low or empty balance is Autumn's to fix and refills a
  * few seconds later, so nothing is announced: if it can't refill, Autumn's
  * auto top-up failed webhook says why.
+ *
+ * In order: decide whether this is a crossing, from the stored level; only
+ * then find who to tell (which may ask GitHub, outside any lock); with nobody,
+ * leave the level alone so a later balance can announce it; otherwise commit
+ * the crossing, unless someone moved the level meanwhile.
  */
 export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, seen: BalanceSeen): Promise<void> {
   const plan = planById(billing.planId);
   if (!plan) return;
   const level = creditLevel(plan, billing.credits);
-  let raise = level !== "ok" && !billing.autoTopUp?.enabled && !(billing.creditLevel !== undefined && CREDIT_LEVELS.indexOf(level) <= billing.creditLevel);
-  // Nobody to tell: leave the level where it is, so the crossing is announced once someone is.
-  const to = raise && mailer().enabled ? await recipients(org.id, `${level} credits email`, "billing") : [];
-  if (to === null) raise = false;
-  if (!(await recordCreditLevel(db(), org.id, CREDIT_LEVELS.indexOf(level), seen, { raise })) || !to?.length) return;
+  const index = CREDIT_LEVELS.indexOf(level);
+  const crossing = await observeCreditLevel(db(), org.id, index, seen, { raise: level !== "ok" && !billing.autoTopUp?.enabled });
+  if (!crossing) return;
+  // Without a mailer the level still moves; there is just nobody to email.
+  const to = mailer().enabled ? await recipients(org.id, `${level} credits email`, "billing") : [];
+  if (to === null || !(await raiseCreditLevel(db(), org.id, index, seen, crossing)) || to.length === 0) return;
   const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
   await send(org.id, to, level === "low" ? creditsLowEmail({ ...input, credits: billing.credits }) : creditsExhaustedEmail(input));
 }
@@ -129,10 +134,11 @@ async function claimAndSend(orgId: string, key: string, what: string, render: ()
  *   The scan-paused email names private repositories and pull requests, so a
  *   former admin must not get it.
  * - `billing`: fresh admins too. When there are none, the stale ones are
- *   checked with GitHub first and only those still admins are emailed; the
- *   answer refreshes their rows. If GitHub can't answer, the stale ones are
- *   emailed anyway: billing emails name no repository or finding, and missing
- *   one can stop every review.
+ *   checked with GitHub first and only those still admins are emailed. The
+ *   answer only chooses this email's recipients: `org_admins` is dashboard
+ *   access, and only signing in changes it. If GitHub can't answer, the stale
+ *   ones are emailed anyway: billing emails name no repository or finding, and
+ *   missing one can stop every review.
  */
 async function recipients(orgId: string, what: string, who: "fresh" | "billing"): Promise<string[] | null> {
   const admins = await orgAdminContacts(db(), orgId);
@@ -148,27 +154,26 @@ async function recipients(orgId: string, what: string, who: "fresh" | "billing")
   return null;
 }
 
-/** Asks GitHub which of these admins still are, and records the answer. Throws when GitHub can't say. */
+/**
+ * Asks GitHub which of these admins still are. Read-only. A username can
+ * change hands, so a membership counts only if it belongs to the same GitHub
+ * account (`github_user_id`). Throws when GitHub can't say.
+ */
 async function confirmAdmins(orgId: string, admins: OrgAdminContact[]): Promise<OrgAdminContact[]> {
   const org = await db().query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.id, orgId), columns: { type: true, githubLogin: true, githubAccountId: true, installationId: true } });
   if (!org) return [];
-  let still: boolean[];
-  if (org.type === "User") {
-    // A personal account has one admin: its owner.
-    still = admins.map((admin) => admin.githubUserId === org.githubAccountId);
-  } else {
-    if (!org.installationId) throw new Error("The app is no longer installed");
-    const installation = githubApp().installation(org.installationId);
-    still = await Promise.all(admins.map((admin) => (admin.login ? installation.isOrgAdmin(org.githubLogin, admin.login) : Promise.resolve(false))));
-  }
-  const confirmed = admins.filter((_, index) => still[index]);
-  await refreshOrgAdmins(
-    db(),
-    orgId,
-    confirmed.map((admin) => admin.userId),
-    admins.filter((_, index) => !still[index]).map((admin) => admin.userId),
+  // A personal account has one admin: its owner.
+  if (org.type === "User") return admins.filter((admin) => admin.githubUserId === org.githubAccountId);
+  if (!org.installationId) throw new Error("The app is no longer installed");
+  const installation = githubApp().installation(org.installationId);
+  const still = await Promise.all(
+    admins.map(async (admin) => {
+      if (!admin.login || admin.githubUserId === null) return false;
+      const membership = await installation.orgMembership(org.githubLogin, admin.login);
+      return membership?.userId === admin.githubUserId && membership.state === "active" && membership.role === "admin";
+    }),
   );
-  return confirmed;
+  return admins.filter((_, index) => still[index]);
 }
 
 /** Best effort: the email is already reserved, so a failure is logged (by error name: SMTP errors can quote addresses), not retried. */

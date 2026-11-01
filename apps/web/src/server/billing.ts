@@ -94,7 +94,7 @@ async function readAndStore(org: BillingOrg): Promise<OrgBillingRow> {
   const row = toRow(state);
   const { firstActivation, previousPlanId } = await saveOrgBilling(db(), org.id, row, at);
   if (state.planId && (firstActivation || !previousPlanId)) await startPendingRecon(org.id);
-  await noticeCredits(org, { ...row, creditLevel: previous?.creditLevel }, seen).catch(logFailure("credits email"));
+  await noticeCredits(org, row, seen).catch(logFailure("credits email"));
   return { orgId: org.id, ...row, activatedAt: previous?.activatedAt ?? (state.planId ? at : null), checkedAt: at, creditLevel: previous?.creditLevel ?? 0, creditLevelAt: previous?.creditLevelAt ?? null };
 }
 

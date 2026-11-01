@@ -33,16 +33,20 @@ const sent: Email[] = [];
 const recordingMailer: Mailer = { enabled: true, send: async (email) => void sent.push(email) };
 const autumn = new FakeAutumn();
 
-/** GitHub's answer to "is this person still an admin of this org?", asked with an installation's token. */
-const githubAdmins = new Set<string>();
+/** GitHub's org memberships, by "org/login": who holds that username now, and their role. */
+const githubMembers = new Map<string, { userId: number; role: string }>();
 const githubAsked: string[] = [];
 let githubDown = false;
+/** Runs while GitHub is being asked, to change things in between. */
+let whileAsking: (() => Promise<void>) | undefined;
 const fakeGithub = {
   installation: (installationId: number) => ({
-    isOrgAdmin: async (org: string, login: string) => {
+    orgMembership: async (org: string, login: string) => {
       githubAsked.push(`${installationId}:${org}/${login}`);
+      if (whileAsking) await whileAsking();
       if (githubDown) throw new Error("GitHub 502: Bad Gateway");
-      return githubAdmins.has(`${org}/${login}`);
+      const member = githubMembers.get(`${org}/${login}`);
+      return member ? { userId: member.userId, state: "active", role: member.role } : null;
     },
   }),
 } as unknown as GitHubApp;
@@ -231,6 +235,22 @@ describe.skipIf(!available)("billing emails", () => {
     await syncBilling(acme);
     expect(await level()).toBe(0);
     expect(sent).toHaveLength(0);
+  });
+
+  test("a crossing is decided from the stored level, never from a level cached with the balance", async () => {
+    const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
+    await noticeCredits(acme, { ...lockbox, credits: 0 }, now());
+    expect(subjects()).toEqual(["Out of credits on acme"]);
+    drain();
+    // Two observers read the row at level 2. The healthy one records the recovery first...
+    await noticeCredits(acme, { ...lockbox, credits: 60 }, now());
+    expect(await level()).toBe(0);
+    // ...then the newer low one arrives still carrying level 2 from its earlier read. It is a real crossing.
+    const carriesStaleLevel = { ...lockbox, credits: 9, creditLevel: 2 };
+    await noticeCredits(acme, carriesStaleLevel, now());
+    expect(subjects()).toEqual(["9 credits left on acme"]);
+    drain();
+    await noticeCredits(acme, { ...lockbox, credits: 60 }, now());
   });
 
   test("an answer asked for before a newer one counted changes nothing, in either direction", async () => {
@@ -553,6 +573,7 @@ describe.skipIf(!available)("scan paused", () => {
 });
 
 describe.skipIf(!available)("admins nobody has confirmed lately", () => {
+  let nextGithubId = 9_000;
   /** An org whose admins all last signed in 40 days ago. */
   async function staleOrg(installationId: number, login: string, type: "User" | "Organization", admins: Array<{ login: string; githubUserId?: number }>) {
     const accountId = installationId * 10;
@@ -560,25 +581,35 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
       { githubRepoId: installationId, fullName: `${login}/private-app`, private: true, defaultBranch: "main" },
     ]);
     const old = new Date(Date.now() - 40 * 86_400_000);
+    const ids: Record<string, number> = {};
     for (const admin of admins) {
-      const [user] = await database.insert(schema.users).values({ name: admin.login, email: `${admin.login}@example.com`, login: admin.login, githubUserId: admin.githubUserId ?? null }).returning();
+      const githubUserId = admin.githubUserId ?? ++nextGithubId;
+      ids[admin.login] = githubUserId;
+      const [user] = await database.insert(schema.users).values({ name: admin.login, email: `${admin.login}@example.com`, login: admin.login, githubUserId }).returning();
       await database.insert(schema.orgAdmins).values({ userId: user!.id, orgId: org.id, checkedAt: old });
     }
-    return { org: { id: org.id, githubLogin: login, settings: org.settings }, repoId: repos[0]!.id, accountId };
+    return { org: { id: org.id, githubLogin: login, settings: org.settings }, repoId: repos[0]!.id, accountId, ids };
   }
-  const fresh = async (orgId: string) => (await orgAdminContacts(database, orgId)).map((admin) => [admin.email, admin.fresh]).sort();
-
-  test("a stale admin doesn't get 'scan paused', which names private repositories", async () => {
-    const { org, repoId: staleRepo } = await staleOrg(604, "oldco", "Organization", [{ login: "frank" }]);
-    const [row] = await database.insert(schema.scans).values({ repoId: staleRepo, orgId: org.id, kind: "pr_review", trigger: "webhook", headSha: "abc", status: "failed", prNumber: 3 }).returning();
+  /** org_admins as stored: dashboard access, which emails must never change. */
+  const adminRows = async (orgId: string) =>
+    (await database.query.orgAdmins.findMany({ where: (rows, { eq }) => eq(rows.orgId, orgId) })).map((row) => `${row.userId}@${row.checkedAt.toISOString()}`).sort();
+  const withWarnings = async <T>(task: () => Promise<T>): Promise<{ result: T; warned: string[] }> => {
     const warned: string[] = [];
     const original = console.warn;
     console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
     try {
-      expect(await noticeScanPaused({ id: row!.id, kind: "pr_review", prNumber: 3, repo: { fullName: "oldco/private-app", org } })).toBe(false);
+      return { result: await task(), warned };
     } finally {
       console.warn = original;
     }
+  };
+
+  test("a stale admin doesn't get 'scan paused', which names private repositories", async () => {
+    const { org, repoId: staleRepo } = await staleOrg(604, "oldco", "Organization", [{ login: "frank" }]);
+    const [row] = await database.insert(schema.scans).values({ repoId: staleRepo, orgId: org.id, kind: "pr_review", trigger: "webhook", headSha: "abc", status: "failed", prNumber: 3 }).returning();
+    githubAsked.length = 0;
+    const { result, warned } = await withWarnings(() => noticeScanPaused({ id: row!.id, kind: "pr_review", prNumber: 3, repo: { fullName: "oldco/private-app", org } }));
+    expect(result).toBe(false);
     expect(sent).toHaveLength(0);
     expect(githubAsked).toEqual([]);
     expect(warned).toEqual([`No admin of org ${org.id} to email: scan paused email not sent`]);
@@ -586,51 +617,73 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     expect((await database.query.scans.findFirst({ where: (scans, { eq }) => eq(scans.id, row!.id) }))!.notifiedAt).toBeNull();
   });
 
-  test("with only stale admins, billing emails ask GitHub first and go only to those still admins", async () => {
-    const { org } = await staleOrg(605, "driftco", "Organization", [{ login: "grace" }, { login: "heidi" }]);
-    githubAdmins.add("driftco/grace");
+  test("with only stale admins, billing emails ask GitHub and go only to the same accounts still admins, changing nothing stored", async () => {
+    const { org, ids } = await staleOrg(605, "driftco", "Organization", [{ login: "grace" }, { login: "heidi" }, { login: "kim" }]);
+    githubMembers.set("driftco/grace", { userId: ids.grace!, role: "admin" });
+    githubMembers.set("driftco/heidi", { userId: ids.heidi!, role: "member" });
+    // Kim renamed; someone else took the username and is an admin. That is not Kim.
+    githubMembers.set("driftco/kim", { userId: 202_202, role: "admin" });
+    const before = await adminRows(org.id);
     githubAsked.length = 0;
     expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_1", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
     expect(sent.map((email) => email.to)).toEqual([["grace@example.com"]]);
-    expect(githubAsked.sort()).toEqual(["605:driftco/grace", "605:driftco/heidi"]);
-    // GitHub's answer is recorded: Grace is fresh again, Heidi is no longer an admin.
-    expect(await fresh(org.id)).toEqual([["grace@example.com", true]]);
+    expect(githubAsked.sort()).toEqual(["605:driftco/grace", "605:driftco/heidi", "605:driftco/kim"]);
+    // Dashboard access is signing in's business only: no row removed or refreshed.
+    expect(await adminRows(org.id)).toEqual(before);
     drain();
-    // So the next email doesn't need to ask.
+    // So the next email asks again.
     expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_2", added: 25, charged: "$10.00", credits: 59 })).toBe("sent");
-    expect(githubAsked).toHaveLength(2);
+    expect(githubAsked).toHaveLength(6);
+    expect(sent.map((email) => email.to)).toEqual([["grace@example.com"]]);
     drain();
   });
 
   test("a personal account's admin is its owner; no need to ask GitHub", async () => {
     const { org, accountId } = await staleOrg(606, "pat", "User", [{ login: "pat", githubUserId: 6060 }, { login: "mallory", githubUserId: 6061 }]);
     expect(accountId).toBe(6060);
+    const before = await adminRows(org.id);
     githubAsked.length = 0;
     expect(await noticeAutoTopUp(org, { invoiceId: "in_pat", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
     expect(sent.map((email) => email.to)).toEqual([["pat@example.com"]]);
     expect(githubAsked).toEqual([]);
-    expect(await fresh(org.id)).toEqual([["pat@example.com", true]]);
+    expect(await adminRows(org.id)).toEqual(before);
     drain();
   });
 
   test("if GitHub can't be asked, billing emails go to the stale admins, and nothing is recorded", async () => {
     const { org } = await staleOrg(607, "downco", "Organization", [{ login: "ivan" }, { login: "judy" }]);
+    const before = await adminRows(org.id);
     githubDown = true;
-    const warned: string[] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
     try {
-      expect(await noticeAutoTopUpFailed(org, { reason: "card", credits: 3 })).toBe("sent");
+      const { result, warned } = await withWarnings(() => noticeAutoTopUpFailed(org, { reason: "card", credits: 3 }));
+      expect(result).toBe("sent");
+      expect(warned).toEqual([`Couldn't check the admins of org ${org.id} with GitHub (Error): emailing the last known ones`]);
     } finally {
-      console.warn = original;
       githubDown = false;
     }
     expect(sent.map((email) => [...email.to].sort())).toEqual([["ivan@example.com", "judy@example.com"]]);
-    expect(warned).toEqual([`Couldn't check the admins of org ${org.id} with GitHub (Error): emailing the last known ones`]);
-    expect(await fresh(org.id)).toEqual([
-      ["ivan@example.com", false],
-      ["judy@example.com", false],
-    ]);
+    expect(await adminRows(org.id)).toEqual(before);
+    drain();
+  });
+
+  test("a crossing is committed only if nobody moved the level while its recipients were found", async () => {
+    const { org, ids } = await staleOrg(608, "raceco", "Organization", [{ login: "lena" }]);
+    githubMembers.set("raceco/lena", { userId: ids.lena!, role: "admin" });
+    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 60, creditsResetAt: null, autoTopUp: null });
+    const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
+    const earlier = { from: new Date(Date.now() - 2_000), to: new Date(Date.now() - 1_000) };
+    // While GitHub is asked about the low balance, a newer healthy balance counts. No lock is held across
+    // the call (it would deadlock here), and the older crossing is then not committed or sent.
+    whileAsking = async () => {
+      whileAsking = undefined;
+      await noticeCredits(org, { ...lockbox, credits: 60 }, now());
+    };
+    await noticeCredits(org, { ...lockbox, credits: 9 }, earlier);
+    expect(sent).toHaveLength(0);
+    expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
+    // A later low balance announces it.
+    await noticeCredits(org, { ...lockbox, credits: 8 }, now());
+    expect(sent.map((email) => [email.to, email.subject])).toEqual([[["lena@example.com"], "8 credits left on raceco"]]);
     drain();
   });
 });

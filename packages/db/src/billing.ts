@@ -104,33 +104,63 @@ export interface BalanceSeen {
   to: Date;
 }
 
+/** The level and its timestamp as read, for a compare-and-set that fails if anyone moved them since. */
+export interface CreditLevelState {
+  level: number;
+  at: Date | null;
+}
+
 /**
- * Moves the org's credit level (0 ok, 1 low, 2 exhausted) to what a balance
- * just observed says. True only for the one caller that raised it: that
- * caller sends the email. A lower level is stored without an email,
- * re-arming the higher ones; with `raise` false the level may only fall.
+ * Applies a balance just observed to the org's credit level (0 ok, 1 low,
+ * 2 exhausted), except a crossing. Returns the state to raise from when the
+ * observation is a crossing (a higher level, with `raise`), and null otherwise.
  *
- * Answers from Autumn can arrive out of order, so an observation counts only
- * if it is certainly newer than the last one that counted: it must have been
- * asked (`from`) no earlier than that one was answered (`credit_level_at`).
- * Every observation that counts moves `credit_level_at` on, even when the
- * level stays the same. A stale answer changes nothing in either direction.
- * Under the row lock, concurrent callers take turns, so a crossing is
- * announced once.
+ * - Answers from Autumn can arrive out of order, so an observation counts only
+ *   if it was asked for (`from`) no earlier than the last counted one was
+ *   answered (`credit_level_at`). A stale one changes nothing.
+ * - A lower level is stored at once, re-arming the higher ones; so is a
+ *   counted observation that leaves the level where it is, moving
+ *   `credit_level_at` on.
+ * - A crossing is not stored here: the caller first finds someone to tell
+ *   (which may ask GitHub), then commits it with `raiseCreditLevel`. No row
+ *   lock is held across that.
  */
-export async function recordCreditLevel(database: Db, orgId: string, level: number, seen: BalanceSeen, options: { raise: boolean }): Promise<boolean> {
+export async function observeCreditLevel(database: Db, orgId: string, level: number, seen: BalanceSeen, options: { raise: boolean }): Promise<CreditLevelState | null> {
   return database.transaction(async (tx) => {
     const [row] = await tx
       .select({ level: orgBilling.creditLevel, at: orgBilling.creditLevelAt })
       .from(orgBilling)
       .where(eq(orgBilling.orgId, orgId))
       .for("update");
-    if (!row || (row.at && row.at > seen.from)) return false;
-    const raised = level > row.level && options.raise;
-    const next = level < row.level || raised ? level : row.level;
-    await tx.update(orgBilling).set({ creditLevel: next, creditLevelAt: seen.to }).where(eq(orgBilling.orgId, orgId));
-    return raised;
+    if (!row || (row.at && row.at > seen.from)) return null;
+    if (level > row.level && options.raise) return { level: row.level, at: row.at };
+    await tx
+      .update(orgBilling)
+      .set({ creditLevel: Math.min(level, row.level), creditLevelAt: seen.to })
+      .where(eq(orgBilling.orgId, orgId));
+    return null;
   });
+}
+
+/**
+ * Commits a crossing `observeCreditLevel` found, if nobody has moved the level
+ * or its timestamp since. True for the one caller that raised it: that caller
+ * sends the email. False when someone else got there first, or a newer
+ * observation counted in between; a later observation announces it then.
+ */
+export async function raiseCreditLevel(database: Db, orgId: string, level: number, seen: BalanceSeen, from: CreditLevelState): Promise<boolean> {
+  const rows = await database
+    .update(orgBilling)
+    .set({ creditLevel: level, creditLevelAt: seen.to })
+    .where(
+      and(
+        eq(orgBilling.orgId, orgId),
+        eq(orgBilling.creditLevel, from.level),
+        from.at ? sql`${orgBilling.creditLevelAt} = ${from.at.toISOString()}::timestamptz` : sql`${orgBilling.creditLevelAt} is null`,
+      ),
+    )
+    .returning({ orgId: orgBilling.orgId });
+  return rows.length === 1;
 }
 
 /** Reserves an org-wide email by a stable key. Exactly one caller gets true. */
@@ -154,8 +184,9 @@ export interface OrgAdminContact {
 /**
  * The org's admins with a real address (no-reply placeholders are skipped),
  * each marked fresh or not. A row is only refreshed when that person visits
- * the dashboard, so a stale one may be someone GitHub no longer counts as an
- * admin. Callers decide what a stale admin may hear.
+ * the dashboard (dashboard access is the only writer), so a stale one may be
+ * someone GitHub no longer counts as an admin. Callers decide what a stale
+ * admin may hear.
  */
 export async function orgAdminContacts(database: Db, orgId: string): Promise<OrgAdminContact[]> {
   return database
@@ -169,14 +200,6 @@ export async function orgAdminContacts(database: Db, orgId: string): Promise<Org
     .from(orgAdmins)
     .innerJoin(users, eq(users.id, orgAdmins.userId))
     .where(and(eq(orgAdmins.orgId, orgId), sql`${users.email} not like '%@users.noreply.github.com'`));
-}
-
-/** Records what GitHub just said about stale admins: the confirmed are fresh again, the rest are no longer admins. */
-export async function refreshOrgAdmins(database: Db, orgId: string, confirmed: string[], removed: string[]): Promise<void> {
-  await Promise.all([
-    confirmed.length ? database.update(orgAdmins).set({ checkedAt: new Date() }).where(and(eq(orgAdmins.orgId, orgId), inArray(orgAdmins.userId, confirmed))) : undefined,
-    removed.length ? database.delete(orgAdmins).where(and(eq(orgAdmins.orgId, orgId), inArray(orgAdmins.userId, removed))) : undefined,
-  ]);
 }
 
 // ---- Scan credits ------------------------------------------------------------
