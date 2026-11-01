@@ -54,7 +54,7 @@ describe("manifest", () => {
       checks: "write",
       issues: "read",
       members: "read",
-      email_addresses: "read",
+      emails: "read",
     });
     // installation and installation_repositories always arrive; GitHub rejects a manifest that lists them.
     expect(manifest.default_events).toEqual(["pull_request", "push", "issue_comment"]);

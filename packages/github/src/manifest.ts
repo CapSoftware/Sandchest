@@ -19,7 +19,8 @@ export const APP_PERMISSIONS = {
   // Who administers an org, for billing and settings.
   members: "read",
   // The sign-in email, for notifications.
-  email_addresses: "read",
+  // GitHub's name for "Email addresses" (a manifest with email_addresses is rejected).
+  emails: "read",
 } as const;
 
 /**
