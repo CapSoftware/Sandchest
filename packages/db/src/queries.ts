@@ -328,9 +328,16 @@ export type FindingInput = Omit<typeof findings.$inferInsert, "id" | "repoId" | 
 export async function upsertFindings(database: Db, repoId: string, scan: Pick<Scan, "id" | "kind" | "prNumber">, list: FindingInput[]): Promise<{ newIds: string[]; ids: string[] }> {
   if (list.length === 0) return { newIds: [], ids: [] };
   return database.transaction(async (tx) => {
+    // A scan can finish after its repo was removed or the app uninstalled. Hold
+    // the org and repo rows (in the order removeInstallation locks them) so the
+    // two serialise, and store no code Sandchest may no longer read.
+    const [org] = await tx.execute<{ installed: boolean }>(sql`select installation_id is not null as installed from ${orgs} where id = (select org_id from ${repos} where id = ${repoId}) for share`);
+    const [repo] = await tx.execute<{ enabled: boolean }>(sql`select enabled from ${repos} where id = ${repoId} for share`);
+    const readable = org?.installed === true && repo?.enabled === true;
+    const stored = readable ? list : list.map((finding) => ({ ...finding, attackPath: withoutExcerpts(finding.attackPath), fixPrompt: "" }));
     const rows = await tx
       .insert(findings)
-      .values(list.map((finding) => ({ ...finding, repoId, sourceScanId: scan.id, sourceKind: scan.kind, prNumber: scan.prNumber })))
+      .values(stored.map((finding) => ({ ...finding, repoId, sourceScanId: scan.id, sourceKind: scan.kind, prNumber: scan.prNumber })))
       .onConflictDoUpdate({
         target: [findings.repoId, findings.fingerprint],
         set: {
@@ -355,6 +362,10 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
     await tx.insert(findingEvents).values(rows.map((row) => ({ findingId: row.id, type: "seen" as const, scanId: scan.id })));
     return { newIds: rows.filter((r) => r.inserted).map((r) => r.id), ids: rows.map((r) => r.id) };
   });
+}
+
+function withoutExcerpts(path: unknown): unknown {
+  return Array.isArray(path) ? path.map((step) => (step && typeof step === "object" ? Object.fromEntries(Object.entries(step).filter(([key]) => key !== "excerpt")) : step)) : path;
 }
 
 export async function openFindings(database: Db, repoId: string): Promise<FindingRow[]> {

@@ -228,6 +228,24 @@ describe("live feed", () => {
 });
 
 describe("findings", () => {
+  it("stores no code from a scan that finishes after Sandchest lost access", async () => {
+    const { org, repos } = await upsertInstallation(database, 9017, { ...account, githubAccountId: 117 }, [repo(52), repo(53)]);
+    const { scan } = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const withPrompt = (fp: string) => ({ ...finding(fp), fixPrompt: "quotes 3| db.query(x)" });
+    const code = async (repoId: string) => {
+      const [row] = await database.$client<Array<{ fix_prompt: string; attack_path: Array<{ excerpt?: string }> }>>`select fix_prompt, attack_path from findings where repo_id = ${repoId}`;
+      return { excerpt: row!.attack_path[0]!.excerpt, prompt: row!.fix_prompt };
+    };
+    // The repo is removed from the installation while its scan runs, then the scan saves its findings.
+    await disableRepos(database, [53]);
+    await upsertFindings(database, repos[1]!.id, scan, [withPrompt("late-removed")]);
+    expect(await code(repos[1]!.id)).toEqual({ excerpt: undefined, prompt: "" });
+    // The app is uninstalled while another scan runs.
+    await removeInstallation(database, 9017);
+    await upsertFindings(database, repos[0]!.id, scan, [withPrompt("late-uninstalled")]);
+    expect(await code(repos[0]!.id)).toEqual({ excerpt: undefined, prompt: "" });
+  });
+
   it("never gives a dismissed finding its code back when a scan finds it again", async () => {
     const { org, repos } = await upsertInstallation(database, 9015, { ...account, githubAccountId: 115 }, [repo(51)]);
     const repoId = repos[0]!.id;
