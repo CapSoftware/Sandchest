@@ -68,7 +68,7 @@ describe("pricing matches the billing package", () => {
       expect(page).toContain(pr);
       expect(page).toContain(deep);
     }
-    expect(doc("scans")).toContain(`${DEEP_SCAN_COOLDOWN_HOURS} hours later`);
+    expect(doc("scans")).toContain(`${DEEP_SCAN_COOLDOWN_HOURS}-hour wait`);
   });
 });
 

@@ -13,7 +13,9 @@ A self-hosted Sandchest sends nothing to us, so this policy doesn't apply to it.
 
 ## What we collect
 
-**From GitHub, when you sign in**: your GitHub user ID, username, email address and avatar, and a sign-in token, which we store encrypted. If your GitHub email is private, we use a no-reply placeholder and you won't get email notifications.
+**From GitHub, when you sign in**: your GitHub user ID, username, display name, avatar and primary email address, and a sign-in token, which we store encrypted. We get your primary email even if it is private on GitHub, because the App has permission to read email addresses. Only if GitHub returns no address do we use a no-reply placeholder, and then you get no email.
+
+**From each sign-in session**: your browser's user agent, stored with the session.
 
 **From GitHub, when you install the App**: the account it's installed on, the repositories you chose (names, whether they're private, default branches), who the account's admins are, and which repositories each signed-in person can push to.
 
@@ -35,7 +37,9 @@ A self-hosted Sandchest sends nothing to us, so this policy doesn't apply to it.
 
 ## How code is processed
 
-During a scan, code is read in the temporary workspace and sent to the model that analyses it. Model inference runs with zero data retention: the provider doesn't keep prompts or outputs. Prompts never include your repository's name, your organization's name, or anything that identifies a person.
+During a scan, code is read in the temporary workspace and sent to the model that analyses it. Our policy is to use model inference with zero data retention: the provider we use is set up not to keep prompts or outputs.
+
+Sandchest adds no account, repository, organization or user identifiers to prompts. But your code goes to the model as it is, so anything written in it does too, such as names, email addresses or URLs in comments.
 
 We don't use your code, findings or prompts to train models.
 
@@ -45,7 +49,8 @@ We don't use your code, findings or prompts to train models.
 - to post reviews and Checks on your pull requests
 - to decide who can see which findings, using GitHub's own permissions
 - to bill your plan
-- to email you about new critical findings and finished deep scans (you can turn this off in Settings)
+- to email people with access about new critical findings and finished deep scans (an admin can turn these emails off for the account in Settings)
+- to email the account's admins about billing, such as running low on credits (these can't be turned off)
 - to keep the service secure and working, and to improve it from aggregate usage
 
 We don't sell personal information, and we don't send marketing email.
@@ -62,9 +67,9 @@ We share information with authorities only when the law requires it.
 
 ## How long we keep it
 
-- **Code excerpts** are deleted as soon as their finding is resolved (fixed or dismissed), along with the fix prompt that quoted them.
-- **Findings, threat models and scan records** are kept while Sandchest is installed, so you keep your history.
-- **If you uninstall** the App, we stop scanning and lose access to your repositories at once. Write to us and we'll delete your account's findings, threat models and scan records.
+- **Code excerpts** are deleted, along with the fix prompt that quoted them, as soon as their finding is fixed or dismissed, when its repository is removed from the installation, or when the App is uninstalled or suspended.
+- **Findings, threat models and scan records** are kept so you keep your history, including after you uninstall, when findings are kept without code. Write to us to have them deleted.
+- **If you uninstall** the App, no new scans start and we lose access to your repositories. A scan already running may still finish.
 - **Your account** is kept until you ask us to delete it.
 - **Billing records** are kept as long as tax and accounting law requires.
 
@@ -78,7 +83,7 @@ We use only the cookies needed to keep you signed in. No advertising or analytic
 
 ## Security
 
-Access to findings follows GitHub: a person sees a repository's findings only if they have push access to it. Installation tokens are short-lived and scoped to the repository being scanned. Sign-in tokens are encrypted at rest. More detail is in [Privacy & security](/docs/security).
+Access to findings follows GitHub: a person sees a repository's findings only if they have push access to it. GitHub tokens are short-lived; the one used to clone can only read the contents of the repository being scanned. Sign-in tokens are encrypted at rest. More detail is in [Privacy & security](/docs/security).
 
 ## Changes
 

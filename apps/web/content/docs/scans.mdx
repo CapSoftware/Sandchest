@@ -10,9 +10,11 @@ Sandchest runs four kinds of scan. All of them read your code in a temporary wor
 | Recon | A repository is added | Builds the repository's threat model | Free |
 | PR review | A pull request is opened or updated | Reviews the change for vulnerabilities | 1 to 5 credits |
 | Deep scan | You press Dig | Hunts across the whole repository | 15, 30 or 75 credits |
-| Fix check | You push to the default branch | Re-checks open findings whose code changed | Free |
+| Fix check | You push to the default branch | Re-checks open findings whose cited files the push changed | Free |
 
-An account runs at most two scans at a time. Others wait in a queue and start as soon as a slot frees up.
+An account runs at most two scans at a time. Others wait in a queue: each checks for a free slot every 20 seconds, and gives up as failed after waiting two hours.
+
+Repositories of a million lines of code or more aren't scanned, by any kind of scan. Get in touch if you need one scanned.
 
 ## Recon
 
@@ -28,7 +30,11 @@ The result is the repository's **threat model**: a structured summary, not a cop
 
 ## PR reviews
 
-Every pull request is reviewed when it is opened, gets new commits, is reopened, or is marked ready for review. Drafts wait until they are ready.
+A pull request is reviewed when it is opened, gets new commits, is reopened, or is marked ready for review. Some aren't reviewed automatically:
+
+- drafts, until they are marked ready for review
+- pull requests from forks of public repositories, and from outside contributors' forks of private ones (see [below](#pull-requests-from-forks))
+- pull requests on an account with no plan, or out of credits: these get a neutral Check instead
 
 1. Sandchest posts a **Sandchest** Check straight away, showing "Digging…".
 2. It reviews the change in the context of the threat model. A finding has to touch the lines the pull request changed: issues that were already there are left for deep scans.
@@ -48,7 +54,7 @@ Set the threshold in [Settings](/settings): Critical, High, Medium or Any. Low-c
 
 ### Private repositories
 
-Each finding is posted as a review comment on the vulnerable line, with its severity, what the attacker gets, who can exploit it, the attack path, a proof of concept, the fix, and a collapsed fix prompt for your coding agent. A finding whose lines are outside the diff goes in the review's summary instead. The Check lists every finding and what the review cost, for example "Reviewed · 2 credits".
+Each finding is posted as a review comment on the last step of its attack path that is inside the diff, with its severity, what the attacker gets, who can exploit it, the attack path, a proof of concept, the fix, and a collapsed fix prompt for your coding agent. A finding whose lines are outside the diff goes in the review's summary instead. The Check lists every finding and what the review cost, for example "Reviewed · 2 credits".
 
 ### Public repositories
 
@@ -71,29 +77,28 @@ Sandchest never opens GitHub issues.
 
 A deep scan hunts across the whole repository. It only runs when someone presses **Dig** on the [Repos](/repos) page. Anyone who can push to the repository can start one, and the button shows the cost first.
 
-- One deep scan runs at a time per repository. After one completes, the repository can be dug again 24 hours later. A dig that fails doesn't start the wait.
+- One deep scan runs at a time per repository. The 24-hour wait before the next starts once a deep scan's results are saved, even if something later goes wrong. A dig that fails before then doesn't start the wait.
 - The scan's page shows a live feed of what Sandchest is doing, and findings appear as they survive verification.
-- When it finishes, people with access get an email with what it found.
-- Repositories of a million lines of code or more are not scanned. Get in touch if you need one scanned.
+- When it finishes, people with access get an email with what it found, unless an admin has turned emails off.
 
 ## Fix checks
 
-When you push to the default branch, Sandchest looks at the repository's open findings. Those whose cited files changed are checked again on the new code:
+When you push to the default branch, Sandchest checks the repository's open findings whose cited files that push changed. Other open findings aren't touched. Each one is checked again on the new code:
 
 - Each step of the attack path is found again by its code, so findings follow code that moved.
 - If the attack path is gone, the finding is marked **fixed**, and its code excerpts are deleted.
-- If the cited code can no longer be found, the finding stays open and is marked **Code moved**. The next deep scan checks it again. Sandchest never closes a finding just because it lost track of the code.
+- If the cited code can no longer be found, the finding stays open and is marked **Code moved**. The mark clears when a later scan finds the same finding again. Sandchest never closes a finding just because it lost track of the code.
 
 Fix checks are free.
 
 ## How Sandchest finds vulnerabilities
 
-Every scan runs the same pipeline:
+PR reviews and deep scans run the same pipeline:
 
 1. **Signal sweep.** A fast, deterministic pass finds leaked secrets, vulnerable dependencies that your code actually calls, and dangerous code reachable from an entry point. These are leads, not findings.
 2. **Hunt.** Several attacker agents work in parallel from the threat model and the leads. They think like outsiders, free-tier users, fraudsters and insiders, and trace untrusted input from entry points to dangerous code, chaining weaknesses together.
 3. **Evidence gate.** A candidate is kept only if it names the exact entry point, cites every step from input to impact by file and line (each citation is checked against your code), states who can exploit it, and includes a proof of concept and its impact in plain English.
 4. **Skeptic.** A separate reviewer reads the cited code and tries to disprove each finding: middleware, validation, framework defaults, unreachable code. It can only drop a finding by citing the code that disproves it. Each survivor gets a confidence: high, medium or low.
-5. **Write-up.** The finding is written up with a title, severity, fix guidance and a fix prompt. File paths, line numbers and code excerpts always come from your repository, never from the model.
+5. **Write-up.** The finding is written up with a title, severity, fix guidance and a fix prompt. Code excerpts are read from your repository, never written by the model.
 
-Repository content is treated as untrusted. Text in code, comments or pull requests that tries to instruct the reviewer is ignored, and reported as a prompt injection finding.
+Repository content is treated as untrusted data. The model is told to ignore any text in code, comments or pull requests that tries to instruct it, and to report it as a prompt injection finding. That makes manipulation harder, but it isn't a guarantee.

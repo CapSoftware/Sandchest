@@ -20,11 +20,11 @@ The prompt quotes short excerpts of your code, so treat it like your code: paste
 
 ## From the dashboard
 
-Open a finding from [Findings](/findings).
+Open a finding from [Findings](/findings). The fix prompt is shown on open findings; fixed and dismissed ones don't have one.
 
-- **Copy fix prompt**, at the top of the page, copies the prompt in one click.
+- **Copy fix prompt**, in the side column next to **Mark fixed** and **Dismiss**, copies the prompt in one click.
 - The **Fix it with your agent** panel shows the prompt in three formats: **Prompt**, **Claude Code** and **Codex**. **Copy prompt** or **Copy command** copies whichever is showing.
-- **Open in Cursor** opens the prompt in Cursor directly. It appears when the prompt is short enough for Cursor's link, about 8,000 characters.
+- **Open in Cursor** opens the prompt in Cursor directly. Long prompts can't be opened by link, so the button doesn't appear for them; copy them instead.
 
 ### Claude Code and Codex one-liners
 
@@ -48,7 +48,7 @@ The quoted heredoc passes the prompt to the agent exactly as written: quotes, ba
 
 ## From a pull request
 
-On private repositories, every review comment ends with a collapsed **Fix prompt for your coding agent**. Expand it, copy the prompt, and give it to your agent on the pull request's branch. When you push the fix, the pull request is reviewed again.
+On private repositories, each finding is posted as a review comment on the last step of its attack path that is inside the diff (or in the review's summary, if none is), and ends with a collapsed **Fix prompt for your coding agent**. Expand it, copy the prompt, and give it to your agent on the pull request's branch. When you push the fix, the pull request is reviewed again.
 
 On public repositories the prompt isn't posted, because review comments are public. Use **View privately** on the Check to open the findings in the dashboard.
 

@@ -23,9 +23,9 @@ Severity is **who can exploit it × what they get**.
 
 | Severity | Meaning |
 | --- | --- |
-| Critical | Unauthenticated remote code execution, takeover of any account, or access to a whole data store |
-| High | Any signed-in user can read or change other people's data, escalate their privileges, or obtain secrets |
-| Medium | Exploitable, but with limited impact or uncommon preconditions |
+| Critical | Unauthenticated remote code execution, takeover of any account, access to a whole data store, or taking money or paid service at will |
+| High | Any signed-in user can read or change other people's data, escalate their privileges, obtain secrets, or get paid features or credits for free; or one cheap request forces you into far more work or spend |
+| Medium | Exploitable, but with limited impact or uncommon preconditions; or an endpoint meant to be public has no rate limit in the application |
 | Low | Defence in depth: worth fixing, not directly exploitable for much |
 
 Two rules keep severity honest:
@@ -49,16 +49,24 @@ Low-confidence findings are hidden by default. They are never posted on pull req
 | Fixed | A fix check showed the attack path is gone, or someone pressed **Mark fixed** |
 | Dismissed | Someone dismissed it as a false positive, an accepted risk, or won't fix |
 
-- A dismissed finding stays dismissed if a later scan finds it again, and no longer fails pull request Checks. Dismissing asks for a reason, and the finding won't be raised again.
+- Dismissing asks for a reason. If a later scan finds the same finding again, it stays dismissed and doesn't fail pull request Checks. A change that makes it look like a different finding can still raise it again (see [Duplicates](#duplicates)).
 - **Reopen** puts a fixed or dismissed finding back to open.
-- **Code moved** means a fix check couldn't find the cited code any more. The finding stays open until the next deep scan checks it.
+- **Code moved** means a fix check couldn't find the cited code any more. The finding stays open, and the mark clears when a later scan finds the same finding again.
 
-When a finding is resolved (fixed or dismissed), its code excerpts are deleted, along with the stored fix prompt that quoted them. A reopened finding gets a new prompt, written without code.
+## When code excerpts are deleted
+
+A finding's code excerpts, and the stored fix prompt that quotes them, are deleted when:
+
+- the finding is fixed or dismissed (a dismissed finding stays without code even if a later scan finds it again)
+- its repository is removed from the GitHub App's installation
+- the App is uninstalled or suspended
+
+The finding itself stays, so your history and counts survive. A reopened finding has no excerpts, and a fix prompt written without code, until a later scan finds it again. A fixed finding that comes back gets its excerpts back with it.
 
 ## Duplicates
 
-The same vulnerability found again, by a later pull request or deep scan, updates the existing finding instead of creating a new one. Sandchest recognizes it by the kind of issue and the vulnerable code itself, not by line numbers, so moving code around doesn't create duplicates.
+The same vulnerability found again, by a later pull request or deep scan, updates the existing finding instead of creating a new one. Sandchest recognizes it by the kind of issue, the file and function with the vulnerable code, and that code itself, not by line numbers. Moving code within a file doesn't create a duplicate, but moving it to another file or function, or editing the vulnerable line, can show up as a new finding.
 
 ## The Findings screen
 
-[Findings](/findings) lists open, fixed and dismissed findings across every repository you can push to. Filter by severity and repository, and turn low-confidence findings on or off. Each finding's page has the full attack path, the proof of concept, the fix, the fix prompt, and the **Mark fixed**, **Dismiss** and **Reopen** actions.
+[Findings](/findings) lists open, fixed and dismissed findings across every repository you can push to. Filter by severity and repository, and turn low-confidence findings on or off. Each finding's page has the full attack path, the proof of concept and the fix. Open findings also have the fix prompt and the **Mark fixed** and **Dismiss** actions; fixed and dismissed ones have **Reopen**.

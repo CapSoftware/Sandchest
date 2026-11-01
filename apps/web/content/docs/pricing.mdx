@@ -22,7 +22,7 @@ Sandchest needs a plan before it scans anything. Each plan gives the GitHub acco
 | Scan | When it runs | Credits |
 | --- | --- | --- |
 | Recon | When a repository is added | Free |
-| PR review | Every pull request update | 1 to 5, by size |
+| PR review | A pull request is opened or updated | 1 to 5, by size |
 | Deep scan | When you press Dig | 15, 30 or 75, by repository size |
 | Fix check | Pushes to the default branch | Free |
 
@@ -44,7 +44,7 @@ Above 5,000 changed lines the price stops rising, and the review covers the most
 
 ### Deep scans
 
-A deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and the **Dig** button shows the price before you start.
+A deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and from then on the **Dig** button shows the price before you start. Before recon has measured a repository, Dig shows no price yet, and a dig costs at most the smallest tier, 15 credits.
 
 | Repository size | Credits |
 | --- | --- |
@@ -52,6 +52,8 @@ A deep scan costs credits by the repository's size in lines of code, not countin
 | Under 300,000 lines | 30 |
 | Under 1,000,000 lines | 75 |
 | 1,000,000 lines or more | Not scanned. Get in touch. |
+
+Repositories of a million lines or more aren't scanned at all, by recon, reviews or deep scans.
 
 ## How credits are charged
 
@@ -66,7 +68,7 @@ A top-up is 25 credits for $10. Top-up credits never expire, and you can buy up 
 
 ### Auto top-up
 
-Auto top-up buys credits for you when the balance runs low, so pull requests keep getting reviewed. It's off until you turn it on in Settings, and it never spends more than the monthly limit you set (twice the plan's price, unless you change it).
+Auto top-up buys credits for you when the balance runs low, so pull requests keep getting reviewed. It's off until an admin turns it on in Settings, and it never spends more than the monthly limit you set (twice the plan's price, unless you change it). Auto top-up charges your card directly, without a confirm page.
 
 | Plan | When the balance falls below | It buys |
 | --- | --- | --- |
@@ -79,11 +81,11 @@ Auto top-up buys credits for you when the balance runs low, so pull requests kee
 Everything lives in [Settings](/settings), under Billing. Only an admin of the GitHub organization, or the owner of a personal account, can change it.
 
 - **Change plan.** Upgrades start at once, and you pay the prorated difference. Downgrades start at the end of the current billing period.
-- **Confirm before charging.** When a card is already on file, every charge is shown on a confirm page, with the exact amount, before it is made.
+- **Confirm before charging.** When a card is already on file, every plan change and top-up you buy is shown on a confirm page, with the exact amount, before it is made. Auto top-up is the exception: it charges on its own, within your monthly limit.
 - **Card, invoices and cancelling** are handled in Stripe's customer portal, linked from Settings. A cancelled plan keeps working until the end of the period you paid for.
 
 Payments are processed by Stripe, through the billing service Autumn. Sandchest never sees your card number.
 
 ## Self-hosted
 
-A self-hosted Sandchest has no billing at all: every scan runs, with no plans or credits. You pay only for your own servers and model usage. See [Self-hosting](/docs/self-hosting).
+A self-hosted Sandchest has billing turned off: no plans, no credits and nothing to buy. You pay only for your own servers and model usage. The operational limits still apply: the 24-hour wait between deep scans of a repository, no scans of repositories with a million lines or more, and at most two scans at a time per account. See [Self-hosting](/docs/self-hosting#limits-without-billing).

@@ -9,7 +9,7 @@ This page explains how that works. The [Privacy policy](/privacy) is the formal 
 
 ## During a scan
 
-1. Sandchest asks GitHub for a short-lived installation token that can read only the repository being scanned.
+1. Sandchest clones with a short-lived GitHub token that can only read the contents of the one repository being scanned. Its other GitHub calls during the scan, such as reading a pull request's files and posting the Check, use the installation's own short-lived token.
 2. It makes a shallow clone of that one commit into a temporary workspace: in the hosted service, an isolated virtual machine created for this scan alone.
 3. The scan reads the code there. Nothing in the repository is executed.
 4. When the scan ends, whether it succeeded or failed, the workspace is destroyed. There are no snapshots and no cache of your code.
@@ -18,9 +18,9 @@ Scans are orchestrated in steps that pass only IDs between them, so your code ne
 
 ## Model inference
 
-Code is sent to the model only for the duration of a scan, and inference runs with zero data retention: the provider doesn't keep prompts or outputs.
+Code is sent to the model only for the duration of a scan. Our policy is to use model inference with zero data retention: the provider we use is set up not to keep prompts or outputs.
 
-Prompts never include your repository's name, your organization's name, or anything that identifies a person. Repository content is passed as clearly marked untrusted data, and text in it that tries to instruct the model is reported as a finding instead of being followed.
+Sandchest adds no account, repository, organization or user identifiers to prompts. Your code itself goes to the model, though, so anything written in it does too, such as names, email addresses or URLs in comments. Repository content is passed as clearly marked untrusted data, and the model is told to report text in it that tries to instruct it, rather than follow it.
 
 ## What Sandchest keeps
 
@@ -29,21 +29,30 @@ Prompts never include your repository's name, your organization's name, or anyth
 | Findings, with short code excerpts for each step of the attack path | To show you the vulnerability and build its fix prompt |
 | Each repository's threat model: a structured summary of entry points, trust boundaries and risky code | So every scan starts from what is already known |
 | Scan records: status, timings, counts, credits, and the live feed's progress messages | To show scan history and charge correctly |
-| Your account: GitHub user ID, username, email address and avatar | To sign you in and send notifications |
+| Your account: GitHub user ID, username, display name, email address and avatar | To sign you in and send notifications |
+| Each sign-in session, with your browser's user agent | To keep you signed in |
 | Your GitHub sign-in token, encrypted | To check which repositories you can access |
 | Billing state: plan, credits and auto top-up settings | To run your plan |
 
-It doesn't keep your source code, clones or diffs, and sign-in doesn't record IP addresses.
+Your email address is the primary one on your GitHub account, even if it is private on GitHub, because the App may read email addresses. A no-reply placeholder is used only when GitHub returns no address at all.
 
-**Code excerpts are deleted when a finding is resolved**, whether it is fixed or dismissed, together with the stored fix prompt that quoted them.
+Sandchest doesn't keep your source code, clones or diffs, and sign-in doesn't record IP addresses.
 
-If you uninstall Sandchest, it stops scanning at once and can no longer read your repositories. To have your findings and account data deleted, [contact us](/privacy#contact).
+## When code excerpts are deleted
+
+A finding's code excerpts, together with the stored fix prompt that quotes them, are deleted when:
+
+- the finding is fixed or dismissed, and a dismissed finding stays without code if a later scan finds it again
+- its repository is removed from the installation
+- the GitHub App is uninstalled or suspended
+
+The findings themselves stay, without code, so your history survives. Uninstalling stops new scans from starting; a scan already running may still finish.
 
 ## Who can see findings
 
 - A person can see a repository's findings only if GitHub says they have push access or higher to it. Sandchest checks with GitHub using their own sign-in, and re-checks at least every five minutes.
 - On public repositories, nothing about a finding is posted to GitHub beyond a count by severity, because Checks and comments there are public. See [PR reviews](/docs/scans#public-repositories).
-- Billing can only be changed by admins of the GitHub organization, or the owner of a personal account.
+- Billing and settings can only be changed by admins of the GitHub organization, or the owner of a personal account.
 
 ## GitHub App permissions
 
@@ -57,17 +66,19 @@ Sandchest asks for the least GitHub lets it.
 | Checks | Write | Report each review as a Check |
 | Issues | Read | Receive the `/sandchest review` command from pull request comments |
 | Members | Read | Know who the organization's admins are, for billing and settings |
-| Email addresses | Read | Your sign-in email, for notifications. If yours is private, a no-reply placeholder is used. |
+| Email addresses | Read | Your sign-in email, for notifications |
 
 Sandchest never writes to your code and never opens issues.
 
 ## Analytics, email and payments
 
 - **Analytics are first-party only.** There are no third-party analytics or tracking scripts. Usage events record opaque IDs, counts and categories, never code, finding contents, names or email addresses.
-- **Email** is only about your findings: new critical findings and finished deep scans. There is no marketing email. Turn notifications off in [Settings](/settings).
+- **Finding emails** cover new critical findings and finished deep scans. They go to people who have signed in and had push access to the repository when Sandchest last checked, within the past 30 days. An admin can turn these emails off for the account in [Settings](/settings).
+- **Billing emails**, such as running low on credits, go to the account's admins and can't be turned off.
+- There is no marketing email.
 - **Payments** are processed by Stripe, through the billing service Autumn. Sandchest never sees your card number.
 
-The list of subprocessors that handle data for the hosted service is available on request; see [Contact](/privacy#contact).
+The list of subprocessors that handle data for the hosted service is available on request from the contact address in the [Privacy policy](/privacy#contact).
 
 ## Self-hosted
 

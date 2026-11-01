@@ -3,18 +3,18 @@ title: Self-hosting
 description: Run Sandchest on your own server with Docker, your own GitHub App and your own model endpoint.
 ---
 
-Sandchest is open source under the AGPL-3.0. You can run the whole product yourself: the dashboard, GitHub reviews, deep scans and fix checks. A self-hosted install has no billing and sends nothing to us.
+Sandchest is open source under the AGPL-3.0. You can run the whole product yourself: the dashboard, pull request reviews, deep scans and fix checks. A self-hosted install has no plans or credits, and sends nothing to us.
 
-The repository's README is the full guide. This page is the overview.
+The repository's README is the full guide, and the place to check the exact commands. This page is the overview.
 
 ## What runs
 
-`docker compose up` starts two containers:
+Docker Compose starts two containers:
 
 - **web**: the Sandchest app. It serves the dashboard, receives GitHub webhooks and runs the scans itself. There is no separate worker.
 - **postgres**: the database, which also keeps track of running scans.
 
-Scans run on the same machine, each in its own temporary directory that is deleted when the scan ends. The code indexer ships inside the web image, for both `amd64` and `arm64`.
+Scans run on the same machine, each in its own temporary directory that is deleted when the scan ends. The code indexer ships inside the web image.
 
 ## What you need
 
@@ -25,32 +25,35 @@ Scans run on the same machine, each in its own temporary directory that is delet
 
 ## Setting up
 
-1. Clone the repository and copy `.env.example` to `.env`.
-2. Point Sandchest at your model:
-
-   ```bash
-   LLM_BASE_URL=https://models.example.com/v1
-   LLM_API_KEY=
-   LLM_MODEL=
-   ```
-
-   The one model is used for every part of a scan. There are no per-provider settings.
-3. Start it:
-
-   ```bash
-   docker compose up
-   ```
-
-4. Open `/setup` on your Sandchest address. It is protected by a setup token, so only you can use it. One click creates your own GitHub App through GitHub's app manifest flow, with the right permissions and webhook address already filled in.
+1. Get the repository and its environment file ready (see [Reference](#reference)).
+2. Point Sandchest at your model with `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`. The one model is used for every part of a scan; there are no per-provider settings.
+3. Start Sandchest with Docker Compose.
+4. Open the setup page on your Sandchest address. It is protected by a setup token, so only you can use it. One click creates your own GitHub App through GitHub's app manifest flow, with the right permissions and webhook address already filled in.
 5. Install your new App on the repositories you want scanned, sign in, and recon starts on each one.
 
-## Optional settings
+## Reference
 
-| Setting | What it does |
+The concrete details, in one place. If anything here disagrees with the README, the README is right.
+
+| What | Value |
 | --- | --- |
-| `SMTP_URL`, `EMAIL_FROM` | Send emails about critical findings and finished deep scans through your mail server. Without them, no email is sent. |
-| `AUTUMN_SECRET_KEY` | Leave it empty. Without it billing is off: no plans, no credits, nothing limited. |
-| `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT` | Your model's prices, in US dollars per million tokens, so each scan records what it cost you. |
+| Environment file | Copy `.env.example` to `.env` |
+| Model | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| Public address | `SANDCHEST_APP_URL` |
+| Start | `docker compose up -d` |
+| Setup page | `/setup`, with the setup token described in the README |
+| Email (optional) | `SMTP_URL` and `EMAIL_FROM`. Without them, no email is sent. |
+| Model prices (optional) | `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT`, in US dollars per million tokens, so each scan records what it cost you |
+| Billing | Leave `AUTUMN_SECRET_KEY` empty |
+| Internal endpoint to keep private | `/.well-known/workflow/v1/flow` |
+
+## Limits without billing
+
+Without `AUTUMN_SECRET_KEY`, billing is off: there are no plans, no credits, and nothing to buy. The limits that keep scans manageable still apply:
+
+- one deep scan per repository at a time, then 24 hours before the next
+- repositories of a million lines of code or more aren't scanned, by any kind of scan
+- at most two scans at a time per account; the rest queue
 
 ## Privacy
 
@@ -65,5 +68,5 @@ Your code, findings and threat models stay on your machine and in your database.
 ## Keeping it safe
 
 - Keep the setup token secret, and keep Sandchest behind HTTPS.
-- Don't expose `/.well-known/workflow/v1/flow` to the internet. It is the internal endpoint that runs scans, and only the app itself should reach it.
+- Don't expose the internal endpoint listed in the [Reference](#reference) to the internet. It runs scans, and only the app itself should reach it.
 - Scans read code from repositories you chose, but that code may still be hostile. Sandchest never runs it, and treats everything in it as untrusted.
