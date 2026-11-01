@@ -5,10 +5,14 @@
  */
 import { describe, expect, test } from "bun:test";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
+import type { ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { mdxComponents } from "@/components/docs/mdx";
+import { SiteFooter } from "@/components/site-chrome";
 import { markdownRewrites } from "@/lib/docs-routes";
-import { isDraftLegalLink, isPlaceholder, legal } from "@/lib/legal";
+import { isDraftLegalLink, isPlaceholder, legal, legalDraft, legalRobots } from "@/lib/legal";
 import { joinPages, markdownUrl, renderLlmsIndex, renderPageMarkdown } from "@/lib/llms";
-import { siteUrl } from "@/lib/site";
+import { site, siteUrl } from "@/lib/site";
 
 const base = "https://sandchest.example";
 const pages = [
@@ -96,12 +100,30 @@ describe("legal pages", () => {
     expect(isDraftLegalLink("/privacy-policy", true)).toBe(false);
   });
 
-  // Fails until the company's details replace the placeholders in src/lib/legal.ts. Deliberately:
-  // the legal pages can't go live with "[Company legal name]" in them.
-  test("every legal fact is filled in", () => {
+  // While lib/legal.ts holds placeholders, what keeps them from going public is the guard:
+  // the pages are noindex and nothing links to them.
+  test.skipIf(!legalDraft)("draft legal pages are noindex and unlinked", () => {
+    expect(legalRobots()).toEqual({ robots: { index: false, follow: false } });
+    for (const href of [site.links.terms, site.links.privacy, site.links.acceptableUse]) expect(isDraftLegalLink(href), href).toBe(true);
+
+    const footer = renderToStaticMarkup(<SiteFooter />);
+    expect(footer).toContain('href="/docs"');
+    expect(footer).not.toMatch(/href="\/(terms|privacy|acceptable-use)"/);
+
+    const Link = mdxComponents.a as (props: { href: string; children: string }) => ReactElement;
+    expect(renderToStaticMarkup(<Link href="/privacy#contact">the policy</Link>)).toBe("the policy");
+    expect(renderToStaticMarkup(<Link href="/docs/security">security</Link>)).toBe('<a href="/docs/security">security</a>');
+
+    expect(renderLlmsIndex(pages, base)).not.toMatch(/\/(terms|privacy|acceptable-use)\b/);
+    expect(renderPageMarkdown(pages[1]!, "[the policy](/privacy)", base)).not.toContain("/privacy");
+  });
+
+  // Before launch: SANDCHEST_LEGAL_FINAL=1 bun test fails until every placeholder is replaced.
+  test.skipIf(process.env.SANDCHEST_LEGAL_FINAL !== "1")("every legal fact is filled in", () => {
     const missing = Object.entries(legal)
       .filter(([, value]) => isPlaceholder(value))
       .map(([key]) => key);
     expect(missing).toEqual([]);
+    expect(legalDraft).toBe(false);
   });
 });

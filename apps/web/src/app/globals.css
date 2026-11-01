@@ -3,6 +3,7 @@
 @source not "../../content";
 @source not "../components/docs";
 @source not "../../test/docs.test.ts";
+@source not "../../test/llms.test.tsx";
 
 @theme {
   --color-void: #0d0a07;

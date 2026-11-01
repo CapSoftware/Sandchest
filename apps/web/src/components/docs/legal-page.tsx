@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { legalPage, type LegalSlug } from "@/lib/docs";
-import { legal, legalDraft } from "@/lib/legal";
+import { legal, legalRobots } from "@/lib/legal";
 import { site } from "@/lib/site";
 import { mdxComponents } from "./mdx";
 import { LegalShell } from "./shell";
@@ -12,7 +12,7 @@ export async function legalMetadata(slug: LegalSlug): Promise<Metadata> {
     description: page.description,
     alternates: { canonical: `/${slug}` },
     // Drafts with placeholders must not be indexed.
-    ...(legalDraft ? { robots: { index: false, follow: false } } : {}),
+    ...legalRobots(),
   };
 }
 

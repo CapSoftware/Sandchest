@@ -36,6 +36,11 @@ export function isPlaceholder(value: string): boolean {
  */
 export const legalDraft = Object.values(legal).some(isPlaceholder);
 
+/** The legal pages' robots metadata: drafts with placeholders must not be indexed. */
+export function legalRobots(draft = legalDraft): { robots?: { index: false; follow: false } } {
+  return draft ? { robots: { index: false, follow: false } } : {};
+}
+
 const LEGAL_PATH = /^\/(terms|privacy|acceptable-use)(#|$)/;
 
 /** Whether a link points at a legal page that is still a draft. */
