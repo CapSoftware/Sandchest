@@ -27,7 +27,7 @@ export function setServices(overrides: Partial<Services>): void {
 }
 
 export function githubApp(): GitHubApp {
-  return (instances.github ??= new GitHubApp(loadAppConfig()));
+  return (instances.github ??= new GitHubApp(loadAppConfig(), { baseUrl: config().GITHUB_API_URL }));
 }
 
 export function llmClient(): LlmClient {

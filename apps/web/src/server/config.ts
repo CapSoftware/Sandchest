@@ -29,6 +29,8 @@ const Schema = z.object({
   AUTUMN_BASE_URL: z.url().optional(),
   /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
   SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
+  /** GitHub's REST API. Default https://api.github.com; tests point it at a fake. */
+  GITHUB_API_URL: z.url({ protocol: /^https?$/ }).optional(),
   /** Where repositories are cloned from. Default https://github.com. */
   SANDCHEST_GIT_HOST: z.url().optional(),
   /** Indexer for local workspaces (this host's platform). */
@@ -51,7 +53,8 @@ export function resetConfig(): void {
 
 export function config(env: Record<string, string | undefined> = process.env): Config {
   if (cached && env === process.env) return cached;
-  const parsed = Schema.safeParse(env);
+  // An empty value means unset: env files and Docker Compose pass blanks for settings left empty.
+  const parsed = Schema.safeParse(Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined && value.trim() !== "")));
   if (!parsed.success) {
     throw new Error(`Invalid server configuration:\n  ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n  ")}`);
   }
