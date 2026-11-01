@@ -152,9 +152,21 @@ describe("scans", () => {
     expect(await claimWorkflowStart(database, scan.id, "retry")).toBe(true);
   });
 
+  it("allows one active deep scan per repo, and a new one once it has finished", async () => {
+    const { org, repos } = await upsertInstallation(database, 9016, { ...account, githubAccountId: 116 }, [repo(80)]);
+    const dig = (sha: string) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: sha });
+    const [a, b] = await Promise.all([dig("one"), dig("two")]);
+    expect([a.created, b.created].sort()).toEqual([false, true]);
+    expect(a.scan.id).toBe(b.scan.id);
+    await updateScan(database, a.scan.id, { status: "completed" });
+    const next = await dig("three");
+    expect(next.created).toBe(true);
+    expect(next.scan.id).not.toBe(a.scan.id);
+  });
+
   it("finds scans that never started and scans stuck past their budget", async () => {
     const { org, repos } = await upsertInstallation(database, 9008, { ...account, githubAccountId: 108 }, [repo(70)]);
-    const make = (sha: string) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: sha });
+    const make = (sha: string) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "recon", trigger: "webhook", headSha: sha });
     const { scan: lost } = await make("lost");
     const { scan: stuck } = await make("stuck");
     const { scan: fine } = await make("fine");
@@ -172,7 +184,7 @@ describe("scans", () => {
   it("lets at most `limit` scans per org run, even when claimed concurrently", async () => {
     const { org, repos } = await upsertInstallation(database, 9003, { ...account, githubAccountId: 103 }, [repo(20)]);
     const created = await Promise.all(
-      Array.from({ length: 5 }, (_, i) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: `sha${i}` })),
+      Array.from({ length: 5 }, (_, i) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "recon", trigger: "webhook", headSha: `sha${i}` })),
     );
     const claims = await Promise.all(created.map(({ scan }) => claimScanSlot(database, scan.id, org.id, 2)));
     expect(claims.filter(Boolean)).toHaveLength(2);

@@ -252,6 +252,22 @@ describe.skipIf(!available)("billing", () => {
     expect(await again.json()).toMatchObject({ started: 0, failed: 0 });
   });
 
+  test("two Digs at once start one deep scan, and the other gives its credits back", async () => {
+    autumn.get(acme.id).credits = 40;
+    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[1]!), with: { org: true } });
+    started.length = 0;
+    const results = await Promise.all([requestDeepScan({ ...repo!, loc: 50_000 }), requestDeepScan({ ...repo!, loc: 50_000 })]);
+    const winners = results.filter((r) => r.ok);
+    expect(winners).toHaveLength(1);
+    const winner = (winners[0] as { scanId: string }).scanId;
+    expect(results.find((r) => !r.ok)).toEqual({ ok: false, reason: "running", scanId: winner });
+    expect(started).toEqual([winner]);
+    const active = await database.$client<Array<{ n: number }>>`select count(*)::int as n from scans where repo_id = ${repoIds[1]!} and kind = 'deep' and status = 'queued'`;
+    expect(active[0]!.n).toBe(1);
+    // Only the winner's 15 credits stay held.
+    expect(autumn.get(acme.id).credits).toBe(25);
+  });
+
   test("auto top-up is sized for the plan, and follows a plan change", async () => {
     await database.$client`update orgs set settings = ${JSON.stringify({ checkThreshold: "high", autoTopUp: { enabled: true, monthlyLimitUsd: 40 } })}::jsonb where id = ${acme.id}`;
     await applyAutoTopUp(acme.id, "lockbox", { enabled: true, monthlyLimitUsd: 40 });

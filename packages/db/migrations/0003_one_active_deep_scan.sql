@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "scans_active_deep_unique" ON "scans" USING btree ("repo_id") WHERE "scans"."kind" = 'deep' and "scans"."status" in ('queued', 'running', 'publishing');

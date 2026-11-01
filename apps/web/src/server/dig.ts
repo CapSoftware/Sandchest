@@ -34,7 +34,12 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   try {
     const headSha = await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);
     const billing = billingEnabled() ? { billing: "reserved" as const, creditsReserved: credits } : {};
-    const { scan } = await createScan(db(), { id: scanId, ...billing, repoId: repo.id, orgId: repo.orgId, kind: "deep", trigger, headSha });
+    const { scan, created: isNew } = await createScan(db(), { id: scanId, ...billing, repoId: repo.id, orgId: repo.orgId, kind: "deep", trigger, headSha });
+    if (!isNew) {
+      // Another Dig won the race: give back what this one held and point at the scan that is running.
+      await autumn()?.finalize({ customerId: repo.org.id, lockId: scanId, action: "release" }).catch(() => {});
+      return { ok: false, reason: "running", scanId: scan.id };
+    }
     created = true;
     // If this start fails, the stranded-scan sweep starts it within minutes: the credits stay held for it.
     await startScan(scan.id).catch((error: unknown) => console.error(`Starting deep scan ${scan.id} failed: ${error instanceof Error ? error.message : "error"}`));

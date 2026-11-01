@@ -105,7 +105,7 @@ export const scans = pgTable(
     checkRunId: bigint("check_run_id", { mode: "number" }),
     workflowRunId: text("workflow_run_id"),
     credits: integer("credits").notNull().default(0),
-    /** Deterministic leads (redacted secrets, advisories, markers): never code. */
+    /** Deterministic leads: redacted secrets, advisories, and marker locations. Never code. */
     leads: jsonb("leads"),
     /** Counts, timings and usage from the engine report. */
     stats: jsonb("stats"),
@@ -125,6 +125,8 @@ export const scans = pgTable(
     index("scans_org_status_idx").on(table.orgId, table.status),
     // A PR head is reviewed once, however many times the webhook arrives.
     uniqueIndex("scans_pr_head_unique").on(table.repoId, table.prNumber, table.headSha).where(sql`${table.kind} = 'pr_review'`),
+    // One deep scan at a time per repo, however many Dig clicks race (SPEC §4).
+    uniqueIndex("scans_active_deep_unique").on(table.repoId).where(sql`${table.kind} = 'deep' and ${table.status} in ('queued', 'running', 'publishing')`),
     // Few rows: scans holding credits, for the sweep that settles them.
     index("scans_billing_reserved_idx").on(table.status).where(sql`${table.billing} = 'reserved'`),
   ],

@@ -142,15 +142,20 @@ export interface NewScan {
 }
 
 /**
- * Creates a scan. A PR head already under review returns the existing scan
- * with `created: false`, so a redelivered webhook never starts a second one.
+ * Creates a scan. A PR head already under review, or a repo with a deep scan
+ * already active, returns the existing scan with `created: false`, so a
+ * redelivered webhook or a second Dig click never starts a second one.
  */
 export async function createScan(database: Db, input: NewScan): Promise<{ scan: Scan; created: boolean }> {
   const [created] = await database.insert(scans).values(input).onConflictDoNothing().returning();
   if (created) return { scan: created, created: true };
-  const existing = await database.query.scans.findFirst({
-    where: and(eq(scans.repoId, input.repoId), eq(scans.kind, input.kind), eq(scans.headSha, input.headSha), input.prNumber === undefined ? undefined : eq(scans.prNumber, input.prNumber)),
-  });
+  // A deep scan conflicts with the repo's active one; a PR review with the review of the same head.
+  const existing =
+    input.kind === "deep"
+      ? await activeDeepScan(database, input.repoId)
+      : await database.query.scans.findFirst({
+          where: and(eq(scans.repoId, input.repoId), eq(scans.kind, input.kind), eq(scans.headSha, input.headSha), input.prNumber === undefined ? undefined : eq(scans.prNumber, input.prNumber)),
+        });
   if (!existing) throw new Error("Scan insert conflicted but no existing scan was found");
   return { scan: existing, created: false };
 }
