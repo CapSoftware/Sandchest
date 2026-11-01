@@ -27,19 +27,25 @@ export interface CheckInput {
 }
 
 /**
- * A finding may fail the build unless we positively know it is a lone,
- * uncorroborated model judgment. Anything with independent evidence
- * (`corroborated`/`confirmed`) fails; so does anything with unknown trust
- * (older findings, or paths that did not set it) — we only ever *relax* the
- * build-blocking signal when we are sure, never guess a real issue away.
+ * What fails the build. Measured against the labelled Cap set, the trust tier
+ * does NOT separate real from false: a finding is `corroborated` when its path
+ * is reachable, but the false positives are "a guard exists that the model
+ * missed" — and those endpoints are reachable too, so 3 of 4 known FPs were
+ * corroborated. Meanwhile 9 real findings (2 of them high) were unconfirmed.
+ * So gating the merge-block on trust drops real high-severity findings while
+ * still admitting reachable-but-guarded ones. Until a signal actually tracks
+ * exploitability (runtime `verified`, or taint that sees the guard), the block
+ * stays on severity + the skeptic; trust only ranks and labels. A runtime
+ * reproduction is the one dispositive signal, so it fails even below threshold.
  */
-function mayFailBuild(finding: Finding): boolean {
-  return finding.trust !== "unconfirmed";
+function mayFailBuild(finding: Finding, threshold: Severity): boolean {
+  if (finding.validation?.status === "verified") return true;
+  return ORDER.indexOf(finding.severity) <= ORDER.indexOf(threshold);
 }
 
 export function checkResult(input: CheckInput): { conclusion: CheckConclusion; output: CheckOutput } {
   const visible = shown(input.findings);
-  const failing = visible.filter((f) => ORDER.indexOf(f.severity) <= ORDER.indexOf(input.threshold) && mayFailBuild(f));
+  const failing = visible.filter((f) => mayFailBuild(f, input.threshold));
   const cost = input.credits ? ` · ${input.credits} ${input.credits === 1 ? "credit" : "credits"}` : "";
 
   if (visible.length === 0) {
