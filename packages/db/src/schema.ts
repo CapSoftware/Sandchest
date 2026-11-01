@@ -124,6 +124,8 @@ export const scans = pgTable(
   (table) => [
     index("scans_repo_idx").on(table.repoId, table.createdAt),
     index("scans_org_status_idx").on(table.orgId, table.status),
+    // Operator dashboards read scans by when they started.
+    index("scans_created_idx").on(table.createdAt),
     // A PR head is reviewed once, however many times the webhook arrives.
     uniqueIndex("scans_pr_head_unique").on(table.repoId, table.prNumber, table.headSha).where(sql`${table.kind} = 'pr_review'`),
     // One deep scan at a time per repo, however many Dig clicks race (SPEC §4).
@@ -203,7 +205,7 @@ export const findings = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
     fixedAt: timestamp("fixed_at", { withTimezone: true }),
   },
-  (table) => [uniqueIndex("findings_repo_fingerprint_unique").on(table.repoId, table.fingerprint), index("findings_repo_status_idx").on(table.repoId, table.status)],
+  (table) => [uniqueIndex("findings_repo_fingerprint_unique").on(table.repoId, table.fingerprint), index("findings_repo_status_idx").on(table.repoId, table.status), index("findings_first_seen_idx").on(table.firstSeenAt)],
 );
 
 export const findingEvents = pgTable(
@@ -219,7 +221,8 @@ export const findingEvents = pgTable(
     scanId: uuid("scan_id").references(() => scans.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
-  (table) => [index("finding_events_finding_idx").on(table.findingId)],
+  // By type and time for operator dashboards: "seen" rows, by far the most, are skipped.
+  (table) => [index("finding_events_finding_idx").on(table.findingId), index("finding_events_type_created_idx").on(table.type, table.createdAt)],
 );
 
 /** GitHub retries webhooks; each delivery is handled once. */
@@ -393,6 +396,41 @@ export const orgNotices = pgTable(
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.orgId, table.key] })],
+);
+
+// ---- Analytics -------------------------------------------------------------
+
+/**
+ * First-party analytics events, only for what other tables cannot tell us.
+ * `props` hold opaque ids, counts and enums: never source code, finding
+ * contents, emails or names.
+ */
+export const EVENT_NAMES = [
+  /** Someone signed in (a new session). */
+  "signed_in",
+  /** Someone opened the dashboard: recorded at most once per person per UTC day. */
+  "dashboard_visit",
+] as const;
+export type EventName = (typeof EVENT_NAMES)[number];
+export type EventProps = Record<string, string | number | boolean | null>;
+
+export const events = pgTable(
+  "events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    orgId: uuid("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    name: text("name", { enum: EVENT_NAMES }).notNull(),
+    props: jsonb("props").$type<EventProps>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index("events_name_created_idx").on(table.name, table.createdAt),
+    // One visit per person per day, however many pages or server instances record it.
+    uniqueIndex("events_daily_visit_unique")
+      .on(table.userId, sql`((${table.createdAt} at time zone 'UTC')::date)`)
+      .where(sql`${table.name} = 'dashboard_visit'`),
+  ],
 );
 
 export const orgRelations = relations(orgs, ({ many }) => ({ repos: many(repos) }));

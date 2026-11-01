@@ -4,3 +4,4 @@ export * as schema from "./schema";
 export type { OrgSettings } from "./schema";
 export * from "./dashboard";
 export * from "./billing";
+export * from "./admin";

@@ -44,9 +44,9 @@ export async function replaceAccess(database: Db, userId: string, access: { repo
 }
 
 /** The signed-in person for a session token, in one query. Expired sessions return nothing. */
-export async function sessionUser(database: Db, token: string): Promise<{ id: string; name: string; login: string | null; image: string | null; accessCheckedAt: Date | null } | undefined> {
+export async function sessionUser(database: Db, token: string): Promise<{ id: string; name: string; login: string | null; githubUserId: number | null; image: string | null; accessCheckedAt: Date | null } | undefined> {
   const [row] = await database
-    .select({ id: users.id, name: users.name, login: users.login, image: users.image, accessCheckedAt: users.accessCheckedAt })
+    .select({ id: users.id, name: users.name, login: users.login, githubUserId: users.githubUserId, image: users.image, accessCheckedAt: users.accessCheckedAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.token, token), sql`${sessions.expiresAt} > now()`));
