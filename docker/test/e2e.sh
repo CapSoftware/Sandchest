@@ -178,26 +178,38 @@ response=$(curl -s -X POST "$BASE/api/github/webhooks" -H 'content-type: applica
 grep -q '"status":"handled"' <<<"$response" || fail "install webhook: $response"
 pass "signed with the secret from setup: $response"
 
-wait_for_scan() { # kind
-  local status=""
-  for _ in $(seq 1 90); do
+wait_for_scan() { # kind [seconds]
+  local status="" limit=${2:-180}
+  for _ in $(seq 1 $((limit / 2))); do
     status=$(sql "select status from scans where kind = '$1' order by created_at desc limit 1")
     case "$status" in completed) return 0 ;; failed | refused | cancelled) fail "$1 scan $status: $(sql "select error from scans where kind = '$1' order by created_at desc limit 1")" ;; esac
     sleep 2
   done
-  fail "$1 scan still $status after 3 minutes"
+  fail "$1 scan still $status after $limit s"
 }
 started=$(date +%s)
 wait_for_scan recon
 pass "recon completed in $(($(date +%s) - started)) s; threat model: $(sql "select threat_model->>'summary' from repo_memory limit 1")"
 
-step "Deep scan from the operator route"
+model_delay() { compose exec -T fakes wget -q -O /dev/null --post-data '' "http://127.0.0.1:4010/control?delayMs=$1"; }
+
+step "Deep scan from the operator route, with the server restarted mid-scan"
 expect_status "$BASE/api/scans" 401 -X POST -d '{"repo":"acme/app"}'
+model_delay 20000
 response=$(curl -s -X POST "$BASE/api/scans" -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' -d '{"repo":"acme/app"}')
 grep -q scanId <<<"$response" || fail "deep scan: $response"
 started=$(date +%s)
-wait_for_scan deep
-pass "deep scan completed in $(($(date +%s) - started)) s"
+for _ in $(seq 1 30); do
+  [ "$(sql "select status from scans where kind = 'deep'")" = running ] && break
+  sleep 1
+done
+[ "$(sql "select status from scans where kind = 'deep'")" = running ] || fail "the deep scan never started"
+sleep 3
+compose restart web >/dev/null
+model_delay 0
+pass "restarted the server $(($(date +%s) - started)) s into the scan"
+wait_for_scan deep 900
+pass "deep scan completed $(($(date +%s) - started)) s after it started"
 findings=$(sql "select severity || ' ' || title from findings")
 grep -q "high SQL injection in login" <<<"$findings" || fail "expected the SQL injection finding, got: $findings"
 pass "finding stored: $findings"

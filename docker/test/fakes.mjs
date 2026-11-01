@@ -7,6 +7,8 @@
  * repositories and a branch's head. The model: just enough of the
  * chat-completions stream to take one scan from recon to a finding.
  *
+ * POST /control?delayMs=N slows the model down; GET /stats counts calls.
+ *
  * Env: FAKE_PEM_FILE (the App's private key), FAKE_HEAD_SHA (the test repo's
  * main branch), FAKE_PORT (default 4010).
  */
@@ -22,6 +24,8 @@ const CODE = "e2e-code";
 
 const stats = { conversions: 0, conversionsRefused: 0, tokens: 0, tokensRefused: 0, chats: 0, roles: {} };
 let codeUsed = false;
+/** How long the model takes to answer; the test slows it down to restart the server mid-scan. */
+let delayMs = 0;
 
 function json(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
@@ -115,9 +119,14 @@ http
         const reply = answer(JSON.parse(raw));
         stats.chats++;
         stats.roles[reply.role] = (stats.roles[reply.role] ?? 0) + 1;
-        return stream(response, reply);
+        setTimeout(() => stream(response, reply), delayMs);
+        return;
       }
       if (request.method === "GET" && path === "/stats") return json(response, 200, stats);
+      if (request.method === "POST" && path === "/control") {
+        delayMs = Number(url.searchParams.get("delayMs") ?? 0);
+        return json(response, 200, { delayMs });
+      }
 
       const conversion = path.match(/^\/app-manifests\/([^/]+)\/conversions$/);
       if (request.method === "POST" && conversion) {
