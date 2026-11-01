@@ -15,11 +15,11 @@ export const metadata: Metadata = { title: "Your GitHub App · Sandchest", refer
  * shown in this response only: nothing is logged or stored, and the page is
  * never cached, so reloading it cannot show them again.
  */
-export default async function SetupCallbackPage({ searchParams }: { searchParams: Promise<{ code?: string; state?: string }> }) {
+export default async function SetupCallbackPage({ searchParams }: { searchParams: Promise<{ code?: string | string[]; state?: string | string[] }> }) {
   const [jar, { code, state }] = await Promise.all([cookies(), searchParams]);
   if (!setupNeeded()) notFound();
 
-  if (!sessionValid(jar.get(SETUP_COOKIE)?.value) || !stateValid(state)) {
+  if (!sessionValid(jar.get(SETUP_COOKIE)?.value) || typeof state !== "string" || !stateValid(state)) {
     return (
       <Problem title="Start again.">
         This link has expired or was opened in a different browser from the one that started setup. If GitHub created the App, delete it first (Settings, Developer settings, GitHub Apps), then

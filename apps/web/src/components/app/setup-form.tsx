@@ -79,6 +79,9 @@ export function SetupForm({ appUrl, redirectUrl, state }: { appUrl: string; redi
         <button type="submit" className="key key-primary key-large key-glow" disabled={owner === "org" && !orgValid}>
           <span className="key-face">Create on GitHub</span>
         </button>
+        <span>
+          GitHub sends you back to <code>{redirectUrl}</code>.
+        </span>
       </div>
     </form>
   );

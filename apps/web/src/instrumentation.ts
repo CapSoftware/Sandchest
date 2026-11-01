@@ -18,7 +18,9 @@ export async function register(): Promise<void> {
     setWorld(world);
     await world.start?.();
   }
-  const { setupAnnouncement } = await import("./server/setup");
-  const announcement = setupAnnouncement();
-  if (announcement) console.log(announcement);
+  if (!process.env.GITHUB_APP_ID?.trim()) {
+    const { setupAnnouncement } = await import("./server/setup");
+    const announcement = setupAnnouncement();
+    if (announcement) console.log(announcement);
+  }
 }

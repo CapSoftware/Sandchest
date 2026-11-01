@@ -1470,6 +1470,10 @@ html:not([data-js]) .no-js-submit {
   margin-top: 2.25rem;
 }
 
+.setup-form .form-foot {
+  flex-wrap: wrap;
+}
+
 .setup-cta,
 .setup-unlock {
   margin-top: 2rem;

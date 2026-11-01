@@ -11,7 +11,6 @@
  * even a stranger who got through could not attach their App to this server.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { z } from "zod";
 
 export const SETUP_COOKIE = "sandchest_setup";
 /** GitHub's manifest codes last an hour; so do setup sessions and states. */
@@ -36,14 +35,12 @@ export function setupToken(env: Env = process.env): string | undefined {
 
 /** The deployment's public URL, if valid. Read directly: the full config needs the App this page creates. */
 export function appUrl(env: Env = process.env): string | undefined {
-  const parsed = z.url({ protocol: /^https?$/ }).safeParse(env.SANDCHEST_APP_URL);
-  return parsed.success ? parsed.data.replace(/\/+$/, "") : undefined;
+  return httpUrl(env.SANDCHEST_APP_URL)?.replace(/\/+$/, "");
 }
 
 /** GitHub's REST API, unless tests point it at a fake. */
 export function githubApiUrl(env: Env = process.env): string | undefined {
-  const parsed = z.url({ protocol: /^https?$/ }).safeParse(env.GITHUB_API_URL);
-  return parsed.success ? parsed.data : undefined;
+  return httpUrl(env.GITHUB_API_URL);
 }
 
 /** The line printed at boot while setup is needed, or undefined once the App exists. */
@@ -69,7 +66,7 @@ export function sessionValue(env: Env = process.env, now = Date.now()): string {
 }
 
 export function sessionValid(value: string | undefined, env: Env = process.env, now = Date.now()): boolean {
-  if (!value || !setupToken(env)) return false;
+  if (typeof value !== "string" || !value || !setupToken(env)) return false;
   const [expires, mac, extra] = value.split(".");
   if (!expires || !mac || extra !== undefined || !/^\d{13,}$/.test(expires) || Number(expires) < now) return false;
   return safeEqual(mac, sign(`session.${expires}`, env));
@@ -87,7 +84,7 @@ export function newState(env: Env = process.env, now = Date.now()): string {
 }
 
 export function stateValid(value: string | null | undefined, env: Env = process.env, now = Date.now()): boolean {
-  if (!value || !setupToken(env)) return false;
+  if (typeof value !== "string" || !value || !setupToken(env)) return false;
   const [expires, nonce, mac, extra] = value.split(".");
   if (!expires || !nonce || !mac || extra !== undefined || !/^\d{13,}$/.test(expires) || Number(expires) < now) return false;
   return safeEqual(mac, sign(`state.${expires}.${nonce}`, env));
@@ -116,6 +113,17 @@ export function setupOrigin(headers: Headers, base: string): SetupOrigin {
     return { ok: true, redirectUrl: `${proto}://${host}/setup/callback`, secure: proto === "https" };
   }
   return { ok: false, setupUrl: `${base}/setup` };
+}
+
+/** The value if it is an absolute http(s) URL. Plain URL parsing keeps this module light: it loads at boot. */
+function httpUrl(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? value.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function sign(message: string, env: Env): string {
