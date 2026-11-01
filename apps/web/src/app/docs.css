@@ -43,7 +43,8 @@
   padding-top: clamp(2rem, 6vh, 3.5rem);
 }
 
-/* ---- Sidebar ------------------------------------------------------------- */
+/* ---- Sidebar and phone menu ------------------------------------------------ */
+/* Two navs with the same links: .docs-sidebar on desktop, .docs-menu (a popover) on phones. */
 
 .docs-nav-title {
   margin-bottom: 0.75rem;
@@ -53,12 +54,12 @@
   color: var(--color-bright);
 }
 
-.docs-nav ol {
+:is(.docs-sidebar, .docs-menu) ol {
   display: grid;
   gap: 0.125rem;
 }
 
-.docs-nav a {
+:is(.docs-sidebar, .docs-menu) a {
   position: relative;
   display: block;
   padding: 0.35rem 0 0.35rem 1.25rem;
@@ -68,16 +69,16 @@
   text-decoration: none;
 }
 
-.docs-nav a:hover {
+:is(.docs-sidebar, .docs-menu) a:hover {
   color: var(--color-sand);
 }
 
 /* The current page gets the gold pixel the landing uses for bullets. */
-.docs-nav a[aria-current="page"] {
+:is(.docs-sidebar, .docs-menu) a[aria-current="page"] {
   color: var(--color-bright);
 }
 
-.docs-nav a[aria-current="page"]::before {
+:is(.docs-sidebar, .docs-menu) a[aria-current="page"]::before {
   content: "";
   position: absolute;
   left: 0.25rem;
@@ -87,37 +88,32 @@
   background: var(--color-gold);
 }
 
-.docs-nav-close {
-  display: none;
-}
-
-/* Desktop: the popover is simply the sidebar, always shown. */
+/* Desktop: a sticky sidebar. The phone menu and its key don't exist here. */
 @media (min-width: 56rem) {
-  .docs-menu-bar {
+  .docs-menu-bar,
+  .docs-menu,
+  .docs-menu:popover-open {
     display: none;
   }
 
-  .docs-nav,
-  .docs-nav:popover-open {
+  .docs-sidebar {
     position: sticky;
-    inset: auto;
     top: 0;
-    display: block;
     align-self: start;
-    width: auto;
-    height: auto;
     max-height: 100vh;
-    margin: 0;
-    padding: clamp(2rem, 6vh, 3.5rem) 0 2rem;
+    /* Room on both sides so focus outlines aren't clipped by the scroll box. */
+    margin: 0 -0.5rem;
+    padding: clamp(2rem, 6vh, 3.5rem) 0.5rem 2rem;
     overflow: auto;
-    border: 0;
-    background: none;
-    color: inherit;
   }
 }
 
-/* Phone: a bar with the menu key, and the sidebar as a sheet from the top. */
+/* Phone: a bar with the menu key, and the menu as a sheet from the top. */
 @media (max-width: 55.99rem) {
+  .docs-sidebar {
+    display: none;
+  }
+
   .docs-menu-bar {
     display: flex;
     align-items: center;
@@ -135,7 +131,7 @@
     white-space: nowrap;
   }
 
-  .docs-nav:popover-open {
+  .docs-menu:popover-open {
     position: fixed;
     inset: 0 0 auto 0;
     width: auto;
@@ -149,21 +145,21 @@
     color: var(--color-sand);
   }
 
-  .docs-nav::backdrop {
+  .docs-menu::backdrop {
     background: color-mix(in oklab, var(--color-void) 70%, transparent);
   }
 
-  .docs-nav a {
+  .docs-menu a {
     padding-top: 0.6rem;
     padding-bottom: 0.6rem;
     font-size: 0.9375rem;
   }
 
-  .docs-nav a[aria-current="page"]::before {
+  .docs-menu a[aria-current="page"]::before {
     top: calc(0.6rem + 0.55em);
   }
 
-  .docs-nav-close {
+  .docs-menu-close {
     display: block;
     margin-top: 1rem;
     padding: 0.5rem 0;
@@ -175,7 +171,7 @@
     cursor: pointer;
   }
 
-  .docs-nav-close:hover {
+  .docs-menu-close:hover {
     color: var(--color-sand);
   }
 }
