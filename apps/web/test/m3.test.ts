@@ -28,6 +28,7 @@ import { sessionUser } from "@sandchest/db";
 import { storeAccess } from "@/server/access";
 import { verifiedSessionToken } from "@/server/auth";
 import { sessionRefreshDue } from "@/server/session-token";
+import { serializeSignedCookie } from "better-call";
 import { digState } from "@/lib/dig-state";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
@@ -253,6 +254,26 @@ describe("sessions", () => {
     expect(await sessionUser(database, "live-token")).toMatchObject({ id: ids.alice, login: "alice" });
     expect(await sessionUser(database, "old-token")).toBeUndefined();
     expect(await sessionUser(database, "no-such-token")).toBeUndefined();
+  });
+});
+
+describe("better-auth's own cookies", () => {
+  test("verify exactly as better-auth signs them, and use its cookie name", async () => {
+    if (!available) return;
+    // The cookie as better-auth (through better-call) writes it, then decoded once, as Next's cookies() reads it.
+    const header = await serializeSignedCookie("better-auth.session_token", "tok-from-better-auth", SECRET, {});
+    const value = decodeURIComponent(header.split(";")[0]!.split("=").slice(1).join("="));
+    expect(verifiedSessionToken(value, SECRET)).toBe("tok-from-better-auth");
+    expect(verifiedSessionToken(value, "another-secret-another-secret-0000")).toBeUndefined();
+    // Over HTTPS better-auth prefixes the name; the check reads the same name.
+    const { sessionCookieName } = await import("@/server/session-token");
+    const { resetConfig } = await import("@/server/config");
+    const before = process.env.SANDCHEST_APP_URL;
+    process.env.SANDCHEST_APP_URL = "https://sandchest.test";
+    resetConfig();
+    expect(sessionCookieName()).toBe("__Secure-better-auth.session_token");
+    process.env.SANDCHEST_APP_URL = before;
+    resetConfig();
   });
 });
 

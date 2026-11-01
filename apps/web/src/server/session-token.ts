@@ -26,6 +26,8 @@ export function sessionCookieName(): string {
 /**
  * The session token in a signed session cookie (`<token>.<HMAC-SHA256 in
  * base64>`, better-auth's format), or undefined if the signature is wrong.
+ * Verified with BETTER_AUTH_SECRET only: better-auth's BETTER_AUTH_SECRETS
+ * rotation list is not supported, so don't set it.
  */
 export function verifiedSessionToken(cookie: string | undefined, secret: string | undefined): string | undefined {
   if (!cookie || !secret) return undefined;
