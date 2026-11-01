@@ -9,7 +9,10 @@
 import { docs as docsCollection, legal as legalCollection } from "collections/collections";
 import type { Item, Node } from "fumadocs-core/page-tree";
 import { loader } from "fumadocs-core/source";
+import { joinPages, renderLlmsIndex, renderPageMarkdown } from "./llms";
 import { site } from "./site";
+
+export { markdownUrl } from "./llms";
 
 const createLoader = async () => loader({ baseUrl: "/docs", source: (await docsCollection).toFumadocsSource() });
 
@@ -40,50 +43,18 @@ export async function docsInOrder(): Promise<DocsPage[]> {
     .filter((page): page is DocsPage => page !== undefined);
 }
 
-/** Where a page's Markdown is served: /docs.md, /docs/<page>.md. */
-export function markdownUrl(page: Pick<DocsPage, "url">): string {
-  return `${page.url}.md`;
-}
+const summary = (page: DocsPage) => ({ url: page.url, title: page.data.title, description: page.data.description });
 
-/**
- * A page as one Markdown document: title, summary, then the body as written,
- * with site links made absolute so the Markdown works wherever it is pasted.
- */
 export async function pageMarkdown(page: DocsPage): Promise<string> {
-  const base = site.url.replace(/\/$/, "");
-  const body = (await page.data.getText("processed")).trim().replace(/\]\(\/(?!\/)/g, `](${base}/`);
-  const summary = page.data.description ? `\n\n> ${page.data.description}` : "";
-  return `# ${page.data.title}${summary}\n\n${body}\n`;
+  return renderPageMarkdown(summary(page), await page.data.getText("processed"), site.url);
 }
 
-/** `/llms.txt`: what Sandchest is, and every docs page as a link to its Markdown. */
 export async function llmsIndex(): Promise<string> {
-  const base = site.url.replace(/\/$/, "");
-  const pages = await docsInOrder();
-  return [
-    `# ${site.name}`,
-    "",
-    "> Sandchest is an open-source GitHub App that reads your code the way an attacker would, finds exploitable vulnerabilities, and gives you a fix prompt for your coding agent.",
-    "",
-    `Each page below is Markdown; drop the \`.md\` for the web page. Every page in one file: ${base}/llms-full.txt`,
-    "",
-    "## Docs",
-    "",
-    ...pages.map((page) => `- [${page.data.title}](${base}${markdownUrl(page)})${page.data.description ? `: ${page.data.description}` : ""}`),
-    "",
-    "## Policies",
-    "",
-    `- [Terms of service](${base}${site.links.terms})`,
-    `- [Privacy policy](${base}${site.links.privacy})`,
-    `- [Acceptable use policy](${base}${site.links.acceptableUse})`,
-    "",
-  ].join("\n");
+  return renderLlmsIndex((await docsInOrder()).map(summary), site.url);
 }
 
-/** `/llms-full.txt`: every docs page, in sidebar order, as Markdown. */
 export async function llmsFull(): Promise<string> {
-  const pages = await Promise.all((await docsInOrder()).map(pageMarkdown));
-  return pages.join("\n---\n\n");
+  return joinPages(await Promise.all((await docsInOrder()).map(pageMarkdown)));
 }
 
 export type LegalSlug = "terms" | "privacy" | "acceptable-use";

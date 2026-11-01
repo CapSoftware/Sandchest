@@ -4,6 +4,7 @@
  */
 import type { MDXComponents } from "mdx/types";
 import type { ComponentProps } from "react";
+import { isDraftLegalLink } from "@/lib/legal";
 import { CodeBlock } from "./copy";
 
 /** A heading that links to itself, so any section can be shared. */
@@ -24,6 +25,8 @@ function anchored(Tag: "h2" | "h3") {
 }
 
 function Link({ href = "", ...props }: ComponentProps<"a">) {
+  // Draft legal pages aren't linked from anywhere (see lib/legal.ts); the words stay.
+  if (isDraftLegalLink(href)) return <>{props.children}</>;
   const external = /^https?:\/\//.test(href);
   return <a href={href} {...(external ? { rel: "noreferrer" } : {})} {...props} />;
 }

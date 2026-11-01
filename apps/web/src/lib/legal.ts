@@ -23,3 +23,22 @@ export const legal = {
   /** Shown on all three pages. Change it whenever a policy changes. */
   lastUpdated: "[Date of publication]",
 } as const;
+
+/** A value that hasn't been filled in yet. */
+export function isPlaceholder(value: string): boolean {
+  return value.startsWith("[") || value.includes("example.com");
+}
+
+/**
+ * While any value is a placeholder the legal pages are drafts: nothing links
+ * to them (footer, docs, llms.txt) and search engines are told not to index
+ * them, so a deploy can't publish "[Company legal name]".
+ */
+export const legalDraft = Object.values(legal).some(isPlaceholder);
+
+const LEGAL_PATH = /^\/(terms|privacy|acceptable-use)(#|$)/;
+
+/** Whether a link points at a legal page that is still a draft. */
+export function isDraftLegalLink(href: string, draft = legalDraft): boolean {
+  return draft && LEGAL_PATH.test(href);
+}

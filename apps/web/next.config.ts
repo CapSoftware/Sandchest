@@ -2,6 +2,13 @@ import { resolve } from "node:path";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
+import { markdownRewrites } from "./src/lib/docs-routes";
+import { siteUrl } from "./src/lib/site";
+
+// Static pages bake in the public address (llms.txt, the docs' Markdown, metadata): never ship localhost.
+if (process.env.VERCEL_ENV === "production" && !siteUrl()) {
+  throw new Error("Set NEXT_PUBLIC_SITE_URL: a production build bakes the public address into static pages.");
+}
 
 /**
  * The Docker image builds a self-contained Node server that runs workflows on
@@ -35,14 +42,7 @@ const nextConfig: NextConfig = {
   }),
   async rewrites() {
     // Every docs page as Markdown: /docs.md and /docs/<page>.md.
-    return {
-      beforeFiles: [
-        { source: "/docs.md", destination: "/docs-md" },
-        { source: "/docs/:path*.md", destination: "/docs-md/:path*" },
-      ],
-      afterFiles: [],
-      fallback: [],
-    };
+    return { beforeFiles: markdownRewrites, afterFiles: [], fallback: [] };
   },
 };
 

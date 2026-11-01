@@ -3,6 +3,7 @@
  * and the legal pages so their navigation stays the same. Server components:
  * no JavaScript.
  */
+import { isDraftLegalLink } from "@/lib/legal";
 import { brandAsset, site } from "@/lib/site";
 
 const NAV = [
@@ -42,7 +43,8 @@ export function SiteFooter({ current }: { current?: Section }) {
     <footer className="site-footer">
       <nav aria-label="Footer">
         <ul>
-          {FOOTER.map((link) => (
+          {/* Legal pages stay unlinked while they still hold placeholders (lib/legal.ts). */}
+          {FOOTER.filter((link) => !isDraftLegalLink(link.href)).map((link) => (
             <li key={link.id}>
               <a href={link.href} aria-current={link.id === current ? "page" : undefined}>
                 {link.label}
