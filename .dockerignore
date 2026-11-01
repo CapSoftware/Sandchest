@@ -5,7 +5,7 @@
 **/*.pem
 **/*.key
 **/node_modules
-**/.next
+**/.next*
 **/.turbo
 **/.vercel
 target

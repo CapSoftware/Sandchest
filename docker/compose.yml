@@ -9,7 +9,8 @@ name: sandchest
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # Pinned by digest, like the image's base: bump it deliberately.
+    image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -33,6 +34,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Scans run git and the indexer over code from repositories, in a container holding every secret:
+    # no capabilities, no privilege escalation, a read-only root and a cap on processes. The server
+    # writes only scan workspaces (on disk, since clones can be large; cleared at each start) and
+    # Next's cache.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    pids_limit: 512
+    volumes:
+      - scratch:/tmp
+    tmpfs:
+      - /app/apps/web/.next/cache:size=64m,uid=1000,gid=1000
     # Loopback only by default: put a tunnel or a reverse proxy with TLS in front.
     # Set SANDCHEST_BIND=0.0.0.0 to listen on every interface instead.
     ports:
@@ -62,3 +75,5 @@ services:
 
 volumes:
   postgres:
+  # Scan workspaces. Nothing in it outlives a scan except after a crash, and the next start clears it.
+  scratch:

@@ -10,12 +10,18 @@
 # The indexer is cross-compiled on the build machine (static musl, no emulation). The web app is built
 # for the target platform, since its traced dependencies can include native modules.
 
-ARG NODE_IMAGE=node:24-alpine
-ARG BUN_IMAGE=oven/bun:1.4.4-alpine
+#
+# Base images are pinned by digest (multi-arch index), so a rebuild uses the same bytes; bump them
+# deliberately. Alpine packages are not pinned: Alpine keeps only the latest build of each package in
+# a release branch, so a pinned version stops installing at its next security fix.
+
+ARG NODE_IMAGE=node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
+ARG BUN_IMAGE=oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a
+ARG ZIGBUILD_IMAGE=ghcr.io/rust-cross/cargo-zigbuild:0.24.0@sha256:eb5578cfc06e070a09deb7b5852474bd128a4e561f9f123261b5ed2405e478b1
 
 # ---- Indexer ------------------------------------------------------------------------------------
 
-FROM --platform=$BUILDPLATFORM ghcr.io/rust-cross/cargo-zigbuild:0.24.0 AS indexer
+FROM --platform=$BUILDPLATFORM ${ZIGBUILD_IMAGE} AS indexer
 ARG TARGETARCH
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
@@ -86,6 +92,7 @@ COPY --from=build /repo/apps/web/public ./apps/web/public
 COPY --from=build /out/ ./
 COPY docker/server.mjs docker/entrypoint.sh ./
 # The app's files stay root-owned; the server may only write its cache and temporary scan workspaces.
+# Compose also mounts the root file system read-only, with these two writable.
 RUN mkdir -p apps/web/.next/cache && chown node:node apps/web/.next/cache
 USER node
 EXPOSE 3000
