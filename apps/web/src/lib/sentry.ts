@@ -2,7 +2,7 @@
  * Error reports in Sentry's envelope format, without Sentry's SDK. The SDK's
  * smallest browser build (@sentry/browser 11, default integrations off) is
  * 32 KB gzipped plus a request; this is one inline script that adds about
- * 3.3 KB gzipped to a page (React repeats it in the page data) and runs
+ * 3.9 KB gzipped to a page (React repeats it in the page data) and runs
  * nothing until an error, and the server side has no dependencies at all.
  *
  * Privacy by construction (SPEC principle 7): an event is built from an
