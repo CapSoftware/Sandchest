@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Jersey_10 } from "next/font/google";
 import type { ReactNode } from "react";
-import { site } from "@/lib/site";
+import { brandAsset, site } from "@/lib/site";
 import "./globals.css";
 
 const display = Jersey_10({
@@ -23,24 +23,24 @@ export const metadata: Metadata = {
   description: site.description,
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
-      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: brandAsset("/favicon.svg"), type: "image/svg+xml" },
+      { url: brandAsset("/favicon-32x32.png"), sizes: "32x32", type: "image/png" },
+      { url: brandAsset("/favicon-16x16.png"), sizes: "16x16", type: "image/png" },
     ],
-    apple: "/apple-touch-icon.png",
+    apple: brandAsset("/apple-touch-icon.png"),
   },
   openGraph: {
     title: site.title,
     description: site.description,
     siteName: site.name,
     type: "website",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: site.name }],
+    images: [{ url: brandAsset("/og.png"), width: 1200, height: 630, alt: site.name }],
   },
   twitter: {
     card: "summary_large_image",
     title: site.title,
     description: site.description,
-    images: ["/og.png"],
+    images: [brandAsset("/og.png")],
   },
 };
 

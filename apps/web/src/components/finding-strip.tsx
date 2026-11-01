@@ -4,6 +4,8 @@
  * Illustrative only: never paste real scan output here (see AGENTS.md).
  */
 
+import { brandAsset } from "@/lib/site";
+
 function Redacted({ chars }: { chars: number }) {
   return (
     <span className="redacted" style={{ width: `${chars}ch` }}>
@@ -76,7 +78,7 @@ export function FindingStrip() {
         <div className="comment">
           <img
             className="comment-avatar"
-            src="/sandchest-icon-small.svg"
+            src={brandAsset("/sandchest-icon-small.svg")}
             alt=""
             width={30}
             height={28}

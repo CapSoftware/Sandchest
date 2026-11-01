@@ -1,7 +1,7 @@
 import { ChestStage } from "@/components/chest-stage";
 import { FindingStrip } from "@/components/finding-strip";
 import { HowItWorks } from "@/components/how-it-works";
-import { site } from "@/lib/site";
+import { brandAsset, site } from "@/lib/site";
 
 const footerLinks = [
   { label: "Docs", href: site.links.docs },
@@ -25,7 +25,7 @@ export default function Home() {
     <div className="page">
       <header className="site-header">
         <a href="/" className="wordmark" aria-label="Sandchest home">
-          <img src="/sandchest-logo-dark.svg" alt="Sandchest" width={184} height={34} />
+          <img src={brandAsset("/sandchest-logo-dark.svg")} alt="Sandchest" width={184} height={34} />
         </a>
         <nav aria-label="Main" className="header-nav">
           <a href={site.links.docs}>Docs</a>

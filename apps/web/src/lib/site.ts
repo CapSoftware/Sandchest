@@ -13,3 +13,11 @@ export const site = {
     acceptableUse: "/acceptable-use",
   },
 } as const;
+
+/**
+ * Logo and icon files keep their names, and Cloudflare tells browsers to cache
+ * them for hours. Bump this when the art changes so visitors fetch the new files.
+ */
+const BRAND_VERSION = "2";
+
+export const brandAsset = (path: string) => `${path}?v=${BRAND_VERSION}`;
