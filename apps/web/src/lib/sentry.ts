@@ -1,19 +1,23 @@
 /**
  * Error reports in Sentry's envelope format, without Sentry's SDK. The SDK's
  * smallest browser build (@sentry/browser 11, default integrations off) is
- * 32 KB gzipped plus a request; this is one inline script that adds 2.3 KB
- * gzipped to a page and runs nothing until an error, and the server side has
- * no dependencies at all.
+ * 32 KB gzipped plus a request; this is one inline script that adds about
+ * 3.3 KB gzipped to a page (React repeats it in the page data) and runs
+ * nothing until an error, and the server side has no dependencies at all.
  *
  * Privacy by construction (SPEC principle 7): an event is built from an
- * allowlist (error type, scrubbed message, stack frames, a route pattern and
- * a few enum tags). There is no request, no user, no breadcrumbs, no
- * headers, cookies or bodies, no source lines and no tracing. Messages are
- * scrubbed of emails, tokens, keys, query strings, IP addresses, home
- * directories and the parameters that database errors quote.
+ * allowlist (error type, stack frames, a route pattern and a few enum tags).
+ * There is no request, no user, no breadcrumbs, no headers, cookies or
+ * bodies, no source lines and no tracing. An error's message is withheld
+ * unless it has a shape known to carry no customer data (a JavaScript
+ * runtime error, a network failure, a database error that names only our
+ * own schema, the text of one of our SQL queries); even then it is scrubbed
+ * of emails, tokens, keys, query strings, IP addresses and home directories.
+ * Messages are free text: a failed clone quotes the repository and a missing
+ * file its path, so nothing is sent in the hope that a scrubber catches it.
  *
- * Shared by the server reporter and the browser snippet, so both scrub with
- * the same rules.
+ * Shared by the server reporter and the browser snippet, so both apply the
+ * same rules.
  */
 
 export interface Dsn {
@@ -25,22 +29,26 @@ export interface Dsn {
 /** Parses `https://<key>@<host>[/<path>]/<project>`. Undefined for anything else, so a bad value turns reporting off. */
 export function parseDsn(value: string | undefined): Dsn | undefined {
   if (!value) return undefined;
-  let url: URL;
+  // A malformed DSN must turn reporting off, never throw: callers run inside error handlers and page renders.
   try {
-    url = new URL(value);
+    const url = new URL(value);
+    const match = /^(.*)\/(\d+)\/?$/.exec(url.pathname);
+    if (!url.username || !match || !/^https?:$/.test(url.protocol)) return undefined;
+    const key = encodeURIComponent(decodeURIComponent(url.username));
+    return { endpoint: `${url.protocol}//${url.host}${match[1]}/api/${match[2]}/envelope/?sentry_version=7&sentry_key=${key}&sentry_client=sandchest%2F1`, dsn: value };
   } catch {
     return undefined;
   }
-  const match = /^(.*)\/(\d+)\/?$/.exec(url.pathname);
-  if (!url.username || !match || !/^https?:$/.test(url.protocol)) return undefined;
-  const key = encodeURIComponent(decodeURIComponent(url.username));
-  return { endpoint: `${url.protocol}//${url.host}${match[1]}/api/${match[2]}/envelope/?sentry_version=7&sentry_key=${key}&sentry_client=sandchest%2F1`, dsn: value };
 }
+
+/** The longest message kept, after scrubbing. Input is cut to four times this before anything else runs. */
+export const MAX_MESSAGE = 1_000;
 
 /**
  * Scrub rules as [pattern, flags, replacement]. Strings, not RegExps, so the
- * browser snippet can carry the same list. Order matters: the broad token
- * rule runs last.
+ * browser snippet can carry the same list. Every rule either starts at a
+ * fixed literal or at the beginning of a run, so a long input costs one pass
+ * per rule. The broad token rule runs last.
  */
 export const SCRUB_RULES: ReadonlyArray<readonly [string, string, string]> = [
   // Drizzle quotes a failed query's parameters, which can be anything a user typed.
@@ -51,7 +59,7 @@ export const SCRUB_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ["\\b(Bearer|Basic|token)\\s+[A-Za-z0-9._~+/=-]{8,}", "gi", "$1 [redacted]"],
   ["\\b(gh[pousr]_|github_pat_|sk-|xox[abpr]-)[A-Za-z0-9_-]+", "g", "[token]"],
   ["\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+", "g", "[token]"],
-  ["[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "g", "[email]"],
+  ["(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\\.[A-Za-z]{2,24}", "g", "[email]"],
   ["(https?:\\/\\/[^\\s?#\"'<>]+)[?#][^\\s\"'<>]*", "g", "$1?[query]"],
   ["\\b\\d{1,3}(\\.\\d{1,3}){3}\\b", "g", "[ip]"],
   ["([\\\\/](?:Users|home)[\\\\/])[^\\\\/\\s]+", "gi", "$1[user]"],
@@ -61,13 +69,56 @@ export const SCRUB_RULES: ReadonlyArray<readonly [string, string, string]> = [
 
 const RULES = SCRUB_RULES.map(([pattern, flags, replacement]) => [new RegExp(pattern, flags), replacement] as const);
 
-/** The longest message kept, after scrubbing. */
-export const MAX_MESSAGE = 1_000;
-
+/** Scrubs text for a report. Long input is cut first, so scrubbing time stays bounded. */
 export function scrub(text: unknown): string {
-  let value = typeof text === "string" ? text : String(text ?? "");
+  let value = (typeof text === "string" ? text : String(text ?? "")).slice(0, MAX_MESSAGE * 4);
   for (const [pattern, replacement] of RULES) value = value.replace(pattern, replacement);
   return value.length > MAX_MESSAGE ? `${value.slice(0, MAX_MESSAGE)}…` : value;
+}
+
+/**
+ * Error messages that may be sent, as [pattern, flags]: shapes that carry no
+ * customer data. The part a pattern matches, from the message's start, is
+ * kept and scrubbed; every other message is withheld. Quantifiers are
+ * bounded, so no message makes matching slow.
+ */
+export const SAFE_MESSAGES: ReadonlyArray<readonly [string, string]> = [
+  // JavaScript runtime errors name code, not data.
+  ["^Cannot read properties of (?:undefined|null) \\(reading '[^'\\n]{1,80}'\\)$", ""],
+  ["^Cannot (?:read|set) property '[^'\\n]{1,80}' of (?:undefined|null)$", ""],
+  ["^[\\w$.\\[\\]]{1,120} is not (?:a function|defined|iterable|a constructor)$", ""],
+  ["^(?:undefined|null) is not an object \\(evaluating '[^'\\n]{1,120}'\\)$", ""],
+  ["^Maximum call stack size exceeded$", ""],
+  ["^Unexpected end of JSON input$", ""],
+  ["^Minified React error #\\d{1,4}", ""],
+  ["^Hydration failed because", ""],
+  // Network failures and timeouts.
+  ["^(?:Failed to fetch|Load failed|fetch failed|NetworkError when attempting to fetch resource\\.|The operation was aborted\\.|This operation was aborted|The user aborted a request\\.|The operation timed out\\.|The operation was aborted due to timeout)$", ""],
+  ["^(?:connect|read|write) (?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|EHOSTUNREACH)(?: [0-9a-f.:\\[\\]]{1,60})?$", ""],
+  ["^getaddrinfo (?:ENOTFOUND|EAI_AGAIN) [\\w.-]{1,253}$", ""],
+  // Postgres errors that name only our schema, and the text of one of our queries (its parameters are cut).
+  ["^Failed query: [^\\n]{1,600}", ""],
+  ['^duplicate key value violates unique constraint "[\\w.]{1,63}"$', ""],
+  ['^(?:relation|column|function|database|role|schema) "[\\w.$]{1,120}" does not exist$', ""],
+  ["^(?:canceling statement due to (?:statement timeout|user request)|deadlock detected|Connection terminated unexpectedly|Connection terminated|sorry, too many clients already)$", ""],
+  // Our own messages that carry only names of settings or opaque ids.
+  ["^Scan [0-9a-f-]{36} not found$", ""],
+  ["^Invalid server configuration:", ""],
+];
+
+const SAFE = SAFE_MESSAGES.map(([pattern, flags]) => new RegExp(pattern, flags));
+
+/** Sent in place of a message without a known-safe shape. */
+export const WITHHELD = "(message withheld)";
+
+/** The message to send: its known-safe part, scrubbed, or a placeholder. */
+export function safeMessage(message: unknown): string {
+  const text = (typeof message === "string" ? message : "").slice(0, MAX_MESSAGE * 4);
+  for (const pattern of SAFE) {
+    const match = pattern.exec(text);
+    if (match) return scrub(match[0]);
+  }
+  return WITHHELD;
 }
 
 export interface Frame {
@@ -85,7 +136,9 @@ const GECKO = /^\s*(.*?)@(.+?):(\d+):(\d+)\s*$/;
 export function parseStack(stack: string | undefined, origin?: string): Frame[] {
   if (!stack) return [];
   const frames: Frame[] = [];
-  for (const line of stack.split("\n").slice(0, 60)) {
+  for (const line of stack.split("\n", 60)) {
+    // Frames are short; a long line is part of a message, never worth a regex pass.
+    if (line.length > 1_000) continue;
     const match = V8.exec(line) ?? GECKO.exec(line);
     if (!match) continue;
     const filename = cleanFile(match[2]!, origin);
@@ -123,7 +176,7 @@ export function exceptionValues(error: unknown, mechanism: { type: string; handl
   for (let depth = 0; depth < 3 && current !== undefined && current !== null; depth++) {
     if (current instanceof Error) {
       const frames = parseStack(current.stack, origin);
-      values.push({ type: scrub(current.name || "Error").slice(0, 100), value: scrub(current.message), ...(frames.length ? { stacktrace: { frames } } : {}), mechanism });
+      values.push({ type: scrub(current.name || "Error").slice(0, 100), value: safeMessage(current.message), ...(frames.length ? { stacktrace: { frames } } : {}), mechanism });
       current = (current as { cause?: unknown }).cause;
     } else {
       // A thrown string or object could hold anything: keep only what kind of value it was.

@@ -4,7 +4,7 @@
  * browser snippet. No real DSN is ever used.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { envelope, exceptionValues, parseDsn, parseStack, routePattern, scrub } from "@/lib/sentry";
+import { envelope, exceptionValues, parseDsn, parseStack, routePattern, safeMessage, scrub, WITHHELD } from "@/lib/sentry";
 import { browserReporter } from "@/lib/sentry-browser";
 import { config } from "@/server/config";
 import { captureException, resetSentry, sentryEnabled } from "@/server/sentry";
@@ -45,6 +45,21 @@ describe("DSN", () => {
     for (const bad of [undefined, "", "not a url", "https://o1.ingest.sentry.io/42", "https://key@host/project", "ftp://key@host/1", "javascript://key@x/1"]) expect(parseDsn(bad)).toBeUndefined();
   });
 
+  test("a DSN whose key is not valid percent-encoding turns reporting off instead of throwing", async () => {
+    const bad = "https://%E0%A4%A@o1.ingest.sentry.io/1";
+    expect(() => parseDsn(bad)).not.toThrow();
+    expect(parseDsn(bad)).toBeUndefined();
+    // Every page renders this: a bad public DSN must not turn them all into errors.
+    expect(browserReporter({ dsn: bad })).toBeUndefined();
+    // The server path runs inside error handlers: the original error must stay the one that surfaces.
+    process.env.SENTRY_DSN = bad;
+    resetSentry();
+    expect(sentryEnabled()).toBe(false);
+    await captureException(new Error("x"), { source: "workflow" });
+    delete process.env.SENTRY_DSN;
+    resetSentry();
+  });
+
   test("a deployment with a malformed DSN is told so at start-up", () => {
     const base = { DATABASE_URL: "postgres://x", GITHUB_APP_ID: "1", GITHUB_APP_PRIVATE_KEY: "k", GITHUB_WEBHOOK_SECRET: "s", SANDCHEST_APP_URL: "https://sandchest.test" };
     expect(() => config({ ...base, SENTRY_DSN: "not a url" })).toThrow(/SENTRY_DSN/);
@@ -58,13 +73,57 @@ describe("scrubbing", () => {
     const values = exceptionValues(plantedError(), { type: "test", handled: false });
     const text = JSON.stringify(values);
     expectClean(text);
-    // What stays: the shape of the error, opaque ids and our own frames.
+    // What stays: the text of our own query (never its parameters), opaque ids and our own frames.
     expect(text).toContain("Failed query: select * from sessions where token = $1");
     expect(text).toContain("0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c");
     expect(text).toContain("https://app.example.com/findings?[query]");
-    expect(text).toContain("params: [redacted]");
+    expect(text).not.toContain("params");
     expect(values).toHaveLength(2);
-    expect(values[0]!.value).toBe("duplicate key: Key (email)=([redacted]) already exists");
+    // The cause has no known-safe shape, so its message is not sent at all.
+    expect(values[0]!.value).toBe(WITHHELD);
+  });
+
+  test("messages without a known-safe shape are withheld: scan errors quote repositories, refs and paths", () => {
+    for (const message of [
+      "Command failed: git clone --depth=1 https://github.com/acme/app.git\nfatal: repository 'https://github.com/acme/app.git/' not found",
+      "Invalid ref: feature/acme-billing",
+      "File not found: src/billing/invoices.ts",
+      "Path escapes the checkout: ../../etc/passwd",
+      "GitHub API 404 on /repos/acme/app/pulls/12/files",
+      "Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON",
+    ])
+      expect(safeMessage(message)).toBe(WITHHELD);
+    // Shapes that carry no customer data still help.
+    expect(safeMessage("Cannot read properties of undefined (reading 'id')")).toBe("Cannot read properties of undefined (reading 'id')");
+    expect(safeMessage("connect ECONNREFUSED 127.0.0.1:5432")).toBe("connect ECONNREFUSED [ip]:5432");
+    expect(safeMessage('relation "scan_metrics" does not exist')).toBe('relation "scan_metrics" does not exist');
+    expect(safeMessage("Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found")).toBe("Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found");
+    // A safe prefix with something after it keeps only the prefix.
+    expect(safeMessage("Minified React error #418; visit https://react.dev/errors/418?args[]=acme")).toBe("Minified React error #418");
+    expect(safeMessage(undefined)).toBe(WITHHELD);
+  });
+
+  test("scrubbing and message checks stay fast on huge or hostile input", () => {
+    const hostile = [
+      "a".repeat(100_000),
+      "a.".repeat(50_000),
+      `${"a".repeat(99_000)}@`,
+      "1".repeat(100_000),
+      "aB3".repeat(33_000),
+      `${"x@".repeat(50_000)}`,
+      `https://${"a".repeat(100_000)}`,
+      `at ${"(".repeat(50_000)}`,
+    ];
+    for (const input of hostile) {
+      const started = performance.now();
+      scrub(input);
+      safeMessage(input);
+      parseStack(`Error\n${input}\n    at f (/x/.next/a.js:1:1)`);
+      const error = new Error(input);
+      error.stack = `Error: ${input}`;
+      exceptionValues(error, { type: "t", handled: false });
+      expect(performance.now() - started).toBeLessThan(50);
+    }
   });
 
   test("thrown non-errors report only their type", () => {
@@ -155,16 +214,32 @@ describe("server reporting", () => {
     expect(event.exception.values.at(-1).stacktrace.frames.at(-1).filename).toBe("app:///.next/server/chunks/ssr/page.js");
   });
 
+  test("a scan's failure goes with its step and opaque scan id, never its message", async () => {
+    process.env.SENTRY_DSN = `http://publickey@127.0.0.1:${server.port}/5`;
+    const error = new Error("Command failed: git clone https://github.com/acme/app.git\nfatal: repository 'https://github.com/acme/app.git/' not found");
+    await captureException(error, { source: "workflow", tags: { step: "execute", scan_id: "0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c" } });
+    expect(received).toHaveLength(1);
+    expect(received[0]!.body).not.toContain("acme");
+    const { event } = parse(received[0]!.body);
+    expect(event.exception.values[0].value).toBe(WITHHELD);
+    expect(event.tags).toMatchObject({ source: "workflow", step: "execute", scan_id: "0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c" });
+  });
+
   test("caps a burst of different errors", async () => {
     process.env.SENTRY_DSN = `http://publickey@127.0.0.1:${server.port}/5`;
-    for (let i = 0; i < 50; i++) await captureException(new Error(`error number ${i}`), { source: "workflow", tags: { step: "execute" }, handled: true });
+    for (let i = 0; i < 50; i++) {
+      // Different errors: messages are withheld, so they differ by where they were thrown.
+      const error = new Error(`error number ${i}`);
+      error.stack = `Error: error number ${i}\n    at step (/srv/app/.next/server/chunks/scan.js:${i + 1}:1)`;
+      await captureException(error, { source: "workflow", tags: { step: "execute" }, handled: true });
+    }
     expect(received).toHaveLength(30);
     expect(parse(received[0]!.body).event.level).toBe("warning");
   });
 
-  test("a withheld message sends the type and stack only", async () => {
+  test("a mail failure sends its type and stack only, since mail errors quote addresses", async () => {
     process.env.SENTRY_DSN = `http://publickey@127.0.0.1:${server.port}/5`;
-    await captureException(new Error("550 mailbox unavailable for someone"), { source: "notifications", handled: true, withholdMessage: true });
+    await captureException(new Error("550 mailbox unavailable for someone"), { source: "notifications", handled: true });
     const { event } = parse(received[0]!.body);
     expect(event.exception.values[0]).toMatchObject({ type: "Error", value: "(message withheld)" });
     expect(received[0]!.body).not.toContain("mailbox");
@@ -185,7 +260,7 @@ describe("browser reporting", () => {
   test("the script cannot break out of its tag", () => {
     const script = browserReporter({ dsn: "https://k@o1.ingest.sentry.io/1", environment: "</script><script>alert(1)</script>" })!;
     expect(script).not.toContain("</script>");
-    expect(script.length).toBeLessThan(4_000);
+    expect(script.length).toBeLessThan(6_000);
   });
 
   test("reports an uncaught error and an unhandled rejection to the endpoint, scrubbed", async () => {
@@ -239,6 +314,27 @@ describe("browser reporting", () => {
     listeners.error!({ error });
     const browser = parse(sent).event.exception.values.map((value: { value: string }) => value.value);
     expect(browser).toEqual(exceptionValues(error, { type: "x", handled: false }).map((value) => value.value));
+  });
+
+  test("the browser reporter stays fast on a huge message", () => {
+    const script = browserReporter({ dsn: "http://publickey@127.0.0.1:9/5" })!;
+    const listeners: Record<string, (event: unknown) => void> = {};
+    let body = "";
+    new Function("location", "addEventListener", "fetch", "crypto", script)(
+      { origin: "https://sandchest.test", pathname: "/" },
+      (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
+      async (_url: string, init: RequestInit) => {
+        body = String(init.body);
+        return new Response();
+      },
+      crypto,
+    );
+    const error = new Error(`${"a".repeat(99_000)}@`);
+    error.stack = `Error: ${"a.".repeat(50_000)}\n    at f (https://sandchest.test/_next/static/chunks/app.js:1:1)`;
+    const started = performance.now();
+    listeners.error!({ error });
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(parse(body).event.exception.values[0].value).toBe(WITHHELD);
   });
 
   test("an envelope is three JSON lines", () => {

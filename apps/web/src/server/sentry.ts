@@ -32,8 +32,6 @@ export interface CaptureContext {
   tags?: Record<string, string | number | boolean | undefined>;
   /** Caught and dealt with (the work carried on) rather than a failure. */
   handled?: boolean;
-  /** Send the error's type and stack but not its message, for errors that can quote addresses (email). */
-  withholdMessage?: boolean;
 }
 
 /** Reports an error. Resolves once sent, dropped or timed out. */
@@ -41,8 +39,8 @@ export async function captureException(error: unknown, context: CaptureContext):
   const target = dsn();
   if (!target) return;
   try {
+    // Messages are withheld unless known to be safe (see `safeMessage`): a scan's errors quote repositories, refs and paths.
     const values = exceptionValues(error, { type: context.source, handled: context.handled ?? false });
-    if (context.withholdMessage) for (const value of values) value.value = "(message withheld)";
     if (!admit(signature(values))) return;
     const event: SentryEvent = {
       event_id: crypto.randomUUID().replace(/-/g, ""),

@@ -244,7 +244,7 @@ export async function publishScan(scanId: string): Promise<void> {
   // Email is best effort and at most once: it never fails or repeats a scan.
   await notifyScan(scan).catch(async (error: unknown) => {
     console.error(`Notifications for scan ${scan.id} failed: ${error instanceof Error ? error.name : "error"}`);
-    await captureException(error, { source: "notifications", tags: { scan_id: scan.id }, handled: true, withholdMessage: true });
+    await captureException(error, { source: "notifications", tags: { scan_id: scan.id }, handled: true });
   });
 }
 
