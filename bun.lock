@@ -61,6 +61,17 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/github": {
+      "name": "@sandchest/github",
+      "dependencies": {
+        "@sandchest/engine": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "typescript": "^5.9.3",
+      },
+    },
     "packages/workspace": {
       "name": "@sandchest/workspace",
       "dependencies": {
@@ -248,6 +259,8 @@
     "@sandchest/engine": ["@sandchest/engine@workspace:packages/engine"],
 
     "@sandchest/evals": ["@sandchest/evals@workspace:evals"],
+
+    "@sandchest/github": ["@sandchest/github@workspace:packages/github"],
 
     "@sandchest/web": ["@sandchest/web@workspace:apps/web"],
 
