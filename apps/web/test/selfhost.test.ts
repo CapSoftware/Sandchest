@@ -9,7 +9,7 @@ import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import postgres from "postgres";
-import { createGateway, isBlocked } from "../../../docker/server.mjs";
+import { createGateway, isBlocked, stopGateway } from "../../../docker/server.mjs";
 import { GET as unlockGet, POST as unlockPost } from "@/app/setup/unlock/route";
 import {
   newState,
@@ -155,6 +155,24 @@ describe("gateway: the workflow routes are not reachable from outside", () => {
     expect(response.status).toBe(502);
     lonely.close();
   });
+
+  test("stopping ends open streams, so the app behind it can shut down", async () => {
+    let upstreamClosed = false;
+    const app = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write("data: open\n\n");
+      request.socket.on("close", () => (upstreamClosed = true));
+    });
+    await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
+    const front = createGateway({ upstreamPort: (app.address() as AddressInfo).port });
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    const response = await fetch(`http://127.0.0.1:${(front.address() as AddressInfo).port}/feed`);
+    await response.body!.getReader().read();
+    stopGateway(front);
+    // The app's own close() completes only once nothing holds a connection to it.
+    await new Promise<void>((resolve) => app.close(() => resolve()));
+    expect(upstreamClosed).toBe(true);
+  });
 });
 
 // ---- Setup ----------------------------------------------------------------
@@ -216,6 +234,8 @@ describe("setup", () => {
     expect(stateValid(`${expires}.other-nonce.${mac}`, env, now)).toBe(false);
     expect(stateValid(a, { ...env, SANDCHEST_SETUP_TOKEN: "y".repeat(30) }, now)).toBe(false);
     expect(stateValid(null, env, now)).toBe(false);
+    // A repeated query parameter arrives as an array.
+    expect(stateValid([a, a] as unknown as string, env, now)).toBe(false);
   });
 
   test("GitHub sends people back only to the public URL, or to loopback on the operator's machine", () => {
@@ -344,7 +364,8 @@ describe("start-up migrations", () => {
 
   test("servers starting together take turns, and a second run changes nothing", async () => {
     if (!available) return;
-    await Promise.all([migrateAll(url), migrateAll(url), migrateAll(url)]);
+    const urls = { app: url, world: url };
+    await Promise.all([migrateAll(urls), migrateAll(urls), migrateAll(urls)]);
     const sql = postgres(url, { max: 1, onnotice: () => {} });
     try {
       const schemas = (await sql`select nspname from pg_namespace where nspname in ('workflow', 'workflow_drizzle', 'graphile_worker', 'drizzle')`).map((r) => r.nspname as string).sort();
@@ -353,7 +374,7 @@ describe("start-up migrations", () => {
       const [{ count: world }] = await sql`select count(*)::int as count from workflow_drizzle.workflow_migrations`;
       expect(applied).toBeGreaterThanOrEqual(3);
       expect(world).toBeGreaterThan(20);
-      await migrateAll(url);
+      await migrateAll(urls);
       const [{ count: again }] = await sql`select count(*)::int as count from drizzle.__drizzle_migrations`;
       expect(again).toBe(applied);
       // The app's tables exist and the lock was released.

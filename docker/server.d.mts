@@ -5,3 +5,6 @@ export function isBlocked(target: string | undefined): boolean;
 
 /** Forwards requests to Next on `upstreamPort`, refusing the workflow routes. */
 export function createGateway(options: { upstreamHost?: string; upstreamPort: number }): Server;
+
+/** Stops taking requests and ends the ones still open. */
+export function stopGateway(server: Server): void;

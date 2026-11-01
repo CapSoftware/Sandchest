@@ -100,7 +100,18 @@ export function createGateway({ upstreamHost = "127.0.0.1", upstreamPort }) {
     if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\nconnection: close\r\n\r\n");
     else socket.destroy();
   });
+  server.on("close", () => agent.destroy());
   return server;
+}
+
+/**
+ * Stops taking requests and ends the ones still open, such as a live feed's
+ * stream: each one holds a connection to Next, which would otherwise keep
+ * Next's own shutdown waiting until Docker kills the process.
+ */
+export function stopGateway(server) {
+  server.close();
+  server.closeAllConnections();
 }
 
 /** Calls the sweep on loopback, as Vercel Cron does in the cloud. Failures are logged and retried next time. */
@@ -139,7 +150,8 @@ async function main() {
   gateway.listen(publicPort, "0.0.0.0", () => console.log(`Sandchest is listening on port ${publicPort}.`));
   scheduleSweep(internalPort, process.env.CRON_SECRET);
 
-  const stop = () => gateway.close();
+  // Next's own handler, registered as it started, closes Next and exits once its connections end.
+  const stop = () => stopGateway(gateway);
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 }
