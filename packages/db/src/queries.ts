@@ -210,6 +210,11 @@ export async function markDeepScanned(database: Db, repoId: string, at: Date, lo
   await database.update(repos).set({ lastDeepScanAt: at, loc }).where(eq(repos.id, repoId));
 }
 
+/** Repository size from a recon, so the Dig button can show its cost before the first deep scan. */
+export async function setRepoLoc(database: Db, repoId: string, loc: number): Promise<void> {
+  await database.update(repos).set({ loc }).where(eq(repos.id, repoId));
+}
+
 export interface MetricsInput {
   inputTokens: number;
   cachedTokens: number;
@@ -335,6 +340,8 @@ export async function markFixed(database: Db, ids: string[], scanId: string): Pr
         status: "fixed",
         fixedAt: new Date(),
         attackPath: sql`(select coalesce(jsonb_agg(step - 'excerpt'), '[]'::jsonb) from jsonb_array_elements(${findings.attackPath}) step)`,
+        // The prompt quotes the same code.
+        fixPrompt: "",
       })
       .where(and(inArray(findings.id, ids), eq(findings.status, "open")));
     await tx.insert(findingEvents).values(ids.map((findingId) => ({ findingId, type: "fixed" as const, scanId })));
