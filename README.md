@@ -2,7 +2,7 @@
 
 Sandchest reads your code the way an attacker would. It is a GitHub App that builds a threat model of each repository, reviews every pull request for exploitable vulnerabilities, and hands you fix prompts for your coding agent.
 
-You can use the hosted service at [sandchest.com](https://www.sandchest.com), or run it yourself with the instructions below. A self-hosted Sandchest sends nothing to us: no telemetry, no billing, no limits.
+You can use the hosted service at [sandchest.com](https://www.sandchest.com), or run it yourself with the instructions below. A self-hosted Sandchest sends nothing to us: no telemetry and no billing. Plans and credits are switched off. The safety limits stay: one deep scan per repository a day, at most two scans at a time per account, and no scans of repositories over a million lines.
 
 ## Self-hosting
 
