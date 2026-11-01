@@ -52,11 +52,16 @@ export function checkResult(input: CheckInput): { conclusion: CheckConclusion; o
   };
 }
 
-export function outOfCredits(detailsUrl: string): { conclusion: CheckConclusion; output: CheckOutput } {
-  return {
-    conclusion: "neutral",
-    output: { title: "Out of credits", summary: `This change was not reviewed. Top up to keep reviewing: ${detailsUrl}` },
-  };
+/**
+ * The Check for a PR that was not reviewed because of billing. Neutral, so it
+ * never blocks a merge (SPEC §4).
+ */
+export function notReviewed(reason: "no_plan" | "out_of_credits", billingUrl: string, credits?: number): { conclusion: CheckConclusion; output: CheckOutput } {
+  if (reason === "no_plan") {
+    return { conclusion: "neutral", output: { title: "Not reviewed: no plan", summary: `Sandchest needs a plan before it reviews pull requests. [Pick a plan →](${billingUrl})` } };
+  }
+  const need = credits ? ` This review needs ${credits} ${credits === 1 ? "credit" : "credits"}.` : "";
+  return { conclusion: "neutral", output: { title: "Out of credits", summary: `This change was not reviewed.${need} [Top up to keep reviewing →](${billingUrl})` } };
 }
 
 /** The one-line public summary: severity counts and nothing else. */
