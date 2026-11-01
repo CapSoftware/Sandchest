@@ -1,0 +1,26 @@
+# Overrides for docker/test/e2e.sh: GitHub and the model are fakes, and repositories are cloned from
+# a local directory. Paths are relative to docker/, the project directory.
+services:
+  web:
+    depends_on:
+      fakes:
+        condition: service_started
+    environment:
+      GITHUB_API_URL: http://fakes:4010
+      SANDCHEST_GIT_HOST: file:///srv/git
+    volumes:
+      - ${E2E_DIR:?}/git:/srv/git:ro
+
+  fakes:
+    image: ${SANDCHEST_IMAGE:-sandchest:local}
+    entrypoint: ["node", "/fakes/fakes.mjs"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4010/stats"]
+      interval: 2s
+      retries: 10
+    environment:
+      FAKE_PEM_FILE: /e2e/app.pem
+      FAKE_HEAD_SHA: ${E2E_HEAD_SHA:?}
+    volumes:
+      - ./test/fakes.mjs:/fakes/fakes.mjs:ro
+      - ${E2E_DIR:?}/app.pem:/e2e/app.pem:ro
