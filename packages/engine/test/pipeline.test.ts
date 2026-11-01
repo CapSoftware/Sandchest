@@ -212,3 +212,33 @@ describe("runScan", () => {
     await expect(run).rejects.toThrow("Interrupted");
   });
 });
+
+describe("PR review", () => {
+  const files = (overrides: Partial<import("../src/scan").ChangedFile>[] = [{}]) =>
+    overrides.map((o) => ({ path: "src/login.ts", status: "modified" as const, additions: 3, deletions: 1, hunks: [[1, 4]] as Array<[number, number]>, patch: "@@ -1,3 +1,4 @@", ...o }));
+
+  test("reviews the change and keeps findings that touch it", async () => {
+    const report = await runScan({ client: fakeClient(), indexer: fakeIndexer(), threatModel, pullRequest: { files: files() } });
+    expect(report.findings).toHaveLength(1);
+    expect(report.review).toEqual({ files: 1, changedLines: 4, reviewedFiles: ["src/login.ts"], skippedFiles: [] });
+    expect(report.stats.hunters.map((h) => h.name)).toContain("change");
+  });
+
+  test("rejects findings that do not touch the change", async () => {
+    const report = await runScan({ client: fakeClient(), indexer: fakeIndexer(), threatModel, pullRequest: { files: files([{ hunks: [[200, 210]] }]) } });
+    expect(report.findings).toEqual([]);
+    expect(report.stats.rejectedByGate).toBeGreaterThan(0);
+  });
+
+  test("a change with nothing security-relevant makes no model calls", async () => {
+    const client: LlmClient = { ...fakeClient(), chat: async () => { throw new Error("no model calls expected"); } };
+    const report = await runScan({
+      client,
+      indexer: fakeIndexer(),
+      pullRequest: { files: files([{ path: "README.md" }, { path: "src/login.test.ts" }, { path: "package-lock.json" }]) },
+    });
+    expect(report.findings).toEqual([]);
+    expect(report.review?.files).toBe(0);
+    expect(report.usage.total.requests).toBe(0);
+  });
+});

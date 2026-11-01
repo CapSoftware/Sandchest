@@ -17,7 +17,8 @@ import type { LlmClient } from "../llm";
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent, type ScanLimits } from "./context";
 import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate } from "./gate";
 import { isFatal, errorMessage } from "./errors";
-import { planAssignments, planCoverage, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
+import { capChanges, changedLines, changeTool, relevantChanges, touchesChange, type ChangedFile } from "./changes";
+import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
 import { buildLeads, codeSignals, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
@@ -35,6 +36,8 @@ export interface ScanOptions {
   osv?: OsvClient;
   /** Reuse a threat model from an earlier scan instead of running recon. */
   threatModel?: ThreatModel;
+  /** Review a pull request: only these files, and only findings that touch them. */
+  pullRequest?: { files: ChangedFile[] };
   limits?: Partial<ScanLimits>;
   pricing?: Pricing;
   onEvent?: (event: ScanEvent) => void;
@@ -72,6 +75,8 @@ export interface ScanReport {
     filesRead: number;
   };
   timings: { indexMs: number; sweepMs: number; reconMs: number; huntMs: number; coverageMs: number; verifyTailMs: number; totalMs: number };
+  /** PR reviews: what was reviewed. `changedLines` counts security-relevant lines only. */
+  review?: { files: number; changedLines: number; reviewedFiles: string[]; skippedFiles: string[] };
   usage: { byRole: Record<string, RoleUsage>; total: RoleUsage; costUsd?: number };
   warnings: string[];
 }
@@ -124,6 +129,21 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const sweepStarted = Date.now();
   const code = await codeSignals(indexer, signal);
   const signals: Signals = { leads: buildLeads(code, []), vulns: [] };
+
+  // PR reviews look only at security-relevant changed files, riskiest first past the line cap.
+  let change: ChangedFile[] | undefined;
+  let reviewed: ScanReport["review"];
+  if (options.pullRequest) {
+    const relevant = relevantChanges(options.pullRequest.files);
+    const { kept, dropped } = capChanges(relevant, limits.prLineCap, riskByFile(routes, code.found.sinks));
+    change = kept;
+    reviewed = { files: relevant.length, changedLines: changedLines(relevant), reviewedFiles: kept.map((f) => f.path), skippedFiles: dropped.map((f) => f.path) };
+    if (dropped.length > 0) emit({ type: "progress", message: `Large change: reviewing the ${kept.length} riskiest of ${relevant.length} files.` });
+    if (kept.length === 0) {
+      emit({ type: "stage", stage: "done", message: "No security-relevant changes to review." });
+      return emptyReport(started, overview, options.threatModel, reviewed, Date.now() - started);
+    }
+  }
   // The advisory lookup is network-bound: let it run while recon maps the code.
   const advisories = vulnerabilities(options.osv, code.dependencies, signal).then((result) => {
     if (result.error) emit({ type: "warning", message: `Dependency vulnerability lookup failed: ${result.error}` });
@@ -138,7 +158,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const base: Omit<ScanContext, "threatModelText"> = {
     client: options.client,
     indexer,
-    tools: repoTools({ indexer, wrap, signals, onRead: (path) => read.add(path) }),
+    tools: [...repoTools({ indexer, wrap, signals, onRead: (path) => read.add(path) }), ...(change ? [changeTool(change, wrap)] : [])],
     limiter: new Limiter(limits.concurrency),
     meter: new UsageMeter(),
     options: limits,
@@ -146,6 +166,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     tag,
     wrap,
     counters: { rejected: 0, duplicates: 0 },
+    change,
     emit,
   };
 
@@ -206,12 +227,20 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       ),
     );
 
-  const assignments = planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap);
+  const inChange = (at: string | undefined) => !change || (!!at && change.some((f) => at.startsWith(`${f.path}:`)));
+  const assignments = change
+    ? planPrAssignments(change, routes, signals.leads.filter((lead) => inChange(lead.at)), limits.prMaxHunters, wrap)
+    : planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap);
   emit({ type: "stage", stage: "hunt", message: `Digging with ${assignments.length} hunters: ${assignments.map((a) => a.name).join(", ")}.` });
   const [hunters, huntMs] = await time(() => hunt(assignments, { turns: limits.hunterTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.55) }));
 
   let coverageMs = 0;
-  const gaps = fatal || Date.now() >= at(0.6) ? [] : planCoverage(routes, signals.leads, read, registry.cited(), wrap);
+  const gaps =
+    fatal || Date.now() >= at(0.6)
+      ? []
+      : change
+        ? planCoverage([], signals.leads.filter((lead) => lead.kind === "sink" && lead.at && touchesChange(change!, [locationOf(lead.at)])), read, registry.cited(), wrap).slice(0, 1)
+        : planCoverage(routes, signals.leads, read, registry.cited(), wrap);
   if (gaps.length > 0) {
     emit({ type: "stage", stage: "coverage", message: `Checking code the first pass never opened with ${gaps.length} more ${gaps.length === 1 ? "hunter" : "hunters"}…` });
     const [extra, ms] = await time(() => hunt(gaps, { turns: limits.coverageTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.75) }));
@@ -231,7 +260,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   if (fatal) throw fatal.error;
 
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || confidenceRank(a) - confidenceRank(b));
-  const leads = persistentLeads(signals.leads);
+  const leads = persistentLeads(signals.leads).filter((lead) => !change || inChange(lead.at));
   const totalMs = Date.now() - started;
   emit({ type: "stage", stage: "done", message: summary(findings) });
 
@@ -256,7 +285,56 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     timings: { indexMs: overview.indexMs, sweepMs, reconMs, huntMs, coverageMs, verifyTailMs, totalMs },
     usage: { byRole: meter.byRole, total: meter.total(), costUsd: options.pricing ? meter.cost(options.pricing) : undefined },
     warnings,
+    review: reviewed,
   };
+}
+
+/** A PR with nothing to review: no model calls at all. */
+function emptyReport(started: number, overview: Overview, threatModel: ThreatModel | undefined, review: ScanReport["review"], totalMs: number): ScanReport {
+  const none: RoleUsage = { requests: 0, retries: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+  return {
+    version: 1,
+    startedAt: new Date(started).toISOString(),
+    durationMs: totalMs,
+    repo: { files: overview.sourceFiles, loc: overview.loc, languages: overview.languages },
+    threatModel: threatModel ?? EMPTY_THREAT_MODEL,
+    leads: [],
+    findings: [],
+    dismissed: [],
+    stats: { candidates: 0, rejectedByGate: 0, duplicates: 0, survivors: 0, hunters: [], filesRead: 0 },
+    timings: { indexMs: overview.indexMs, sweepMs: 0, reconMs: 0, huntMs: 0, coverageMs: 0, verifyTailMs: 0, totalMs },
+    usage: { byRole: {}, total: none, costUsd: 0 },
+    warnings: [],
+    review,
+  };
+}
+
+const EMPTY_THREAT_MODEL: ThreatModel = {
+  summary: "",
+  stack: [],
+  entryPoints: [],
+  authModel: "",
+  trustBoundaries: [],
+  sensitiveAssets: [],
+  dangerousSinks: [],
+  frameworkProtections: [],
+  abuseSurfaces: [],
+  subsystems: [],
+};
+
+/** Entry points and sinks per file: how risky a changed file is. */
+function riskByFile(routes: RouteInfo[], sinks: Array<{ at: string }>): (path: string) => number {
+  const counts = new Map<string, number>();
+  for (const { at } of [...routes, ...sinks]) {
+    const file = locationOf(at).file;
+    counts.set(file, (counts.get(file) ?? 0) + 1);
+  }
+  return (path) => counts.get(path) ?? 0;
+}
+
+function locationOf(at: string): { file: string; line: number } {
+  const colon = at.lastIndexOf(":");
+  return { file: at.slice(0, colon), line: Number(at.slice(colon + 1)) };
 }
 
 export interface VerifyOptions {

@@ -2,6 +2,7 @@ import type { IndexerClient } from "../indexer/client";
 import type { LlmClient } from "../llm";
 import type { Limiter, UsageMeter } from "./metrics";
 import type { Finding } from "./schema";
+import type { ChangedFile } from "./changes";
 import type { AgentTool, Wrap } from "./tools";
 
 export interface ScanLimits {
@@ -28,6 +29,10 @@ export interface ScanLimits {
   concurrency: number;
   /** Largest repository scanned, in lines of hand-written code. Default 1,000,000. */
   maxLoc: number;
+  /** PR reviews: hunters at most. Default 3. */
+  prMaxHunters: number;
+  /** PR reviews: changed lines reviewed before narrowing to the riskiest files. Default 5,000. */
+  prLineCap: number;
   /**
    * Wall-clock ceiling for the scan. Typical scans finish far inside it; it
    * bounds the worst case. The main hunt stops at 55% of it, the coverage
@@ -47,6 +52,8 @@ export const DEFAULT_LIMITS: ScanLimits = {
   reconTurns: 10,
   concurrency: 12,
   maxLoc: 1_000_000,
+  prMaxHunters: 3,
+  prLineCap: 5_000,
   timeBudgetMs: 15 * 60_000,
 };
 
@@ -73,5 +80,7 @@ export interface ScanContext {
   /** Rendered threat model; part of the cached prompt prefix. */
   threatModelText: string;
   counters: { rejected: number; duplicates: number };
+  /** PR reviews: the files under review. Findings must touch them. */
+  change?: ChangedFile[];
   emit(event: ScanEvent): void;
 }

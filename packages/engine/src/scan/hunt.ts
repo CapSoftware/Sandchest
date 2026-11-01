@@ -8,6 +8,7 @@ import { runAgent } from "./agent";
 import { CandidateRegistry, checkEvidence, fingerprint, normalizePath, type GatedCandidate } from "./gate";
 import { huntSystemPrompt } from "./prompts";
 import { CandidateSchema, type Candidate, type Lead, type ThreatModel } from "./schema";
+import { touchesChange, type ChangedFile } from "./changes";
 import { agentTool, formatLead, type AgentTool, type RouteInfo, type Wrap } from "./tools";
 import type { ScanContext } from "./context";
 
@@ -168,6 +169,42 @@ export function planCoverage(
     }));
 }
 
+/** Changed lines one PR hunter reviews. */
+const LINES_PER_PR_HUNTER = 600;
+
+/**
+ * PR review: the changed files split across a few hunters by size, each told
+ * to attack what the change introduces and to follow it into the codebase.
+ */
+export function planPrAssignments(files: ChangedFile[], routes: RouteInfo[], leads: Lead[], maxHunters: number, wrap: Wrap): Assignment[] {
+  const section = (title: string, lines: string[], empty: string) => `## ${title}\n${lines.length ? wrap(lines.join("\n")) : empty}`;
+  const total = files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+  const count = Math.max(1, Math.min(maxHunters, Math.ceil(total / LINES_PER_PR_HUNTER), files.length));
+
+  // Largest files first onto the lightest hunter: balanced groups.
+  const groups: ChangedFile[][] = Array.from({ length: count }, () => []);
+  const load = new Array<number>(count).fill(0);
+  for (const file of [...files].sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions))) {
+    const lightest = load.indexOf(Math.min(...load));
+    groups[lightest]!.push(file);
+    load[lightest]! += file.additions + file.deletions;
+  }
+
+  return groups.map((group, i) => {
+    const paths = new Set(group.map((f) => f.path));
+    const inGroup = (at: string | undefined) => !!at && paths.has(at.slice(0, at.lastIndexOf(":")));
+    return {
+      name: count > 1 ? `change ${i + 1}/${count}` : "change",
+      brief: [
+        "Your scope: this pull request's change. Attack what it introduces or alters: new or modified entry points, changed authorisation, new queries, commands, file access, outbound requests, markup and business rules, and anything that now reaches existing dangerous code. Read each diff with diff(path), read the surrounding code, and follow the data into the rest of the codebase. Report only issues the change introduces or touches.",
+        section("Changed files", group.map((f) => `- ${f.path} (${f.status}, +${f.additions} −${f.deletions})`), ""),
+        section("Entry points in these files", routes.filter((r) => inGroup(r.at)).map(formatRoute), "None found by the index."),
+        section("Leads in these files", leads.filter((lead) => inGroup(lead.at)).map(formatLead), "None from the sweep."),
+      ].join("\n\n"),
+    };
+  });
+}
+
 export interface HunterLimits {
   /** Turns every hunter gets. */
   turns: number;
@@ -229,6 +266,10 @@ function reportTool(
     if (!gate.ok) {
       ctx.counters.rejected++;
       return `Not recorded. Fix these and report again:\n- ${gate.problems.join("\n- ")}`;
+    }
+    if (ctx.change && !touchesChange(ctx.change, [gate.entry, ...gate.path])) {
+      ctx.counters.rejected++;
+      return "Not recorded. This is a PR review: report only issues this change introduces or touches, citing at least one changed line (see diff()). Leave pre-existing issues elsewhere to deep scans.";
     }
     const sink = gate.path.at(-1)!;
     const print = fingerprint(candidate.category, sink);
