@@ -56,8 +56,14 @@ describe("fix-check re-anchoring", () => {
     expect(moved!.entryPoint.line).toBe(4);
   });
 
+  test("follows a sink line that the fix rewrote", async () => {
+    const lines = new Map([["routes.ts", ["router.post(login)"]], ["login.ts", ["  const email = req.body.email;", 'db.query("... = $1", [email]);']]]);
+    const moved = await reanchor(finding, async (path) => lines.get(path));
+    expect(moved!.attackPath.at(-1)!.line).toBe(2);
+  });
+
   test("is stale when the sink's code is gone", async () => {
-    const lines = new Map([["routes.ts", ["router.post(login)"]], ["login.ts", ["  const email = req.body.email;", "db.query(sql, [email]);"]]]);
+    const lines = new Map([["routes.ts", ["router.post(login)"]], ["login.ts", ["  const email = req.body.email;", "return null;"]]]);
     expect(await reanchor(finding, async (path) => lines.get(path))).toBeUndefined();
   });
 });

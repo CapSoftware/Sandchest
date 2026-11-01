@@ -22,7 +22,8 @@ export async function spawnIndexer(
   const token = crypto.randomUUID();
   const child = spawn(binary, ["serve", root, "--host", "127.0.0.1", "--port", "0", "--exit-on-stdin-close"], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { PATH: process.env.PATH ?? "", SANDCHEST_INDEX_TOKEN: token },
+    // Only what the daemon needs: no host secrets.
+    env: { NODE_ENV: process.env.NODE_ENV, PATH: process.env.PATH ?? "", SANDCHEST_INDEX_TOKEN: token },
   });
 
   let stderr = "";

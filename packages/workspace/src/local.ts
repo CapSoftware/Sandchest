@@ -113,7 +113,8 @@ export class LocalWorkspace implements Workspace {
     return new Promise((resolve, reject) => {
       const child = spawn(file, args, {
         cwd,
-        env: { ...this.env, ...options.env },
+        // A deliberately minimal environment; Next's typings would otherwise insist on NODE_ENV.
+        env: { ...this.env, ...options.env } as unknown as NodeJS.ProcessEnv,
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
       });

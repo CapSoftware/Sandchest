@@ -165,6 +165,12 @@ export class Installation {
     );
   }
 
+  /** The commit a branch points at. */
+  async branchSha(repo: string, branch: string): Promise<string> {
+    const result = await githubRequest<{ commit: { sha: string } }>(this.auth, `/repos/${repo}/branches/${encodeURIComponent(branch)}`, {}, this.http);
+    return result.commit.sha;
+  }
+
   async comment(repo: string, issueNumber: number, body: string): Promise<void> {
     await githubRequest(this.auth, `/repos/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: { body } }, this.http);
   }

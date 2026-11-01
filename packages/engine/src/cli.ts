@@ -12,7 +12,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LocalWorkspace } from "@sandchest/workspace/local";
-import { startLocalIndexer } from "./indexer";
+import { startLocalIndexer } from "./indexer/local";
 import { createLlmClient, loadLlmConfig } from "./llm";
 import { createOsvClient, loadPricing, runScan, ThreatModelSchema, type ScanEvent, type ScanReport } from "./scan";
 

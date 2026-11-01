@@ -289,6 +289,56 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   };
 }
 
+export interface ReconResult {
+  threatModel: ThreatModel;
+  loc: number;
+  durationMs: number;
+  usage: RoleUsage;
+  costUsd?: number;
+}
+
+/** Builds the repo's threat model alone: the first scan after install, and refreshes. */
+export async function runRecon(options: Omit<ScanOptions, "threatModel" | "pullRequest">): Promise<ReconResult> {
+  const started = Date.now();
+  const limits: ScanLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const { indexer, signal } = options;
+  const emit = (event: ScanEvent) => options.onEvent?.(event);
+  emit({ type: "stage", stage: "index", message: "Indexing the code…" });
+  const [overview, { routes }, code] = await Promise.all([
+    indexer.call<Overview>("overview", {}, signal),
+    indexer.call<{ routes: RouteInfo[] }>("routes", { limit: 1000 }, signal),
+    codeSignals(indexer, signal),
+  ]);
+  if (overview.loc > limits.maxLoc) {
+    throw new ScanRefusedError(`This repository has ${overview.loc.toLocaleString("en")} lines of code; the limit is ${limits.maxLoc.toLocaleString("en")}.`);
+  }
+  const signals: Signals = { leads: buildLeads(code, []), vulns: [] };
+  const tag = `repo-data-${randomBytes(6).toString("hex")}`;
+  const wrap = createWrap(tag);
+  const meter = new UsageMeter();
+  emit({ type: "stage", stage: "recon", message: "Mapping the attack surface…" });
+  const threatModel = await recon(
+    {
+      client: options.client,
+      indexer,
+      tools: repoTools({ indexer, wrap, signals }),
+      limiter: new Limiter(limits.concurrency),
+      meter,
+      options: limits,
+      signal,
+      tag,
+      wrap,
+      counters: { rejected: 0, duplicates: 0 },
+      emit,
+    },
+    overview,
+    routes,
+    signals.leads,
+  );
+  emit({ type: "stage", stage: "done", message: `Mapped ${overview.routes} entry points and ${threatModel.subsystems.length} areas to dig into.` });
+  return { threatModel, loc: overview.loc, durationMs: Date.now() - started, usage: meter.total(), costUsd: options.pricing ? meter.cost(options.pricing) : undefined };
+}
+
 /** A PR with nothing to review: no model calls at all. */
 function emptyReport(started: number, overview: Overview, threatModel: ThreatModel | undefined, review: ScanReport["review"], totalMs: number): ScanReport {
   const none: RoleUsage = { requests: 0, retries: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };

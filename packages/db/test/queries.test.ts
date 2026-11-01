@@ -13,7 +13,6 @@ import {
   eventsSince,
   EventWriter,
   markFixed,
-  migrate,
   openFindings,
   removeInstallation,
   repoByGithubId,
@@ -24,6 +23,7 @@ import {
   type Db,
   type FindingInput,
 } from "../src";
+import { migrate } from "../src/migrate";
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
 const NAME = `sandchest_test_${process.pid}`;

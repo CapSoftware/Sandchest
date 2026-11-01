@@ -104,7 +104,11 @@ export function excerptLine(excerpt: string, line: number): string | undefined {
   return undefined;
 }
 
-/** The line holding `text` closest to where it used to be. */
+/**
+ * Where a cited line is now: the exact text closest to where it was, else
+ * the most similar line nearby (a fix usually rewrites the vulnerable line
+ * itself), else nothing.
+ */
 function nearest(content: string[], text: string, previous: number): number | undefined {
   let best: number | undefined;
   for (let i = 0; i < content.length; i++) {
@@ -113,7 +117,36 @@ function nearest(content: string[], text: string, previous: number): number | un
     if (Math.abs(line - previous) > MAX_DRIFT) continue;
     if (best === undefined || Math.abs(line - previous) < Math.abs(best - previous)) best = line;
   }
+  if (best !== undefined) return best;
+
+  const wanted = tokens(text);
+  let bestScore = SIMILARITY;
+  const from = Math.max(0, previous - 1 - SIMILAR_WINDOW);
+  const to = Math.min(content.length, previous + SIMILAR_WINDOW);
+  for (let i = from; i < to; i++) {
+    const score = dice(wanted, tokens(content[i]!));
+    if (score > bestScore) {
+      bestScore = score;
+      best = i + 1;
+    }
+  }
   return best;
+}
+
+/** How similar a rewritten line must be to count as the same line, and how far to look for it. */
+const SIMILARITY = 0.5;
+const SIMILAR_WINDOW = 40;
+
+function tokens(line: string): Set<string> {
+  return new Set(line.toLowerCase().match(/[a-z_$][\w$]*|\d+/g) ?? []);
+}
+
+/** Sørensen–Dice similarity of two token sets. */
+function dice(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const token of a) if (b.has(token)) shared++;
+  return (2 * shared) / (a.size + b.size);
 }
 
 /** A whole file's lines, or `undefined` if it no longer exists. */

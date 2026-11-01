@@ -9,7 +9,7 @@ export interface LocalIndexer extends AsyncDisposable {
 }
 
 /** Where `cargo build --release` puts the binary in this repository. */
-const DEFAULT_BINARY = resolve(import.meta.dir, "../../../../target/release/sandchest-index");
+const DEFAULT_BINARY = resolve(import.meta.dirname, "../../../../target/release/sandchest-index");
 
 /** Finds the indexer binary: `SANDCHEST_INDEXER_BIN`, then the workspace build output. */
 export function indexerBinary(env: Record<string, string | undefined> = process.env): string {
