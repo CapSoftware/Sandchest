@@ -8,7 +8,7 @@ import type { IndexerClient } from "../indexer/client";
 import { fixPrompt } from "./fix-prompt";
 import { fingerprint } from "./gate";
 import type { Advisory, OsvClient } from "./osv";
-import { productFirst } from "./paths";
+import { isNonProductAt, productFirst } from "./paths";
 import type { Finding, Lead, Severity } from "./schema";
 import type { Dependency, SinkInfo } from "./tools";
 
@@ -16,6 +16,8 @@ export interface DependencyVulns {
   ecosystem: string;
   name: string;
   version: string;
+  /** A dev/build/test dependency, not shipped in the product. */
+  dev: boolean;
   reachability: Dependency["reachability"];
   importedAt: string[];
   advisories: Advisory[];
@@ -65,7 +67,7 @@ export async function vulnerabilities(
     const vulns = dependencies
       .map((dep, i) => ({ ...dep, importedAt: dep.importedAt ?? [], advisories: advisories[i] ?? [] }))
       .filter((dep) => dep.advisories.length > 0)
-      .map(({ ecosystem, name, version, reachability, importedAt, advisories }) => ({ ecosystem, name, version, reachability, importedAt, advisories }));
+      .map(({ ecosystem, name, version, dev, reachability, importedAt, advisories }) => ({ ecosystem, name, version, dev, reachability, importedAt, advisories }));
     return { vulns };
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -122,51 +124,58 @@ export function persistentLeads(leads: Lead[]): Lead[] {
 }
 
 /**
- * Findings emitted deterministically for imported dependencies with a known
- * critical or high advisory, so the highest-severity known-vulnerable
- * dependencies are reported every run rather than only when a hunter happens
- * to surface them (a measured source of run-to-run variance). These are
- * software-composition facts — the package *is* at a vulnerable version and
- * *is* imported — so they are `corroborated` by construction and never fail
- * the evidence gate or the skeptic. Any package a hunter already reported is
- * skipped, so nothing is duplicated.
+ * Findings emitted deterministically for a known **critical** advisory in a
+ * dependency that is actually shipped — so the highest-severity known-vulnerable
+ * dependencies are reported every run rather than only when a hunter happens to
+ * surface them (a measured source of run-to-run variance, e.g. the next@16.3
+ * image-optimizer RCE). Deliberately conservative, to stay credible rather than
+ * turn into a dependency-audit firehose (measured on Cap, where a looser rule
+ * emitted 21 findings — dev tooling, config files and three copies of the same
+ * package):
+ *   - critical only (high advisories go to the leads hunter, which weighs exploitability);
+ *   - never a dev/build/test dependency (`dep.dev`);
+ *   - must have at least one *product* import site (not a test, dot-directory or config file);
+ *   - one finding per package, and none a hunter already reported.
+ * These are software-composition facts, so they are `corroborated` by
+ * construction and skip the gate and skeptic.
  */
 export function dependencyFindings(vulns: DependencyVulns[], already: Finding[]): Finding[] {
-  const covered = new Set(
-    already.filter((f) => f.category === "vulnerable_dependency").map((f) => f.title.split(/[@\s]/)[0]!.toLowerCase()),
-  );
+  const covered = new Set(already.filter((f) => f.category === "vulnerable_dependency").map((f) => f.title.split(/[@\s]/)[0]!.toLowerCase()));
+  const emitted = new Set<string>();
   const findings: Finding[] = [];
   for (const dep of vulns) {
-    if (dep.reachability !== "imported") continue;
-    const sev = worst(dep);
-    if (sev !== "critical" && sev !== "high") continue;
-    if (covered.has(dep.name.toLowerCase())) continue;
+    if (dep.dev || dep.reachability !== "imported") continue;
+    if (worst(dep) !== "critical") continue;
+    const name = dep.name.toLowerCase();
+    if (covered.has(name) || emitted.has(name)) continue;
+    const site = (dep.importedAt ?? []).find((s) => !isNonProductAt(s));
+    if (!site) continue; // imported only by tooling, tests or config — not the product's attack surface
 
-    const site = dep.importedAt[0] ?? dep.importedAt.find(Boolean) ?? "package.json:1";
+    emitted.add(name);
     const file = site.includes(":") ? site.slice(0, site.lastIndexOf(":")) : site;
     const line = Number(site.slice(file.length + 1)) || 1;
-    const top = dep.advisories.filter((a) => a.severity === sev).slice(0, 3);
+    const top = dep.advisories.filter((a) => a.severity === "critical").slice(0, 3);
     const ids = top.map((a) => a.id).join(", ");
     const fixedIn = top.map((a) => a.fixed).find(Boolean);
     const base: Omit<Finding, "fixPrompt"> = {
       fingerprint: fingerprint("vulnerable_dependency", { file, line, text: `${dep.name}@${dep.version} ${ids}`, symbol: dep.name }),
-      title: `${dep.name}@${dep.version} ships a known ${sev} vulnerability (${ids})`,
-      severity: sev,
-      confidence: sev === "critical" ? "high" : "medium",
+      title: `${dep.name}@${dep.version} ships a known critical vulnerability (${ids})`,
+      severity: "critical",
+      confidence: "high",
       category: "vulnerable_dependency",
       cwe: null,
-      impact: top[0]?.summary ?? `${dep.name} has a known ${sev} vulnerability.`,
+      impact: top[0]?.summary ?? `${dep.name} has a known critical vulnerability.`,
       entryPoint: { file, line, description: `${dep.name}@${dep.version} imported here` },
       attackPath: [{ file, line, note: `Vulnerable dependency ${dep.name}@${dep.version} is imported and reachable here`, excerpt: "" }],
       attacker: "unauthenticated",
-      preconditions: `The project depends on ${dep.name}@${dep.version}, which is imported into the application.`,
+      preconditions: `The project depends on ${dep.name}@${dep.version}, which is imported into shipped code.`,
       proofOfConcept: `${dep.name}@${dep.version} is affected by ${ids}: ${top[0]?.summary ?? "see the advisory"}. Consult the advisory for a working exploit against this version.`,
       fixGuidance: fixedIn ? `Upgrade ${dep.name} to ${fixedIn} or later.` : `Upgrade ${dep.name} to a patched version, or remove the dependency.`,
       guarantees: [`The project no longer depends on a version of ${dep.name} affected by ${ids}.`],
       mustNotBreak: [],
       regressionTest: `After upgrading, re-run the scan and confirm ${ids} no longer appears for ${dep.name}.`,
       leads: [],
-      skeptic: { confidence: sev === "critical" ? "high" : "medium", reasoning: "Deterministic software-composition fact: the advisory applies to the imported version." },
+      skeptic: { confidence: "high", reasoning: "Deterministic software-composition fact: the critical advisory applies to the imported version." },
     };
     findings.push({ ...base, fixPrompt: fixPrompt(base) });
   }
