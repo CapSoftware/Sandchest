@@ -128,6 +128,20 @@ done
 inside=$(compose exec -T web wget -q -O - "http://127.0.0.1:3001/.well-known/workflow/v1/flow?__health" 2>&1 || true)
 [ -n "$inside" ] || fail "the flow route did not answer on loopback inside the container"
 pass "inside the container, loopback reaches it: ${inside:0:60}"
+# Next's image optimiser fetches its url parameter from inside the server: it must not be a way in.
+for path in "/_next/image?url=%2F.well-known%2Fworkflow%2Fv1%2Fwebhook%2Fx&w=64&q=75" "/_next/image?url=%2Fsandchest-logo-dark.svg&w=64&q=75"; do
+  expect_status "$BASE$path" 404
+done
+direct=$(compose exec -T web wget -q -S -O /dev/null "http://127.0.0.1:3001/_next/image?url=%2Fsandchest-logo-dark.svg&w=64&q=75" 2>&1 || true)
+grep -q "HTTP/1.1 200" <<<"$direct" && fail "the image optimiser is on"
+compose logs --no-color web | contains -i "resumeWebhook\|webhook/x" && fail "a workflow handler ran for the image route"
+pass "the image optimiser is off in Next as well, and no workflow handler ran"
+
+step "The web container is locked down"
+compose exec -T web touch /app/probe 2>/dev/null && fail "the root file system is writable"
+[ "$(compose exec -T web grep CapEff /proc/1/status | tr -d '[:space:]')" = "CapEff:0000000000000000" ] || fail "the server has capabilities"
+compose exec -T web grep -q NoNewPrivs:.*1 /proc/1/status || fail "privilege escalation is not blocked"
+pass "read-only root, no capabilities, no new privileges"
 
 step "Setup with the token from the log"
 TOKEN=$(compose logs --no-color web | grep -o 'setup/unlock?token=[A-Za-z0-9_-]*' | tail -1 | cut -d= -f2)
@@ -213,11 +227,47 @@ pass "deep scan completed $(($(date +%s) - started)) s after it started"
 findings=$(sql "select severity || ' ' || title from findings")
 grep -q "high SQL injection in login" <<<"$findings" || fail "expected the SQL injection finding, got: $findings"
 pass "finding stored: $findings"
+leftovers=$(compose exec -T web find /tmp -mindepth 1 -maxdepth 1 -name 'sandchest-*')
+[ -z "$leftovers" ] || fail "scan workspaces left behind: $leftovers"
+pass "no scan workspace left in /tmp"
+
+step "Pull request opened → in-progress Check, review, failing Check"
+pr=$(cat <<JSON
+{"action":"opened","number":5,"installation":{"id":77},"repository":{"id":1001,"full_name":"acme/app","private":true,"default_branch":"main"},"sender":{"login":"dev"},"pull_request":{"number":5,"draft":false,"author_association":"MEMBER","head":{"sha":"$HEAD_SHA","ref":"feature","repo":{"id":1001,"full_name":"acme/app"}},"base":{"sha":"$HEAD_SHA","ref":"main","repo":{"id":1001}}}}
+JSON
+)
+signature="sha256=$(printf '%s' "$pr" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -r | cut -d' ' -f1)"
+response=$(curl -s -X POST "$BASE/api/github/webhooks" -H 'content-type: application/json' -H 'x-github-event: pull_request' -H "x-github-delivery: e2e-pr-$(date +%s)" -H "x-hub-signature-256: $signature" -d "$pr")
+grep -q '"status":"handled"' <<<"$response" || fail "pull_request webhook: $response"
+started=$(date +%s)
+wait_for_scan pr_review
+pass "review completed in $(($(date +%s) - started)) s"
+posted=$(compose exec -T fakes wget -q -O - http://127.0.0.1:4010/posted)
+node -e '
+  const { checks, reviews } = JSON.parse(process.argv[1]);
+  const fail = (message) => { console.error(message, JSON.stringify({ checks, reviews })); process.exit(1); };
+  if (checks.length !== 1) fail("expected one Check run");
+  const [check] = checks;
+  if (check.headSha !== process.argv[2] || check.createdAs !== "in_progress" || check.firstTitle !== "Digging…") fail("the Check did not start in progress on the head commit");
+  if (check.status !== "completed" || check.conclusion !== "failure") fail("the Check did not fail on a high finding");
+  if (!check.detailsUrl?.startsWith(process.argv[3] + "/scans/")) fail("the Check does not link to the scan");
+  if (reviews.length !== 1 || reviews[0].commitId !== process.argv[2]) fail("expected one review on the head commit");
+  const [comment] = reviews[0].comments;
+  if (reviews[0].comments.length !== 1 || comment.path !== "app.js" || comment.line !== 4) fail("expected one inline comment on app.js line 4");
+  console.log(`Check: in_progress → ${check.conclusion} ("${check.title}"); review: ${reviews[0].comments.length} inline comment at ${comment.path}:${comment.line}`);
+' "$posted" "$HEAD_SHA" "$BASE" >"$WORK/pr.txt" || fail "pull request outcome: $(cat "$WORK/pr.txt")"
+pass "$(cat "$WORK/pr.txt")"
 runs=$(sql "select status || '=' || count(*) from workflow.workflow_runs group by status order by 1" | tr '\n' ' ')
-grep -q "completed=2" <<<"$runs" || fail "workflow runs: $runs"
+grep -q "completed=3" <<<"$runs" || fail "workflow runs: $runs"
 pass "workflow runs on the Postgres World: $runs"
 stats=$(compose exec -T fakes wget -q -O - http://127.0.0.1:4010/stats)
 grep -q '"tokensRefused":0' <<<"$stats" || fail "an installation token was refused: $stats"
 pass "fakes: $stats"
+
+step "A bad setting stops the server instead of failing every request"
+if out=$(compose run --rm --no-deps -T -e SANDCHEST_ADMIN_TOKEN=too-short web 2>&1); then fail "the server started with a 9-character admin token"; fi
+grep -q "Sandchest cannot start" <<<"$out" && grep -q "SANDCHEST_ADMIN_TOKEN: Too small" <<<"$out" || fail "unclear exit: $out"
+grep -q "too-short" <<<"$out" && fail "the bad value reached the log"
+pass "exited non-zero: $(grep -A1 'Sandchest cannot start' <<<"$out" | tr -s ' \n' ' ')"
 
 step "All checks passed"

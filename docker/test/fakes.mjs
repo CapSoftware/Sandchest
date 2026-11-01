@@ -4,10 +4,12 @@
  *
  * GitHub: the manifest conversion (one code, usable once), installation
  * tokens (only for a JWT signed with the App's key), the installation's
- * repositories and a branch's head. The model: just enough of the
+ * repositories, a branch's head, and a pull request's files, Check runs and
+ * review. The model: just enough of the
  * chat-completions stream to take one scan from recon to a finding.
  *
- * POST /control?delayMs=N slows the model down; GET /stats counts calls.
+ * POST /control?delayMs=N slows the model down; GET /stats counts calls; GET /posted
+ * returns the check runs and reviews the App posted.
  *
  * Env: FAKE_PEM_FILE (the App's private key), FAKE_HEAD_SHA (the test repo's
  * main branch), FAKE_PORT (default 4010).
@@ -24,6 +26,11 @@ const CODE = "e2e-code";
 
 const stats = { conversions: 0, conversionsRefused: 0, tokens: 0, tokensRefused: 0, chats: 0, roles: {} };
 let codeUsed = false;
+/** Check runs and reviews the App posted, for the test to read back. */
+const checks = [];
+const reviews = [];
+const PR_PATCH =
+  '@@ -1,7 +1,7 @@\n const express = require("express")\n const app = express()\n app.post("/login", async (req, res) => {\n-  const rows = await db.query("SELECT 1")\n+  const rows = await db.query("SELECT * FROM users WHERE email = \'" + req.body.email + "\'")\n   res.json(rows)\n })\n module.exports = app';
 /** How long the model takes to answer; the test slows it down to restart the server mid-scan. */
 let delayMs = 0;
 
@@ -123,6 +130,7 @@ http
         return;
       }
       if (request.method === "GET" && path === "/stats") return json(response, 200, stats);
+      if (request.method === "GET" && path === "/posted") return json(response, 200, { checks, reviews });
       if (request.method === "POST" && path === "/control") {
         delayMs = Number(url.searchParams.get("delayMs") ?? 0);
         return json(response, 200, { delayMs });
@@ -163,6 +171,29 @@ http
         return json(response, 200, { total_count: 1, repositories: [{ id: 1001, full_name: "acme/app", private: true, default_branch: "main" }] });
       }
       if (request.method === "GET" && path === "/repos/acme/app/branches/main") return json(response, 200, { commit: { sha: process.env.FAKE_HEAD_SHA } });
+
+      // Pull request 5 adds the vulnerable query on line 4.
+      if (request.method === "GET" && path === "/repos/acme/app/pulls/5/files") {
+        return json(response, 200, [{ filename: "app.js", status: "modified", additions: 1, deletions: 1, patch: PR_PATCH }]);
+      }
+      if (request.method === "POST" && path === "/repos/acme/app/check-runs") {
+        const body = JSON.parse(raw);
+        checks.push({ id: checks.length + 1, headSha: body.head_sha, createdAs: body.status, firstTitle: body.output?.title, detailsUrl: body.details_url });
+        return json(response, 201, { id: checks.length });
+      }
+      const checkRun = path.match(/^\/repos\/acme\/app\/check-runs\/(\d+)$/);
+      if (request.method === "PATCH" && checkRun) {
+        const body = JSON.parse(raw);
+        const check = checks[Number(checkRun[1]) - 1];
+        if (!check) return json(response, 404, { message: "Not Found" });
+        Object.assign(check, { status: body.status, conclusion: body.conclusion, title: body.output?.title });
+        return json(response, 200, { id: check.id });
+      }
+      if (request.method === "POST" && path === "/repos/acme/app/pulls/5/reviews") {
+        const body = JSON.parse(raw);
+        reviews.push({ commitId: body.commit_id, event: body.event, comments: (body.comments ?? []).map((c) => ({ path: c.path, line: c.line, side: c.side })) });
+        return json(response, 200, { id: reviews.length });
+      }
 
       console.log(`fakes: unexpected ${request.method} ${path}`);
       return json(response, 404, { message: "Not Found" });
