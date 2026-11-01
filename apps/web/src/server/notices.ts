@@ -57,21 +57,37 @@ type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetA
  * In order: decide whether this is a crossing, from the stored level; only
  * then find who to tell (which may ask GitHub, outside any lock); with nobody,
  * leave the level alone so a later balance can announce it; otherwise commit
- * the crossing, unless someone moved the level meanwhile.
+ * the crossing if the level's revision hasn't moved. If it has, look again
+ * with the same balance: it may still be a crossing (an exhausted balance
+ * after someone else's low one), or now be stale or already covered.
  */
 export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, seen: BalanceSeen): Promise<void> {
   const plan = planById(billing.planId);
   if (!plan) return;
   const level = creditLevel(plan, billing.credits);
   const index = CREDIT_LEVELS.indexOf(level);
-  const crossing = await observeCreditLevel(db(), org.id, index, seen, { raise: level !== "ok" && !billing.autoTopUp?.enabled });
-  if (!crossing) return;
-  // Without a mailer the level still moves; there is just nobody to email.
-  const to = mailer().enabled ? await recipients(org.id, `${level} credits email`, "billing") : [];
-  if (to === null || !(await raiseCreditLevel(db(), org.id, index, seen, crossing)) || to.length === 0) return;
-  const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
-  await send(org.id, to, level === "low" ? creditsLowEmail({ ...input, credits: billing.credits }) : creditsExhaustedEmail(input));
+  const raise = level !== "ok" && !billing.autoTopUp?.enabled;
+  let to: string[] | undefined;
+  for (let attempt = 0; attempt < MAX_RAISE_ATTEMPTS; attempt++) {
+    const crossing = await observeCreditLevel(db(), org.id, index, seen, { raise, retry: attempt > 0 });
+    if (!crossing) return;
+    if (!to) {
+      // Without a mailer the level still moves; there is just nobody to email.
+      const found = mailer().enabled ? await recipients(org.id, `${level} credits email`, "billing") : [];
+      if (found === null) return;
+      to = found;
+    }
+    if (!(await raiseCreditLevel(db(), org.id, index, seen, crossing))) continue;
+    if (to.length === 0) return;
+    const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
+    await send(org.id, to, level === "low" ? creditsLowEmail({ ...input, credits: billing.credits }) : creditsExhaustedEmail(input));
+    return;
+  }
+  console.warn(`The credit level of org ${org.id} kept changing: ${level} credits email not sent`);
 }
+
+/** How many times a crossing is looked at again after someone else moved the level first. */
+const MAX_RAISE_ATTEMPTS = 5;
 
 /** What became of an org-wide email: sent, already sent by an earlier caller, or not sent (and not reserved) for want of a mailer or a recipient. */
 export type NoticeOutcome = "sent" | "duplicate" | "skipped";

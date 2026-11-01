@@ -7,4 +7,5 @@ CREATE TABLE "org_notices" (
 --> statement-breakpoint
 ALTER TABLE "org_billing" ADD COLUMN "credit_level" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "org_billing" ADD COLUMN "credit_level_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "org_billing" ADD COLUMN "credit_level_rev" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "org_notices" ADD CONSTRAINT "org_notices_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE cascade ON UPDATE no action;

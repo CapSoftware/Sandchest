@@ -371,6 +371,12 @@ export const orgBilling = pgTable("org_billing", {
   creditLevel: smallint("credit_level").notNull().default(0),
   /** When the last balance that counted toward the level was answered. Older answers are ignored. */
   creditLevelAt: timestamp("credit_level_at", { withTimezone: true }),
+  /**
+   * Goes up by one with every balance that counts and every crossing raised:
+   * what a raise compares and sets against. Timestamps can repeat (two
+   * answers in one millisecond), a revision can't.
+   */
+  creditLevelRev: bigint("credit_level_rev", { mode: "number" }).notNull().default(0),
 });
 
 /**

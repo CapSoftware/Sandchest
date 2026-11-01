@@ -576,7 +576,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
   let nextGithubId = 9_000;
   /** An org whose admins all last signed in 40 days ago. */
   async function staleOrg(installationId: number, login: string, type: "User" | "Organization", admins: Array<{ login: string; githubUserId?: number }>) {
-    const accountId = installationId * 10;
+    const accountId = installationId * 100; // Clear of the other accounts in this file.
     const { org, repos } = await upsertInstallation(database, installationId, { githubAccountId: accountId, githubLogin: login, type }, [
       { githubRepoId: installationId, fullName: `${login}/private-app`, private: true, defaultBranch: "main" },
     ]);
@@ -639,8 +639,8 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
   });
 
   test("a personal account's admin is its owner; no need to ask GitHub", async () => {
-    const { org, accountId } = await staleOrg(606, "pat", "User", [{ login: "pat", githubUserId: 6060 }, { login: "mallory", githubUserId: 6061 }]);
-    expect(accountId).toBe(6060);
+    const { org, accountId } = await staleOrg(606, "pat", "User", [{ login: "pat", githubUserId: 60_600 }, { login: "mallory", githubUserId: 60_601 }]);
+    expect(accountId).toBe(60_600);
     const before = await adminRows(org.id);
     githubAsked.length = 0;
     expect(await noticeAutoTopUp(org, { invoiceId: "in_pat", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
@@ -684,6 +684,81 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     // A later low balance announces it.
     await noticeCredits(org, { ...lockbox, credits: 8 }, now());
     expect(sent.map((email) => [email.to, email.subject])).toEqual([[["lena@example.com"], "8 credits left on raceco"]]);
+    drain();
+  });
+
+  /** Holds every GitHub call until released, so a test decides who commits first. */
+  function holdGithub() {
+    const held: Array<() => void> = [];
+    whileAsking = () => new Promise<void>((resolve) => void held.push(resolve));
+    const until = async (count: number) => {
+      for (let i = 0; i < 1_000 && held.length < count; i++) await Bun.sleep(2);
+      expect(held.length).toBe(count);
+    };
+    return { held, until, stop: () => (whileAsking = undefined) };
+  }
+
+  async function orgWithBilling(installationId: number, login: string, admin: string) {
+    const made = await staleOrg(installationId, login, "Organization", [{ login: admin }]);
+    githubMembers.set(`${login}/${admin}`, { userId: made.ids[admin]!, role: "admin" });
+    await saveOrgBilling(database, made.org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 60, creditsResetAt: null, autoTopUp: null });
+    return made.org;
+  }
+  const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
+
+  test("a newer, more severe crossing that loses its raise to an older one looks again, and is announced", async () => {
+    const org = await orgWithBilling(609, "waveco", "nina");
+    const t = Date.now();
+    const lowSeen = { from: new Date(t - 3_000), to: new Date(t - 2_000) };
+    const emptySeen = { from: new Date(t - 1_000), to: new Date(t) };
+    const gate = holdGithub();
+    // Both find a crossing from level 0, then wait on GitHub for who to tell.
+    const low = noticeCredits(org, { ...lockbox, credits: 9 }, lowSeen);
+    await gate.until(1);
+    const empty = noticeCredits(org, { ...lockbox, credits: 0 }, emptySeen);
+    await gate.until(2);
+    gate.stop();
+    // The older low balance raises first; the empty one's raise then fails, and it looks again from level 1.
+    gate.held[0]!();
+    await low;
+    gate.held[1]!();
+    await empty;
+    expect(subjects()).toEqual(["9 credits left on waveco", "Out of credits on waveco"]);
+    expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(2);
+    drain();
+  });
+
+  test("a raise compares revisions, not timestamps: equal-millisecond answers can't announce a crossing twice", async () => {
+    const org = await orgWithBilling(610, "abaco", "olga");
+    const T = new Date();
+    const same = { from: T, to: T };
+    const gate = holdGithub();
+    const first = noticeCredits(org, { ...lockbox, credits: 9 }, same);
+    await gate.until(1);
+    const second = noticeCredits(org, { ...lockbox, credits: 9 }, same);
+    await gate.until(2);
+    gate.stop();
+    gate.held[0]!();
+    await first;
+    expect(subjects()).toEqual(["9 credits left on abaco"]);
+    // A recovery in the same millisecond puts level and timestamp back where the second one read them.
+    await noticeCredits(org, { ...lockbox, credits: 60 }, same);
+    expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
+    gate.held[1]!();
+    await second;
+    // The revision moved twice, so the delayed raise fails; looking again, the recovery is at least as new.
+    expect(subjects()).toEqual(["9 credits left on abaco"]);
+    expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
+    drain();
+  });
+
+  test("waves of 100 concurrent observers: one email per crossing, none for recoveries", async () => {
+    const org = await orgWithBilling(611, "crowdco", "pia");
+    githubAsked.length = 0;
+    for (const credits of [9, 60, 0, 60, 5, 0]) {
+      await Promise.all(Array.from({ length: 100 }, () => noticeCredits(org, { ...lockbox, credits }, now())));
+    }
+    expect(subjects()).toEqual(["9 credits left on crowdco", "Out of credits on crowdco", "5 credits left on crowdco", "Out of credits on crowdco"]);
     drain();
   });
 });

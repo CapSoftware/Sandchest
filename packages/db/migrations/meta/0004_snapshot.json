@@ -1,5 +1,5 @@
 {
-  "id": "1397d564-39bc-4c20-a704-26d9b19f151d",
+  "id": "21686933-cfa9-47bd-97d7-51084b2572d9",
   "prevId": "998688e2-43cc-4257-a7ef-17e7a9fa1b29",
   "version": "7",
   "dialect": "postgresql",
@@ -665,6 +665,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "credit_level_rev": {
+          "name": "credit_level_rev",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         }
       },
       "indexes": {},
