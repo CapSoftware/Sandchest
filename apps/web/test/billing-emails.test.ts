@@ -7,15 +7,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
 import { signWebhook } from "@sandchest/billing";
-import { billingRecipients, createDb, orgBillingRow, saveOrgBilling, schema, upsertInstallation, type Db } from "@sandchest/db";
+import { createDb, orgAdminContacts, orgBillingRow, saveOrgBilling, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Email, Mailer } from "@sandchest/email";
+import type { GitHubApp } from "@sandchest/github";
 import { POST as autumnWebhook } from "@/app/api/autumn/webhooks/route";
 import { money } from "@/server/autumn-webhooks";
 import { applyAutoTopUp, reserveScan, setAutumn, syncBilling } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { setMailer } from "@/server/mailer";
-import { noticeAutoTopUp, noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
+import { noticeAutoTopUp, noticeAutoTopUpFailed, noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
 import { FakeAutumn } from "./fake-autumn";
@@ -31,6 +32,20 @@ let available = true;
 const sent: Email[] = [];
 const recordingMailer: Mailer = { enabled: true, send: async (email) => void sent.push(email) };
 const autumn = new FakeAutumn();
+
+/** GitHub's answer to "is this person still an admin of this org?", asked with an installation's token. */
+const githubAdmins = new Set<string>();
+const githubAsked: string[] = [];
+let githubDown = false;
+const fakeGithub = {
+  installation: (installationId: number) => ({
+    isOrgAdmin: async (org: string, login: string) => {
+      githubAsked.push(`${installationId}:${org}/${login}`);
+      if (githubDown) throw new Error("GitHub 502: Bad Gateway");
+      return githubAdmins.has(`${org}/${login}`);
+    },
+  }),
+} as unknown as GitHubApp;
 const started: string[] = [];
 let acme: { id: string; githubLogin: string };
 let repoId: string;
@@ -57,7 +72,7 @@ beforeAll(async () => {
   resetConfig();
   database = createDb(url.toString(), { max: 10 });
   await migrate(database);
-  setServices({ db: database, mailer: recordingMailer });
+  setServices({ db: database, mailer: recordingMailer, github: fakeGithub });
   setAutumn(autumn);
   setScanStarter(async (id) => void started.push(id));
 
@@ -104,8 +119,11 @@ afterAll(async () => {
 const reserve = (credits: number) => reserveScan(`00000000-0000-4000-8000-${String(++lock).padStart(12, "0")}`, acme, credits, false);
 const level = async () => (await orgBillingRow(database, acme.id))!.creditLevel;
 const subjects = () => sent.map((email) => email.subject);
-/** Every admin with a real address: Alice, and Carol whom GitHub last confirmed 40 days ago. Not Bob (no-reply) or Dave (not an admin). */
-const ADMINS = ["alice@example.com", "carol@example.com"];
+/**
+ * Who hears about acme's billing: Alice, the admin GitHub confirmed recently. Not Carol, whom it last
+ * confirmed 40 days ago (she may have left), Bob (a no-reply placeholder) or Dave (not an admin).
+ */
+const ADMINS = ["alice@example.com"];
 /** A balance seen just now. */
 const now = () => {
   const at = new Date();
@@ -148,10 +166,17 @@ const topUpFailed = (reason: string, balance: number | null = 8) => ({
 });
 
 describe.skipIf(!available)("billing emails", () => {
-  test("go to every admin of the org with a real address, however long ago GitHub confirmed them", async () => {
-    // Carol set billing up and hasn't signed in for 40 days: she is exactly who these are for.
-    expect((await billingRecipients(database, acme.id)).sort()).toEqual(ADMINS);
-    expect(sent).toHaveLength(0);
+  test("admins GitHub confirmed recently are preferred over stale ones, without asking GitHub", async () => {
+    const contacts = await orgAdminContacts(database, acme.id);
+    expect(contacts.map((admin) => [admin.email, admin.fresh]).sort()).toEqual([
+      ["alice@example.com", true],
+      ["carol@example.com", false],
+    ]);
+    await noticeCredits(acme, { planId: "lockbox", credits: 9, creditsResetAt: null, autoTopUp: null }, now());
+    expect(sent.map((email) => email.to)).toEqual([ADMINS]);
+    expect(githubAsked).toEqual([]);
+    drain();
+    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, now());
     expect(await level()).toBe(0);
   });
 
@@ -321,7 +346,7 @@ describe.skipIf(!available)("billing emails", () => {
     }
     expect(sent).toHaveLength(0);
     expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
-    expect(warned).toEqual([`No admin of org ${org.id} has an email address: low credits email not sent`, `No admin of org ${org.id} has an email address: auto top-up email not sent`]);
+    expect(warned).toEqual([`No admin of org ${org.id} to email: low credits email not sent`, `No admin of org ${org.id} to email: auto top-up email not sent`]);
 
     const [admin] = await database.insert(schema.users).values({ name: "erin", email: "erin@example.com", login: "erin" }).returning();
     await database.insert(schema.orgAdmins).values({ userId: admin!.id, orgId: org.id });
@@ -524,5 +549,88 @@ describe.skipIf(!available)("scan paused", () => {
     quiet.repo.org.settings = { checkThreshold: "high", emailNotifications: false };
     expect(await noticeScanPaused(quiet, new Date("2030-01-01T12:00:00Z"))).toBe(false);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!available)("admins nobody has confirmed lately", () => {
+  /** An org whose admins all last signed in 40 days ago. */
+  async function staleOrg(installationId: number, login: string, type: "User" | "Organization", admins: Array<{ login: string; githubUserId?: number }>) {
+    const accountId = installationId * 10;
+    const { org, repos } = await upsertInstallation(database, installationId, { githubAccountId: accountId, githubLogin: login, type }, [
+      { githubRepoId: installationId, fullName: `${login}/private-app`, private: true, defaultBranch: "main" },
+    ]);
+    const old = new Date(Date.now() - 40 * 86_400_000);
+    for (const admin of admins) {
+      const [user] = await database.insert(schema.users).values({ name: admin.login, email: `${admin.login}@example.com`, login: admin.login, githubUserId: admin.githubUserId ?? null }).returning();
+      await database.insert(schema.orgAdmins).values({ userId: user!.id, orgId: org.id, checkedAt: old });
+    }
+    return { org: { id: org.id, githubLogin: login, settings: org.settings }, repoId: repos[0]!.id, accountId };
+  }
+  const fresh = async (orgId: string) => (await orgAdminContacts(database, orgId)).map((admin) => [admin.email, admin.fresh]).sort();
+
+  test("a stale admin doesn't get 'scan paused', which names private repositories", async () => {
+    const { org, repoId: staleRepo } = await staleOrg(604, "oldco", "Organization", [{ login: "frank" }]);
+    const [row] = await database.insert(schema.scans).values({ repoId: staleRepo, orgId: org.id, kind: "pr_review", trigger: "webhook", headSha: "abc", status: "failed", prNumber: 3 }).returning();
+    const warned: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+    try {
+      expect(await noticeScanPaused({ id: row!.id, kind: "pr_review", prNumber: 3, repo: { fullName: "oldco/private-app", org } })).toBe(false);
+    } finally {
+      console.warn = original;
+    }
+    expect(sent).toHaveLength(0);
+    expect(githubAsked).toEqual([]);
+    expect(warned).toEqual([`No admin of org ${org.id} to email: scan paused email not sent`]);
+    // Nothing was reserved, so the scan can still be announced once someone is confirmed.
+    expect((await database.query.scans.findFirst({ where: (scans, { eq }) => eq(scans.id, row!.id) }))!.notifiedAt).toBeNull();
+  });
+
+  test("with only stale admins, billing emails ask GitHub first and go only to those still admins", async () => {
+    const { org } = await staleOrg(605, "driftco", "Organization", [{ login: "grace" }, { login: "heidi" }]);
+    githubAdmins.add("driftco/grace");
+    githubAsked.length = 0;
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_1", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
+    expect(sent.map((email) => email.to)).toEqual([["grace@example.com"]]);
+    expect(githubAsked.sort()).toEqual(["605:driftco/grace", "605:driftco/heidi"]);
+    // GitHub's answer is recorded: Grace is fresh again, Heidi is no longer an admin.
+    expect(await fresh(org.id)).toEqual([["grace@example.com", true]]);
+    drain();
+    // So the next email doesn't need to ask.
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_2", added: 25, charged: "$10.00", credits: 59 })).toBe("sent");
+    expect(githubAsked).toHaveLength(2);
+    drain();
+  });
+
+  test("a personal account's admin is its owner; no need to ask GitHub", async () => {
+    const { org, accountId } = await staleOrg(606, "pat", "User", [{ login: "pat", githubUserId: 6060 }, { login: "mallory", githubUserId: 6061 }]);
+    expect(accountId).toBe(6060);
+    githubAsked.length = 0;
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_pat", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
+    expect(sent.map((email) => email.to)).toEqual([["pat@example.com"]]);
+    expect(githubAsked).toEqual([]);
+    expect(await fresh(org.id)).toEqual([["pat@example.com", true]]);
+    drain();
+  });
+
+  test("if GitHub can't be asked, billing emails go to the stale admins, and nothing is recorded", async () => {
+    const { org } = await staleOrg(607, "downco", "Organization", [{ login: "ivan" }, { login: "judy" }]);
+    githubDown = true;
+    const warned: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+    try {
+      expect(await noticeAutoTopUpFailed(org, { reason: "card", credits: 3 })).toBe("sent");
+    } finally {
+      console.warn = original;
+      githubDown = false;
+    }
+    expect(sent.map((email) => [...email.to].sort())).toEqual([["ivan@example.com", "judy@example.com"]]);
+    expect(warned).toEqual([`Couldn't check the admins of org ${org.id} with GitHub (Error): emailing the last known ones`]);
+    expect(await fresh(org.id)).toEqual([
+      ["ivan@example.com", false],
+      ["judy@example.com", false],
+    ]);
+    drain();
   });
 });

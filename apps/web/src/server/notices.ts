@@ -11,17 +11,29 @@
  *   and concurrent callers send it at most once. With nobody to send it to,
  *   nothing is reserved, so a later trigger can still send it once there is.
  * - Recipients are the org's admins, the people who can change its billing,
- *   with a real address. Billing emails ignore the email toggle: they are
- *   rare by construction and are how an admin learns reviews are about to
- *   stop. The scan-paused email follows the toggle like other scan emails.
+ *   with a real address (see `recipients`). Billing emails ignore the email
+ *   toggle: they are rare by construction and are how an admin learns
+ *   reviews are about to stop. The scan-paused email follows the toggle like
+ *   other scan emails.
  * - Nothing here logs an address or an email's contents; only opaque ids.
  */
 import { CREDIT_LEVELS, creditLevel, planById } from "@sandchest/billing/plans";
-import { billingRecipients, claimNotification, claimOrgNotice, recordCreditLevel, type BalanceSeen, type OrgBillingRow, type OrgSettings } from "@sandchest/db";
+import {
+  claimNotification,
+  claimOrgNotice,
+  orgAdminContacts,
+  recordCreditLevel,
+  refreshOrgAdmins,
+  type BalanceSeen,
+  type OrgAdminContact,
+  type OrgBillingRow,
+  type OrgSettings,
+} from "@sandchest/db";
 import { autoTopUpFailedEmail, autoTopUpSucceededEmail, creditsExhaustedEmail, creditsLowEmail, scanPausedEmail, type RenderedEmail } from "@sandchest/email";
 import { shortDate } from "@/lib/format";
 import { config } from "./config";
 import { db } from "./db";
+import { githubApp } from "./github-app";
 import { mailer } from "./mailer";
 
 export interface NoticeOrg {
@@ -29,7 +41,8 @@ export interface NoticeOrg {
   githubLogin: string;
 }
 
-type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetAt" | "autoTopUp">;
+/** `creditLevel`, when known: the level stored before this balance, so a balance already announced looks no one up. */
+type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetAt" | "autoTopUp"> & { creditLevel?: number };
 
 /**
  * Checks a balance Sandchest just learned (a reservation's answer, or a read
@@ -46,9 +59,9 @@ export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, se
   const plan = planById(billing.planId);
   if (!plan) return;
   const level = creditLevel(plan, billing.credits);
-  let raise = level !== "ok" && !billing.autoTopUp?.enabled;
+  let raise = level !== "ok" && !billing.autoTopUp?.enabled && !(billing.creditLevel !== undefined && CREDIT_LEVELS.indexOf(level) <= billing.creditLevel);
   // Nobody to tell: leave the level where it is, so the crossing is announced once someone is.
-  const to = raise && mailer().enabled ? await recipients(org.id, `${level} credits email`) : [];
+  const to = raise && mailer().enabled ? await recipients(org.id, `${level} credits email`, "billing") : [];
   if (to === null) raise = false;
   if (!(await recordCreditLevel(db(), org.id, CREDIT_LEVELS.indexOf(level), seen, { raise })) || !to?.length) return;
   const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
@@ -91,7 +104,7 @@ export async function noticeScanPaused(scan: PausedScan, at = new Date()): Promi
   if (scan.kind === "fix_check") return false;
   const org = scan.repo.org;
   if (org.settings.emailNotifications === false || !mailer().enabled) return false;
-  const to = await recipients(org.id, "scan paused email");
+  const to = await recipients(org.id, "scan paused email", "fresh");
   if (!to) return false;
   if (!(await claimNotification(db(), scan.id))) return false;
   if (!(await claimOrgNotice(db(), org.id, `scan_paused:${at.toISOString().slice(0, 13)}`))) return false;
@@ -102,19 +115,60 @@ export async function noticeScanPaused(scan: PausedScan, at = new Date()): Promi
 /** Reserves an org-wide email by key and sends it. Without a mailer or anyone to send to, nothing is reserved. */
 async function claimAndSend(orgId: string, key: string, what: string, render: () => RenderedEmail): Promise<NoticeOutcome> {
   if (!mailer().enabled) return "skipped";
-  const to = await recipients(orgId, what);
+  const to = await recipients(orgId, what, "billing");
   if (!to) return "skipped";
   if (!(await claimOrgNotice(db(), orgId, key))) return "duplicate";
   await send(orgId, to, render());
   return "sent";
 }
 
-/** The org's admins with an address, or null (logged by org id) when there are none. */
-async function recipients(orgId: string, what: string): Promise<string[] | null> {
-  const to = await billingRecipients(db(), orgId);
-  if (to.length > 0) return to;
-  console.warn(`No admin of org ${orgId} has an email address: ${what} not sent`);
+/**
+ * Who to email, or null (logged by org id) when there is nobody.
+ *
+ * - `fresh`: admins GitHub confirmed within 30 days, as for finding emails.
+ *   The scan-paused email names private repositories and pull requests, so a
+ *   former admin must not get it.
+ * - `billing`: fresh admins too. When there are none, the stale ones are
+ *   checked with GitHub first and only those still admins are emailed; the
+ *   answer refreshes their rows. If GitHub can't answer, the stale ones are
+ *   emailed anyway: billing emails name no repository or finding, and missing
+ *   one can stop every review.
+ */
+async function recipients(orgId: string, what: string, who: "fresh" | "billing"): Promise<string[] | null> {
+  const admins = await orgAdminContacts(db(), orgId);
+  let chosen = admins.filter((admin) => admin.fresh);
+  if (chosen.length === 0 && who === "billing" && admins.length > 0) {
+    chosen = await confirmAdmins(orgId, admins).catch((error: unknown) => {
+      console.warn(`Couldn't check the admins of org ${orgId} with GitHub (${error instanceof Error ? error.name : "error"}): emailing the last known ones`);
+      return admins;
+    });
+  }
+  if (chosen.length > 0) return [...new Set(chosen.map((admin) => admin.email))];
+  console.warn(`No admin of org ${orgId} to email: ${what} not sent`);
   return null;
+}
+
+/** Asks GitHub which of these admins still are, and records the answer. Throws when GitHub can't say. */
+async function confirmAdmins(orgId: string, admins: OrgAdminContact[]): Promise<OrgAdminContact[]> {
+  const org = await db().query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.id, orgId), columns: { type: true, githubLogin: true, githubAccountId: true, installationId: true } });
+  if (!org) return [];
+  let still: boolean[];
+  if (org.type === "User") {
+    // A personal account has one admin: its owner.
+    still = admins.map((admin) => admin.githubUserId === org.githubAccountId);
+  } else {
+    if (!org.installationId) throw new Error("The app is no longer installed");
+    const installation = githubApp().installation(org.installationId);
+    still = await Promise.all(admins.map((admin) => (admin.login ? installation.isOrgAdmin(org.githubLogin, admin.login) : Promise.resolve(false))));
+  }
+  const confirmed = admins.filter((_, index) => still[index]);
+  await refreshOrgAdmins(
+    db(),
+    orgId,
+    confirmed.map((admin) => admin.userId),
+    admins.filter((_, index) => !still[index]).map((admin) => admin.userId),
+  );
+  return confirmed;
 }
 
 /** Best effort: the email is already reserved, so a failure is logged (by error name: SMTP errors can quote addresses), not retried. */

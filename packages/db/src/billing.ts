@@ -139,19 +139,44 @@ export async function claimOrgNotice(database: Db, orgId: string, key: string): 
   return rows.length === 1;
 }
 
+/** How long an `org_admins` row is trusted: the same 30 days as access for finding emails. */
+export const ADMIN_FRESH_DAYS = 30;
+
+export interface OrgAdminContact {
+  userId: string;
+  email: string;
+  login: string | null;
+  githubUserId: number | null;
+  /** GitHub confirmed them as an admin within the last 30 days. */
+  fresh: boolean;
+}
+
 /**
- * Who hears about an org's billing: its admins (the people who can change it)
- * with a real address, however long ago GitHub last confirmed them. An admin
- * who set billing up and never came back is exactly who these emails are for.
- * No-reply placeholders are skipped.
+ * The org's admins with a real address (no-reply placeholders are skipped),
+ * each marked fresh or not. A row is only refreshed when that person visits
+ * the dashboard, so a stale one may be someone GitHub no longer counts as an
+ * admin. Callers decide what a stale admin may hear.
  */
-export async function billingRecipients(database: Db, orgId: string): Promise<string[]> {
-  const rows = await database
-    .selectDistinct({ email: users.email })
+export async function orgAdminContacts(database: Db, orgId: string): Promise<OrgAdminContact[]> {
+  return database
+    .select({
+      userId: users.id,
+      email: users.email,
+      login: users.login,
+      githubUserId: users.githubUserId,
+      fresh: sql<boolean>`${orgAdmins.checkedAt} > now() - make_interval(days => ${ADMIN_FRESH_DAYS})`,
+    })
     .from(orgAdmins)
     .innerJoin(users, eq(users.id, orgAdmins.userId))
     .where(and(eq(orgAdmins.orgId, orgId), sql`${users.email} not like '%@users.noreply.github.com'`));
-  return rows.map((row) => row.email);
+}
+
+/** Records what GitHub just said about stale admins: the confirmed are fresh again, the rest are no longer admins. */
+export async function refreshOrgAdmins(database: Db, orgId: string, confirmed: string[], removed: string[]): Promise<void> {
+  await Promise.all([
+    confirmed.length ? database.update(orgAdmins).set({ checkedAt: new Date() }).where(and(eq(orgAdmins.orgId, orgId), inArray(orgAdmins.userId, confirmed))) : undefined,
+    removed.length ? database.delete(orgAdmins).where(and(eq(orgAdmins.orgId, orgId), inArray(orgAdmins.userId, removed))) : undefined,
+  ]);
 }
 
 // ---- Scan credits ------------------------------------------------------------

@@ -4,7 +4,7 @@
  * scoped to a single repository with read-only contents.
  */
 import { createSign } from "node:crypto";
-import { githubPaginate, githubRequest, type HttpOptions } from "./client";
+import { GitHubError, githubPaginate, githubRequest, type HttpOptions } from "./client";
 
 export interface AppConfig {
   appId: string;
@@ -173,6 +173,21 @@ export class Installation {
 
   async comment(repo: string, issueNumber: number, body: string): Promise<void> {
     await githubRequest(this.auth, `/repos/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: { body } }, this.http);
+  }
+
+  /**
+   * Whether the user is an active admin of the organisation (Members: read).
+   * False when GitHub says they are not a member; other errors are thrown, since
+   * then nobody knows.
+   */
+  async isOrgAdmin(org: string, username: string): Promise<boolean> {
+    try {
+      const membership = await githubRequest<{ state: string; role: string }>(this.auth, `/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(username)}`, {}, this.http);
+      return membership.state === "active" && membership.role === "admin";
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return false;
+      throw error;
+    }
   }
 
   /** The user's permission on the repo: admin, maintain, write, triage, read or none. */

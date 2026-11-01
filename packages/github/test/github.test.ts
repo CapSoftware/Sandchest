@@ -79,6 +79,25 @@ describe("app auth", () => {
     expect(await app.token(7)).toBe("old");
     expect(await app.token(7)).toBe("new");
   });
+
+  test("reads org admin status with the installation's token: admin, member, gone, or unknown", async () => {
+    const later = new Date(Date.now() + 60 * 60_000).toISOString();
+    const { fetch, requests } = scripted(
+      json({ token: "inst", expires_at: later }),
+      json({ state: "active", role: "admin" }),
+      json({ state: "active", role: "member" }),
+      json({ state: "pending", role: "admin" }),
+      json({ message: "Not Found" }, { status: 404 }),
+      json({ message: "Resource not accessible by integration" }, { status: 403 }),
+    );
+    const installation = new GitHubApp(config, { fetch, ...quick }).installation(7);
+    expect(await installation.isOrgAdmin("acme", "alice")).toBe(true);
+    expect(await installation.isOrgAdmin("acme", "bob")).toBe(false);
+    expect(await installation.isOrgAdmin("acme", "carol")).toBe(false);
+    expect(await installation.isOrgAdmin("acme", "dave")).toBe(false);
+    await expect(installation.isOrgAdmin("acme", "erin")).rejects.toThrow("403");
+    expect(requests[1]!.url).toBe("https://api.github.com/orgs/acme/memberships/alice");
+  });
 });
 
 describe("webhooks", () => {

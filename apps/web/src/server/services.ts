@@ -3,11 +3,12 @@ import type { Db } from "@sandchest/db";
 import type { Mailer } from "@sandchest/email";
 import { createLlmClient, loadLlmConfig, type LlmClient } from "@sandchest/engine/llm";
 import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
-import { GitHubApp, loadAppConfig } from "@sandchest/github";
+import type { GitHubApp } from "@sandchest/github";
 import { db, setDb } from "./db";
+import { githubApp, setGithubApp } from "./github-app";
 import { mailer, setMailer } from "./mailer";
 
-export { db, mailer };
+export { db, githubApp, mailer };
 
 interface Services {
   db: Db;
@@ -25,10 +26,7 @@ export function setServices(overrides: Partial<Services>): void {
   Object.assign(instances, overrides);
   if (overrides.db) setDb(overrides.db);
   if (overrides.mailer) setMailer(overrides.mailer);
-}
-
-export function githubApp(): GitHubApp {
-  return (instances.github ??= new GitHubApp(loadAppConfig(), { baseUrl: config().GITHUB_API_URL }));
+  if (overrides.github) setGithubApp(overrides.github);
 }
 
 export function llmClient(): LlmClient {
