@@ -9,8 +9,7 @@
     "start": "next start",
     "typecheck": "fumadocs-mdx && tsc --noEmit",
     "chest:fallback": "bun scripts/render-chest-fallback.ts",
-    "test": "bun test",
-    "postinstall": "fumadocs-mdx"
+    "test": "bun test"
   },
   "dependencies": {
     "@sandchest/billing": "workspace:*",

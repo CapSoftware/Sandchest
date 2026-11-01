@@ -1,55 +1,75 @@
 ---
 title: Self-hosting
-description: Run Sandchest on your own server with Docker, your own GitHub App and your own model endpoint.
+description: Run Sandchest on your own server with Docker Compose, your own GitHub App and your own model endpoint.
 ---
 
 Sandchest is open source under the AGPL-3.0. You can run the whole product yourself: the dashboard, pull request reviews, deep scans and fix checks. A self-hosted install has no plans or credits, and sends nothing to us.
 
-The repository's README is the full guide, and the place to check the exact commands. This page is the overview.
+The [README](https://github.com/CapSoftware/Sandchest#self-hosting) is the full guide, with troubleshooting, upgrades and backups. This page is the overview.
 
 ## What runs
 
-Docker Compose starts two containers:
+`docker/compose.yml` starts two containers:
 
-- **web**: the Sandchest app. It serves the dashboard, receives GitHub webhooks and runs the scans itself. There is no separate worker.
-- **postgres**: the database, which also keeps track of running scans.
+- **web**: the Sandchest server. It serves the dashboard, receives GitHub webhooks and runs scans as durable workflows stored in Postgres. There is no separate worker. The image includes the code indexer for amd64 and arm64.
+- **postgres**: the database. It isn't published on any port; only `web` can reach it.
 
-Scans run on the same machine, each in its own temporary directory that is deleted when the scan ends. The code indexer ships inside the web image.
+Each scan clones its repository with a short-lived, read-only token into a temporary directory, which is deleted when the scan ends.
 
 ## What you need
 
-- A machine with Docker.
-- A public HTTPS address that GitHub can reach, for webhooks and sign-in.
-- A model endpoint that speaks the standard chat-completions protocol. Sandchest is built for one class of model: fast, abliterated, with strict JSON-schema output, parallel tool calls and prompt caching.
-- A GitHub account or organization to create your GitHub App on.
+- Docker with the Compose plugin, version 2.20 or newer.
+- A machine with 2 or more CPUs and 4 GB of memory, and disk space for your largest repository.
+- A public HTTPS address GitHub can send webhooks to: a domain behind a reverse proxy, or a tunnel for a trial.
+- A model endpoint that speaks the standard chat-completions protocol, with streaming, tool calls and strict JSON-schema output.
+- A GitHub account, or owner rights on the organization that will own the App.
 
 ## Setting up
 
-1. Get the repository and its environment file ready (see [Reference](#reference)).
-2. Point Sandchest at your model with `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`. The one model is used for every part of a scan; there are no per-provider settings.
-3. Start Sandchest with Docker Compose.
-4. Open the setup page on your Sandchest address. It is protected by a setup token, so only you can use it. One click creates your own GitHub App through GitHub's app manifest flow, with the right permissions and webhook address already filled in.
-5. Install your new App on the repositories you want scanned, sign in, and recon starts on each one.
+1. In `docker/`, copy `.env.example` to `.env` and fill in the required settings (see below).
+2. Build and start it with `docker compose up -d --build`. Each start migrates the database first. If a required setting is missing, Compose refuses to start and names it.
+3. Get the setup link from the log with `docker compose logs web | grep setup`. While no GitHub App is configured, the server prints a one-time link to `/setup/unlock?token=…` on your address. Without the token, `/setup` shows nothing but a prompt for it.
+4. On the setup page, choose who owns the App and create it on GitHub in one click, through GitHub's app manifest flow. The App's keys are shown once and stored nowhere: copy them into the `GITHUB_…` lines of `docker/.env`.
+5. Restart with `docker compose up -d`. The setup page disappears once the App is configured.
+6. Install the App on your repositories and sign in. Recon builds each repository's threat model first; then every pull request gets a Sandchest Check.
 
-## Reference
+```bash
+cd Sandchest/docker
+cp .env.example .env
+docker compose up -d --build
+docker compose logs web | grep setup
+```
 
-The concrete details, in one place. If anything here disagrees with the README, the README is right.
+## Settings
 
-| What | Value |
+All of them go in `docker/.env`.
+
+| Setting | What it is |
 | --- | --- |
-| Environment file | Copy `.env.example` to `.env` |
-| Model | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
-| Public address | `SANDCHEST_APP_URL` |
-| Start | `docker compose up -d` |
-| Setup page | `/setup`, with the setup token described in the README |
-| Email (optional) | `SMTP_URL` and `EMAIL_FROM`. Without them, no email is sent. |
-| Model prices (optional) | `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT`, in US dollars per million tokens, so each scan records what it cost you |
-| Billing | Leave `AUTUMN_SECRET_KEY` empty |
-| Internal endpoint to keep private | `/.well-known/workflow/v1/flow` |
+| `SANDCHEST_APP_URL` | Required. The public HTTPS address, with no trailing slash |
+| `BETTER_AUTH_SECRET` | Required. 32 or more characters. Signs sessions, encrypts stored GitHub tokens, and derives the setup token |
+| `POSTGRES_PASSWORD` | Required. Letters and digits only, set before the first start |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Required. Your model endpoint. One model does every job |
+| `GITHUB_APP_ID` and the other `GITHUB_…` lines | Empty until setup gives you the App's keys. While `GITHUB_APP_ID` is empty, the server runs in setup mode |
+| `SANDCHEST_SETUP_TOKEN` | Optional. Your own setup token, 24 or more characters, instead of the one derived from `BETTER_AUTH_SECRET` |
+| `SANDCHEST_BIND`, `SANDCHEST_PORT` | Optional. Where `web` listens on the machine. The default is `127.0.0.1:3000`: loopback only, for a tunnel or reverse proxy in front. `0.0.0.0` listens on every interface |
+| `SMTP_URL`, `EMAIL_FROM` | Optional. Email about critical findings and finished deep scans. Without them, no email is sent |
+| `SENTRY_DSN` | Optional. Error reports to your own Sentry project |
+| `SANDCHEST_ADMIN_TOKEN` | Optional. 24 or more characters. Lets you start a deep scan with `POST /api/scans` |
+| `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT` | Optional. Your model's prices, in US dollars per million tokens, so each scan records what it cost |
+
+There is no billing key: billing stays off.
+
+## How it runs
+
+- The server checks its settings when it starts. If one is wrong it exits, says which, and Compose restarts it until you fix it.
+- The health check, `/api/health`, fails while the database is unreachable.
+- A scan survives one restart of the server: it runs again from the start when the server comes back, and fails if it is interrupted a second time. Every ten minutes the server also finishes or fails scans that got stuck.
+- The `web` container runs as a non-root user with no Linux capabilities, a read-only root file system and a limit on processes.
 
 ## Limits without billing
 
-Without `AUTUMN_SECRET_KEY`, billing is off: there are no plans, no credits, and nothing to buy. The limits that keep scans manageable still apply:
+Without billing there are no plans, no credits, and nothing to buy. The limits that keep scans manageable still apply:
 
 - one deep scan per repository at a time, then 24 hours before the next
 - repositories of a million lines of code or more aren't scanned, by any kind of scan
@@ -62,11 +82,13 @@ A self-hosted Sandchest has no telemetry and sends nothing to us. It connects to
 - **GitHub**, to read the repositories you installed it on and post reviews.
 - **Your model endpoint**, for the scans themselves.
 - **OSV** (osv.dev), the open vulnerability database, to look up your dependencies. Only package names and versions are sent.
+- **Your mail server and Sentry project**, only if you set them.
 
 Your code, findings and threat models stay on your machine and in your database.
 
 ## Keeping it safe
 
-- Keep the setup token secret, and keep Sandchest behind HTTPS.
-- Don't expose the internal endpoint listed in the [Reference](#reference) to the internet. It runs scans, and only the app itself should reach it.
+- Keep `docker/.env` safe: it holds the App's private key, and anyone who can read it, or the server's log during setup, can get the setup token.
+- Keep Sandchest behind HTTPS. The proxy must pass the original `Host` header.
+- The workflow engine's internal route, under `/.well-known/workflow/`, has no authentication of its own. Only the server itself reaches it, on loopback inside the container: a small gateway in front answers every outside request for it with a 404, however the path is written.
 - Scans read code from repositories you chose, but that code may still be hostile. Sandchest never runs it, and treats everything in it as untrusted.
