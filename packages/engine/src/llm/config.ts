@@ -1,11 +1,19 @@
 import { z } from "zod";
-import type { ReasoningEffort, Role } from "./types";
+import { ROLES, type ReasoningEffort, type Role } from "./types";
 
 export interface LlmConfig {
   /** Base URL including the version segment, e.g. `https://host/v1`. No trailing slash. */
   baseUrl: string;
   apiKey: string;
+  /** Default model for any role without its own override. */
   model: string;
+  /**
+   * Model per role, so a cheap model can do the wide, shallow passes (recon,
+   * write-up) while a strong one does the reasoning that finds and verifies
+   * bugs (hunt, skeptic). Resolved by `loadLlmConfig`; a config built without
+   * it (tests) falls back to `model` for every role.
+   */
+  models?: Readonly<Record<Role, string>>;
 }
 
 /**
@@ -21,11 +29,16 @@ export const ROLE_REASONING: Readonly<Record<Role, ReasoningEffort | undefined>>
 };
 
 const required = z.string().trim().min(1, "is required");
+const optionalModel = z.string().trim().min(1).optional();
 
 const EnvSchema = z.object({
   LLM_BASE_URL: z.url({ protocol: /^https?$/ }),
   LLM_API_KEY: required,
   LLM_MODEL: required,
+  LLM_MODEL_RECON: optionalModel,
+  LLM_MODEL_HUNT: optionalModel,
+  LLM_MODEL_SKEPTIC: optionalModel,
+  LLM_MODEL_STRUCTURE: optionalModel,
 });
 
 /**
@@ -38,9 +51,18 @@ export function loadLlmConfig(env: Record<string, string | undefined> = process.
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     throw new Error(`Invalid model configuration:\n  ${problems.join("\n  ")}`);
   }
+  const model = parsed.data.LLM_MODEL;
+  const override: Record<Role, string | undefined> = {
+    recon: parsed.data.LLM_MODEL_RECON,
+    hunt: parsed.data.LLM_MODEL_HUNT,
+    skeptic: parsed.data.LLM_MODEL_SKEPTIC,
+    structure: parsed.data.LLM_MODEL_STRUCTURE,
+  };
+  const models = Object.fromEntries(ROLES.map((role) => [role, override[role] ?? model])) as Record<Role, string>;
   return {
     baseUrl: parsed.data.LLM_BASE_URL.replace(/\/+$/, ""),
     apiKey: parsed.data.LLM_API_KEY,
-    model: parsed.data.LLM_MODEL,
+    model,
+    models,
   };
 }

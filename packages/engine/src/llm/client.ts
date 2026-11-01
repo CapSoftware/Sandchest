@@ -113,7 +113,7 @@ export function createLlmClient(config: LlmConfig, options: LlmClientOptions = {
 
 function buildBody(config: LlmConfig, request: ChatRequest): string {
   const body: Record<string, unknown> = {
-    model: config.model,
+    model: config.models?.[request.role] ?? config.model,
     messages: request.messages,
     stream: true,
     stream_options: { include_usage: true },

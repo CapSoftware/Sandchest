@@ -38,7 +38,12 @@ describe("readSse", () => {
 describe("loadLlmConfig", () => {
   test("reads and normalises the endpoint", () => {
     const config = loadLlmConfig({ LLM_BASE_URL: "https://llm.example.com/v1/", LLM_API_KEY: " key ", LLM_MODEL: "model" });
-    expect(config).toEqual({ baseUrl: "https://llm.example.com/v1", apiKey: "key", model: "model" });
+    expect(config).toEqual({ baseUrl: "https://llm.example.com/v1", apiKey: "key", model: "model", models: { recon: "model", hunt: "model", skeptic: "model", structure: "model" } });
+  });
+
+  test("per-role overrides fall back to the default model", () => {
+    const config = loadLlmConfig({ LLM_BASE_URL: "https://llm.example.com/v1", LLM_API_KEY: "key", LLM_MODEL: "strong", LLM_MODEL_RECON: "cheap", LLM_MODEL_STRUCTURE: "cheap" });
+    expect(config.models).toEqual({ recon: "cheap", hunt: "strong", skeptic: "strong", structure: "cheap" });
   });
 
   test("names every problem at once", () => {
