@@ -27,6 +27,7 @@ import { createHmac } from "node:crypto";
 import { sessionUser } from "@sandchest/db";
 import { storeAccess } from "@/server/access";
 import { verifiedSessionToken } from "@/server/auth";
+import { sessionRefreshDue } from "@/server/session-token";
 import { digState } from "@/lib/dig-state";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
@@ -235,6 +236,8 @@ describe("sessions", () => {
     if (!available) return;
     expect(verifiedSessionToken(sign("tok123"), SECRET)).toBe("tok123");
     expect(verifiedSessionToken(encodeURIComponent(sign("tok123")), SECRET)).toBe("tok123");
+    // A malformed escape is a bad cookie, not a server error.
+    expect(verifiedSessionToken("abc%ZZ.def", SECRET)).toBeUndefined();
     expect(verifiedSessionToken(sign("tok123", "another-secret-another-secret-0000"), SECRET)).toBeUndefined();
     expect(verifiedSessionToken(sign("tok123").replace("tok123", "tok124"), SECRET)).toBeUndefined();
     expect(verifiedSessionToken("tok123", SECRET)).toBeUndefined();
@@ -250,5 +253,19 @@ describe("sessions", () => {
     expect(await sessionUser(database, "live-token")).toMatchObject({ id: ids.alice, login: "alice" });
     expect(await sessionUser(database, "old-token")).toBeUndefined();
     expect(await sessionUser(database, "no-such-token")).toBeUndefined();
+  });
+});
+
+describe("session expiry", () => {
+  test("a session is extended once it is a day old, as better-auth does", () => {
+    const now = Date.parse("2026-11-08T12:00:00Z");
+    const day = 86_400_000;
+    // Signed in just now: expires in 7 days, nothing to do.
+    expect(sessionRefreshDue(new Date(now + 7 * day), now)).toBe(false);
+    // Signed in 23 hours ago.
+    expect(sessionRefreshDue(new Date(now + 6 * day + 3_600_000), now)).toBe(false);
+    // Signed in a day ago or more: extend it.
+    expect(sessionRefreshDue(new Date(now + 6 * day), now)).toBe(true);
+    expect(sessionRefreshDue(new Date(now + 2 * day), now)).toBe(true);
   });
 });
