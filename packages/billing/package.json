@@ -4,14 +4,18 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./plans": "./src/plans.ts",
+    "./costs": "./src/costs.ts"
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "autumn:push": "atmn push --headless -c autumn"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
+    "atmn": "2.0.191",
     "typescript": "^5.9.3"
   }
 }
