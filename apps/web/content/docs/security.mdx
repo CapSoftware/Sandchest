@@ -74,7 +74,7 @@ Sandchest never writes to your code and never opens issues.
 
 - **Analytics are first-party only.** There are no third-party analytics or tracking scripts. Usage events record opaque IDs, counts and categories, never code, finding contents, names or email addresses.
 - **Finding emails** cover new critical findings and finished deep scans. They go to people who have signed in and had push access to the repository when Sandchest last checked, within the past 30 days. An admin can turn these emails off for the account in [Settings](/settings).
-- **Billing emails**, such as running low on credits, go to the account's admins and can't be turned off.
+- **Billing emails** go to the account's admins and can't be turned off: credits running low or out (only while auto top-up is off), an auto top-up that went through or failed, and a scan stopped because the model provider refused it. Admins are people GitHub confirmed as admins in the last 30 days; if there are none, Sandchest asks GitHub before sending. The scan-stopped email names the repository, so it follows the account's email setting and only goes to admins confirmed in the last 30 days.
 - There is no marketing email.
 - **Payments** are processed by Stripe, through the billing service Autumn. Sandchest never sees your card number.
 
