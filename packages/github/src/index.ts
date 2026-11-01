@@ -3,4 +3,4 @@ export { GitHubError, githubPaginate, githubRequest, type HttpOptions } from "./
 export { parsePatch, type FileDiff } from "./diff";
 export { checkResult, notReviewed, publicSentence, reviewBody, reviewComment, shown, type CheckInput } from "./render";
 export * from "./webhooks";
-export { readUserAccess, type RepoRole, type UserInstallationAccess } from "./user";
+export { readUserAccess, type ListedInstallation, type RepoRole, type UserInstallationAccess } from "./user";

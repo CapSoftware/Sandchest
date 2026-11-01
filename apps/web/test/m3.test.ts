@@ -33,6 +33,10 @@ import { serializeSignedCookie } from "better-call";
 import { digState } from "@/lib/dig-state";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
+import { setGithubApp } from "@/server/github-app";
+import { setScanStarter } from "@/server/start";
+import { handleWebhook } from "@/server/webhooks";
+import type { GitHubApp } from "@sandchest/github";
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
 const NAME = `sandchest_m3_test_${process.pid}`;
@@ -42,12 +46,12 @@ let database: Db;
 let available = true;
 
 /** A fake GitHub API for one user's token: installations, their repos with roles, and org memberships. */
-function fakeGithub(user: { id: number; login: string }, installations: Array<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; repos: Array<{ id: number; push?: boolean; admin?: boolean }>; orgAdmin?: boolean }>): typeof fetch {
+function fakeGithub(user: { id: number; login: string }, installations: Array<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; repos: Array<{ id: number; push?: boolean; admin?: boolean }>; orgAdmin?: boolean; suspended?: boolean }>): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
     if (url.pathname === "/user") return json(user);
-    if (url.pathname === "/user/installations") return json({ installations: installations.map(({ id, account }) => ({ id, account })) });
+    if (url.pathname === "/user/installations") return json({ installations: installations.map(({ id, account, suspended }) => ({ id, account, suspended_at: suspended ? "2026-01-01T00:00:00Z" : null })) });
     const repos = /^\/user\/installations\/(\d+)\/repositories$/.exec(url.pathname);
     if (repos) {
       const installation = installations.find((i) => i.id === Number(repos[1]))!;
@@ -130,14 +134,26 @@ describe("access from GitHub", () => {
   test("push access or higher makes a repo visible; read and triage do not", async () => {
     if (!available) return;
     // Alice: admin of acme, push on api, read-only on secret, owner of her personal account.
+    // Installation 99 is unknown here: recording it is attempted (as if its webhook were late) and fails.
+    const tried: number[] = [];
+    setGithubApp({
+      installation: (id: number) => ({
+        repositories: async () => {
+          tried.push(id);
+          throw new Error("not this App's installation");
+        },
+      }),
+    } as unknown as GitHubApp);
     await storeAccess(ids.alice, "token-a", {
       fetch: fakeGithub({ id: 501, login: "alice" }, [
         { id: 11, account: { id: 100, login: "acme", type: "Organization" }, repos: [{ id: 1, push: true }, { id: 2, admin: true }, { id: 3 }], orgAdmin: true },
         { id: 12, account: { id: 501, login: "alice", type: "User" }, repos: [{ id: 4, admin: true }] },
-        // An installation Sandchest has never recorded is ignored.
+        // An installation Sandchest has never recorded and cannot record is left out.
         { id: 99, account: { id: 900, login: "other", type: "Organization" }, repos: [{ id: 50, admin: true }] },
       ]),
     });
+    setGithubApp(undefined);
+    expect(tried).toEqual([99]);
     const repos = await dashboardRepos(database, ids.alice);
     expect(repos.map((r) => r.fullName).sort()).toEqual(["acme/api", "acme/web", "alice/site"]);
     const api = repos.find((r) => r.fullName === "acme/api")!;
@@ -162,6 +178,83 @@ describe("access from GitHub", () => {
     expect(await updateOrgSettings(database, ids.alice, ids.org, { autoTopUp: { enabled: true, monthlyLimitUsd: 40 } })).toBe(true);
     const [after] = await database.$client<Array<{ settings: unknown; kind: string }>>`select settings, jsonb_typeof(settings) as kind from orgs where id = ${ids.org}`;
     expect(after).toEqual({ kind: "object", settings: { checkThreshold: "critical", autoTopUp: { enabled: true, monthlyLimitUsd: 40 } } });
+  });
+
+  test("an installation GitHub lists before its webhook arrives is recorded on the spot", async () => {
+    if (!available) return;
+    // Back from installing: GitHub redirects at once, and the installation webhook can land a moment later.
+    const asked: number[] = [];
+    setGithubApp({
+      installation: (id: number) => ({
+        repositories: async () => {
+          asked.push(id);
+          return [{ id: 70, full_name: "newco/app", private: true, default_branch: "main" }];
+        },
+      }),
+    } as unknown as GitHubApp);
+    const started: string[] = [];
+    setScanStarter(async (scanId) => void started.push(scanId));
+    try {
+      await storeAccess(ids.bob, "token-b", {
+        fetch: fakeGithub({ id: 502, login: "bob" }, [
+          { id: 11, account: { id: 100, login: "acme", type: "Organization" }, repos: [{ id: 1, push: true }] },
+          { id: 13, account: { id: 700, login: "newco", type: "Organization" }, repos: [{ id: 70, admin: true }], orgAdmin: true },
+        ]),
+      });
+      expect(asked).toEqual([13]);
+      expect((await dashboardRepos(database, ids.bob)).map((r) => r.fullName).sort()).toEqual(["acme/api", "newco/app"]);
+      expect((await settingsOrgs(database, ids.bob)).find((o) => o.login === "newco")?.admin).toBe(true);
+      // Recon starts as the webhook would (billing is off here), after the page, never holding it up.
+      for (let i = 0; i < 100 && started.length === 0; i++) await Bun.sleep(10);
+      expect(started.length).toBe(1);
+
+      // The webhook arriving afterwards records nothing new and starts no second recon.
+      const deps = { db: database, github: { installation: () => ({ repositories: async () => [{ id: 70, full_name: "newco/app", private: true, default_branch: "main" }] }) } as unknown as GitHubApp, startScan: async (scanId: string) => void started.push(scanId) };
+      await handleWebhook(deps, "installation", "late-delivery", { action: "created", installation: { id: 13, account: { id: 700, login: "newco", type: "Organization" } } });
+      expect(started.length).toBe(1);
+
+      // A later refresh asks GitHub for nothing new.
+      await storeAccess(ids.bob, "token-b", {
+        fetch: fakeGithub({ id: 502, login: "bob" }, [{ id: 13, account: { id: 700, login: "newco", type: "Organization" }, repos: [{ id: 70, admin: true }], orgAdmin: true }]),
+      });
+      expect(asked).toEqual([13]);
+    } finally {
+      setGithubApp(undefined);
+      setScanStarter(undefined);
+      await database.$client`delete from scans where org_id in (select id from orgs where installation_id = 13)`;
+      await database.$client`delete from orgs where installation_id = 13`;
+    }
+  });
+
+  test("an installation that cannot be recorded yet leaves the rest of the refresh intact", async () => {
+    if (!available) return;
+    setGithubApp({
+      installation: () => ({
+        repositories: async () => {
+          throw new Error("GitHub is down");
+        },
+      }),
+    } as unknown as GitHubApp);
+    try {
+      await storeAccess(ids.bob, "token-b", {
+        fetch: fakeGithub({ id: 502, login: "bob" }, [
+          { id: 11, account: { id: 100, login: "acme", type: "Organization" }, repos: [{ id: 1, push: true }] },
+          { id: 14, account: { id: 701, login: "later", type: "Organization" }, repos: [{ id: 71, admin: true }] },
+        ]),
+      });
+      expect((await dashboardRepos(database, ids.bob)).map((r) => r.fullName)).toEqual(["acme/api"]);
+      expect((await database.$client`select 1 from orgs where installation_id = 14`).length).toBe(0);
+    } finally {
+      setGithubApp(undefined);
+    }
+  });
+
+  test("a suspended installation counts as gone", async () => {
+    if (!available) return;
+    await storeAccess(ids.bob, "token-b", {
+      fetch: fakeGithub({ id: 502, login: "bob" }, [{ id: 11, account: { id: 100, login: "acme", type: "Organization" }, repos: [{ id: 1, push: true }], suspended: true }]),
+    });
+    expect(await dashboardRepos(database, ids.bob)).toEqual([]);
   });
 
   test("losing access on GitHub removes it here on the next refresh", async () => {

@@ -105,8 +105,14 @@ export async function storeAccess(userId: string, token: string, http?: HttpOpti
   const known = new Map<number, string>();
   const access = await readUserAccess(token, {
     http,
-    only: async (installationIds) => {
-      for (const org of await orgsByInstallation(db(), installationIds)) if (org.installationId) known.set(org.installationId, org.id);
+    only: async (installations) => {
+      for (const org of await orgsByInstallation(db(), installations.map((i) => i.id))) if (org.installationId) known.set(org.installationId, org.id);
+      // Back from installing before GitHub's webhook arrived: record the installation now, as the webhook will.
+      const unknown = installations.filter((i) => !known.has(i.id));
+      if (unknown.length > 0) {
+        const { recordListedInstallations } = await import("./installations");
+        for (const org of await recordListedInstallations(unknown)) known.set(org.installationId, org.id);
+      }
       return new Set(known.keys());
     },
   });

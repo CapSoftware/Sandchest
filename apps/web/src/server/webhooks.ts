@@ -82,15 +82,29 @@ async function onInstallation(deps: WebhookDeps, payload: InstallationEvent): Pr
     return { status: "ignored", detail: `installation.${payload.action}` };
   }
   if (installation.account.type === "Bot") return { status: "ignored", detail: "bot account" };
+  const org = await recordInstallation(deps, { id: installation.id, account: { ...installation.account, type: installation.account.type } });
+  return startRecon(deps, org);
+}
+
+/**
+ * Records an installation and its repositories. Run by the installation
+ * webhook, and by an access refresh that finds an installation before its
+ * webhook has arrived (someone back from installing on GitHub). Safe to run
+ * twice: everything is an upsert. Recon is the caller's next step.
+ */
+export async function recordInstallation(
+  deps: Pick<WebhookDeps, "db" | "github">,
+  installation: { id: number; account: { id: number; login: string; type: "User" | "Organization" } },
+): Promise<{ id: string; githubLogin: string; installationId: number | null }> {
   // The payload lacks default branches; one API listing has them for every repo.
   const repositories = await deps.github.installation(installation.id).repositories();
-  const { org, repos } = await upsertInstallation(
+  const { org } = await upsertInstallation(
     deps.db,
     installation.id,
     { githubAccountId: installation.account.id, githubLogin: installation.account.login, type: installation.account.type },
     repositories.map((r) => ({ githubRepoId: r.id, fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })),
   );
-  return startRecon(deps, org);
+  return org;
 }
 
 async function onInstallationRepositories(deps: WebhookDeps, payload: InstallationRepositoriesEvent): Promise<WebhookOutcome> {
@@ -110,7 +124,7 @@ async function onInstallationRepositories(deps: WebhookDeps, payload: Installati
  * way, once the org has a plan. Queued in one serialised step, so it never
  * doubles up with the recon that buying a plan starts.
  */
-async function startRecon(deps: WebhookDeps, org: { id: string; githubLogin: string }): Promise<WebhookOutcome> {
+export async function startRecon(deps: WebhookDeps, org: { id: string; githubLogin: string }): Promise<WebhookOutcome> {
   if (deps.hasPlan && !(await deps.hasPlan(org))) return { status: "handled", scans: [], detail: "recon waits for a plan" };
   // "HEAD" is resolved to the default branch's commit when the scan clones.
   const scans = await queuePendingRecons(deps.db, org.id);

@@ -20,7 +20,11 @@ export interface UserInstallationAccess {
 interface ApiInstallation {
   id: number;
   account: { id: number; login: string; type: "User" | "Organization" | "Bot" };
+  suspended_at?: string | null;
 }
+
+/** An installation as the user's token lists it, for `only` to pick from. */
+export type ListedInstallation = Pick<ApiInstallation, "id" | "account">;
 
 interface ApiRepo {
   id: number;
@@ -31,15 +35,16 @@ interface ApiRepo {
  * Reads a user's access across the app's installations. `only` picks the
  * installations worth reading (those Sandchest knows about). Requests run in parallel.
  */
-export async function readUserAccess(token: string, options: { only?: (installationIds: number[]) => Promise<Set<number>>; http?: HttpOptions } = {}): Promise<{ userId: number; login: string; installations: UserInstallationAccess[] }> {
+export async function readUserAccess(token: string, options: { only?: (installations: ListedInstallation[]) => Promise<Set<number>>; http?: HttpOptions } = {}): Promise<{ userId: number; login: string; installations: UserInstallationAccess[] }> {
   const auth = async () => token;
   const http = options.http ?? {};
   const [user, installations] = await Promise.all([
     githubRequest<{ id: number; login: string }>(auth, "/user", {}, http),
     githubPaginate(auth, "/user/installations", (page: { installations: ApiInstallation[] }) => page.installations, {}, http),
   ]);
-  const people = installations.filter((installation) => installation.account.type !== "Bot");
-  const keep = options.only ? await options.only(people.map((installation) => installation.id)) : undefined;
+  // Suspended installations are treated as removed, as their webhook does.
+  const people = installations.filter((installation) => installation.account.type !== "Bot" && !installation.suspended_at);
+  const keep = options.only ? await options.only(people.map(({ id, account }) => ({ id, account }))) : undefined;
   const wanted = keep ? people.filter((installation) => keep.has(installation.id)) : people;
   const results = await Promise.all(
     wanted.map(async (installation): Promise<UserInstallationAccess> => {
