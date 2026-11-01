@@ -25,7 +25,7 @@ export default function Home() {
     <div className="page">
       <header className="site-header">
         <a href="/" className="wordmark" aria-label="Sandchest home">
-          <img src="/sandchest-logo-dark.svg" alt="Sandchest" width={2382} height={473} />
+          <img src="/sandchest-logo-dark.svg" alt="Sandchest" width={184} height={34} />
         </a>
         <nav aria-label="Main" className="header-nav">
           <a href={site.links.docs}>Docs</a>

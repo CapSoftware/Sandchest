@@ -61,12 +61,12 @@
   padding: 1.5rem 0;
 }
 
+/* Pixel art on a 2px grid, the same cell size as the chest panel. */
 .wordmark img {
   display: block;
-  height: 2.25rem;
-  width: auto;
-  /* The artwork has generous padding for its glow. */
-  margin-left: -0.4rem;
+  width: 184px;
+  height: 34px;
+  image-rendering: pixelated;
 }
 
 .header-nav {
@@ -347,7 +347,7 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
 
 .comment {
   display: grid;
-  grid-template-columns: 1.75rem minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr);
   gap: 0.875rem;
   padding: 1.25rem 1.25rem 1.5rem;
   border-top: 1px solid var(--color-seam);
@@ -355,8 +355,9 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
 }
 
 .comment-avatar {
-  width: 1.75rem;
-  height: auto;
+  width: 30px;
+  height: 28px;
+  image-rendering: pixelated;
   margin-top: 0.1rem;
 }
 

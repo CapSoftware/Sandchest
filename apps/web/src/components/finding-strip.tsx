@@ -76,10 +76,10 @@ export function FindingStrip() {
         <div className="comment">
           <img
             className="comment-avatar"
-            src="/sandchest-icon-flat.svg"
+            src="/sandchest-icon-small.svg"
             alt=""
-            width={28}
-            height={24}
+            width={30}
+            height={28}
           />
           <div className="comment-main">
             <p className="comment-meta">
