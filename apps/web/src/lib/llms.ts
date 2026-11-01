@@ -4,7 +4,17 @@
  * can check them without compiling MDX.
  */
 import { isDraftLegalLink, legalDraft } from "./legal";
-import { site } from "./site";
+import { site, siteUrl } from "./site";
+
+/**
+ * What links in the Markdown start with: the public address when the build
+ * knows it, otherwise nothing, so links stay root-relative (/docs/...). A
+ * self-hosted image is built before its address is known, and must never
+ * point readers at localhost.
+ */
+export function markdownBase(env: Record<string, string | undefined> = process.env): string {
+  return siteUrl(env) ?? "";
+}
 
 export interface MarkdownPage {
   url: string;

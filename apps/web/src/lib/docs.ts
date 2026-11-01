@@ -9,8 +9,7 @@
 import { docs as docsCollection, legal as legalCollection } from "collections/collections";
 import type { Item, Node } from "fumadocs-core/page-tree";
 import { loader } from "fumadocs-core/source";
-import { joinPages, renderLlmsIndex, renderPageMarkdown } from "./llms";
-import { site } from "./site";
+import { joinPages, markdownBase, renderLlmsIndex, renderPageMarkdown } from "./llms";
 
 export { markdownUrl } from "./llms";
 
@@ -46,11 +45,11 @@ export async function docsInOrder(): Promise<DocsPage[]> {
 const summary = (page: DocsPage) => ({ url: page.url, title: page.data.title, description: page.data.description });
 
 export async function pageMarkdown(page: DocsPage): Promise<string> {
-  return renderPageMarkdown(summary(page), await page.data.getText("processed"), site.url);
+  return renderPageMarkdown(summary(page), await page.data.getText("processed"), markdownBase());
 }
 
 export async function llmsIndex(): Promise<string> {
-  return renderLlmsIndex((await docsInOrder()).map(summary), site.url);
+  return renderLlmsIndex((await docsInOrder()).map(summary), markdownBase());
 }
 
 export async function llmsFull(): Promise<string> {

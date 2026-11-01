@@ -11,7 +11,7 @@ import { mdxComponents } from "@/components/docs/mdx";
 import { SiteFooter } from "@/components/site-chrome";
 import { markdownRewrites } from "@/lib/docs-routes";
 import { isDraftLegalLink, isPlaceholder, legal, legalDraft, legalRobots } from "@/lib/legal";
-import { joinPages, markdownUrl, renderLlmsIndex, renderPageMarkdown } from "@/lib/llms";
+import { joinPages, markdownBase, markdownUrl, renderLlmsIndex, renderPageMarkdown } from "@/lib/llms";
 import { site, siteUrl } from "@/lib/site";
 
 const base = "https://sandchest.example";
@@ -80,6 +80,26 @@ describe("llms.txt and llms-full.txt", () => {
 
   test("the full file is every page, separated by rules", () => {
     expect(joinPages(["# A\n", "# B\n"])).toBe("# A\n\n---\n\n# B\n");
+  });
+});
+
+describe("links without a known address", () => {
+  test("a build that knows its address writes absolute links", () => {
+    expect(markdownBase({ NEXT_PUBLIC_SITE_URL: "https://www.example.com" })).toBe("https://www.example.com");
+    expect(markdownBase({ VERCEL_PROJECT_PRODUCTION_URL: "www.example.com" })).toBe("https://www.example.com");
+  });
+
+  test("a build that doesn't (a self-hosted image) writes root-relative links, never localhost", () => {
+    const base = markdownBase({});
+    expect(base).toBe("");
+    const index = renderLlmsIndex(pages, base, false);
+    const markdown = renderPageMarkdown(pages[1]!, "See [scans](/docs/scans#fix-checks) and [the policy](/privacy).", base, false);
+    for (const output of [index, markdown]) expect(output).not.toContain("localhost");
+    expect(index).toContain("- [Getting started](/docs.md)");
+    expect(index).toContain("- [Pricing & credits](/docs/pricing.md)");
+    expect(index).toContain("Every page in one file: /llms-full.txt");
+    expect(index).toContain("[Privacy policy](/privacy)");
+    expect(markdown).toContain("See [scans](/docs/scans#fix-checks) and [the policy](/privacy).");
   });
 });
 
