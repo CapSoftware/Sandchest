@@ -1,9 +1,13 @@
 /**
- * Sandchest's pricing in Autumn, built from `src/plans.ts`. Preview with
+ * Sandchest's pricing in Autumn, built from `src/plans.ts`, and the webhook
+ * that sends auto top-up results and plan changes to the app. Preview with
  * `bun run autumn:push`, apply with `bun run autumn:push --yes` (sandbox), or
- * add `--prod` for production.
+ * add `--prod` for production. Creating the webhook writes its signing secret
+ * to this package's env file (`AUTUMN_WEBHOOK_SANDCHEST_SECRET` for
+ * production, `AUTUMN_WEBHOOK_SANDCHEST_SANDBOX_SECRET` for the sandbox); the
+ * app reads it as AUTUMN_WEBHOOK_SECRET.
  */
-import { atmn, feature, plan } from "atmn";
+import { atmn, feature, plan, webhook } from "atmn";
 import { CREDITS, PLANS, TOP_UP } from "../src/plans";
 
 export const credits = feature({ featureId: CREDITS, name: "Credits", type: "metered", consumable: true });
@@ -35,4 +39,9 @@ export const topUp = plan({
   items: [topUpItem],
 });
 
-export default atmn({ features: [credits], plans: [...plans, topUp] });
+/** Where Autumn sends events. Set AUTUMN_WEBHOOK_URL to point an environment at another deployment. */
+const webhookUrl = process.env.AUTUMN_WEBHOOK_URL ?? "https://www.sandchest.com/api/autumn/webhooks";
+const events = ["billing.auto_topup_succeeded", "billing.auto_topup_failed", "billing.updated"];
+export const webhooks = (["live", "sandbox"] as const).map((env) => webhook({ id: "sandchest", env, url: webhookUrl, events, description: "Auto top-up emails and plan changes" }));
+
+export default atmn({ features: [credits], plans: [...plans, topUp], webhooks });
