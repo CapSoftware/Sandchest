@@ -1,0 +1,23 @@
+# Keep secrets, build output and private data out of the image's build context.
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/node_modules
+**/.next
+**/.turbo
+**/.vercel
+target
+.git
+.claude
+.sandchest
+tmp
+evals/private
+evals/results
+**/*.scan.json
+**/*.findings.json
+SPEC.md
+FINDINGS.md
+**/.DS_Store
+**/*.log

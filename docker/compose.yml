@@ -1,0 +1,64 @@
+# Sandchest, self-hosted. From this directory:
+#
+#   cp .env.example .env    # fill in the required values
+#   docker compose up -d
+#   docker compose logs web | grep setup    # then open the setup link
+#
+# Compose refuses to start, naming the setting, while a required value is missing.
+name: sandchest
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in docker/.env (openssl rand -hex 32)}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/sandchest.sh:ro
+    # Reachable only from the web container: no ports are published.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U sandchest -d sandchest"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    image: ${SANDCHEST_IMAGE:-sandchest:local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Loopback only by default: put a tunnel or a reverse proxy with TLS in front.
+    # Set SANDCHEST_BIND=0.0.0.0 to listen on every interface instead.
+    ports:
+      - "${SANDCHEST_BIND:-127.0.0.1}:${SANDCHEST_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgres://sandchest:${POSTGRES_PASSWORD}@postgres:5432/sandchest
+      SANDCHEST_APP_URL: ${SANDCHEST_APP_URL:?Set SANDCHEST_APP_URL in docker/.env to the public URL GitHub can reach}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in docker/.env (openssl rand -hex 32)}
+      LLM_BASE_URL: ${LLM_BASE_URL:?Set LLM_BASE_URL in docker/.env to your model endpoint}
+      LLM_API_KEY: ${LLM_API_KEY:?Set LLM_API_KEY in docker/.env (any value if your endpoint needs none)}
+      LLM_MODEL: ${LLM_MODEL:?Set LLM_MODEL in docker/.env}
+      LLM_PRICE_INPUT: ${LLM_PRICE_INPUT:-}
+      LLM_PRICE_CACHED_INPUT: ${LLM_PRICE_CACHED_INPUT:-}
+      LLM_PRICE_OUTPUT: ${LLM_PRICE_OUTPUT:-}
+      # Written by the setup page. Empty until then: the server runs in setup mode.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      SANDCHEST_SETUP_TOKEN: ${SANDCHEST_SETUP_TOKEN:-}
+      SANDCHEST_ADMIN_TOKEN: ${SANDCHEST_ADMIN_TOKEN:-}
+      SMTP_URL: ${SMTP_URL:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+
+volumes:
+  postgres:
