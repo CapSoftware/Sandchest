@@ -373,6 +373,8 @@ function toFindingInput(finding: Finding): FindingInput {
     mustNotBreak: finding.mustNotBreak,
     regressionTest: finding.regressionTest,
     fixPrompt: finding.fixPrompt,
+    trust: finding.trust ?? null,
+    validation: finding.validation ?? null,
   };
 }
 
@@ -398,6 +400,8 @@ function toEngineFinding(row: FindingRow): Finding & { id: string } {
     fixPrompt: row.fixPrompt,
     leads: [],
     skeptic: { confidence: row.confidence, reasoning: "" },
+    trust: row.trust ?? undefined,
+    validation: (row.validation as Finding["validation"]) ?? undefined,
   };
 }
 

@@ -81,6 +81,15 @@ export class SandboxWorkspace implements Workspace {
     return this.run(cmd, this.root, options);
   }
 
+  async startDetached(cmd: string[], options: { env?: Record<string, string> } = {}): Promise<void> {
+    this.assertUsable();
+    const [file, ...args] = cmd;
+    if (!file) throw new WorkspaceError("Empty command");
+    // Detached, like the indexer: the process keeps running on the microVM
+    // until the VM stops, and `destroy()` deletes the VM.
+    await this.sandbox.runCommand({ cmd: file, args, env: options.env, detached: true });
+  }
+
   async readFile(path: string): Promise<string> {
     this.assertUsable();
     // Symlinks can only reach files inside the microVM, which holds nothing but the checkout.

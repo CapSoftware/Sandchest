@@ -11,6 +11,12 @@ export interface Workspace extends AsyncDisposable {
   clone(repo: RepoRef, options: CloneOptions): Promise<void>;
   /** Runs a command in `root`. A non-zero exit code is returned, not thrown. */
   exec(cmd: string[], options?: ExecOptions): Promise<ExecResult>;
+  /**
+   * Launches a long-running process (an app server) in `root` that outlives
+   * this call, resolving once it has started. `destroy()` stops it with
+   * everything else, so it never leaks.
+   */
+  startDetached(cmd: string[], options?: { env?: Record<string, string> }): Promise<void>;
   /** Reads a UTF-8 file by checkout-relative path. Refuses paths that resolve outside the checkout. */
   readFile(path: string): Promise<string>;
   /**

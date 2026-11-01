@@ -10,6 +10,7 @@ import { huntSystemPrompt } from "./prompts";
 import { CandidateSchema, type Candidate, type Lead, type ThreatModel } from "./schema";
 import { touchesChange, type ChangedFile } from "./changes";
 import { agentTool, formatLead, type AgentTool, type RouteInfo, type Wrap } from "./tools";
+import { productFirst } from "./paths";
 import type { ScanContext } from "./context";
 
 export interface Assignment {
@@ -64,7 +65,9 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
   const under = (prefixes: string[], at: string | undefined) =>
     !!at && prefixes.some((prefix) => prefix === "" || at === prefix || at.startsWith(`${prefix}/`) || at.startsWith(`${prefix}:`));
 
-  const accessGroups = chunk(routes, ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
+  // Product routes before test/fixture routes, so the capped access-control hunters cover what ships first.
+  const ranked = productFirst(routes, (r) => r.at);
+  const accessGroups = chunk(ranked, ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
   // Access control, abuse and leads hunters always run; subsystems share the rest.
   const reserved = Math.max(1, accessGroups.length) + 2;
   for (const subsystem of subsystems.slice(0, Math.max(1, maxHunters - reserved))) {
@@ -90,7 +93,7 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
       brief: [
         "Your scope: authentication and authorisation across every entry point.",
         ACCESS_CONTROL_BRIEF,
-        section("Entry points", routes.map(formatRoute), "None found by the index. Use search() to find handlers."),
+        section("Entry points", ranked.map(formatRoute), "None found by the index. Use search() to find handlers."),
       ].join("\n\n"),
     });
   } else {
@@ -112,7 +115,7 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
       "Your scope: how the product can be abused, rather than broken into. Think like a fraudster and an abusive customer: what does this application let people get, spend, send or trigger, and how can you get more of it than you should, at someone else's expense?",
       "Look for: payments, plans and credits that can be skipped, reused, reversed or set by the client; coupons, referrals and trials that stack or reset; quantities, prices and currencies the client controls; steps that can be skipped, repeated or raced (two requests at once); invites, sharing and notifications that send attacker-chosen content to others; brute-forceable codes, passwords and tokens with no rate limit or lockout; user enumeration; and endpoints that make the owner pay per request (AI calls, transcoding, exports, storage, email) with no limit.",
       model.abuseSurfaces?.length ? section("Worth abusing (from recon)", model.abuseSurfaces, "") : "",
-      section("Entry points", routes.slice(0, MAX_ROUTES_LISTED).map(formatRoute), "None found by the index. Use search() to find handlers."),
+      section("Entry points", ranked.slice(0, MAX_ROUTES_LISTED).map(formatRoute), "None found by the index. Use search() to find handlers."),
     ]
       .filter(Boolean)
       .join("\n\n"),

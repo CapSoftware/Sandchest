@@ -5,8 +5,11 @@
  * never suppress them.
  */
 import type { IndexerClient } from "../indexer/client";
+import { fixPrompt } from "./fix-prompt";
+import { fingerprint } from "./gate";
 import type { Advisory, OsvClient } from "./osv";
-import type { Lead, Severity } from "./schema";
+import { productFirst } from "./paths";
+import type { Finding, Lead, Severity } from "./schema";
 import type { Dependency, SinkInfo } from "./tools";
 
 export interface DependencyVulns {
@@ -75,7 +78,8 @@ export function buildLeads({ found }: CodeSignals, vulns: DependencyVulns[]): Le
   const leads: Lead[] = [];
   const add = (lead: Omit<Lead, "id">) => leads.push({ id: `L${leads.length + 1}`, ...lead });
 
-  for (const secret of found.secrets) {
+  // Product code before test/fixture code: a committed secret in `tests/` matters far less than one in the app.
+  for (const secret of productFirst(found.secrets, (s) => s.at)) {
     add({ kind: "secret", title: `Committed ${secret.rule.replaceAll("_", " ")}`, at: secret.at, detail: `value ${secret.redacted}` });
   }
   for (const marker of found.injectionMarkers) {
@@ -93,7 +97,9 @@ export function buildLeads({ found }: CodeSignals, vulns: DependencyVulns[]): Le
       severity: toSeverity(worst(dep)),
     });
   }
-  for (const sink of found.sinks.slice(0, MAX_SINK_LEADS)) {
+  // Reachable, then product-before-fixture, then take the budget: hunters see the sinks that ship first.
+  const rankedSinks = productFirst([...found.sinks].sort((a, b) => Number(b.reachable) - Number(a.reachable)), (s) => s.at);
+  for (const sink of rankedSinks.slice(0, MAX_SINK_LEADS)) {
     const reach = sink.reachable ? "" : " (no route reaches it)";
     add({ kind: "sink", title: `${sink.kind} sink with ${sink.input} input${reach}`, at: sink.at, detail: `in ${sink.in}: ${sink.code}` });
   }
@@ -113,6 +119,58 @@ export function storableLeads(leads: Lead[]): Lead[] {
 /** Leads that must be reported whatever the hunters conclude. */
 export function persistentLeads(leads: Lead[]): Lead[] {
   return leads.filter((lead) => lead.kind !== "sink");
+}
+
+/**
+ * Findings emitted deterministically for imported dependencies with a known
+ * critical or high advisory, so the highest-severity known-vulnerable
+ * dependencies are reported every run rather than only when a hunter happens
+ * to surface them (a measured source of run-to-run variance). These are
+ * software-composition facts — the package *is* at a vulnerable version and
+ * *is* imported — so they are `corroborated` by construction and never fail
+ * the evidence gate or the skeptic. Any package a hunter already reported is
+ * skipped, so nothing is duplicated.
+ */
+export function dependencyFindings(vulns: DependencyVulns[], already: Finding[]): Finding[] {
+  const covered = new Set(
+    already.filter((f) => f.category === "vulnerable_dependency").map((f) => f.title.split(/[@\s]/)[0]!.toLowerCase()),
+  );
+  const findings: Finding[] = [];
+  for (const dep of vulns) {
+    if (dep.reachability !== "imported") continue;
+    const sev = worst(dep);
+    if (sev !== "critical" && sev !== "high") continue;
+    if (covered.has(dep.name.toLowerCase())) continue;
+
+    const site = dep.importedAt[0] ?? dep.importedAt.find(Boolean) ?? "package.json:1";
+    const file = site.includes(":") ? site.slice(0, site.lastIndexOf(":")) : site;
+    const line = Number(site.slice(file.length + 1)) || 1;
+    const top = dep.advisories.filter((a) => a.severity === sev).slice(0, 3);
+    const ids = top.map((a) => a.id).join(", ");
+    const fixedIn = top.map((a) => a.fixed).find(Boolean);
+    const base: Omit<Finding, "fixPrompt"> = {
+      fingerprint: fingerprint("vulnerable_dependency", { file, line, text: `${dep.name}@${dep.version} ${ids}`, symbol: dep.name }),
+      title: `${dep.name}@${dep.version} ships a known ${sev} vulnerability (${ids})`,
+      severity: sev,
+      confidence: sev === "critical" ? "high" : "medium",
+      category: "vulnerable_dependency",
+      cwe: null,
+      impact: top[0]?.summary ?? `${dep.name} has a known ${sev} vulnerability.`,
+      entryPoint: { file, line, description: `${dep.name}@${dep.version} imported here` },
+      attackPath: [{ file, line, note: `Vulnerable dependency ${dep.name}@${dep.version} is imported and reachable here`, excerpt: "" }],
+      attacker: "unauthenticated",
+      preconditions: `The project depends on ${dep.name}@${dep.version}, which is imported into the application.`,
+      proofOfConcept: `${dep.name}@${dep.version} is affected by ${ids}: ${top[0]?.summary ?? "see the advisory"}. Consult the advisory for a working exploit against this version.`,
+      fixGuidance: fixedIn ? `Upgrade ${dep.name} to ${fixedIn} or later.` : `Upgrade ${dep.name} to a patched version, or remove the dependency.`,
+      guarantees: [`The project no longer depends on a version of ${dep.name} affected by ${ids}.`],
+      mustNotBreak: [],
+      regressionTest: `After upgrading, re-run the scan and confirm ${ids} no longer appears for ${dep.name}.`,
+      leads: [],
+      skeptic: { confidence: sev === "critical" ? "high" : "medium", reasoning: "Deterministic software-composition fact: the advisory applies to the imported version." },
+    };
+    findings.push({ ...base, fixPrompt: fixPrompt(base) });
+  }
+  return findings;
 }
 
 function reachRank(dep: DependencyVulns): number {

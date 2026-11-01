@@ -61,6 +61,28 @@ export class LocalWorkspace implements Workspace {
     return this.run(cmd, this.root, options);
   }
 
+  startDetached(cmd: string[], options: { env?: Record<string, string> } = {}): Promise<void> {
+    this.assertUsable();
+    const [file, ...args] = cmd;
+    if (!file) throw new WorkspaceError("Empty command");
+    return new Promise((resolve, reject) => {
+      const child = spawn(file, args, {
+        cwd: this.root,
+        env: { ...this.env, ...options.env } as unknown as NodeJS.ProcessEnv,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      // Kept in `running` for its whole life, so `destroy()` kills the group.
+      this.running.add(child);
+      child.once("error", (error) => {
+        this.running.delete(child);
+        reject(new WorkspaceError(`Could not start ${file}: ${error.message}`, { cause: error }));
+      });
+      child.once("close", () => this.running.delete(child));
+      child.once("spawn", () => resolve());
+    });
+  }
+
   async readFile(path: string): Promise<string> {
     this.assertUsable();
     // Resolve symlinks too: a hostile repo can link to files elsewhere on the host.

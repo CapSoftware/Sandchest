@@ -50,6 +50,13 @@
       "when": 1793545002721,
       "tag": "0006_free_first_dig",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793564931340,
+      "tag": "0007_finding_trust",
+      "breakpoints": true
     }
   ]
 }

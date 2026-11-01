@@ -122,6 +122,35 @@ export interface PathStep extends Step {
   excerpt: string;
 }
 
+/**
+ * The outcome of validating a finding. A ladder of trust, strongest first:
+ *   - `verified`: the attack was reproduced against a running instance and a
+ *     deterministic oracle confirmed it (runtime validation — "we did it").
+ *   - `path_confirmed`: the index proves the attacker-reachable path from entry
+ *     to sink is real in the code, without running anything (code-path proof).
+ *     Weaker than `verified`: the path exists, but exploitability was not
+ *     executed. This runs in every scan.
+ *   - `inconclusive`: neither held — the path could not be confirmed on its
+ *     own, the app would not boot, or a probe did not fire.
+ *
+ * Validation only ever *raises* trust; it never downgrades or drops a finding,
+ * so a missing index edge or a flaky bring-up can never bury a real bug. A
+ * finding with no `validation` was not put through the stage at all.
+ */
+export type ValidationStatus = "verified" | "path_confirmed" | "inconclusive";
+
+/** How much independent evidence backs a finding. Strongest first. See `trust.ts`. */
+export const TRUST_TIERS = ["confirmed", "corroborated", "unconfirmed"] as const;
+export type TrustTier = (typeof TRUST_TIERS)[number];
+
+export interface Validation {
+  status: ValidationStatus;
+  /** How it was checked, e.g. `code-path`, `two-tenant`. Shown in diagnostics; never a secret. */
+  method: string;
+  /** One plain-English line: no code, payloads, secrets or identifiers. */
+  detail: string;
+}
+
 export interface Finding {
   /** Stable across scans: rule class + sink location + entry point. */
   fingerprint: string;
@@ -144,6 +173,10 @@ export interface Finding {
   /** Leads this finding explains. */
   leads: string[];
   skeptic: { confidence: Confidence; reasoning: string };
+  /** Present only when the finding went through dynamic validation. */
+  validation?: Validation;
+  /** How much independent evidence backs the finding; set by the trust gate. See `trust.ts`. */
+  trust?: TrustTier;
 }
 
 const EntryPoint = z.object({

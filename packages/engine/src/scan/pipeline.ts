@@ -19,7 +19,7 @@ import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate } fr
 import { isFatal, errorMessage } from "./errors";
 import { capChanges, changedLines, changeTool, relevantChanges, touchesChange, type ChangedFile } from "./changes";
 import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
-import { buildLeads, codeSignals, persistentLeads, vulnerabilities, type Signals } from "./leads";
+import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
 import { renderThreatModel } from "./prompts";
@@ -28,6 +28,10 @@ import { severityRank, type Candidate, type Finding, type Lead, type ThreatModel
 import { review, unreviewed, type Review } from "./skeptic";
 import { structure } from "./structure";
 import { createWrap, repoTools, type RouteInfo } from "./tools";
+import type { Runtime } from "./runtime";
+import { validateFindings, type ValidateOptions } from "./validate";
+import { proveFindings } from "./prove";
+import { trustRank, trustTier } from "./trust";
 
 export interface ScanOptions {
   client: LlmClient;
@@ -42,6 +46,13 @@ export interface ScanOptions {
   pricing?: Pricing;
   onEvent?: (event: ScanEvent) => void;
   signal?: AbortSignal;
+  /**
+   * Opt-in dynamic validation: boot the app in the workspace and reproduce
+   * surviving findings. Both must be present or the stage is skipped, so the
+   * default pipeline is unchanged. It only ever adds a `verified` badge.
+   */
+  runtime?: Runtime;
+  validate?: ValidateOptions;
 }
 
 export interface DismissedCandidate {
@@ -70,11 +81,15 @@ export interface ScanReport {
     rejectedByGate: number;
     duplicates: number;
     survivors: number;
+    /** Survivors whose attacker-reachable path the index confirmed (code-path proof). */
+    pathConfirmed: number;
+    /** Survivors reproduced against a running instance (runtime validation). */
+    verified: number;
     hunters: HunterStats[];
     /** Distinct files agents read. */
     filesRead: number;
   };
-  timings: { indexMs: number; sweepMs: number; reconMs: number; huntMs: number; coverageMs: number; verifyTailMs: number; totalMs: number };
+  timings: { indexMs: number; sweepMs: number; reconMs: number; huntMs: number; coverageMs: number; verifyTailMs: number; validateMs: number; totalMs: number };
   /** PR reviews: what was reviewed. `changedLines` counts security-relevant lines only. */
   review?: { files: number; changedLines: number; reviewedFiles: string[]; skippedFiles: string[] };
   usage: { byRole: Record<string, RoleUsage>; total: RoleUsage; costUsd?: number };
@@ -259,7 +274,45 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   });
   if (fatal) throw fatal.error;
 
-  findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || confidenceRank(a) - confidenceRank(b));
+  let validateMs = 0;
+  if (findings.length > 0 && !signal.aborted) {
+    emit({ type: "stage", stage: "verify", message: "Proving the code path of what we found…" });
+    [, validateMs] = await time(async () => {
+      try {
+        // Always-on: prove each finding's path through the index, no app boot.
+        await proveFindings(indexer, findings, { signal, onProgress: (message) => emit({ type: "progress", message }) });
+        // Stronger tier, when a runtime is supplied: reproduce live, upgrading to `verified`.
+        if (options.runtime && options.validate) {
+          await validateFindings(options.runtime, findings, {
+            ...options.validate,
+            signal,
+            onProgress: (message) => emit({ type: "progress", message }),
+          });
+        }
+      } catch (error) {
+        // Validation is best-effort: a failure here must never fail the scan or lose a finding.
+        if (isFatal(error, signal)) throw error;
+        emit({ type: "warning", message: `Validation did not finish: ${errorMessage(error)}` });
+      }
+    });
+  }
+
+  // Deep scans: guarantee the highest-severity known-vulnerable imported dependencies are reported
+  // every run (killing hunter variance). PR reviews skip this — their findings must touch the change.
+  if (!change) {
+    const deps = dependencyFindings(signals.vulns, findings);
+    for (const finding of deps) {
+      findings.push(finding);
+      emit({ type: "finding", finding });
+    }
+  }
+
+  // Trust is set from the evidence each finding now carries (validation, origin).
+  for (const finding of findings) finding.trust = trustTier(finding);
+  // Most severe first, then best-corroborated, then most confident: proven findings surface above lone judgments.
+  findings.sort(
+    (a, b) => severityRank(a.severity) - severityRank(b.severity) || trustRank(a.trust) - trustRank(b.trust) || confidenceRank(a) - confidenceRank(b),
+  );
   const leads = persistentLeads(signals.leads).filter((lead) => !change || inChange(lead.at));
   const totalMs = Date.now() - started;
   emit({ type: "stage", stage: "done", message: summary(findings) });
@@ -279,10 +332,12 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       rejectedByGate: base.counters.rejected,
       duplicates: base.counters.duplicates,
       survivors: findings.length,
+      pathConfirmed: findings.filter((f) => f.validation?.status === "path_confirmed").length,
+      verified: findings.filter((f) => f.validation?.status === "verified").length,
       hunters,
       filesRead: read.size,
     },
-    timings: { indexMs: overview.indexMs, sweepMs, reconMs, huntMs, coverageMs, verifyTailMs, totalMs },
+    timings: { indexMs: overview.indexMs, sweepMs, reconMs, huntMs, coverageMs, verifyTailMs, validateMs, totalMs },
     usage: { byRole: meter.byRole, total: meter.total(), costUsd: options.pricing ? meter.cost(options.pricing) : undefined },
     warnings,
     review: reviewed,
@@ -351,8 +406,8 @@ function emptyReport(started: number, overview: Overview, threatModel: ThreatMod
     leads: [],
     findings: [],
     dismissed: [],
-    stats: { candidates: 0, rejectedByGate: 0, duplicates: 0, survivors: 0, hunters: [], filesRead: 0 },
-    timings: { indexMs: overview.indexMs, sweepMs: 0, reconMs: 0, huntMs: 0, coverageMs: 0, verifyTailMs: 0, totalMs },
+    stats: { candidates: 0, rejectedByGate: 0, duplicates: 0, survivors: 0, pathConfirmed: 0, verified: 0, hunters: [], filesRead: 0 },
+    timings: { indexMs: overview.indexMs, sweepMs: 0, reconMs: 0, huntMs: 0, coverageMs: 0, verifyTailMs: 0, validateMs: 0, totalMs },
     usage: { byRole: {}, total: none, costUsd: 0 },
     warnings: [],
     review,

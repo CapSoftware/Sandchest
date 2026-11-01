@@ -26,9 +26,20 @@ export interface CheckInput {
   inline?: number;
 }
 
+/**
+ * A finding may fail the build unless we positively know it is a lone,
+ * uncorroborated model judgment. Anything with independent evidence
+ * (`corroborated`/`confirmed`) fails; so does anything with unknown trust
+ * (older findings, or paths that did not set it) — we only ever *relax* the
+ * build-blocking signal when we are sure, never guess a real issue away.
+ */
+function mayFailBuild(finding: Finding): boolean {
+  return finding.trust !== "unconfirmed";
+}
+
 export function checkResult(input: CheckInput): { conclusion: CheckConclusion; output: CheckOutput } {
   const visible = shown(input.findings);
-  const failing = visible.filter((f) => ORDER.indexOf(f.severity) <= ORDER.indexOf(input.threshold));
+  const failing = visible.filter((f) => ORDER.indexOf(f.severity) <= ORDER.indexOf(input.threshold) && mayFailBuild(f));
   const cost = input.credits ? ` · ${input.credits} ${input.credits === 1 ? "credit" : "credits"}` : "";
 
   if (visible.length === 0) {

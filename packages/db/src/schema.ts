@@ -202,6 +202,10 @@ export const findings = pgTable(
     mustNotBreak: jsonb("must_not_break").$type<string[]>().notNull(),
     regressionTest: text("regression_test").notNull(),
     fixPrompt: text("fix_prompt").notNull(),
+    /** How much independent evidence backs the finding (the trust gate). Null on findings written before validation shipped. */
+    trust: text("trust", { enum: ["confirmed", "corroborated", "unconfirmed"] }),
+    /** The validation outcome, if the finding went through it: { status, method, detail }. No code or secrets. */
+    validation: jsonb("validation").$type<{ status: string; method: string; detail: string }>(),
     sourceScanId: uuid("source_scan_id").references(() => scans.id, { onDelete: "set null" }),
     sourceKind: scanKind("source_kind").notNull(),
     prNumber: integer("pr_number"),

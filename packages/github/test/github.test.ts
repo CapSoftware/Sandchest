@@ -158,6 +158,21 @@ describe("render", () => {
     expect(checkResult({ ...base, findings: [] }).output.title).toBe("Nothing buried here");
   });
 
+  test("the build fails only on corroborated findings, never a lone unconfirmed guess", () => {
+    const base = { threshold: "high" as const, isPublic: false, detailsUrl: "https://app/x" };
+    // A lone, uncorroborated model judgment never blocks a merge…
+    const unconfirmed = checkResult({ ...base, findings: [{ ...finding("critical"), trust: "unconfirmed" }] });
+    expect(unconfirmed.conclusion).toBe("success");
+    expect(unconfirmed.output.title).toContain("1 issue"); // still shown, just not blocking
+    // …while corroborated and confirmed findings do.
+    expect(checkResult({ ...base, findings: [{ ...finding("high"), trust: "corroborated" }] }).conclusion).toBe("failure");
+    expect(checkResult({ ...base, findings: [{ ...finding("high"), trust: "confirmed" }] }).conclusion).toBe("failure");
+    // Unknown trust (older findings) still fails — we only relax when we are sure.
+    expect(checkResult({ ...base, findings: [finding("high")] }).conclusion).toBe("failure");
+    // A corroborated issue alongside an unconfirmed one fails on the corroborated one.
+    expect(checkResult({ ...base, findings: [{ ...finding("high"), trust: "unconfirmed" }, { ...finding("critical"), trust: "corroborated" }] }).conclusion).toBe("failure");
+  });
+
   test("public repos get counts and a link, never details", () => {
     const { output } = checkResult({ findings: [finding("high"), finding("low")], threshold: "high", isPublic: true, detailsUrl: "https://app/x", credits: 2 });
     const text = JSON.stringify(output);

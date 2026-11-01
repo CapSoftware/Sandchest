@@ -8,3 +8,21 @@ export * from "./schema";
 export { capChanges, changedLines, isSecurityRelevant, relevantChanges, touchesChange, type ChangedFile } from "./changes";
 export { checkFixes, reanchor, type FixCheckOptions, type FixCheckResult } from "./fixcheck";
 export { storableLeads } from "./leads";
+export { proveFinding, proveFindings, type ProveOptions } from "./prove";
+export { trustTier, trustRank } from "./trust";
+export type { Runtime, RuntimeExecOptions, RuntimeExecResult } from "./runtime";
+export {
+  bringUp,
+  judgeTwoTenant,
+  planBringUp,
+  repoProbe,
+  runTwoTenant,
+  validateFindings,
+  type BootResult,
+  type BringUpOptions,
+  type BringUpPlan,
+  type RepoProbe,
+  type RequestStep,
+  type TwoTenantRecipe,
+  type ValidateOptions,
+} from "./validate";
