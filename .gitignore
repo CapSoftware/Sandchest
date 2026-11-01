@@ -19,6 +19,7 @@ FINDINGS.md
 # Dependencies and build output
 node_modules/
 .next/
+.next-*/
 .turbo/
 .vercel/
 dist/
