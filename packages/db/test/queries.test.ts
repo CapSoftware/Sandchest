@@ -216,6 +216,22 @@ describe("live feed", () => {
 });
 
 describe("findings", () => {
+  it("never gives a dismissed finding its code back when a scan finds it again", async () => {
+    const { org, repos } = await upsertInstallation(database, 9015, { ...account, githubAccountId: 115 }, [repo(51)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const withPrompt = { ...finding("fp-dismissed"), fixPrompt: "quotes 3| db.query(x)" };
+    const [id] = (await upsertFindings(database, repoId, scan, [withPrompt])).ids;
+    // Dismissing deletes the code (as applyFindingAction does).
+    await database.$client`update findings set status = 'dismissed', dismiss_reason = 'accepted_risk', fix_prompt = '', attack_path = (select jsonb_agg(step - 'excerpt') from jsonb_array_elements(attack_path) step) where id = ${id!}`;
+
+    await upsertFindings(database, repoId, scan, [withPrompt]);
+    const [row] = await database.$client<Array<{ status: string; fix_prompt: string; attack_path: Array<{ file: string; line: number; note: string; excerpt?: string }> }>>`select status, fix_prompt, attack_path from findings where id = ${id!}`;
+    expect(row!.status).toBe("dismissed");
+    expect(row!.fix_prompt).toBe("");
+    expect(row!.attack_path[0]).toEqual({ file: "a.ts", line: 3, note: "sink" });
+  });
+
   it("dedupes by fingerprint, reopens fixed findings, and strips excerpts when fixed", async () => {
     const { org, repos } = await upsertInstallation(database, 9005, { ...account, githubAccountId: 105 }, [repo(40)]);
     const repoId = repos[0]!.id;

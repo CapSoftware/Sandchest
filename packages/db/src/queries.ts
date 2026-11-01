@@ -337,11 +337,12 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
           confidence: sql`excluded.confidence`,
           title: sql`excluded.title`,
           impact: sql`excluded.impact`,
-          attackPath: sql`excluded.attack_path`,
+          // A dismissed finding stays resolved, so it never gets its code back (SPEC §6).
+          attackPath: sql`case when ${findings.status} = 'dismissed' then (select coalesce(jsonb_agg(step - 'excerpt'), '[]'::jsonb) from jsonb_array_elements(excluded.attack_path) step) else excluded.attack_path end`,
           entryPoint: sql`excluded.entry_point`,
           proofOfConcept: sql`excluded.proof_of_concept`,
           fixGuidance: sql`excluded.fix_guidance`,
-          fixPrompt: sql`excluded.fix_prompt`,
+          fixPrompt: sql`case when ${findings.status} = 'dismissed' then '' else excluded.fix_prompt end`,
         },
       })
       // xmax = 0 only for freshly inserted rows.
