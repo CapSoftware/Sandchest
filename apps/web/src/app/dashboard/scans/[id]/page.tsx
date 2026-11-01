@@ -5,9 +5,8 @@ import { HoverLink } from "@/components/app/hover-link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { Heat } from "@/components/app/heat";
-import { LiveFeed } from "@/components/app/live-feed";
-import { When } from "@/components/app/when";
-import { compactNumber, duration, plural, SCAN_KIND_LABEL, SCAN_STATUS_LABEL } from "@/lib/format";
+import { ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack } from "@/components/app/scan-live";
+import { compactNumber, plural, SCAN_KIND_LABEL } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
 
@@ -35,14 +34,24 @@ export default async function ScanPage({ params }: Params) {
   if (!row) notFound();
   const { scan, repo, metrics, findings, events } = row;
   const live = ACTIVE.has(scan.status);
-  const started = scan.startedAt ?? scan.createdAt;
-  // Server-rendered: a running scan shows how long it had run when the page was drawn.
-  const elapsed = metrics?.durationMs ?? (scan.finishedAt ?? new Date()).getTime() - started.getTime();
   const shown = findings.filter((finding) => finding.confidence !== "low");
   const stats = (scan.stats ?? {}) as { loc?: number; checked?: number; fixed?: number };
 
+  const initial = {
+    kind: scan.kind,
+    status: scan.status,
+    createdAt: scan.createdAt.getTime(),
+    startedAt: scan.startedAt?.getTime() ?? null,
+    finishedAt: scan.finishedAt?.getTime() ?? null,
+    durationMs: metrics?.durationMs ?? null,
+    renderedAt: Date.now(),
+    events: events.map((event) => ({ seq: event.seq, type: event.type, message: event.message, at: event.createdAt.getTime() })),
+  };
+
   return (
-    <>
+    // Keyed by status: when the scan ends and the page refreshes, the view starts again from the
+    // finished scan (its end time and measured duration) instead of keeping what it followed live.
+    <ScanLive key={scan.status} scanId={scan.id} initial={initial}>
       <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/dashboard">Repos</Link>
         <span aria-hidden="true">/</span>
@@ -53,12 +62,7 @@ export default async function ScanPage({ params }: Params) {
         <div>
           <h1 className="page-title">{title(scan.kind, scan.prNumber)}</h1>
           <p className="page-sub">
-            <span className="scan-state" data-status={scan.status}>
-              {live && <span className="blink" aria-hidden="true" />}
-              {SCAN_STATUS_LABEL[scan.status]}
-            </span>
-            {live ? ", started " : " "}
-            <When date={scan.finishedAt ?? started} /> on <code>{scan.headSha === "HEAD" ? "the default branch" : scan.headSha.slice(0, 7)}</code>
+            <ScanStatus /> on <code>{scan.headSha === "HEAD" ? "the default branch" : scan.headSha.slice(0, 7)}</code>
           </p>
         </div>
         {scan.prNumber !== null && (
@@ -71,10 +75,7 @@ export default async function ScanPage({ params }: Params) {
       {scan.error && <p className="scan-error">{scan.error}</p>}
 
       <dl className="stats">
-        <div className="stat">
-          <dt>{live ? "Running for" : "Took"}</dt>
-          <dd>{duration(elapsed)}</dd>
-        </div>
+        <ScanClock />
         {scan.kind === "fix_check" ? (
           <div className="stat">
             <dt>Fixed</dt>
@@ -135,13 +136,9 @@ export default async function ScanPage({ params }: Params) {
         <h2 id="feed-title" className="block-title">
           {live ? "Live" : "Log"}
         </h2>
-        <LiveFeed
-          scanId={scan.id}
-          startedAt={started.getTime()}
-          live={live}
-          initial={events.map((event) => ({ seq: event.seq, type: event.type, message: event.message, at: event.createdAt.getTime() - started.getTime() }))}
-        />
+        <ScanTrack />
+        <ScanFeed />
       </section>
-    </>
+    </ScanLive>
   );
 }

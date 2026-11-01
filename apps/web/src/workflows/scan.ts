@@ -8,7 +8,7 @@ import { beginScan as begin, executeScan as execute, failScan as fail, publishSc
 import { captureException } from "@/server/sentry";
 
 /** How long a scan waits for an org concurrency slot before giving up. */
-const MAX_QUEUE_POLLS = 360; // × 20 s = 2 hours
+const MAX_QUEUE_POLLS = 720; // × 10 s = 2 hours
 
 export async function scanWorkflow(scanId: string): Promise<{ state: string }> {
   "use workflow";
@@ -20,7 +20,7 @@ export async function scanWorkflow(scanId: string): Promise<{ state: string }> {
         await failStep(scanId, "Waited too long for a free scan slot.");
         return { state: "failed" };
       }
-      await sleep("20s");
+      await sleep("10s");
       ({ state } = await beginStep(scanId));
     }
     if (state === "done") return { state };

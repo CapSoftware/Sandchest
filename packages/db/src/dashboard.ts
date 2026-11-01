@@ -364,15 +364,21 @@ export async function canSeeScan(database: Db, userId: string, scanId: string): 
 }
 
 /** The live feed's poll: new events and the scan's status, in one query. */
-export async function feedSince(database: Db, scanId: string, afterSeq: number, limit = 200): Promise<{ status: string | null; events: Array<{ seq: number; type: string; message: string; createdAt: string }> }> {
-  const [row] = await database.execute<{ status: string | null; events: Array<{ seq: number; type: string; message: string; createdAt: string }> }>(sql`
-    select (select status from ${scans} where id = ${scanId}) as status,
+export async function feedSince(
+  database: Db,
+  scanId: string,
+  afterSeq: number,
+  limit = 200,
+): Promise<{ status: string | null; startedAt: string | null; events: Array<{ seq: number; type: string; message: string; createdAt: string }> }> {
+  const [row] = await database.execute<{ status: string | null; startedAt: string | null; events: Array<{ seq: number; type: string; message: string; createdAt: string }> }>(sql`
+    select s.status, s.started_at as "startedAt",
       coalesce((select json_agg(e order by e.seq) from (
         select seq, type, message, created_at as "createdAt" from ${scanEvents}
         where scan_id = ${scanId} and seq > ${afterSeq} order by seq limit ${limit}
       ) e), '[]'::json) as events
+    from (select 1) one left join ${scans} s on s.id = ${scanId}
   `);
-  return { status: row?.status ?? null, events: row?.events ?? [] };
+  return { status: row?.status ?? null, startedAt: row?.startedAt ? new Date(row.startedAt).toISOString() : null, events: row?.events ?? [] };
 }
 
 export async function recentScans(database: Db, userId: string, repoId: string, limit = 8) {

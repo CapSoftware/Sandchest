@@ -12,6 +12,7 @@ import {
   markDeepScanned,
   markFixed,
   markStale,
+  noteScanEvent,
   notificationRecipients,
   openFindings,
   recordMetrics,
@@ -51,7 +52,7 @@ import { noticeScanPaused } from "./notices";
 import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
 
-/** Concurrent scans per org (SPEC §4). */
+/** Concurrent scans per org (SPEC §4), in each lane: recon, and everything else (see `claimScanSlot`). */
 export const ORG_CONCURRENCY = 2;
 /** The engine's wall-clock budget inside a workflow step: under Vercel's 800 s function limit. */
 const SCAN_BUDGET_MS = 12 * 60_000;
@@ -76,7 +77,12 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
       return { state: "done" };
     }
   }
-  if (!(await claimScanSlot(db(), scan.id, scan.orgId, ORG_CONCURRENCY))) return { state: "queued" };
+  if (!(await claimScanSlot(db(), scan.id, scan.orgId, ORG_CONCURRENCY))) {
+    // Said once (a repeat of the last line is skipped), so the feed explains the wait.
+    const what = scan.kind === "recon" ? "repositories are being mapped" : "scans are already running";
+    await noteScanEvent(db(), scan.id, "queue", `Waiting for a free slot: ${ORG_CONCURRENCY} ${what} for ${scan.repo.org.githubLogin}. This starts as soon as one finishes.`);
+    return { state: "queued" };
+  }
   if (scan.kind === "pr_review" && !scan.checkRunId && scan.repo.org.installationId) {
     const checkRunId = await githubApp()
       .installation(scan.repo.org.installationId)
@@ -124,7 +130,10 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
 
   const installation = githubApp().installation(installationId);
   const events = new EventWriter(db(), scan.id);
-  const onEvent = (event: ScanEvent) => events.write(event.type, event.type === "finding" ? `Found: ${event.finding.title}` : event.message);
+  // A stage's name travels with it ("stage:hunt"), so the page can light its step on the track.
+  const onEvent = (event: ScanEvent) =>
+    events.write(event.type === "stage" ? `stage:${event.stage}` : event.type, event.type === "finding" ? `Found: ${event.finding.title}` : event.message);
+  events.write("stage:setup", "Starting a fresh sandbox and fetching the code…");
   const settings = config();
   const workspace: Workspace =
     settings.workspace === "sandbox" ? await SandboxWorkspace.create({ timeoutMs: SCAN_BUDGET_MS + 5 * 60_000 }) : await LocalWorkspace.create();

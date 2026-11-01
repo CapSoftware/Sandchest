@@ -1191,6 +1191,83 @@ html:not([data-js]) .no-js-submit {
   color: var(--color-sand);
 }
 
+/*
+ * A scan's steps: a row of pixel bars. Done steps are solid gold; the
+ * current one is a dithered gold that marches while it digs; the rest are
+ * dark seams. A failed step turns the critical red.
+ */
+
+.track {
+  display: grid;
+  grid-template-columns: repeat(var(--steps), minmax(0, 1fr));
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+.track-step {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.track-bar {
+  display: block;
+  height: 0.5rem;
+  background: var(--color-seam);
+  transition: background-color 240ms;
+}
+
+.track-label {
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--color-dust) 70%, var(--color-void));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 240ms;
+}
+
+.track-step[data-state="done"] .track-bar {
+  background: var(--color-gold);
+  box-shadow: inset 0 -2px 0 var(--color-rust);
+}
+
+.track-step[data-state="done"] .track-label {
+  color: var(--color-sand);
+}
+
+.track-step[data-state="current"] .track-bar {
+  background: repeating-conic-gradient(var(--color-gold) 0 25%, var(--color-seam) 0 50%) 0 0 / 4px 4px;
+  box-shadow: 0 0 0.75rem color-mix(in oklab, var(--color-amber) 35%, transparent);
+}
+
+.track-step[data-state="current"] .track-label {
+  color: var(--color-gold-light);
+}
+
+.track-step[data-state="failed"] .track-bar {
+  background: var(--critical);
+}
+
+.track-step[data-state="failed"] .track-label {
+  color: var(--critical);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .track-step[data-state="current"] .track-bar {
+    animation: dig 480ms steps(2) infinite;
+  }
+}
+
+@keyframes dig {
+  to {
+    background-position: 4px 0;
+  }
+}
+
+.feed-line[data-type="queue"] {
+  color: var(--color-honey);
+}
+
 /* The live feed: a terminal you watch, not one you type in. */
 
 .feed {

@@ -11,6 +11,8 @@ import {
   strandedScans,
   updateScan,
   claimScanSlot,
+  feedSince,
+  noteScanEvent,
   createDb,
   createScan,
   disableRepos,
@@ -191,6 +193,36 @@ describe("scans", () => {
     // Claiming a running scan again is a no-op that reports it running.
     const running = created[claims.indexOf(true)]!.scan.id;
     expect(await claimScanSlot(database, running, org.id, 2)).toBe(true);
+  });
+  it("gives recon its own lane, so a Dig never waits behind it", async () => {
+    const { org, repos } = await upsertInstallation(database, 9013, { ...account, githubAccountId: 113 }, [repo(21), repo(22), repo(23)]);
+    const make = (i: number, kind: "recon" | "deep") => createScan(database, { repoId: repos[i % 3]!.id, orgId: org.id, kind, trigger: "manual", headSha: `lane${i}` });
+    const recons = await Promise.all([0, 1, 2].map((i) => make(i, "recon")));
+    const claims = await Promise.all(recons.map(({ scan }) => claimScanSlot(database, scan.id, org.id, 2)));
+    expect(claims.filter(Boolean)).toHaveLength(2);
+    // Both recon slots are taken, and a deep scan still starts at once.
+    const { scan: deep } = await make(0, "deep");
+    expect(await claimScanSlot(database, deep.id, org.id, 2)).toBe(true);
+    // The third recon still waits: its lane is full.
+    expect(await claimScanSlot(database, recons[claims.indexOf(false)]!.scan.id, org.id, 2)).toBe(false);
+  });
+
+  it("notes why a scan waits once, not on every poll, and reports when it started", async () => {
+    const { org, repos } = await upsertInstallation(database, 9014, { ...account, githubAccountId: 114 }, [repo(24)]);
+    const { scan } = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "note" });
+    for (let i = 0; i < 3; i++) await noteScanEvent(database, scan.id, "queue", "Waiting for a free slot.");
+    await noteScanEvent(database, scan.id, "queue", "Waiting for a free slot: 2 running.");
+    const first = await feedSince(database, scan.id, 0);
+    expect(first.events.map((e) => [e.seq, e.type, e.message])).toEqual([
+      [1, "queue", "Waiting for a free slot."],
+      [2, "queue", "Waiting for a free slot: 2 running."],
+    ]);
+    expect(first).toMatchObject({ status: "queued", startedAt: null });
+    expect(await claimScanSlot(database, scan.id, org.id, 2)).toBe(true);
+    const started = await feedSince(database, scan.id, 2);
+    expect(started.status).toBe("running");
+    expect(Date.parse(started.startedAt!)).toBeGreaterThan(Date.now() - 60_000);
+    expect(await feedSince(database, "00000000-0000-0000-0000-000000000000", 0)).toEqual({ status: null, startedAt: null, events: [] });
   });
 });
 

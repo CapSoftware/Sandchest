@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
 
@@ -170,24 +170,44 @@ export async function scanById(database: Db, id: string): Promise<(Scan & { repo
 }
 
 /**
- * Moves a queued scan to running if its org has a free slot. Serialised per
- * org with an advisory lock, so two scans cannot both take the last slot.
- * Returns true if the scan is running (now, or already).
+ * Moves a queued scan to running if its org has a free slot in the scan's
+ * lane. Recon, which runs by itself for every repository when a plan starts,
+ * has a lane of its own, so a Dig, a PR review or a fix check never waits
+ * behind it. Serialised per org with an advisory lock, so two scans cannot
+ * both take the last slot. Returns true if the scan is running (now, or already).
  */
 export async function claimScanSlot(database: Db, scanId: string, orgId: string, limit: number): Promise<boolean> {
   return database.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${orgId}, 0))`);
-    const [scan] = await tx.select({ status: scans.status }).from(scans).where(eq(scans.id, scanId));
+    const [scan] = await tx.select({ status: scans.status, kind: scans.kind }).from(scans).where(eq(scans.id, scanId));
     if (!scan) throw new Error(`Scan ${scanId} not found`);
     if (scan.status !== "queued") return scan.status === "running";
+    const lane = scan.kind === "recon" ? eq(scans.kind, "recon") : ne(scans.kind, "recon");
     const [{ running }] = (await tx
       .select({ running: sql<number>`count(*)::int` })
       .from(scans)
-      .where(and(eq(scans.orgId, orgId), eq(scans.status, "running")))) as [{ running: number }];
+      .where(and(eq(scans.orgId, orgId), eq(scans.status, "running"), lane))) as [{ running: number }];
     if (running >= limit) return false;
     await tx.update(scans).set({ status: "running", startedAt: new Date() }).where(eq(scans.id, scanId));
     return true;
   });
+}
+
+/**
+ * Adds one line to a scan's feed, unless it would repeat the line before it:
+ * a waiting scan says why once, not on every poll. For lines written outside
+ * a running scan (its EventWriter takes over from there).
+ */
+export async function noteScanEvent(database: Db, scanId: string, type: string, message: string): Promise<void> {
+  await database.execute(sql`
+    insert into ${scanEvents} (scan_id, seq, type, message)
+    select ${scanId}, coalesce(max(seq), 0) + 1, ${type}, ${message} from ${scanEvents} where scan_id = ${scanId}
+    having not exists (
+      select 1 from ${scanEvents} last where last.scan_id = ${scanId} and last.type = ${type} and last.message = ${message}
+        and last.seq = (select max(seq) from ${scanEvents} where scan_id = ${scanId})
+    )
+    on conflict do nothing
+  `);
 }
 
 export async function updateScan(database: Db, scanId: string, values: Partial<Pick<Scan, "status" | "checkRunId" | "workflowRunId" | "credits" | "leads" | "stats" | "error" | "finishedAt" | "baseSha">>): Promise<void> {
