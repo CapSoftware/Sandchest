@@ -5,10 +5,11 @@ import type { Finding } from "./schema";
  * is reached, what the fix must guarantee, what must not break, and a
  * regression test that proves it.
  */
-export function fixPrompt(finding: Omit<Finding, "fixPrompt">): string {
+export function fixPrompt(finding: Pick<Finding, "severity" | "title" | "cwe" | "impact" | "entryPoint" | "preconditions" | "proofOfConcept" | "fixGuidance" | "guarantees" | "mustNotBreak" | "regressionTest"> & { attackPath: Array<Omit<Finding["attackPath"][number], "excerpt"> & { excerpt?: string }> }): string {
   const sink = finding.attackPath.at(-1)!;
   const steps = finding.attackPath
-    .map((step, i) => `${i + 1}. \`${step.file}:${step.line}\` — ${step.note}\n\n${fence(step.excerpt)}`)
+    // Excerpts are dropped once a finding is resolved; the path still reads without them.
+    .map((step, i) => `${i + 1}. \`${step.file}:${step.line}\` — ${step.note}${step.excerpt ? `\n\n${fence(step.excerpt)}` : ""}`)
     .join("\n\n");
   const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n");
 

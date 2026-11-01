@@ -1,4 +1,5 @@
 export { DEFAULT_LIMITS, type ScanEvent, type ScanLimits } from "./context";
+export { fixPrompt } from "./fix-prompt";
 export { fingerprint } from "./gate";
 export { loadPricing, type Pricing } from "./metrics";
 export { createOsvClient, type OsvClient } from "./osv";
