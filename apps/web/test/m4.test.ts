@@ -275,6 +275,24 @@ describe.skipIf(!available)("billing", () => {
     expect(autumn.get(acme.id).credits).toBe(25);
   });
 
+  test("a Dig that loses the race never reaches Autumn: no hold, no auto top-up", async () => {
+    // Free the slot left by the previous test, then arm auto top-up below 15 credits.
+    await database.$client`update scans set status = 'completed' where repo_id = ${repoIds[1]!} and kind = 'deep'`;
+    const customer = autumn.get(acme.id);
+    customer.credits = 40;
+    customer.autoTopUp = { enabled: true, threshold: 15, quantity: 25, perMonth: 4 };
+    customer.topUpsThisMonth = 0;
+    const chargesBefore = customer.charges.length;
+    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[1]!), with: { org: true } });
+    const results = await Promise.all([requestDeepScan({ ...repo!, loc: 50_000 }), requestDeepScan({ ...repo!, loc: 50_000 })]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ ok: false, reason: "running" });
+    // The winner's hold leaves 25, above the line. A hold by the loser would have left 10 and bought a top-up.
+    expect(customer.credits).toBe(25);
+    expect(customer.charges.slice(chargesBefore).filter((c) => c.what === "auto_top_up")).toHaveLength(0);
+    customer.autoTopUp = null;
+  });
+
   test("auto top-up is sized for the plan, and follows a plan change", async () => {
     await database.$client`update orgs set settings = ${JSON.stringify({ checkThreshold: "high", autoTopUp: { enabled: true, monthlyLimitUsd: 40 } })}::jsonb where id = ${acme.id}`;
     await applyAutoTopUp(acme.id, "lockbox", { enabled: true, monthlyLimitUsd: 40 });

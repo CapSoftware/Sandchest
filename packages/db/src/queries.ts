@@ -160,6 +160,11 @@ export async function createScan(database: Db, input: NewScan): Promise<{ scan: 
   return { scan: existing, created: false };
 }
 
+/** Removes a scan that never started (a Dig whose credits were refused), freeing its slot. */
+export async function deleteUnstartedScan(database: Db, scanId: string): Promise<void> {
+  await database.delete(scans).where(and(eq(scans.id, scanId), eq(scans.status, "queued"), isNull(scans.workflowRunId)));
+}
+
 export async function scanById(database: Db, id: string): Promise<(Scan & { repo: Repo & { org: Org } }) | undefined> {
   return database.query.scans.findFirst({ where: eq(scans.id, id), with: { repo: { with: { org: true } } } });
 }
