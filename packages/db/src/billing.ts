@@ -104,66 +104,52 @@ export interface BalanceSeen {
   to: Date;
 }
 
-/** The level and its revision as read, for a compare-and-set that fails if anyone moved them since. */
-export interface CreditLevelState {
-  level: number;
-  rev: number;
+/** The org's stored credit level, read without a lock: only to skip finding recipients for a balance that can't be a crossing. */
+export async function storedCreditLevel(database: Db, orgId: string): Promise<number | undefined> {
+  const [row] = await database.select({ level: orgBilling.creditLevel }).from(orgBilling).where(eq(orgBilling.orgId, orgId));
+  return row?.level;
 }
 
 /**
- * Applies a balance just observed to the org's credit level (0 ok, 1 low,
- * 2 exhausted), except a crossing. Returns the state to raise from when the
- * observation is a crossing (a higher level, with `raise`), and null otherwise.
+ * Applies one observed balance to the org's credit level (0 ok, 1 low,
+ * 2 exhausted), in one transaction under the org's row lock, so observations
+ * for an org take turns. True only when this call recorded an upward crossing
+ * and reserved its email: the caller sends it after the commit.
  *
- * - Answers from Autumn can arrive out of order, so an observation counts only
- *   if it was asked for (`from`) no earlier than the last counted one was
- *   answered (`credit_level_at`). A stale one changes nothing. With `retry`
- *   (the caller lost a raise to someone else) a tie goes to what is stored:
- *   it counts only if asked for strictly later.
- * - A lower level is stored at once, re-arming the higher ones; so is a
- *   counted observation that leaves the level where it is. Either way
- *   `credit_level_at` moves on and `credit_level_rev` goes up by one.
- * - A crossing is not stored here: the caller first finds someone to tell
- *   (which may ask GitHub), then commits it with `raiseCreditLevel`. No row
- *   lock is held across that.
+ * - Fresh: answers from Autumn can arrive out of order, so an observation
+ *   counts only if it was asked for (`from`) strictly after the last counted
+ *   one was answered (`credit_level_at`). A tie is stale either way; a
+ *   crossing it would have announced is announced by the next balance, and
+ *   every reservation, charge and refusal produces one.
+ * - Up: recorded only when `announce` (there is someone to tell). Then the
+ *   level, its timestamp and revision move, and the email is reserved in
+ *   `org_notices` in the same transaction. Without anyone to tell nothing
+ *   changes, so a later balance can still announce it.
+ * - Same or down: the level and its timestamp are stored, re-arming the
+ *   emails for the levels above.
  */
-export async function observeCreditLevel(
-  database: Db,
-  orgId: string,
-  level: number,
-  seen: BalanceSeen,
-  options: { raise: boolean; retry?: boolean },
-): Promise<CreditLevelState | null> {
+export async function recordCreditLevel(database: Db, orgId: string, level: number, seen: BalanceSeen, announce: boolean): Promise<boolean> {
   return database.transaction(async (tx) => {
     const [row] = await tx
       .select({ level: orgBilling.creditLevel, at: orgBilling.creditLevelAt, rev: orgBilling.creditLevelRev })
       .from(orgBilling)
       .where(eq(orgBilling.orgId, orgId))
       .for("update");
-    if (!row) return null;
-    if (row.at && (options.retry ? row.at >= seen.from : row.at > seen.from)) return null;
-    if (level > row.level && options.raise) return { level: row.level, rev: row.rev };
+    if (!row || (row.at && seen.from <= row.at)) return false;
+    const up = level > row.level;
+    if (up && !announce) return false;
     await tx
       .update(orgBilling)
-      .set({ creditLevel: Math.min(level, row.level), creditLevelAt: seen.to, creditLevelRev: sql`${orgBilling.creditLevelRev} + 1` })
+      .set({ creditLevel: level, creditLevelAt: seen.to, creditLevelRev: row.rev + 1 })
       .where(eq(orgBilling.orgId, orgId));
-    return null;
+    if (!up) return false;
+    const claimed = await tx
+      .insert(orgNotices)
+      .values({ orgId, key: `credits:${level}:${row.rev + 1}` })
+      .onConflictDoNothing()
+      .returning({ key: orgNotices.key });
+    return claimed.length === 1;
   });
-}
-
-/**
- * Commits a crossing `observeCreditLevel` found, if the revision is still the
- * one it read: nobody raised or counted anything since. True for the one
- * caller that raised it: that caller sends the email. False when someone
- * moved it in between; the caller then looks again.
- */
-export async function raiseCreditLevel(database: Db, orgId: string, level: number, seen: BalanceSeen, from: CreditLevelState): Promise<boolean> {
-  const rows = await database
-    .update(orgBilling)
-    .set({ creditLevel: level, creditLevelAt: seen.to, creditLevelRev: sql`${orgBilling.creditLevelRev} + 1` })
-    .where(and(eq(orgBilling.orgId, orgId), eq(orgBilling.creditLevelRev, from.rev)))
-    .returning({ orgId: orgBilling.orgId });
-  return rows.length === 1;
 }
 
 /** Reserves an org-wide email by a stable key. Exactly one caller gets true. */

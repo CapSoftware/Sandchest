@@ -21,9 +21,9 @@ import { CREDIT_LEVELS, creditLevel, planById } from "@sandchest/billing/plans";
 import {
   claimNotification,
   claimOrgNotice,
-  observeCreditLevel,
   orgAdminContacts,
-  raiseCreditLevel,
+  recordCreditLevel,
+  storedCreditLevel,
   type BalanceSeen,
   type OrgAdminContact,
   type OrgBillingRow,
@@ -54,40 +54,29 @@ type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetA
  * few seconds later, so nothing is announced: if it can't refill, Autumn's
  * auto top-up failed webhook says why.
  *
- * In order: decide whether this is a crossing, from the stored level; only
- * then find who to tell (which may ask GitHub, outside any lock); with nobody,
- * leave the level alone so a later balance can announce it; otherwise commit
- * the crossing if the level's revision hasn't moved. If it has, look again
- * with the same balance: it may still be a crossing (an exhausted balance
- * after someone else's low one), or now be stale or already covered.
+ * In order, with no network call under a lock:
+ * 1. Read the stored level. A balance at or below it can't be an upward
+ *    crossing, so nobody is looked up (an optimisation only).
+ * 2. Otherwise find who to tell first, outside any lock (this may ask GitHub).
+ * 3. In one transaction under the org's row lock: apply the balance if it is
+ *    fresh, and record an upward crossing, reserving its email, only if there
+ *    is someone to tell. With nobody, nothing is recorded, so a later balance
+ *    can announce it.
+ * 4. After the commit, send if this call reserved the email.
  */
 export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, seen: BalanceSeen): Promise<void> {
   const plan = planById(billing.planId);
   if (!plan) return;
   const level = creditLevel(plan, billing.credits);
   const index = CREDIT_LEVELS.indexOf(level);
-  const raise = level !== "ok" && !billing.autoTopUp?.enabled;
-  let to: string[] | undefined;
-  for (let attempt = 0; attempt < MAX_RAISE_ATTEMPTS; attempt++) {
-    const crossing = await observeCreditLevel(db(), org.id, index, seen, { raise, retry: attempt > 0 });
-    if (!crossing) return;
-    if (!to) {
-      // Without a mailer the level still moves; there is just nobody to email.
-      const found = mailer().enabled ? await recipients(org.id, `${level} credits email`, "billing") : [];
-      if (found === null) return;
-      to = found;
-    }
-    if (!(await raiseCreditLevel(db(), org.id, index, seen, crossing))) continue;
-    if (to.length === 0) return;
-    const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
-    await send(org.id, to, level === "low" ? creditsLowEmail({ ...input, credits: billing.credits }) : creditsExhaustedEmail(input));
-    return;
+  let to: string[] | null = null;
+  if (level !== "ok" && !billing.autoTopUp?.enabled && mailer().enabled && index > ((await storedCreditLevel(db(), org.id)) ?? Number.POSITIVE_INFINITY)) {
+    to = await recipients(org.id, `${level} credits email`, "billing");
   }
-  console.warn(`The credit level of org ${org.id} kept changing: ${level} credits email not sent`);
+  if (!(await recordCreditLevel(db(), org.id, index, seen, !!to?.length)) || !to) return;
+  const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
+  await send(org.id, to, level === "low" ? creditsLowEmail({ ...input, credits: billing.credits }) : creditsExhaustedEmail(input));
 }
-
-/** How many times a crossing is looked at again after someone else moved the level first. */
-const MAX_RAISE_ATTEMPTS = 5;
 
 /** What became of an org-wide email: sent, already sent by an earlier caller, or not sent (and not reserved) for want of a mailer or a recipient. */
 export type NoticeOutcome = "sent" | "duplicate" | "skipped";
