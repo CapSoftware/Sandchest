@@ -5,10 +5,12 @@ import { HoverLink } from "@/components/app/hover-link";
 import { DigButton } from "@/components/app/dig-button";
 import { Heat } from "@/components/app/heat";
 import { InstallKey } from "@/components/app/install-key";
+import { PlanPicker } from "@/components/app/plan-picker";
 import { When } from "@/components/app/when";
 import { plural, SCAN_KIND_LABEL, SEVERITIES, timeUntil } from "@/lib/format";
 import { ensureAccess, viewer } from "@/server/access";
 import { digState } from "@/lib/dig-state";
+import { billingEnabled, pageBilling } from "@/server/billing";
 import { db } from "@/server/db";
 
 /** "Deep scan failed 2 hr. ago". Completed scans need no verb. */
@@ -16,11 +18,24 @@ const LAST_SCAN_VERB: Record<string, string> = { queued: "queued", running: "sta
 
 export const metadata: Metadata = { title: "Repos · Sandchest" };
 
-export default async function ReposPage({ searchParams }: { searchParams: Promise<{ installation_id?: string }> }) {
+/** What billing allows for an org on this page. Undefined when billing is off. */
+type OrgPlan = { planId: string | null; credits: number } | undefined;
+
+export default async function ReposPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; plan?: string }> }) {
   const user = await viewer();
+  const params = await searchParams;
   // Back from installing on GitHub: read access again so new repos show at once.
-  if ((await searchParams).installation_id) await ensureAccess(user.id, { force: true });
+  if (params.installation_id) await ensureAccess(user.id, { force: true });
   const repos = await dashboardRepos(db(), user.id);
+
+  // Each org's billing, read from Autumn only where the stored copy is missing or old.
+  const orgs = [...new Map(repos.map((repo) => [repo.orgId, repo])).values()];
+  const plans = new Map<string, OrgPlan>();
+  if (billingEnabled()) {
+    const rows = await Promise.all(orgs.map((repo) => pageBilling({ id: repo.orgId, githubLogin: repo.orgLogin }, repo.billing)));
+    orgs.forEach((repo, i) => plans.set(repo.orgId, { planId: rows[i]?.planId ?? null, credits: rows[i]?.credits ?? 0 }));
+  }
+  const unpaid = orgs.filter((repo) => plans.get(repo.orgId) && !plans.get(repo.orgId)!.planId);
 
   if (repos.length === 0) {
     return (
@@ -52,10 +67,28 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
         </div>
         <InstallKey secondary />
       </div>
+      {params.plan === "started" && unpaid.length === 0 && (
+        <p className="notice" role="status">
+          You’re all set. Recon is mapping each repository now, about a minute each; then Dig is ready.
+        </p>
+      )}
+      {unpaid.map((repo) => (
+        <section key={repo.orgId} className="paywall" aria-labelledby={`plan-${repo.orgId}`}>
+          <h2 id={`plan-${repo.orgId}`} className="paywall-title">
+            Choose a plan for {repo.orgLogin}
+          </h2>
+          <p className="field-help">
+            Sandchest maps each repository and reviews every pull request once {repo.orgLogin} has a plan. Credits pay for reviews (1–5) and
+            deep scans (15–75); recon and fix checks are free.
+            {!repo.orgAdmin && ` Only an admin of ${repo.orgLogin} can choose one.`}
+          </p>
+          <PlanPicker orgId={repo.orgId} current={null} admin={repo.orgAdmin} />
+        </section>
+      ))}
       <ul className="rows">
         {repos.map((repo) => (
           <li key={repo.id} className="row">
-            <RepoRow repo={repo} />
+            <RepoRow repo={repo} plan={plans.get(repo.orgId)} />
           </li>
         ))}
       </ul>
@@ -63,7 +96,7 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
   );
 }
 
-function RepoRow({ repo }: { repo: DashboardRepo }) {
+function RepoRow({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
   const [owner, name] = repo.fullName.split("/");
   const counts = SEVERITIES.filter((severity) => repo.open[severity] > 0);
   return (
@@ -96,12 +129,12 @@ function RepoRow({ repo }: { repo: DashboardRepo }) {
           "Not scanned yet"
         )}
       </div>
-      <Dig repo={repo} />
+      <Dig repo={repo} plan={plan} />
     </div>
   );
 }
 
-function Dig({ repo }: { repo: DashboardRepo }) {
+function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
   const state = digState(repo);
   switch (state.state) {
     case "running":
@@ -126,6 +159,20 @@ function Dig({ repo }: { repo: DashboardRepo }) {
         </div>
       );
     case "ready":
+      if (plan && !plan.planId)
+        return (
+          <div className="repo-dig">
+            <span className="repo-dig-note">Needs a plan</span>
+          </div>
+        );
+      if (plan && plan.credits < (state.credits ?? 15))
+        return (
+          <div className="repo-dig">
+            <HoverLink href="/settings#billing" className="repo-dig-note">
+              Out of credits: top up
+            </HoverLink>
+          </div>
+        );
       return <DigButton repoId={repo.id} note={state.credits === undefined ? "Full deep scan" : `${state.credits} credits`} />;
   }
 }

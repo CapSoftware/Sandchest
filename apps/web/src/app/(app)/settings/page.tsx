@@ -1,10 +1,12 @@
 import { settingsOrgs, type SettingsOrg } from "@sandchest/db";
 import type { Metadata } from "next";
 import { Avatar } from "@/components/app/avatar";
+import { BillingPanel } from "@/components/app/billing-panel";
 import { OrgSettingsForm } from "@/components/app/org-settings";
 import { InstallKey } from "@/components/app/install-key";
 import { viewer } from "@/server/access";
 import { signOut } from "@/server/actions";
+import { billingEnabled, pageBilling } from "@/server/billing";
 import { db } from "@/server/db";
 
 export const metadata: Metadata = { title: "Settings · Sandchest" };
@@ -19,6 +21,8 @@ function installationUrl(org: SettingsOrg): string {
 export default async function SettingsPage() {
   const user = await viewer();
   const orgs = await settingsOrgs(db(), user.id);
+  // Each org's billing, read from Autumn only where the stored copy is missing or old.
+  const billing = billingEnabled() ? await Promise.all(orgs.map((org) => pageBilling({ id: org.id, githubLogin: org.login }, org.billing))) : [];
   return (
     <>
       <div className="page-head">
@@ -34,7 +38,8 @@ export default async function SettingsPage() {
         </div>
       )}
 
-      {orgs.map((org) => (
+      <div id="billing" />
+      {orgs.map((org, index) => (
         <section key={org.id} className="account" aria-labelledby={`org-${org.id}`}>
           <div>
             <h2 id={`org-${org.id}`} className="account-name">
@@ -44,6 +49,7 @@ export default async function SettingsPage() {
             <p className="account-role">{org.admin ? "You’re an admin" : "Only admins can change these"}</p>
           </div>
           <div className="settings-form">
+            {billingEnabled() && <BillingPanel org={org} billing={billing[index] ?? null} />}
             <OrgSettingsForm orgId={org.id} threshold={org.settings.checkThreshold} email={org.settings.emailNotifications !== false} admin={org.admin} />
             <div>
               <p className="field-legend">Repositories</p>

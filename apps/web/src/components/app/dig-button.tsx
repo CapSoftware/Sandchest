@@ -14,6 +14,12 @@ export function DigButton({ repoId, note }: { repoId: string; note: string }) {
       {state.error ? (
         <span className="repo-dig-error" role="alert">
           {state.error}
+          {state.topUp && (
+            <>
+              {" "}
+              <a href="/settings#billing">Billing</a>
+            </>
+          )}
         </span>
       ) : (
         <span className="repo-dig-note">{note}</span>

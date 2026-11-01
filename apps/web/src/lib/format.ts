@@ -109,3 +109,15 @@ export function compactNumber(value: number): string {
 export function githubLine(repo: string, ref: string, file: string, line: number): string {
   return `https://github.com/${repo}/blob/${encodeURIComponent(ref)}/${file.split("/").map(encodeURIComponent).join("/")}#L${line}`;
 }
+
+const SHORT_DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** "1 Dec 2026". */
+export function shortDate(date: Date): string {
+  return SHORT_DATE.format(date);
+}
+
+/** "$20" or "$12.50". */
+export function usd(amount: number): string {
+  return `$${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
+}
