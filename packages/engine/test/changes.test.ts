@@ -66,4 +66,11 @@ describe("fix-check re-anchoring", () => {
     const lines = new Map([["routes.ts", ["router.post(login)"]], ["login.ts", ["  const email = req.body.email;", "return null;"]]]);
     expect(await reanchor(finding, async (path) => lines.get(path))).toBeUndefined();
   });
+
+  test("is stale, not a crash, for a reopened finding whose code was deleted", async () => {
+    const reopened = { ...finding, attackPath: finding.attackPath.map(({ excerpt: _, ...step }) => step) } as unknown as Finding;
+    const lines = new Map([["routes.ts", ["router.post(login)"]], ["login.ts", ["  const email = req.body.email;", 'db.query("..." + email);']]]);
+    expect(await reanchor(reopened, async (path) => lines.get(path))).toBeUndefined();
+    expect(excerptLine(undefined, 3)).toBeUndefined();
+  });
 });

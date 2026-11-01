@@ -95,8 +95,13 @@ export async function reanchor(finding: Finding, lines: (path: string) => Promis
   return { ...finding, entryPoint, attackPath: kept };
 }
 
-/** The code on `line` from an excerpt like ` 12| code`. */
-export function excerptLine(excerpt: string, line: number): string | undefined {
+/**
+ * The code on `line` from an excerpt like ` 12| code`. A finding whose code
+ * was deleted (resolved, then reopened) has no excerpt, so nothing to
+ * re-anchor by: it reads as stale until a scan finds it again.
+ */
+export function excerptLine(excerpt: string | undefined, line: number): string | undefined {
+  if (!excerpt) return undefined;
   for (const row of excerpt.split("\n")) {
     const match = /^\s*(\d+)\| ?(.*)$/.exec(row);
     if (match && Number(match[1]) === line) return match[2]!.trim() || undefined;
