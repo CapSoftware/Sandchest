@@ -10,6 +10,7 @@ export { checkFixes, reanchor, type FixCheckOptions, type FixCheckResult } from 
 export { storableLeads } from "./leads";
 export { proveFinding, proveFindings, type ProveOptions } from "./prove";
 export { trustTier, trustRank } from "./trust";
+export { mergeReports, runScanEnsemble, type EnsembleReport, type SupportedFinding } from "./ensemble";
 export type { Runtime, RuntimeExecOptions, RuntimeExecResult } from "./runtime";
 export {
   bringUp,
