@@ -12,16 +12,18 @@
     "test": "bun test"
   },
   "dependencies": {
-    "next": "^16.4.3",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
     "@sandchest/billing": "workspace:*",
     "@sandchest/db": "workspace:*",
     "@sandchest/engine": "workspace:*",
     "@sandchest/github": "workspace:*",
     "@sandchest/workspace": "workspace:*",
+    "better-auth": "1.7.14",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "workflow": "5.2.3",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "@sandchest/email": "workspace:*"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

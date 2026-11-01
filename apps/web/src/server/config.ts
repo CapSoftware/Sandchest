@@ -11,8 +11,19 @@ const Schema = z.object({
   GITHUB_WEBHOOK_SECRET: z.string().min(1),
   /** Public URL of this app, for links in Checks and comments. */
   SANDCHEST_APP_URL: z.url(),
-  /** Bearer token for operator-only routes (manual scans) until dashboard auth exists. */
+  /** Bearer token for operator-only routes (manual scans, any scan's live feed). */
   SANDCHEST_ADMIN_TOKEN: z.string().min(24).optional(),
+  /** Signs sessions and encrypts stored GitHub tokens. */
+  BETTER_AUTH_SECRET: z.string().min(32).optional(),
+  /** The GitHub App's OAuth client, used for sign-in. */
+  GITHUB_CLIENT_ID: z.string().min(1).optional(),
+  GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
+  /** The App's URL name, for install links (github.com/apps/<slug>). */
+  GITHUB_APP_SLUG: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  /** Email: Resend in the cloud, SMTP when self-hosted. Neither set means no email. */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  SMTP_URL: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().min(3).optional(),
   /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
   SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
   /** Where repositories are cloned from. Default https://github.com. */

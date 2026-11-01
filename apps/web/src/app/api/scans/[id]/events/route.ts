@@ -1,5 +1,6 @@
-/** The live feed as server-sent events. Operator-only until dashboard sign-in exists. */
-import { eventsSince, scanById } from "@sandchest/db";
+/** The live feed as server-sent events, for people who can see the scan's repository (or operators). */
+import { eventsSince, scanById, scanForUser } from "@sandchest/db";
+import { currentUser, ensureAccess } from "@/server/access";
 import { isOperator } from "@/server/auth";
 import { db } from "@/server/services";
 
@@ -10,12 +11,19 @@ const POLL_MS = 1_000;
 const FINISHED = new Set(["completed", "failed", "cancelled", "refused"]);
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
-  if (!isOperator(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  if (!/^[0-9a-f-]{36}$/.test(id) || !(await scanById(db(), id))) return Response.json({ error: "not found" }, { status: 404 });
+  if (!/^[0-9a-f-]{36}$/.test(id)) return Response.json({ error: "not found" }, { status: 404 });
+  if (!isOperator(request)) {
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "unauthorized" }, { status: 401 });
+    await ensureAccess(user.id);
+    if (!(await scanForUser(db(), user.id, id))) return Response.json({ error: "not found" }, { status: 404 });
+  } else if (!(await scanById(db(), id))) {
+    return Response.json({ error: "not found" }, { status: 404 });
+  }
 
-  // Resume where the client left off after a reconnect.
-  let after = Number(request.headers.get("last-event-id") ?? 0) || 0;
+  // Resume where the client left off: after a reconnect, or after what the page already rendered.
+  let after = Number(request.headers.get("last-event-id") ?? new URL(request.url).searchParams.get("after") ?? 0) || 0;
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

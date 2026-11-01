@@ -4,16 +4,20 @@
  * because a step that dies is retried from the start.
  */
 import { deepScanCredits, prReviewCredits } from "@sandchest/billing";
+import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
 import {
+  claimNotification,
   claimScanSlot,
   EventWriter,
   markDeepScanned,
   markFixed,
   markStale,
+  notificationRecipients,
   openFindings,
   recordMetrics,
   saveThreatModel,
   scanById,
+  setRepoLoc,
   threatModel as storedThreatModel,
   updateScan,
   upsertFindings,
@@ -38,7 +42,7 @@ import type { IndexerBinary, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { config } from "./config";
-import { db, githubApp, llmClient, osvClient, pricing } from "./services";
+import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 
 /** Concurrent scans per org (SPEC §4). */
 export const ORG_CONCURRENCY = 2;
@@ -104,6 +108,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       await saveThreatModel(db(), scan.repo.id, result.threatModel, headSha);
       await recordMetrics(db(), scan.id, { ...usageOf(result.usage), modelCostUsd: result.costUsd, durationMs: result.durationMs, candidates: 0, survivors: 0 });
       await updateScan(db(), scan.id, { stats: { loc: result.loc } });
+      await setRepoLoc(db(), scan.repo.id, result.loc);
       return { findings: 0 };
     }
 
@@ -132,7 +137,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       onEvent,
     });
     if (!model) await saveThreatModel(db(), scan.repo.id, report.threatModel, headSha);
-    const { ids } = await upsertFindings(db(), scan.repo.id, scan, report.findings.map(toFindingInput));
+    const { ids, newIds } = await upsertFindings(db(), scan.repo.id, scan, report.findings.map(toFindingInput));
     const credits = scan.kind === "pr_review" ? (report.review?.files ? prReviewCredits(report.review.changedLines) : 0) : (deepScanCredits(report.repo.loc) ?? 0);
     await recordMetrics(db(), scan.id, {
       ...usageOf(report.usage.total),
@@ -144,7 +149,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     await updateScan(db(), scan.id, {
       credits,
       leads: report.leads,
-      stats: { findingIds: ids, timings: report.timings, review: report.review, warnings: report.warnings, loc: report.repo.loc },
+      stats: { findingIds: ids, newFindingIds: newIds, timings: report.timings, review: report.review, warnings: report.warnings, loc: report.repo.loc },
     });
     if (scan.kind === "deep") await markDeepScanned(db(), scan.repo.id, new Date(), report.repo.loc);
     return { findings: ids.length };
@@ -168,7 +173,8 @@ export async function publishScan(scanId: string): Promise<void> {
   if (scan.kind === "pr_review" && scan.checkRunId && scan.prNumber && installationId) {
     const installation = githubApp().installation(installationId);
     const stats = (scan.stats ?? {}) as { findingIds?: string[] };
-    const findings = (await findingsById(stats.findingIds ?? [])).map(toEngineFinding);
+    // A finding someone dismissed stays quiet when a later scan finds it again.
+    const findings = (await findingsById(stats.findingIds ?? [])).filter((row) => row.status !== "dismissed").map(toEngineFinding);
     const visible = shown(findings);
     let inline = 0;
     // Private repos get the details inline; public repos only ever get the redacted Check.
@@ -190,6 +196,31 @@ export async function publishScan(scanId: string): Promise<void> {
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);
   }
   await updateScan(db(), scan.id, { status: "completed", finishedAt: new Date() });
+  // Email is best effort and at most once: it never fails or repeats a scan.
+  await notifyScan(scan).catch((error: unknown) => console.error(`Notifications for scan ${scan.id} failed: ${error instanceof Error ? error.name : "error"}`));
+}
+
+/**
+ * Emails people with push access about new critical findings, and about
+ * every finished deep scan. Reserved before sending, so a retried step never
+ * sends twice.
+ */
+async function notifyScan(scan: NonNullable<Awaited<ReturnType<typeof scanById>>>): Promise<void> {
+  if (scan.kind !== "deep" && scan.kind !== "pr_review") return;
+  if (scan.repo.org.settings.emailNotifications === false || !mailer().enabled) return;
+  const stats = (scan.stats ?? {}) as { findingIds?: string[]; newFindingIds?: string[] };
+  const rows = (await findingsById(stats.findingIds ?? [])).filter((row) => row.status === "open" && row.confidence !== "low");
+  const fresh = new Set(stats.newFindingIds ?? []);
+  const critical = rows.filter((row) => row.severity === "critical" && fresh.has(row.id));
+  if (scan.kind !== "deep" && critical.length === 0) return;
+  const recipients = await notificationRecipients(db(), scan.repo.id);
+  if (recipients.length === 0 || !(await claimNotification(db(), scan.id))) return;
+  const base = config().SANDCHEST_APP_URL.replace(/\/$/, "");
+  const summary = (row: FindingRow) => ({ title: row.title, severity: row.severity, url: `${base}/findings/${row.id}` });
+  const order = ["critical", "high", "medium", "low"];
+  const sorted = rows.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
+  const email = scan.kind === "deep" ? deepScanEmail({ repo: scan.repo.fullName, scanUrl: detailsUrl(scan.id), findings: sorted.map(summary) }) : criticalFindingEmail({ repo: scan.repo.fullName, findings: critical.map(summary) });
+  await mailer().send({ to: recipients, ...email });
 }
 
 /** Records a failure and never leaves a PR Check spinning. */

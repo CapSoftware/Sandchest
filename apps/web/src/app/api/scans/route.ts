@@ -1,10 +1,9 @@
-/** Manual deep scans ("Dig"). Operator-only until dashboard sign-in exists. */
-import { DEEP_SCAN_COOLDOWN_HOURS } from "@sandchest/billing";
-import { activeDeepScan, createScan, lastDeepScanAt, repoByFullName } from "@sandchest/db";
+/** Manual deep scans for operators (`Authorization: Bearer <SANDCHEST_ADMIN_TOKEN>`). People use the dashboard's Dig button. */
+import { repoByFullName } from "@sandchest/db";
 import { z } from "zod";
 import { isOperator } from "@/server/auth";
-import { db, githubApp } from "@/server/services";
-import { startScan } from "@/server/start";
+import { requestDeepScan } from "@/server/dig";
+import { db } from "@/server/services";
 
 export const dynamic = "force-dynamic";
 
@@ -16,18 +15,20 @@ export async function POST(request: Request): Promise<Response> {
   if (!parsed.success) return Response.json({ error: "expected { repo: 'owner/name' }" }, { status: 400 });
 
   const repo = await repoByFullName(db(), parsed.data.repo);
-  if (!repo?.enabled || !repo.org.installationId) return Response.json({ error: "repository not installed" }, { status: 404 });
-
-  const active = await activeDeepScan(db(), repo.id);
-  if (active) return Response.json({ error: "a deep scan is already running", scanId: active.id }, { status: 409 });
-  const last = await lastDeepScanAt(db(), repo.id);
-  const nextAllowed = last ? new Date(last.getTime() + DEEP_SCAN_COOLDOWN_HOURS * 3_600_000) : undefined;
-  if (nextAllowed && nextAllowed > new Date()) {
-    return Response.json({ error: "cooling down", retryAt: nextAllowed.toISOString() }, { status: 429, headers: { "retry-after": String(Math.ceil((nextAllowed.getTime() - Date.now()) / 1000)) } });
+  if (!repo) return Response.json({ error: "repository not installed" }, { status: 404 });
+  const result = await requestDeepScan(repo);
+  if (result.ok) return Response.json({ scanId: result.scanId }, { status: 202 });
+  switch (result.reason) {
+    case "not_installed":
+      return Response.json({ error: "repository not installed" }, { status: 404 });
+    case "running":
+      return Response.json({ error: "a deep scan is already running", scanId: result.scanId }, { status: 409 });
+    case "too_large":
+      return Response.json({ error: "repository is over 1M lines; deep scans are refused" }, { status: 422 });
+    case "cooling":
+      return Response.json(
+        { error: "cooling down", retryAt: result.retryAt!.toISOString() },
+        { status: 429, headers: { "retry-after": String(Math.ceil((result.retryAt!.getTime() - Date.now()) / 1000)) } },
+      );
   }
-
-  const headSha = await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);
-  const { scan } = await createScan(db(), { repoId: repo.id, orgId: repo.orgId, kind: "deep", trigger: "manual", headSha });
-  await startScan(scan.id);
-  return Response.json({ scanId: scan.id }, { status: 202 });
 }
