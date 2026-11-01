@@ -154,6 +154,11 @@ describe("access from GitHub", () => {
     expect(await updateOrgSettings(database, ids.alice, ids.org, { checkThreshold: "critical" })).toBe(true);
     const [org] = await database.$client<Array<{ settings: { checkThreshold: string } }>>`select settings from orgs where id = ${ids.org}`;
     expect(org!.settings.checkThreshold).toBe("critical");
+
+    // Auto top-up is saved the same way: merged into the settings object, the threshold untouched.
+    expect(await updateOrgSettings(database, ids.alice, ids.org, { autoTopUp: { enabled: true, monthlyLimitUsd: 40 } })).toBe(true);
+    const [after] = await database.$client<Array<{ settings: unknown; kind: string }>>`select settings, jsonb_typeof(settings) as kind from orgs where id = ${ids.org}`;
+    expect(after).toEqual({ kind: "object", settings: { checkThreshold: "critical", autoTopUp: { enabled: true, monthlyLimitUsd: 40 } } });
   });
 
   test("losing access on GitHub removes it here on the next refresh", async () => {
