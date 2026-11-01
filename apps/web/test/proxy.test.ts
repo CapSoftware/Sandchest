@@ -106,12 +106,17 @@ describe("paths", () => {
 });
 
 describe("matcher", () => {
-  test("covers every page path without naming any section", () => {
-    // Next publishes the matchers to every visitor.
-    expect(JSON.stringify(config)).not.toMatch(/admin|ops|repos|findings/);
-    const matcher = new RegExp(`^${config.matcher[0]}$`);
-    for (const path of ["/", "/admin", "/admin/cost", "/ops", "/ops/funnel", "/repos", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", "/settings", "/sign-in"]) expect(matcher.test(path)).toBe(true);
-    for (const path of ["/_next/static/chunks/app.js", "/api/auth/callback/github", "/api/github/webhooks", "/.well-known/workflow/v1/flow", "/favicon.svg", "/og.png"]) expect(matcher.test(path)).toBe(false);
+  test("runs only on the sections it acts on, never on the static landing, docs and legal pages", () => {
+    // Every matcher is "/<section>/:path*", which Next reads as the section itself or anything below it.
+    const sections = config.matcher.map((source) => {
+      const match = /^\/([a-z-]+)\/:path\*$/.exec(source);
+      expect(match).not.toBeNull();
+      return match![1]!;
+    });
+    expect(sections.sort()).toEqual(["admin", "findings", "ops", "repos", "scans", "settings"]);
+    const runs = (path: string) => sections.some((section) => path === `/${section}` || path.startsWith(`/${section}/`));
+    for (const path of ["/admin", "/admin/cost", "/ops", "/ops/funnel", "/repos", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", "/scans/x", "/settings"]) expect(runs(path)).toBe(true);
+    for (const path of ["/", "/docs", "/docs/self-hosting", "/terms", "/privacy", "/acceptable-use", "/sign-in", "/api/auth/callback/github", "/api/github/webhooks", "/administrator", "/opsx"]) expect(runs(path)).toBe(false);
   });
 });
 

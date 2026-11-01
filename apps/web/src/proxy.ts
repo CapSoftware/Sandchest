@@ -50,13 +50,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * Every page path, named by shape rather than by section: Next publishes the
- * matchers to every visitor, so listing the operator paths here would
- * announce them. Paths outside the sections above pass straight through,
- * without touching the database. Build assets, API routes, workflow routes
- * and files with an extension are skipped.
+ * Only the sections the proxy acts on, named one by one (`:path*` also
+ * matches the bare section). Everything else, the landing page, docs and
+ * legal pages above all, never runs the proxy: on Vercel they stay static
+ * and are served straight from the CDN, with no function in front of them.
+ * Next publishes these matchers to every visitor, so /admin and /ops are
+ * visible here; that is accepted, since both are in the public source and
+ * neither answers anyone but an operator.
  */
-export const config = { matcher: ["/((?!_next/|api/|\\.well-known/)(?!.*\\.\\w+$).*)"] };
+export const config = { matcher: ["/repos/:path*", "/findings/:path*", "/scans/:path*", "/settings/:path*", "/admin/:path*", "/ops/:path*"] };
 
 /** The path as routes see it: percent-decoded, repeated and trailing slashes removed. Undefined if it does not decode. */
 export function normalisePath(pathname: string): string | undefined {
