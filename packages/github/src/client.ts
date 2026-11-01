@@ -29,6 +29,8 @@ export interface RequestOptions {
 
 export interface HttpOptions {
   fetch?: typeof fetch;
+  /** The REST API's base URL. Default https://api.github.com; tests point it at a fake. */
+  baseUrl?: string;
   /** Attempts per request, including the first. Default 4. */
   maxAttempts?: number;
   /** Per-attempt timeout. Default 30s. */
@@ -68,7 +70,9 @@ async function send(auth: () => Promise<string>, path: string, options: RequestO
   const maxAttempts = http.maxAttempts ?? 4;
   const timeoutMs = http.timeoutMs ?? 30_000;
   const maxBackoffMs = http.maxBackoffMs ?? 60_000;
-  const url = path.startsWith("https://") ? path : `${API}${path}`;
+  const base = (http.baseUrl ?? API).replace(/\/+$/, "");
+  // Absolute URLs come from GitHub's own pagination links.
+  const url = path.startsWith("https://") || path.startsWith(`${base}/`) ? path : `${base}${path}`;
 
   for (let attempt = 1; ; attempt++) {
     let failure: GitHubError;
