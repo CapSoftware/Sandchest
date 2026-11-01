@@ -1,6 +1,7 @@
-import { eventsSince, scanForUser } from "@sandchest/db";
+import { scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { HoverLink } from "@/components/app/hover-link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { Heat } from "@/components/app/heat";
@@ -8,7 +9,7 @@ import { LiveFeed } from "@/components/app/live-feed";
 import { When } from "@/components/app/when";
 import { compactNumber, duration, plural, SCAN_KIND_LABEL, SCAN_STATUS_LABEL } from "@/lib/format";
 import { viewer } from "@/server/access";
-import { db } from "@/server/services";
+import { db } from "@/server/db";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,7 +17,7 @@ const ACTIVE = new Set(["queued", "running", "publishing"]);
 
 const load = cache(async (id: string) => {
   const user = await viewer();
-  return /^[0-9a-f-]{36}$/.test(id) ? scanForUser(db(), user.id, id) : undefined;
+  return /^[0-9a-f-]{36}$/.test(id) ? scanForUser(db(), user.id, id, { events: 1_000 }) : undefined;
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
@@ -32,8 +33,7 @@ export default async function ScanPage({ params }: Params) {
   const { id } = await params;
   const row = await load(id);
   if (!row) notFound();
-  const { scan, repo, metrics, findings } = row;
-  const events = await eventsSince(db(), scan.id, 0, 1_000);
+  const { scan, repo, metrics, findings, events } = row;
   const live = ACTIVE.has(scan.status);
   const started = scan.startedAt ?? scan.createdAt;
   // Server-rendered: a running scan shows how long it had run when the page was drawn.
@@ -110,7 +110,7 @@ export default async function ScanPage({ params }: Params) {
           <ul className="rows">
             {shown.map((finding) => (
               <li key={finding.id} className="row finding-row">
-                <Link href={`/findings/${finding.id}`}>
+                <HoverLink href={`/findings/${finding.id}`}>
                   <Heat severity={finding.severity} label />
                   <span className="finding-row-title">
                     {finding.title}
@@ -124,7 +124,7 @@ export default async function ScanPage({ params }: Params) {
                       </code>
                     </span>
                   )}
-                </Link>
+                </HoverLink>
               </li>
             ))}
           </ul>

@@ -1,16 +1,18 @@
 /**
  * Sign-in with GitHub through the GitHub App's own OAuth client, so the
- * user token can list the app's installations the person can see. Sessions
- * are cached in a signed cookie for five minutes; GitHub tokens are stored
- * encrypted; IP addresses are not recorded and telemetry is off.
+ * user token can list the app's installations the person can see. better-auth
+ * signs people in and out and keeps their GitHub tokens (encrypted); pages
+ * read the session themselves in one query (see `currentUser`). No cookie
+ * cache: server components cannot refresh it, and revocation should be
+ * immediate. IP addresses are not recorded and telemetry is off.
  */
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { schema } from "@sandchest/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { config } from "./config";
-import { db } from "./services";
+import { db } from "./db";
 
 function createAuth() {
   const settings = config();
@@ -47,7 +49,6 @@ function createAuth() {
       },
     },
     account: { encryptOAuthTokens: true, accountLinking: { enabled: false } },
-    session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
     advanced: { database: { generateId: "uuid" }, ipAddress: { disableIpTracking: true } },
     telemetry: { enabled: false },
     plugins: [nextCookies()],
@@ -58,6 +59,26 @@ function createAuth() {
 export function authConfigured(): boolean {
   const settings = config();
   return Boolean(settings.BETTER_AUTH_SECRET && settings.GITHUB_CLIENT_ID && settings.GITHUB_CLIENT_SECRET);
+}
+
+/** better-auth's session cookie, with the `__Secure-` prefix it uses over HTTPS. */
+export function sessionCookieName(): string {
+  return config().SANDCHEST_APP_URL.startsWith("https://") ? "__Secure-better-auth.session_token" : "better-auth.session_token";
+}
+
+/**
+ * The session token in a signed session cookie (`<token>.<HMAC-SHA256 in
+ * base64>`, better-auth's format), or undefined if the signature is wrong.
+ */
+export function verifiedSessionToken(cookie: string | undefined, secret: string | undefined): string | undefined {
+  if (!cookie || !secret) return undefined;
+  const value = cookie.includes("%") ? decodeURIComponent(cookie) : cookie;
+  const dot = value.lastIndexOf(".");
+  if (dot <= 0) return undefined;
+  const token = value.slice(0, dot);
+  const given = Buffer.from(value.slice(dot + 1));
+  const expected = Buffer.from(createHmac("sha256", secret).update(token).digest("base64"));
+  return given.length === expected.length && timingSafeEqual(given, expected) ? token : undefined;
 }
 
 let instance: ReturnType<typeof createAuth> | undefined;

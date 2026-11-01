@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { accounts, findingEvents, findings, orgAdmins, orgs, permissionCache, repos, scanMetrics, scans, users, type OrgSettings } from "./schema";
+import { accounts, sessions, findingEvents, findings, orgAdmins, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
 
 type Severity = "critical" | "high" | "medium" | "low";
 export type RepoPermission = (typeof permissionCache.$inferSelect)["permission"];
@@ -41,6 +41,16 @@ export async function replaceAccess(database: Db, userId: string, access: { repo
     if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, checkedAt: at })));
     await tx.update(users).set({ accessCheckedAt: at }).where(eq(users.id, userId));
   });
+}
+
+/** The signed-in person for a session token, in one query. Expired sessions return nothing. */
+export async function sessionUser(database: Db, token: string): Promise<{ id: string; name: string; login: string | null; image: string | null; accessCheckedAt: Date | null } | undefined> {
+  const [row] = await database
+    .select({ id: users.id, name: users.name, login: users.login, image: users.image, accessCheckedAt: users.accessCheckedAt })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .where(and(eq(sessions.token, token), sql`${sessions.expiresAt} > now()`));
+  return row;
 }
 
 /** The id of the user's GitHub account row, which better-auth needs to hand out its token. */
@@ -213,21 +223,31 @@ export async function findingStatusCounts(database: Db, userId: string, filters:
 
 // ---- Finding screen --------------------------------------------------------
 
+/** A finding the user can see, with its history. One round trip: both queries run at once. */
 export async function findingForUser(database: Db, userId: string, findingId: string) {
-  const [row] = await database
-    .select({ finding: findings, repo: { id: repos.id, fullName: repos.fullName, private: repos.private, defaultBranch: repos.defaultBranch } })
-    .from(findings)
-    .innerJoin(repos, eq(repos.id, findings.repoId))
-    .where(and(eq(findings.id, findingId), canSee(userId)));
-  if (!row) return undefined;
-  const history = await database
-    .select({ type: findingEvents.type, at: findingEvents.createdAt, login: users.login, scanId: findingEvents.scanId })
-    .from(findingEvents)
-    .leftJoin(users, eq(users.id, findingEvents.userId))
-    .where(and(eq(findingEvents.findingId, findingId), sql`${findingEvents.type} <> 'prompt_copied'`))
-    .orderBy(desc(findingEvents.createdAt))
-    .limit(30);
-  return { ...row, history };
+  const [[row], history] = await Promise.all([
+    database
+      .select({ finding: findings, repo: { id: repos.id, fullName: repos.fullName, private: repos.private, defaultBranch: repos.defaultBranch } })
+      .from(findings)
+      .innerJoin(repos, eq(repos.id, findings.repoId))
+      .where(and(eq(findings.id, findingId), canSee(userId))),
+    // Scoped too, so nothing about a finding the user cannot see is ever read into memory.
+    database
+      .select({ type: findingEvents.type, at: findingEvents.createdAt, login: users.login, scanId: findingEvents.scanId })
+      .from(findingEvents)
+      .innerJoin(findings, eq(findings.id, findingEvents.findingId))
+      .leftJoin(users, eq(users.id, findingEvents.userId))
+      .where(
+        and(
+          eq(findingEvents.findingId, findingId),
+          sql`${findingEvents.type} <> 'prompt_copied'`,
+          sql`exists (select 1 from ${permissionCache} pc where pc.user_id = ${userId} and pc.repo_id = ${findings.repoId})`,
+        ),
+      )
+      .orderBy(desc(findingEvents.createdAt))
+      .limit(30),
+  ]);
+  return row ? { ...row, history } : undefined;
 }
 
 export type FindingAction = { type: "dismiss"; reason: "false_positive" | "accepted_risk" | "wont_fix" } | { type: "fix" } | { type: "reopen" };
@@ -267,23 +287,50 @@ export async function recordPromptCopied(database: Db, userId: string, findingId
 
 // ---- Scan screen -----------------------------------------------------------
 
-export async function scanForUser(database: Db, userId: string, scanId: string) {
-  const [row] = await database
-    .select({ scan: scans, repo: { id: repos.id, fullName: repos.fullName, private: repos.private }, metrics: scanMetrics })
-    .from(scans)
-    .innerJoin(repos, eq(repos.id, scans.repoId))
-    .leftJoin(scanMetrics, eq(scanMetrics.scanId, scans.id))
-    .where(and(eq(scans.id, scanId), canSee(userId)));
-  if (!row) return undefined;
-  const ids = ((row.scan.stats ?? {}) as { findingIds?: string[] }).findingIds ?? [];
-  const found = ids.length
-    ? await database
-        .select({ id: findings.id, title: findings.title, severity: findings.severity, confidence: findings.confidence, status: findings.status, sink: sql<{ file: string; line: number } | null>`${findings.attackPath} -> -1` })
-        .from(findings)
-        .where(inArray(findings.id, ids))
-        .orderBy(SEVERITY_ORDER)
-    : [];
-  return { ...row, findings: found };
+/** A scan the user can see, with the findings it reported and its feed so far. One round trip. */
+export async function scanForUser(database: Db, userId: string, scanId: string, options: { events?: number } = {}) {
+  const visibleScan = sql`exists (select 1 from ${scans} s join ${permissionCache} pc on pc.repo_id = s.repo_id and pc.user_id = ${userId} where s.id = ${scanId})`;
+  const [[row], found, events] = await Promise.all([
+    database
+      .select({ scan: scans, repo: { id: repos.id, fullName: repos.fullName, private: repos.private }, metrics: scanMetrics })
+      .from(scans)
+      .innerJoin(repos, eq(repos.id, scans.repoId))
+      .leftJoin(scanMetrics, eq(scanMetrics.scanId, scans.id))
+      .where(and(eq(scans.id, scanId), canSee(userId))),
+    // The scan's findings are listed in its stats.
+    database
+      .select({ id: findings.id, title: findings.title, severity: findings.severity, confidence: findings.confidence, status: findings.status, sink: sql<{ file: string; line: number } | null>`${findings.attackPath} -> -1` })
+      .from(findings)
+      .where(and(sql`${findings.id} in (select jsonb_array_elements_text(coalesce(stats -> 'findingIds', '[]'::jsonb))::uuid from ${scans} where id = ${scanId})`, visibleScan))
+      .orderBy(SEVERITY_ORDER),
+    options.events
+      ? database
+          .select({ seq: scanEvents.seq, type: scanEvents.type, message: scanEvents.message, createdAt: scanEvents.createdAt })
+          .from(scanEvents)
+          .where(and(eq(scanEvents.scanId, scanId), visibleScan))
+          .orderBy(scanEvents.seq)
+          .limit(options.events)
+      : Promise.resolve([]),
+  ]);
+  return row ? { ...row, findings: found, events } : undefined;
+}
+
+/** Whether the user can see a scan, without loading it. */
+export async function canSeeScan(database: Db, userId: string, scanId: string): Promise<boolean> {
+  const rows = await database.select({ id: scans.id }).from(scans).innerJoin(repos, eq(repos.id, scans.repoId)).where(and(eq(scans.id, scanId), canSee(userId)));
+  return rows.length === 1;
+}
+
+/** The live feed's poll: new events and the scan's status, in one query. */
+export async function feedSince(database: Db, scanId: string, afterSeq: number, limit = 200): Promise<{ status: string | null; events: Array<{ seq: number; type: string; message: string; createdAt: string }> }> {
+  const [row] = await database.execute<{ status: string | null; events: Array<{ seq: number; type: string; message: string; createdAt: string }> }>(sql`
+    select (select status from ${scans} where id = ${scanId}) as status,
+      coalesce((select json_agg(e order by e.seq) from (
+        select seq, type, message, created_at as "createdAt" from ${scanEvents}
+        where scan_id = ${scanId} and seq > ${afterSeq} order by seq limit ${limit}
+      ) e), '[]'::json) as events
+  `);
+  return { status: row?.status ?? null, events: row?.events ?? [] };
 }
 
 export async function recentScans(database: Db, userId: string, repoId: string, limit = 8) {

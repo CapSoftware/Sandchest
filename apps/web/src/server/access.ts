@@ -5,14 +5,15 @@
  * cached for five minutes: after two it refreshes in the background, after
  * five a request waits for GitHub.
  */
-import { githubAccountRowId, orgsByInstallation, replaceAccess, repoIdsByGithubId, userById, type RepoPermission } from "@sandchest/db";
+import { githubAccountRowId, orgsByInstallation, replaceAccess, repoIdsByGithubId, sessionUser, userById, type RepoPermission } from "@sandchest/db";
 import { GitHubError, readUserAccess, type HttpOptions } from "@sandchest/github";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { cache } from "react";
-import { auth, authConfigured } from "./auth";
-import { db } from "./services";
+import { auth, authConfigured, sessionCookieName, verifiedSessionToken } from "./auth";
+import { config } from "./config";
+import { db } from "./db";
 
 const SOFT_TTL_MS = 2 * 60_000;
 const HARD_TTL_MS = 5 * 60_000;
@@ -23,17 +24,21 @@ export interface Viewer {
   name: string;
   login: string | null;
   image: string | null;
+  /** When access was last read from GitHub. */
+  accessCheckedAt: Date | null;
 }
 
-/** The signed-in person, once per request. */
+/**
+ * The signed-in person, once per request, in one database round trip: the
+ * cookie's signature is checked here and the session is read with its user.
+ * (better-auth's own `getSession` takes three queries in a row.)
+ */
 export const currentUser = cache(async (): Promise<Viewer | undefined> => {
-  // Headers first: it marks the page as per-request before anything else runs.
-  const requestHeaders = await headers();
+  // Cookies first: reading them marks the page as per-request before anything else runs.
+  const jar = await cookies();
   if (!authConfigured()) return undefined;
-  const session = await auth().api.getSession({ headers: requestHeaders });
-  if (!session) return undefined;
-  const user = session.user as typeof session.user & { login?: string | null };
-  return { id: user.id, name: user.name, login: user.login ?? null, image: user.image ?? null };
+  const token = verifiedSessionToken(jar.get(sessionCookieName())?.value, config().BETTER_AUTH_SECRET);
+  return token ? sessionUser(db(), token) : undefined;
 });
 
 /** The signed-in person with fresh access, or a redirect to sign in. */
@@ -41,7 +46,7 @@ export const viewer = cache(async (): Promise<Viewer> => {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
   try {
-    await ensureAccess(user.id);
+    await ensureAccess(user.id, { checkedAt: user.accessCheckedAt });
   } catch (error) {
     // The GitHub grant was revoked or expired beyond refresh: start again.
     if (error instanceof GitHubError && error.status === 401) {
@@ -55,10 +60,14 @@ export const viewer = cache(async (): Promise<Viewer> => {
 
 const inFlight = new Map<string, Promise<void>>();
 
-/** Makes sure the user's cached access is recent enough to trust. */
-export async function ensureAccess(userId: string, options: { force?: boolean } = {}): Promise<void> {
-  const user = await userById(db(), userId);
-  const age = user?.accessCheckedAt ? Date.now() - user.accessCheckedAt.getTime() : Number.POSITIVE_INFINITY;
+/**
+ * Makes sure the user's cached access is recent enough to trust. Pass
+ * `checkedAt` when it is already known (it comes with the session) to skip
+ * looking it up.
+ */
+export async function ensureAccess(userId: string, options: { force?: boolean; checkedAt?: Date | null } = {}): Promise<void> {
+  const checkedAt = options.checkedAt !== undefined ? options.checkedAt : ((await userById(db(), userId))?.accessCheckedAt ?? null);
+  const age = checkedAt ? Date.now() - checkedAt.getTime() : Number.POSITIVE_INFINITY;
   if (!options.force && age < SOFT_TTL_MS) return;
   if (!options.force && age < HARD_TTL_MS) {
     after(() => refreshAccess(userId).catch(() => {}));

@@ -23,8 +23,11 @@ import {
 } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
+import { createHmac } from "node:crypto";
+import { sessionUser } from "@sandchest/db";
 import { storeAccess } from "@/server/access";
-import { digState } from "@/server/dig";
+import { verifiedSessionToken } from "@/server/auth";
+import { digState } from "@/lib/dig-state";
 import { setServices } from "@/server/services";
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
@@ -76,6 +79,8 @@ function finding(fingerprint: string, severity: FindingInput["severity"], confid
     fixPrompt: "prompt quoting 2| b",
   };
 }
+
+const SECRET = "test-secret-test-secret-test-secret-00";
 
 let ids: { org: string; personal: string; api: string; web: string; secret: string; alice: string; bob: string; scan: string; findings: string[] };
 
@@ -213,5 +218,30 @@ describe("dig", () => {
     expect(digState({ loc: 2_000_000, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "too_large" });
     expect(digState({ loc: 10, lastDeepScanAt: new Date("2026-11-01T02:00:00Z"), activeDeepScanId: null }, now)).toEqual({ state: "cooling", retryAt: new Date("2026-11-02T02:00:00Z") });
     expect(digState({ loc: 10, lastDeepScanAt: null, activeDeepScanId: "s1" }, now)).toEqual({ state: "running", scanId: "s1" });
+  });
+});
+
+describe("sessions", () => {
+  const sign = (token: string, secret = SECRET) => `${token}.${createHmac("sha256", secret).update(token).digest("base64")}`;
+
+  test("a cookie is trusted only with a valid signature", () => {
+    if (!available) return;
+    expect(verifiedSessionToken(sign("tok123"), SECRET)).toBe("tok123");
+    expect(verifiedSessionToken(encodeURIComponent(sign("tok123")), SECRET)).toBe("tok123");
+    expect(verifiedSessionToken(sign("tok123", "another-secret-another-secret-0000"), SECRET)).toBeUndefined();
+    expect(verifiedSessionToken(sign("tok123").replace("tok123", "tok124"), SECRET)).toBeUndefined();
+    expect(verifiedSessionToken("tok123", SECRET)).toBeUndefined();
+    expect(verifiedSessionToken(undefined, SECRET)).toBeUndefined();
+  });
+
+  test("a session reads its user in one query, and expired sessions read nothing", async () => {
+    if (!available) return;
+    await database.insert(schema.sessions).values([
+      { userId: ids.alice, token: "live-token", expiresAt: new Date(Date.now() + 60_000) },
+      { userId: ids.alice, token: "old-token", expiresAt: new Date(Date.now() - 60_000) },
+    ]);
+    expect(await sessionUser(database, "live-token")).toMatchObject({ id: ids.alice, login: "alice" });
+    expect(await sessionUser(database, "old-token")).toBeUndefined();
+    expect(await sessionUser(database, "no-such-token")).toBeUndefined();
   });
 });
