@@ -66,7 +66,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
     if (input.data.kind === "top_up") return { error: "Choose a plan first: top-ups add to a plan’s credits." };
     return checkout(row.org, input.data);
   }
-  redirect(`/billing/confirm?org=${orgId}&${purchaseQuery(input.data)}`);
+  redirect(`/dashboard/billing/confirm?org=${orgId}&${purchaseQuery(input.data)}`);
 }
 
 /** Charges a purchase the admin confirmed. */
@@ -79,7 +79,7 @@ export async function confirmPurchase(orgId: string, _previous: BillingOutcome, 
 }
 
 async function checkout(org: { id: string; githubLogin: string }, input: PurchaseInput): Promise<BillingOutcome> {
-  const successUrl = `${appUrl()}/billing/return?org=${org.id}`;
+  const successUrl = `${appUrl()}/dashboard/billing/return?org=${org.id}`;
   let paymentUrl: string | null;
   try {
     ({ paymentUrl } = await autumn()!.attach({
@@ -95,20 +95,20 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
   }
   // Checkout, or a card step (3-D Secure, a declined card): Stripe sends them back to the return page.
   if (paymentUrl) redirect(paymentUrl);
-  redirect(`/billing/return?org=${org.id}`);
+  redirect(`/dashboard/billing/return?org=${org.id}`);
 }
 
 /** Opens Stripe's billing portal: card, invoices and cancelling. */
 export async function openPortal(orgId: string): Promise<void> {
   const row = await adminOrg(orgId);
-  if (!row) redirect("/settings");
+  if (!row) redirect("/dashboard/settings");
   let url: string;
   try {
-    url = await autumn()!.portal(orgId, `${appUrl()}/billing/return?org=${orgId}`);
+    url = await autumn()!.portal(orgId, `${appUrl()}/dashboard/billing/return?org=${orgId}`);
   } catch (error) {
     console.error(`Billing portal for org ${orgId} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "portal" }, handled: true });
-    redirect("/settings?billing=unavailable#billing");
+    redirect("/dashboard/settings?billing=unavailable#billing");
   }
   redirect(url);
 }
@@ -137,6 +137,6 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
     await captureException(error, { source: "billing", tags: { action: "auto_top_up" }, handled: true });
     return { error: "Saved here, but billing didn’t take the change. Try again in a minute." };
   }
-  revalidatePath("/settings");
+  revalidatePath("/dashboard/settings");
   return { saved: true };
 }

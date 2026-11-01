@@ -108,7 +108,7 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
   let checkRunId = scan.checkRunId;
   if (scan.kind === "pr_review" && scan.repo.org.installationId) {
     const installation = githubApp().installation(scan.repo.org.installationId);
-    const { conclusion, output } = notReviewed(gate.reason, `${appUrl()}/settings`, gate.credits);
+    const { conclusion, output } = notReviewed(gate.reason, `${appUrl()}/dashboard/settings`, gate.credits);
     checkRunId ??= await installation.createCheckRun(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
     await installation.completeCheckRun(scan.repo.fullName, checkRunId, conclusion, output);
   }
@@ -266,7 +266,7 @@ async function notifyScan(scan: NonNullable<Awaited<ReturnType<typeof scanById>>
   const recipients = await notificationRecipients(db(), scan.repo.id);
   if (recipients.length === 0 || !(await claimNotification(db(), scan.id))) return;
   const base = config().SANDCHEST_APP_URL.replace(/\/$/, "");
-  const summary = (row: FindingRow) => ({ title: row.title, severity: row.severity, url: `${base}/findings/${row.id}` });
+  const summary = (row: FindingRow) => ({ title: row.title, severity: row.severity, url: `${base}/dashboard/findings/${row.id}` });
   const order = ["critical", "high", "medium", "low"];
   const sorted = rows.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
   const email = scan.kind === "deep" ? deepScanEmail({ repo: scan.repo.fullName, scanUrl: detailsUrl(scan.id), findings: sorted.map(summary) }) : criticalFindingEmail({ repo: scan.repo.fullName, findings: critical.map(summary) });
@@ -319,7 +319,7 @@ function appUrl(): string {
 }
 
 function detailsUrl(scanId: string): string {
-  return `${appUrl()}/scans/${scanId}`;
+  return `${appUrl()}/dashboard/scans/${scanId}`;
 }
 
 function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {

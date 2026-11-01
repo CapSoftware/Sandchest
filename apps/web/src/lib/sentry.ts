@@ -135,13 +135,13 @@ export function safeMessage(message: unknown): string {
  */
 export const PAGE_TEMPLATES: ReadonlyArray<readonly [string, string]> = [
   ["^/$", "/"],
-  ["^/repos$", "/repos"],
-  ["^/findings$", "/findings"],
-  ["^/findings/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/findings/[id]"],
-  ["^/scans/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/scans/[id]"],
-  ["^/settings$", "/settings"],
-  ["^/billing/confirm$", "/billing/confirm"],
-  ["^/billing/return$", "/billing/return"],
+  ["^/dashboard$", "/dashboard"],
+  ["^/dashboard/findings$", "/dashboard/findings"],
+  ["^/dashboard/findings/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/dashboard/findings/[id]"],
+  ["^/dashboard/scans/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/dashboard/scans/[id]"],
+  ["^/dashboard/settings$", "/dashboard/settings"],
+  ["^/dashboard/billing/confirm$", "/dashboard/billing/confirm"],
+  ["^/dashboard/billing/return$", "/dashboard/billing/return"],
   ["^/sign-in$", "/sign-in"],
 ];
 

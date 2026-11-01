@@ -16,7 +16,7 @@ const Id = z.uuid();
 
 export async function signIn(next: string): Promise<void> {
   // Checked again here: a bound argument can be changed by the client.
-  const callbackURL = /^\/(?![/\\])/.test(next) ? next : "/repos";
+  const callbackURL = /^\/(?![/\\])/.test(next) ? next : "/dashboard";
   const result = await auth().api.signInSocial({ body: { provider: "github", callbackURL, errorCallbackURL: "/sign-in?error=1" }, headers: await headers() });
   if (!result.url) throw new Error("GitHub sign-in did not return a URL");
   redirect(result.url);
@@ -38,9 +38,9 @@ export async function changeFinding(findingId: string, form: FormData): Promise<
   const action = FindingForm.safeParse(Object.fromEntries(form));
   if (!action.success || !Id.safeParse(findingId).success) return;
   if (await applyFindingAction(db(), user.id, findingId, action.data as FindingAction)) {
-    revalidatePath(`/findings/${findingId}`);
-    revalidatePath("/findings");
-    revalidatePath("/repos");
+    revalidatePath(`/dashboard/findings/${findingId}`);
+    revalidatePath("/dashboard/findings");
+    revalidatePath("/dashboard");
   }
 }
 
@@ -62,6 +62,6 @@ export async function saveOrgSettings(orgId: string, _previous: SettingsOutcome,
   if (!parsed.success || !Id.safeParse(orgId).success) return { error: "Those settings aren’t valid." };
   const ok = await updateOrgSettings(db(), user.id, orgId, { checkThreshold: parsed.data.checkThreshold, emailNotifications: parsed.data.emailNotifications === "on" });
   if (!ok) return { error: "Only an admin of this account can change its settings." };
-  revalidatePath("/settings");
+  revalidatePath("/dashboard/settings");
   return { saved: true };
 }

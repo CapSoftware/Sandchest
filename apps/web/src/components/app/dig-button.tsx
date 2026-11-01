@@ -17,7 +17,7 @@ export function DigButton({ repoId, note }: { repoId: string; note: string }) {
           {state.topUp && (
             <>
               {" "}
-              <a href="/settings#billing">Billing</a>
+              <a href="/dashboard/settings#billing">Billing</a>
             </>
           )}
         </span>

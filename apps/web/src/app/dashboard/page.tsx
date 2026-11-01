@@ -102,7 +102,7 @@ function RepoRow({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
   return (
     <div className="repo">
       <div className="repo-name">
-        <HoverLink href={`/findings?repo=${repo.id}`}>
+        <HoverLink href={`/dashboard/findings?repo=${repo.id}`}>
           <span className="repo-owner">{owner}/</span>
           {name}
         </HoverLink>
@@ -113,7 +113,7 @@ function RepoRow({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
           <span className="tally-clear">Nothing open</span>
         ) : (
           counts.map((severity) => (
-            <Link key={severity} href={`/findings?repo=${repo.id}&severity=${severity}`} aria-label={`${repo.open[severity]} ${severity}`}>
+            <Link key={severity} href={`/dashboard/findings?repo=${repo.id}&severity=${severity}`} aria-label={`${repo.open[severity]} ${severity}`}>
               <Heat severity={severity} />
               {repo.open[severity]}
             </Link>
@@ -122,7 +122,7 @@ function RepoRow({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
       </div>
       <div className="repo-scan">
         {repo.lastScan ? (
-          <HoverLink href={`/scans/${repo.lastScan.id}`}>
+          <HoverLink href={`/dashboard/scans/${repo.lastScan.id}`}>
             {SCAN_KIND_LABEL[repo.lastScan.kind]} {LAST_SCAN_VERB[repo.lastScan.status] ?? ""} <When date={repo.lastScan.at} />
           </HoverLink>
         ) : (
@@ -140,7 +140,7 @@ function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
     case "running":
       return (
         <div className="repo-dig">
-          <HoverLink href={`/scans/${state.scanId}`} className="digging">
+          <HoverLink href={`/dashboard/scans/${state.scanId}`} className="digging">
             <span className="blink" aria-hidden="true" />
             Digging
           </HoverLink>
@@ -168,7 +168,7 @@ function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
       if (plan && plan.credits < (state.credits ?? 15))
         return (
           <div className="repo-dig">
-            <HoverLink href="/settings#billing" className="repo-dig-note">
+            <HoverLink href="/dashboard/settings#billing" className="repo-dig-note">
               Out of credits: top up
             </HoverLink>
           </div>

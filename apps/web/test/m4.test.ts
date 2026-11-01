@@ -185,7 +185,7 @@ describe.skipIf(!available)("billing", () => {
     expect(await scanById(database, scanId)).toMatchObject({ status: "refused", billing: null });
     expect(checks.at(-1)).toMatchObject({ conclusion: "neutral", title: "Out of credits" });
     expect(checks.at(-1)!.summary).toContain("needs 1 credit");
-    expect(checks.at(-1)!.summary).toContain("https://sandchest.test/settings");
+    expect(checks.at(-1)!.summary).toContain("https://sandchest.test/dashboard/settings");
     expect(autumn.get(acme.id).locks.size).toBe(0);
     // The refusal also refreshed what the dashboard shows.
     expect((await orgBillingRow(database, acme.id))?.credits).toBe(0);

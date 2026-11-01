@@ -41,7 +41,7 @@ function href(current: ReturnType<typeof parse>, change: Partial<ReturnType<type
   if (next.repo) params.set("repo", next.repo);
   if (next.low) params.set("low", "1");
   const query = params.toString();
-  return query ? `/findings?${query}` : "/findings";
+  return query ? `/dashboard/findings?${query}` : "/dashboard/findings";
 }
 
 export default async function FindingsPage({ searchParams }: { searchParams: Promise<Query> }) {
@@ -79,7 +79,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
             })}
           </div>
           {repos.length > 1 && (
-            <form action="/findings" className="filter-set">
+            <form action="/dashboard/findings" className="filter-set">
               {current.status !== "open" && <input type="hidden" name="status" value={current.status} />}
               {current.severities.length > 0 && <input type="hidden" name="severity" value={current.severities.join(",")} />}
               {current.low && <input type="hidden" name="low" value="1" />}
@@ -119,7 +119,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
         <ul className="rows">
           {list.map((finding) => (
             <li key={finding.id} className="row finding-row">
-              <HoverLink href={`/findings/${finding.id}`}>
+              <HoverLink href={`/dashboard/findings/${finding.id}`}>
                 <Heat severity={finding.severity} label />
                 <span className="finding-row-title">
                   {finding.title}

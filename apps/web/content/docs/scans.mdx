@@ -50,7 +50,7 @@ Each commit is reviewed once. Reviews are priced by the number of security-relev
 | Success | Nothing at or above the threshold |
 | Neutral | Not reviewed: no plan, out of credits, or the review couldn't finish |
 
-Set the threshold in [Settings](/settings): Critical, High, Medium or Any. Low-confidence findings never fail a Check. A Check only blocks merging if you make it a required status check in GitHub's branch protection. A neutral Check never blocks.
+Set the threshold in [Settings](/dashboard/settings): Critical, High, Medium or Any. Low-confidence findings never fail a Check. A Check only blocks merging if you make it a required status check in GitHub's branch protection. A neutral Check never blocks.
 
 ### Private repositories
 
@@ -75,7 +75,7 @@ Sandchest never opens GitHub issues.
 
 ## Deep scans
 
-A deep scan hunts across the whole repository. It only runs when someone presses **Dig** on the [Repos](/repos) page. Anyone who can push to the repository can start one, and the button shows the cost first.
+A deep scan hunts across the whole repository. It only runs when someone presses **Dig** on the [Repos](/dashboard) page. Anyone who can push to the repository can start one, and the button shows the cost first.
 
 - One deep scan runs at a time per repository. The 24-hour wait before the next starts once a deep scan's results are saved, even if something later goes wrong. A dig that fails before then doesn't start the wait.
 - The scan's page shows a live feed of what Sandchest is doing, and findings appear as they survive verification.

@@ -4,6 +4,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { config } from "./config";
+import { SESSION_COOKIES } from "@/lib/app-routes";
 
 /** How long a session lasts, and how often its expiry is pushed back while it is used (better-auth's defaults, set explicitly). */
 export const SESSION_EXPIRES_IN_S = 7 * 24 * 60 * 60;
@@ -20,7 +21,7 @@ export function sessionRefreshDue(expiresAt: Date, now = Date.now()): boolean {
 
 /** better-auth's session cookie, with the `__Secure-` prefix it uses over HTTPS. */
 export function sessionCookieName(): string {
-  return config().SANDCHEST_APP_URL.startsWith("https://") ? "__Secure-better-auth.session_token" : "better-auth.session_token";
+  return SESSION_COOKIES[config().SANDCHEST_APP_URL.startsWith("https://") ? 0 : 1];
 }
 
 /**

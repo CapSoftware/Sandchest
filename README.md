@@ -93,9 +93,11 @@ sandchest.example.com {
 
 The proxy must pass the original `Host` header. Caddy does; with nginx, add `proxy_set_header Host $host;`. The setup page shows the address GitHub will send you back to, so check it before you continue.
 
+Don't put a shared cache in front of Sandchest that keys on the URL alone. The landing page at `/` differs for signed-in people (it shows a Dashboard button), and Sandchest sends no `Vary: Cookie`. A plain proxy like the ones above is fine.
+
 To listen on every interface instead, set `SANDCHEST_BIND=0.0.0.0` in `.env`. Set `SANDCHEST_PORT` to use another port.
 
-If the address changes later, update `SANDCHEST_APP_URL`, restart, and in the App's settings on GitHub change the homepage, webhook URL (`<address>/api/github/webhooks`), callback URL (`<address>/api/auth/callback/github`) and setup URL (`<address>/repos`).
+If the address changes later, update `SANDCHEST_APP_URL`, restart, and in the App's settings on GitHub change the homepage, webhook URL (`<address>/api/github/webhooks`), callback URL (`<address>/api/auth/callback/github`) and setup URL (`<address>/dashboard`).
 
 ### Optional settings
 

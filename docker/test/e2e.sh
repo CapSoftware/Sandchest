@@ -262,7 +262,7 @@ node -e '
   const [check] = checks;
   if (check.headSha !== process.argv[2] || check.createdAs !== "in_progress" || check.firstTitle !== "Digging…") fail("the Check did not start in progress on the head commit");
   if (check.status !== "completed" || check.conclusion !== "failure") fail("the Check did not fail on a high finding");
-  if (!check.detailsUrl?.startsWith(process.argv[3] + "/scans/")) fail("the Check does not link to the scan");
+  if (!check.detailsUrl?.startsWith(process.argv[3] + "/dashboard/scans/")) fail("the Check does not link to the scan");
   if (reviews.length !== 1 || reviews[0].commitId !== process.argv[2]) fail("expected one review on the head commit");
   const [comment] = reviews[0].comments;
   if (reviews[0].comments.length !== 1 || comment.path !== "app.js" || comment.line !== 4) fail("expected one inline comment on app.js line 4");

@@ -14,7 +14,7 @@ export function ConfirmPurchase({ orgId, fields, label }: { orgId: string; field
       <Submit className="key key-primary" pending="Charging…">
         {label}
       </Submit>
-      <a className="quiet" href="/settings#billing">
+      <a className="quiet" href="/dashboard/settings#billing">
         Cancel
       </a>
       {state.error && (

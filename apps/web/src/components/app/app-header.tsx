@@ -4,9 +4,9 @@ import { AppNav } from "@/components/app/nav";
 import type { Viewer } from "@/server/access";
 
 const SECTIONS = [
-  { href: "/repos", label: "Repos" },
-  { href: "/findings", label: "Findings" },
-  { href: "/settings", label: "Settings" },
+  { href: "/dashboard", label: "Repos" },
+  { href: "/dashboard/findings", label: "Findings" },
+  { href: "/dashboard/settings", label: "Settings" },
 ];
 
 /** The sections a person sees: operators also get Admin. Decided here, on the server. */
@@ -19,7 +19,7 @@ export function AppHeader({ user, admin }: { user: Viewer; admin: boolean }) {
   return (
     <header className="app-header">
       <div className="shell">
-        <Link href="/repos" className="app-mark" aria-label="Sandchest">
+        <Link href="/dashboard" className="app-mark" aria-label="Sandchest">
           <img src="/sandchest-icon-small.svg" alt="" width={30} height={28} />
         </Link>
         <AppNav links={navLinks(admin)} />

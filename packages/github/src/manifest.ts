@@ -67,7 +67,7 @@ export function buildManifest(input: ManifestInput): Manifest {
     hook_attributes: { url: `${base}/api/github/webhooks`, active: true },
     redirect_url: input.redirectUrl,
     callback_urls: [`${base}/api/auth/callback/github`],
-    setup_url: `${base}/repos`,
+    setup_url: `${base}/dashboard`,
     // After someone changes which repositories it can see, send them back so the dashboard refreshes.
     setup_on_update: true,
     // Sign-in is its own step; installing should not also ask to authorise.

@@ -18,6 +18,8 @@ export const site = {
   githubUrl: process.env.NEXT_PUBLIC_GITHUB_URL || "https://github.com/CapSoftware/Sandchest",
   links: {
     getStarted: "/sign-in",
+    signIn: "/sign-in",
+    dashboard: "/dashboard",
     docs: "/docs",
     terms: "/terms",
     privacy: "/privacy",

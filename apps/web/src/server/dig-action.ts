@@ -30,7 +30,7 @@ export async function dig(repoId: string): Promise<DigOutcome> {
     return { error: "The dig couldn’t start. Nothing was charged; try again in a minute." };
   }
   if (!result.ok) {
-    revalidatePath("/repos");
+    revalidatePath("/dashboard");
     const messages = {
       not_installed: "Sandchest is no longer installed on this repository.",
       running: "A deep scan is already running.",
@@ -41,5 +41,5 @@ export async function dig(repoId: string): Promise<DigOutcome> {
     };
     return { error: messages[result.reason], topUp: result.reason === "no_plan" || result.reason === "out_of_credits" };
   }
-  redirect(`/scans/${result.scanId}`);
+  redirect(`/dashboard/scans/${result.scanId}`);
 }

@@ -16,13 +16,13 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const user = await viewer();
   const client = autumn();
   const row = client && params.org && /^[0-9a-f-]{36}$/.test(params.org) ? await orgForAdmin(db(), user.id, params.org) : undefined;
-  if (!client || !row) redirect("/settings");
+  if (!client || !row) redirect("/dashboard/settings");
 
   const plan = planById(params.plan);
   const packs = Number(params.topup);
   const topUp = !plan && Number.isInteger(packs) && packs >= 1 && packs <= MAX_TOP_UP_PACKS;
   const current = planById(row.billing?.planId);
-  if ((!plan && !topUp) || !current || plan?.id === current.id) redirect("/settings#billing");
+  if ((!plan && !topUp) || !current || plan?.id === current.id) redirect("/dashboard/settings#billing");
 
   const preview = await client.preview({ customerId: row.org.id, planId: plan ? plan.id : TOP_UP.id, packs: topUp ? packs : undefined }).catch(() => undefined);
   const downgrade = plan && plan.price < current.price;

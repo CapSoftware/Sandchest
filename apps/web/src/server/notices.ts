@@ -119,7 +119,7 @@ export async function noticeScanPaused(scan: PausedScan, at = new Date()): Promi
   if (!to) return false;
   if (!(await claimNotification(db(), scan.id))) return false;
   if (!(await claimOrgNotice(db(), org.id, `scan_paused:${at.toISOString().slice(0, 13)}`))) return false;
-  await send(org.id, to, scanPausedEmail({ org: org.githubLogin, repo: scan.repo.fullName, kind: scan.kind, prNumber: scan.prNumber, scanUrl: `${appUrl()}/scans/${scan.id}` }));
+  await send(org.id, to, scanPausedEmail({ org: org.githubLogin, repo: scan.repo.fullName, kind: scan.kind, prNumber: scan.prNumber, scanUrl: `${appUrl()}/dashboard/scans/${scan.id}` }));
   return true;
 }
 
@@ -249,5 +249,5 @@ function appUrl(): string {
 }
 
 function billingUrl(): string {
-  return `${appUrl()}/settings#billing`;
+  return `${appUrl()}/dashboard/settings#billing`;
 }

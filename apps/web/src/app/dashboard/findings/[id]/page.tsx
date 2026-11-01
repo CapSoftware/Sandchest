@@ -53,9 +53,9 @@ export default async function FindingPage({ params }: Params) {
   return (
     <>
       <nav className="crumbs" aria-label="Breadcrumb">
-        <Link href="/findings">Findings</Link>
+        <Link href="/dashboard/findings">Findings</Link>
         <span aria-hidden="true">/</span>
-        <Link href={`/findings?repo=${repo.id}`}>{repo.fullName}</Link>
+        <Link href={`/dashboard/findings?repo=${repo.id}`}>{repo.fullName}</Link>
       </nav>
 
       <header className="finding-head">
@@ -192,7 +192,7 @@ export default async function FindingPage({ params }: Params) {
               <dt>Found by</dt>
               <dd>
                 {finding.sourceScanId ? (
-                  <Link className="quiet" href={`/scans/${finding.sourceScanId}`}>
+                  <Link className="quiet" href={`/dashboard/scans/${finding.sourceScanId}`}>
                     {finding.prNumber !== null ? `Review of PR #${finding.prNumber}` : SCAN_KIND_LABEL[finding.sourceKind]}
                   </Link>
                 ) : finding.prNumber !== null ? (

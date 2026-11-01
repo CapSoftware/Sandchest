@@ -54,5 +54,5 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
 
 /** Only paths on this site: never another origin, never a protocol-relative URL. */
 function safeNext(next: string | undefined): string {
-  return next && /^\/(?![/\\])/.test(next) ? next : "/repos";
+  return next && /^\/(?![/\\])/.test(next) ? next : "/dashboard";
 }

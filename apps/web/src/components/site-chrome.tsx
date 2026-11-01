@@ -21,7 +21,12 @@ const FOOTER = [
 
 type Section = (typeof FOOTER)[number]["id"];
 
-export function SiteHeader({ current }: { current?: Section }) {
+/**
+ * `visitor` is set only on the landing page, which is built once for each
+ * (see `homeRewrites`): signed in, a Dashboard key; otherwise Sign in. Docs
+ * and legal pages stay a single static page and show neither.
+ */
+export function SiteHeader({ current, visitor }: { current?: Section; visitor?: "signed-in" | "signed-out" }) {
   return (
     <header className="site-header">
       <a href="/" className="wordmark" aria-label="Sandchest home">
@@ -33,6 +38,12 @@ export function SiteHeader({ current }: { current?: Section }) {
             {link.label}
           </a>
         ))}
+        {visitor === "signed-out" && <a href={site.links.signIn}>Sign in</a>}
+        {visitor === "signed-in" && (
+          <a href={site.links.dashboard} className="button button-primary button-small">
+            <span className="button-face">Dashboard</span>
+          </a>
+        )}
       </nav>
     </header>
   );

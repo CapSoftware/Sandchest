@@ -39,7 +39,7 @@ describe("manifest", () => {
     expect(manifest.url).toBe("https://sandchest.example.com");
     expect(manifest.hook_attributes).toEqual({ url: "https://sandchest.example.com/api/github/webhooks", active: true });
     expect(manifest.callback_urls).toEqual(["https://sandchest.example.com/api/auth/callback/github"]);
-    expect(manifest.setup_url).toBe("https://sandchest.example.com/repos");
+    expect(manifest.setup_url).toBe("https://sandchest.example.com/dashboard");
     expect(manifest.redirect_url).toBe("https://sandchest.example.com/setup/callback");
     expect(manifest.name).toBe("Sandchest Acme");
     expect(manifest.public).toBe(false);

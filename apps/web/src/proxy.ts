@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIES } from "./lib/app-routes";
 
 /**
  * Sends signed-out visitors to sign in, remembering where they were going
@@ -38,7 +39,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // A leading underscore marks a private folder, so no route can ever answer here.
   if (section === "ops") return NextResponse.rewrite(new URL(NO_ROUTE, request.url));
   if (section === "dashboard") {
-    const hasSession = request.cookies.has("better-auth.session_token") || request.cookies.has("__Secure-better-auth.session_token");
+    const hasSession = SESSION_COOKIES.some((name) => request.cookies.has(name));
     if (hasSession) return NextResponse.next();
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
@@ -58,7 +59,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
  * visible here; that is accepted, since both are in the public source and
  * neither answers anyone but an operator.
  */
-export const config = { matcher: ["/repos/:path*", "/findings/:path*", "/scans/:path*", "/settings/:path*", "/admin/:path*", "/ops/:path*"] };
+export const config = { matcher: ["/dashboard/:path*", "/admin/:path*", "/ops/:path*"] };
 
 /** The path as routes see it: percent-decoded, repeated and trailing slashes removed. Undefined if it does not decode. */
 export function normalisePath(pathname: string): string | undefined {
@@ -72,14 +73,13 @@ export function normalisePath(pathname: string): string | undefined {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
-const DASHBOARD = ["/repos", "/findings", "/scans", "/settings"];
 const within = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
 
 /** Which part of the app a normalised path belongs to. */
 export function sectionOf(path: string): "admin" | "ops" | "dashboard" | undefined {
   if (within(path, "/admin")) return "admin";
   if (within(path, "/ops")) return "ops";
-  return DASHBOARD.some((prefix) => within(path, prefix)) ? "dashboard" : undefined;
+  return within(path, "/dashboard") ? "dashboard" : undefined;
 }
 
 /** Where /ops asked for by name is sent: under a private folder (leading underscore), so never a route. */

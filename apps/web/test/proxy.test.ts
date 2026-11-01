@@ -92,12 +92,14 @@ describe("paths", () => {
     expect(normalisePath("/%6f%70%73")).toBe("/ops");
     expect(normalisePath("/")).toBe("/");
     expect(normalisePath("/%E0%A4%A")).toBeUndefined();
-    expect(["/admin", "/admin/cost", "/ops/funnel", "/repos", "/findings/x", "/administrator", "/opsx", "/"].map(sectionOf)).toEqual([
+    expect(["/admin", "/admin/cost", "/ops/funnel", "/dashboard", "/dashboard/findings/x", "/administrator", "/opsx", "/dashboards", "/repos", "/"].map(sectionOf)).toEqual([
       "admin",
       "admin",
       "ops",
       "dashboard",
       "dashboard",
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -113,10 +115,10 @@ describe("matcher", () => {
       expect(match).not.toBeNull();
       return match![1]!;
     });
-    expect(sections.sort()).toEqual(["admin", "findings", "ops", "repos", "scans", "settings"]);
+    expect(sections.sort()).toEqual(["admin", "dashboard", "ops"]);
     const runs = (path: string) => sections.some((section) => path === `/${section}` || path.startsWith(`/${section}/`));
-    for (const path of ["/admin", "/admin/cost", "/ops", "/ops/funnel", "/repos", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", "/scans/x", "/settings"]) expect(runs(path)).toBe(true);
-    for (const path of ["/", "/docs", "/docs/self-hosting", "/terms", "/privacy", "/acceptable-use", "/sign-in", "/api/auth/callback/github", "/api/github/webhooks", "/administrator", "/opsx"]) expect(runs(path)).toBe(false);
+    for (const path of ["/admin", "/admin/cost", "/ops", "/ops/funnel", "/dashboard", "/dashboard/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", "/dashboard/scans/x", "/dashboard/settings"]) expect(runs(path)).toBe(true);
+    for (const path of ["/", "/docs", "/docs/self-hosting", "/terms", "/privacy", "/acceptable-use", "/sign-in", "/api/auth/callback/github", "/api/github/webhooks", "/administrator", "/opsx", "/home", "/dashboards"]) expect(runs(path)).toBe(false);
   });
 });
 
@@ -161,9 +163,9 @@ describe("proxy", () => {
 
   test("dashboard pages still send signed-out visitors to sign in", async () => {
     if (!available) return;
-    const response = await proxy(request("/repos?x=1"));
+    const response = await proxy(request("/dashboard?x=1"));
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://sandchest.test/sign-in?next=%2Frepos%3Fx%3D1");
-    expect(isNext(await proxy(request("/findings", { session: "member" })))).toBe(true);
+    expect(response.headers.get("location")).toBe("http://sandchest.test/sign-in?next=%2Fdashboard%3Fx%3D1");
+    expect(isNext(await proxy(request("/dashboard/findings", { session: "member" })))).toBe(true);
   });
 });

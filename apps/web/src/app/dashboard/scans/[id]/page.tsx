@@ -44,9 +44,9 @@ export default async function ScanPage({ params }: Params) {
   return (
     <>
       <nav className="crumbs" aria-label="Breadcrumb">
-        <Link href="/repos">Repos</Link>
+        <Link href="/dashboard">Repos</Link>
         <span aria-hidden="true">/</span>
-        <Link href={`/findings?repo=${repo.id}`}>{repo.fullName}</Link>
+        <Link href={`/dashboard/findings?repo=${repo.id}`}>{repo.fullName}</Link>
       </nav>
 
       <div className="page-head">
@@ -110,7 +110,7 @@ export default async function ScanPage({ params }: Params) {
           <ul className="rows">
             {shown.map((finding) => (
               <li key={finding.id} className="row finding-row">
-                <HoverLink href={`/findings/${finding.id}`}>
+                <HoverLink href={`/dashboard/findings/${finding.id}`}>
                   <Heat severity={finding.severity} label />
                   <span className="finding-row-title">
                     {finding.title}

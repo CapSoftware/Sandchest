@@ -17,7 +17,7 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
   const { org: orgId } = await searchParams;
   const user = await viewer();
   const row = autumn() && orgId && /^[0-9a-f-]{36}$/.test(orgId) ? await orgForAdmin(db(), user.id, orgId) : undefined;
-  if (!row) redirect("/settings");
+  if (!row) redirect("/dashboard/settings");
 
   const hadPlan = !!row.billing?.planId;
   let state = await syncBilling(row.org).catch(() => undefined);
@@ -25,6 +25,6 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     state = await syncBilling(row.org).catch(() => state);
   }
-  if (!hadPlan && state?.planId) redirect("/repos?plan=started");
-  redirect("/settings#billing");
+  if (!hadPlan && state?.planId) redirect("/dashboard?plan=started");
+  redirect("/dashboard/settings#billing");
 }

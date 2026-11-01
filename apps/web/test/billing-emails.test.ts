@@ -220,7 +220,7 @@ describe.skipIf(!available)("billing emails", () => {
     await reserve(1); // 14
     expect(subjects()).toEqual(["14 credits left on acme"]);
     expect([...sent[0]!.to].sort()).toEqual(ADMINS);
-    expect(sent[0]!.html).toContain("https://sandchest.test/settings#billing");
+    expect(sent[0]!.html).toContain("https://sandchest.test/dashboard/settings#billing");
     expect(sent[0]!.text).toContain("come back on 1 Jan 2030");
     await reserve(1);
     await sync();
@@ -583,7 +583,7 @@ describe.skipIf(!available)("scan paused", () => {
     expect(subjects()).toEqual(["Scan paused: acme/api"]);
     expect([...sent[0]!.to].sort()).toEqual(ADMINS);
     expect(sent[0]!.text).toContain("The review of pull request #7 in acme/api stopped");
-    expect(sent[0]!.html).toContain(`https://sandchest.test/scans/${first.id}`);
+    expect(sent[0]!.html).toContain(`https://sandchest.test/dashboard/scans/${first.id}`);
     drain();
 
     // The same scan again (a retried step), and another scan in the same hour.

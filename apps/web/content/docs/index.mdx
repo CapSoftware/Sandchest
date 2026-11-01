@@ -10,7 +10,7 @@ It only ever scans repositories where you have installed it.
 ## Set up in five steps
 
 1. **Sign in with GitHub.** Go to [Get started](/sign-in). Sandchest uses your GitHub sign-in to see which repositories you can access.
-2. **Install the GitHub App.** From [Repos](/repos), choose **Install on GitHub**, pick the account (yours or an organization) and the repositories Sandchest may read. You come back to Repos when GitHub is done.
+2. **Install the GitHub App.** From [Repos](/dashboard), choose **Install on GitHub**, pick the account (yours or an organization) and the repositories Sandchest may read. You come back to Repos when GitHub is done.
 3. **Pick a plan for that account.** The GitHub account you installed on is the customer, so each account has its own plan and credits. Only an admin of the organization (or the owner of a personal account) can choose one. Checkout is handled by Stripe. See [Pricing & credits](/docs/pricing).
 4. **Recon maps each repository.** As soon as the account has a plan, Sandchest builds a threat model of every repository: its entry points, trust boundaries, sensitive data and dangerous code. It takes about a minute per repository and is free.
 5. **Start digging.** Press **Dig** on a repository for a full deep scan, and open a pull request to see a review. Findings appear on the [scan's live feed](/docs/scans#deep-scans) as soon as they survive verification.
@@ -20,8 +20,8 @@ From then on pull requests are reviewed automatically (except drafts, some pull 
 ## Where findings show up
 
 - **On the pull request.** A Check called **Sandchest** reports what the review found. On private repositories each finding is also posted as a review comment on the vulnerable line. On public repositories, where Checks and comments are visible to everyone, Sandchest only posts a count with a link to view the details privately. See [PR reviews](/docs/scans#pr-reviews).
-- **In the dashboard.** [Findings](/findings) lists everything across your repositories. Each finding has the full attack path, a proof of concept and a fix prompt.
-- **By email.** People who have signed in and can push to the repository get an email about new critical findings and finished deep scans. An admin can turn these emails off for the account in [Settings](/settings).
+- **In the dashboard.** [Findings](/dashboard/findings) lists everything across your repositories. Each finding has the full attack path, a proof of concept and a fix prompt.
+- **By email.** People who have signed in and can push to the repository get an email about new critical findings and finished deep scans. An admin can turn these emails off for the account in [Settings](/dashboard/settings).
 
 ## Who can see what
 

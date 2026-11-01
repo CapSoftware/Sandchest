@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
+import { appRedirects, homeRewrites } from "./src/lib/app-routes";
 import { markdownRewrites } from "./src/lib/docs-routes";
 import { siteUrl } from "./src/lib/site";
 
@@ -40,9 +41,12 @@ const nextConfig: NextConfig = {
     // queue worker's optional config loader pulls back in.
     outputFileTracingExcludes: { "*": ["**/node_modules/typescript/**", "**/node_modules/sharp/**", "**/node_modules/@img/**"] },
   }),
+  async redirects() {
+    return appRedirects;
+  },
   async rewrites() {
-    // Every docs page as Markdown: /docs.md and /docs/<page>.md.
-    return { beforeFiles: markdownRewrites, afterFiles: [], fallback: [] };
+    // Every docs page as Markdown (/docs.md and /docs/<page>.md), and the signed-in landing page.
+    return { beforeFiles: [...homeRewrites, ...markdownRewrites], afterFiles: [], fallback: [] };
   },
 };
 

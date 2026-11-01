@@ -131,10 +131,10 @@ describe("scrubbing", () => {
   });
 
   test("the page is a known route template or unknown, never the raw path", () => {
-    expect(pageTemplate("/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/findings/[id]");
-    expect(pageTemplate("/scans/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/scans/[id]");
-    expect(pageTemplate("/repos")).toBe("/repos");
-    for (const path of ["/findings/jane.doe@example.com", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c/x", "/acme-secret-project", "/repos/123456"]) expect(pageTemplate(path)).toBe("unknown");
+    expect(pageTemplate("/dashboard/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/dashboard/findings/[id]");
+    expect(pageTemplate("/dashboard/scans/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/dashboard/scans/[id]");
+    expect(pageTemplate("/dashboard")).toBe("/dashboard");
+    for (const path of ["/dashboard/findings/jane.doe@example.com", "/dashboard/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c/x", "/acme-secret-project", "/dashboard/123456", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c"]) expect(pageTemplate(path)).toBe("unknown");
     // Operator pages are never named in what the browser carries.
     expect(JSON.stringify(PAGE_TEMPLATES)).not.toMatch(/admin|ops/);
   });
@@ -398,7 +398,7 @@ describe("browser reporting", () => {
     // A minimal window: the snippet only uses these.
     const listeners: Record<string, (event: unknown) => void> = {};
     const window = {
-      location: { origin: "https://sandchest.test", pathname: "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", href: "https://sandchest.test/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c?q=secret" },
+      location: { origin: "https://sandchest.test", pathname: "/dashboard/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", href: "https://sandchest.test/dashboard/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c?q=secret" },
       addEventListener: (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
       fetch: (url: string, init: RequestInit) => fetch(url, init),
       crypto,
@@ -416,7 +416,7 @@ describe("browser reporting", () => {
     expect(received).toHaveLength(2);
     for (const request of received) expectClean(request.body);
     const first = parse(received[0]!.body).event;
-    expect(first).toMatchObject({ platform: "javascript", environment: "test", release: "abcdef123456", tags: { source: "browser", page: "/findings/[id]" } });
+    expect(first).toMatchObject({ platform: "javascript", environment: "test", release: "abcdef123456", tags: { source: "browser", page: "/dashboard/findings/[id]" } });
     expect(Object.keys(first).sort()).toEqual(["environment", "event_id", "exception", "level", "platform", "release", "sdk", "tags", "timestamp"]);
     const frames = first.exception.values.at(-1).stacktrace.frames;
     // The extension's frame is dropped: only our own static assets are kept.
@@ -471,7 +471,7 @@ describe("browser reporting", () => {
     const listeners: Record<string, (event: unknown) => void> = {};
     let body = "";
     new Function("location", "addEventListener", "fetch", "crypto", script)(
-      { origin: "https://sandchest.test", pathname: "/repos" },
+      { origin: "https://sandchest.test", pathname: "/dashboard" },
       (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
       async (_url: string, init: RequestInit) => {
         body = String(init.body);
