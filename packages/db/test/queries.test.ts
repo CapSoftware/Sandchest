@@ -100,6 +100,24 @@ describe("installations", () => {
     expect(found?.enabled).toBe(false);
     expect(found?.org.installationId).toBeNull();
   });
+
+  it("deletes the code findings quote when a repo is removed, then on uninstall", async () => {
+    const { org, repos } = await upsertInstallation(database, 9011, { ...account, githubAccountId: 111 }, [repo(11), repo(12)]);
+    const { scan } = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    for (const r of repos) await upsertFindings(database, r.id, scan, [{ ...finding(`code-${r.githubRepoId}`), fixPrompt: "quotes 3| db.query(x)" }]);
+    const quoted = async (repoId: string) => {
+      const [row] = await database.$client<Array<{ attack_path: Array<{ excerpt?: string }>; fix_prompt: string; title: string }>>`select attack_path, fix_prompt, title from findings where repo_id = ${repoId}`;
+      return { excerpt: row!.attack_path[0]!.excerpt, prompt: row!.fix_prompt, title: row!.title };
+    };
+
+    await disableRepos(database, [12]);
+    expect(await quoted(repos[1]!.id)).toEqual({ excerpt: undefined, prompt: "", title: "SQL injection" });
+    // The repo still installed keeps its code until the app goes.
+    expect((await quoted(repos[0]!.id)).excerpt).toBe("3| db.query(x)");
+
+    await removeInstallation(database, 9011);
+    expect(await quoted(repos[0]!.id)).toEqual({ excerpt: undefined, prompt: "", title: "SQL injection" });
+  });
 });
 
 describe("webhooks", () => {

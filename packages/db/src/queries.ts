@@ -67,16 +67,36 @@ export async function upsertRepos(database: Db, orgId: string, repoList: RepoInp
     .returning();
 }
 
+/**
+ * Deletes the code a repo's findings quote (attack-path excerpts and the fix
+ * prompt built from them) once Sandchest may no longer read that repo
+ * (SPEC §6, §16). The findings themselves stay, so history and counts
+ * survive; a later scan after reinstalling brings excerpts back.
+ */
+const forgetCode = {
+  attackPath: sql`(select coalesce(jsonb_agg(step - 'excerpt'), '[]'::jsonb) from jsonb_array_elements(${findings.attackPath}) step)`,
+  fixPrompt: "",
+};
+
+/** A repo removed from the installation: stop scanning it and delete the code its findings quote. */
 export async function disableRepos(database: Db, githubRepoIds: number[]): Promise<void> {
   if (githubRepoIds.length === 0) return;
-  await database.update(repos).set({ enabled: false }).where(inArray(repos.githubRepoId, githubRepoIds));
+  await database.transaction(async (tx) => {
+    const disabled = await tx.update(repos).set({ enabled: false }).where(inArray(repos.githubRepoId, githubRepoIds)).returning({ id: repos.id });
+    if (disabled.length > 0) await tx.update(findings).set(forgetCode).where(inArray(findings.repoId, disabled.map((r) => r.id)));
+  });
 }
 
-/** Uninstall: forget the installation and disable its repos. Findings stay until data deletion. */
+/**
+ * Uninstall (or suspension): forget the installation, disable its repos and
+ * delete the code their findings quote. Findings stay until data deletion.
+ */
 export async function removeInstallation(database: Db, installationId: number): Promise<void> {
   await database.transaction(async (tx) => {
     const [org] = await tx.update(orgs).set({ installationId: null }).where(eq(orgs.installationId, installationId)).returning({ id: orgs.id });
-    if (org) await tx.update(repos).set({ enabled: false }).where(eq(repos.orgId, org.id));
+    if (!org) return;
+    await tx.update(repos).set({ enabled: false }).where(eq(repos.orgId, org.id));
+    await tx.update(findings).set(forgetCode).where(sql`${findings.repoId} in (select id from ${repos} where org_id = ${org.id})`);
   });
 }
 
