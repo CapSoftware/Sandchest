@@ -43,7 +43,10 @@ export interface ScanLimits {
 }
 
 export const DEFAULT_LIMITS: ScanLimits = {
-  maxHunters: 8,
+  // Sized to one concurrency wave: large apps need up to 6 access-control
+  // hunters (one per ~60 routes) plus abuse, leads and the risky subsystems,
+  // all running in parallel. Small apps never reach the ceiling.
+  maxHunters: 12,
   hunterTurns: 24,
   turnsPerFinding: 6,
   hunterMaxTurns: 40,

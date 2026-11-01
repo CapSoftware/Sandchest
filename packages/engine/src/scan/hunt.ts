@@ -32,7 +32,13 @@ const MAX_ROUTES_LISTED = 150;
 const MAX_LEADS_LISTED = 80;
 /** Entry points one access-control hunter reviews; more are split across hunters. */
 const ROUTES_PER_ACCESS_HUNTER = 60;
-const MAX_ACCESS_HUNTERS = 2;
+/**
+ * Broken access control is the highest-yield class and must cover every entry
+ * point, so this scales with the route count rather than capping at a fixed
+ * slice: a 300-route app got only 120 routes (40%) reviewed at the old cap of
+ * 2. The ceiling keeps the hunters inside one concurrency wave.
+ */
+const MAX_ACCESS_HUNTERS = 6;
 /** Sinks every scan must rule on when a route reaches them: the classic injection shapes. */
 const HIGH_SIGNAL_SINK = /^(sql|nosql|command|code_eval|deserialization|xxe|template|ssrf|path) sink with (built|variable) input$/;
 /** Items one coverage hunter checks. */
