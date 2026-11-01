@@ -183,6 +183,18 @@ describe("live feed", () => {
     expect(events.map((e) => e.message).at(-1)).toBe("step 7");
     expect((await eventsSince(database, scan.id, 5)).map((e) => e.seq)).toEqual([6, 7]);
   });
+
+  it("stamps each event when it happened, not when its batch was written", async () => {
+    const { org, repos } = await upsertInstallation(database, 9014, { ...account, githubAccountId: 114 }, [repo(31)]);
+    const { scan } = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const writer = new EventWriter(database, scan.id, 1_000);
+    writer.write("stage", "first");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    writer.write("stage", "second");
+    await writer.flush();
+    const [first, second] = await eventsSince(database, scan.id, 0);
+    expect(second!.createdAt.getTime() - first!.createdAt.getTime()).toBeGreaterThanOrEqual(30);
+  });
 });
 
 describe("findings", () => {

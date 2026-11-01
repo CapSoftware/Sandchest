@@ -243,7 +243,7 @@ export async function recordMetrics(database: Db, scanId: string, metrics: Metri
  * already stored, so a retried step appends rather than overwriting.
  */
 export class EventWriter {
-  private queue: Array<{ type: string; message: string }> = [];
+  private queue: Array<{ type: string; message: string; createdAt: Date }> = [];
   private flushing: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private seq: number | undefined;
@@ -254,8 +254,9 @@ export class EventWriter {
     private readonly delayMs = 150,
   ) {}
 
+  /** Each event keeps the time it happened, not the time its batch was written. */
   write(type: string, message: string): void {
-    this.queue.push({ type, message });
+    this.queue.push({ type, message, createdAt: new Date() });
     this.timer ??= setTimeout(() => void this.flush(), this.delayMs);
   }
 
