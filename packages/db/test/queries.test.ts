@@ -6,6 +6,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
 import {
   claimDelivery,
+  claimWorkflowStart,
+  releaseWorkflowStart,
+  strandedScans,
+  updateScan,
   claimScanSlot,
   createDb,
   createScan,
@@ -116,6 +120,35 @@ describe("scans", () => {
     expect(second.scan.id).toBe(first.scan.id);
     // A new head is a new review.
     expect((await createScan(database, { ...input, headSha: "def" })).created).toBe(true);
+  });
+
+  it("lets exactly one caller start a scan's workflow, and lets it retry after a failed start", async () => {
+    const { org, repos } = await upsertInstallation(database, 9007, { ...account, githubAccountId: 107 }, [repo(60)]);
+    const { scan } = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "z" });
+    const claims = await Promise.all(Array.from({ length: 5 }, (_, i) => claimWorkflowStart(database, scan.id, `c${i}`)));
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const winner = `c${claims.indexOf(true)}`;
+    await releaseWorkflowStart(database, scan.id, "someone-else");
+    expect(await claimWorkflowStart(database, scan.id, "late")).toBe(false);
+    await releaseWorkflowStart(database, scan.id, winner);
+    expect(await claimWorkflowStart(database, scan.id, "retry")).toBe(true);
+  });
+
+  it("finds scans that never started and scans stuck past their budget", async () => {
+    const { org, repos } = await upsertInstallation(database, 9008, { ...account, githubAccountId: 108 }, [repo(70)]);
+    const make = (sha: string) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: sha });
+    const { scan: lost } = await make("lost");
+    const { scan: stuck } = await make("stuck");
+    const { scan: fine } = await make("fine");
+    await updateScan(database, stuck.id, { status: "running" });
+    await database.$client`update scans set started_at = now() - interval '2 hours' where id = ${stuck.id}`;
+    await updateScan(database, fine.id, { workflowRunId: "run-1" });
+
+    const later = new Date(Date.now() + 10 * 60_000);
+    const { unstarted, stuck: stuckScans } = await strandedScans(database, later);
+    expect(unstarted.map((s) => s.id)).toContain(lost.id);
+    expect(unstarted.map((s) => s.id)).not.toContain(fine.id);
+    expect(stuckScans.map((s) => s.id)).toEqual([stuck.id]);
   });
 
   it("lets at most `limit` scans per org run, even when claimed concurrently", async () => {

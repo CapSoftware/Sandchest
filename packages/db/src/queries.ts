@@ -160,6 +160,41 @@ export async function updateScan(database: Db, scanId: string, values: Partial<P
   await database.update(scans).set(values).where(eq(scans.id, scanId));
 }
 
+/**
+ * Reserves the right to start a scan's workflow. Exactly one caller gets
+ * true, however many deliveries race for the same scan.
+ */
+export async function claimWorkflowStart(database: Db, scanId: string, claim: string): Promise<boolean> {
+  const rows = await database
+    .update(scans)
+    .set({ workflowRunId: claim })
+    .where(and(eq(scans.id, scanId), sql`${scans.workflowRunId} is null`))
+    .returning({ id: scans.id });
+  return rows.length === 1;
+}
+
+/** Gives the reservation back after a failed start, so a redelivery can try again. */
+export async function releaseWorkflowStart(database: Db, scanId: string, claim: string): Promise<void> {
+  await database.update(scans).set({ workflowRunId: null }).where(and(eq(scans.id, scanId), eq(scans.workflowRunId, claim)));
+}
+
+/** Scans that never got a workflow (a lost start) or have been running far past any budget. */
+export async function strandedScans(database: Db, now = new Date()): Promise<{ unstarted: Scan[]; stuck: Scan[] }> {
+  const fiveMinutesAgo = new Date(now.getTime() - 5 * 60_000);
+  const halfHourAgo = new Date(now.getTime() - 30 * 60_000);
+  const [unstarted, stuck] = await Promise.all([
+    database.query.scans.findMany({
+      where: and(eq(scans.status, "queued"), sql`${scans.workflowRunId} is null`, sql`${scans.createdAt} < ${fiveMinutesAgo}`),
+      limit: 50,
+    }),
+    database.query.scans.findMany({
+      where: and(inArray(scans.status, ["running", "publishing"]), sql`${scans.startedAt} < ${halfHourAgo}`),
+      limit: 50,
+    }),
+  ]);
+  return { unstarted, stuck };
+}
+
 /** When the repo last had a completed deep scan, for the 24-hour cooldown. */
 export async function lastDeepScanAt(database: Db, repoId: string): Promise<Date | undefined> {
   const repo = await database.query.repos.findFirst({ where: eq(repos.id, repoId), columns: { lastDeepScanAt: true } });

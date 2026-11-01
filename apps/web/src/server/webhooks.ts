@@ -157,13 +157,18 @@ async function onIssueComment(deps: WebhookDeps, payload: IssueCommentEvent): Pr
   return { status: "handled", scans: scanId ? [scanId] : [] };
 }
 
-/** Creates a scan and starts its workflow. A PR head already under review is not started twice. */
+/**
+ * Creates a scan and starts its workflow. A PR head already under review is
+ * not started twice, but one whose workflow never started (a failed start
+ * before a redelivery) is started now.
+ */
 async function newScan(
   deps: WebhookDeps,
   input: { repoId: string; orgId: string; kind: ScanKind; headSha: string; baseSha?: string; prNumber?: number; trigger?: "webhook" | "manual" },
 ): Promise<string> {
   const { scan, created } = await createScan(deps.db, { trigger: "webhook", ...input });
-  if (!created) return "";
+  const orphaned = !created && scan.status === "queued" && !scan.workflowRunId;
+  if (!created && !orphaned) return "";
   await deps.startScan(scan.id);
   return scan.id;
 }

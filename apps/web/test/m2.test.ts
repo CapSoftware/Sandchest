@@ -260,6 +260,16 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(await openFindings(database, scan!.repoId)).toHaveLength(1);
   }, 60_000);
 
+  test("a review whose workflow failed to start is started on redelivery", async () => {
+    const event = prEvent(repos[0]!, "feedface");
+    event.pull_request.number = 9;
+    const failing = { ...deps(), startScan: async () => Promise.reject(new Error("workflow service unavailable")) };
+    await expect(handleWebhook(failing, "pull_request", "d-orphan", event)).rejects.toThrow("unavailable");
+    const retried = await handleWebhook(deps(), "pull_request", "d-orphan", event);
+    expect(retried.status).toBe("handled");
+    expect(retried.scans).toHaveLength(1);
+  });
+
   test("a redelivered webhook is ignored", async () => {
     expect((await handleWebhook(deps(), "pull_request", "d-pr", prEvent(repos[0]!, head))).status).toBe("duplicate");
   });
