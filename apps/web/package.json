@@ -8,12 +8,20 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "chest:fallback": "bun scripts/render-chest-fallback.ts"
+    "chest:fallback": "bun scripts/render-chest-fallback.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "next": "^16.4.3",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "@sandchest/billing": "workspace:*",
+    "@sandchest/db": "workspace:*",
+    "@sandchest/engine": "workspace:*",
+    "@sandchest/github": "workspace:*",
+    "@sandchest/workspace": "workspace:*",
+    "workflow": "5.2.3",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
@@ -24,6 +32,11 @@
     "pngjs": "^7.0.0",
     "@types/pngjs": "^6.0.5",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/bun": "^1.4.4",
+    "postgres": "^3.4.9"
+  },
+  "optionalDependencies": {
+    "@workflow/world-postgres": "5.0.5"
   }
 }
