@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./plans": "./src/plans.ts",
-    "./costs": "./src/costs.ts"
+    "./costs": "./src/costs.ts",
+    "./webhooks": "./src/webhooks.ts"
   },
   "scripts": {
     "test": "bun test",

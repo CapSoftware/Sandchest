@@ -49,6 +49,22 @@ export function autoTopUpControl(plan: Plan, enabled: boolean, monthlyLimitUsd: 
   return { enabled: enabled && perMonth >= 1, threshold: plan.autoTopUp.below, quantity: plan.autoTopUp.packs * TOP_UP.credits, perMonth: Math.max(perMonth, 1) };
 }
 
+/**
+ * How an org's credits stand, for the emails that warn about them:
+ * - `ok`: at least the plan's low line, which is about one typical deep scan
+ *   for the plan (15, 30 or 75 credits) and the same line auto top-up buys at;
+ * - `low`: below it, but something left;
+ * - `exhausted`: nothing left, so every paid scan is refused.
+ * Ordered, so a higher level is a downward crossing.
+ */
+export const CREDIT_LEVELS = ["ok", "low", "exhausted"] as const;
+export type CreditLevel = (typeof CREDIT_LEVELS)[number];
+
+export function creditLevel(plan: Plan, remaining: number): CreditLevel {
+  if (remaining <= 0) return "exhausted";
+  return remaining < plan.autoTopUp.below ? "low" : "ok";
+}
+
 /** USD charged by one auto top-up on this plan. */
 export function autoTopUpPrice(plan: Plan): number {
   return plan.autoTopUp.packs * TOP_UP.price;
