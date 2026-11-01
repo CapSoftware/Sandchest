@@ -226,6 +226,32 @@ describe.skipIf(!available)("billing", () => {
     expect(autumn.get(acme.id).credits).toBe(25);
   });
 
+  test("the sweep restarts lost starts and fails stuck PR reviews, so no Check spins forever", async () => {
+    // A scan whose workflow start was lost 10 minutes ago, and a PR review stuck for an hour with its Check in progress.
+    checks.push({ repo: "acme/api", title: "Digging…" });
+    const stuckCheck = checks.length;
+    const [lost] = await database
+      .insert(schema.scans)
+      .values({ repoId: repoIds[0]!, orgId: acme.id, kind: "recon", trigger: "webhook", headSha: "lost", createdAt: new Date(Date.now() - 10 * 60_000) })
+      .returning();
+    const [stuck] = await database
+      .insert(schema.scans)
+      .values({ repoId: repoIds[0]!, orgId: acme.id, kind: "pr_review", trigger: "webhook", headSha: "stuck", prNumber: 77, status: "running", checkRunId: stuckCheck, workflowRunId: "run-stuck", startedAt: new Date(Date.now() - 60 * 60_000) })
+      .returning();
+    started.length = 0;
+
+    const response = await sweep(new Request("https://sandchest.test/api/cron/sweep", { headers: { authorization: "Bearer cron-secret" } }));
+    expect(await response.json()).toMatchObject({ started: 1, failed: 1, errors: 0 });
+    expect(started).toEqual([lost!.id]);
+    expect(await scanById(database, stuck!.id)).toMatchObject({ status: "failed", error: "The scan stopped responding." });
+    expect(checks[stuckCheck - 1]).toMatchObject({ conclusion: "neutral", title: "Review could not finish" });
+
+    // A second sweep finds nothing new to do.
+    await database.$client`update scans set workflow_run_id = 'run-lost' where id = ${lost!.id}`;
+    const again = await sweep(new Request("https://sandchest.test/api/cron/sweep", { headers: { authorization: "Bearer cron-secret" } }));
+    expect(await again.json()).toMatchObject({ started: 0, failed: 0 });
+  });
+
   test("auto top-up is sized for the plan, and follows a plan change", async () => {
     await database.$client`update orgs set settings = ${JSON.stringify({ checkThreshold: "high", autoTopUp: { enabled: true, monthlyLimitUsd: 40 } })}::jsonb where id = ${acme.id}`;
     await applyAutoTopUp(acme.id, "lockbox", { enabled: true, monthlyLimitUsd: 40 });
