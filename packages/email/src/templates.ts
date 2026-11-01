@@ -148,16 +148,14 @@ export function creditsLowEmail(input: CreditsInput): RenderedEmail {
   });
 }
 
-/** Nothing left: every paid scan is refused until credits come back. */
-export function creditsExhaustedEmail(input: Omit<CreditsInput, "credits"> & { autoTopUp: boolean }): RenderedEmail {
+/** Nothing left: every paid scan is refused until credits come back. Sent only while auto top-up is off. */
+export function creditsExhaustedEmail(input: Omit<CreditsInput, "credits">): RenderedEmail {
   return render({
     subject: `Out of credits on ${input.org}`,
     title: "The chest is empty.",
     paragraphs: [
       `${input.org} has used every credit on ${input.plan}. Until it has more, pull requests get a neutral Check instead of a review, and deep scans won’t start.`,
-      input.autoTopUp
-        ? "Auto top-up is on but couldn’t refill it. Check its monthly limit and the card in billing, or top up now."
-        : `Top up to keep digging${input.resetsOn ? `, or wait for the plan’s monthly credits on ${input.resetsOn}` : ""}.`,
+      `Top up to keep digging, or turn on auto top-up${input.resetsOn ? `. The plan’s monthly credits come back on ${input.resetsOn}` : ""}.`,
     ],
     button: { url: input.billingUrl, label: "Top up" },
     footer: adminFooter(input.org, false),

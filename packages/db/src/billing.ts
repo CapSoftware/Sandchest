@@ -2,7 +2,7 @@
  * Billing's database side: a copy of each org's Autumn state for display,
  * the credits each scan holds, and starting recon once an org has a plan.
  */
-import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users } from "./schema";
 
@@ -96,39 +96,41 @@ export async function queuePendingRecons(database: Db, orgId: string): Promise<s
 // ---- Billing emails ----------------------------------------------------------
 
 /**
- * Moves the org's credit level (0 ok, 1 low, 2 exhausted) to what was just
- * observed. True only for the one caller that raised it: that caller sends the
- * email. A row lock serialises concurrent callers, and the second re-reads the
- * level the first wrote, so a crossing is announced once.
- *
- * A lower level is stored without an email, re-arming the higher ones, but
- * only from a balance read that started (`lowerAsOf`) no earlier than the
- * level last rose: a slower, older answer from Autumn must not re-arm a
- * crossing just announced, or the next scan would announce it again.
- * Without `raise` or `lowerAsOf` the call changes nothing.
+ * When a balance was true: Autumn answered sometime between the request
+ * leaving (`from`) and the answer arriving (`to`).
  */
-export async function recordCreditLevel(database: Db, orgId: string, level: number, options: { raise: boolean; lowerAsOf?: Date }): Promise<boolean> {
-  if (level > 0 && options.raise) {
-    const raised = await database
-      .update(orgBilling)
-      .set({ creditLevel: level, creditLevelAt: new Date() })
-      .where(and(eq(orgBilling.orgId, orgId), lt(orgBilling.creditLevel, level)))
-      .returning({ orgId: orgBilling.orgId });
-    if (raised.length === 1) return true;
-  }
-  if (options.lowerAsOf) {
-    await database
-      .update(orgBilling)
-      .set({ creditLevel: level })
-      .where(
-        and(
-          eq(orgBilling.orgId, orgId),
-          gt(orgBilling.creditLevel, level),
-          sql`(${orgBilling.creditLevelAt} is null or ${orgBilling.creditLevelAt} <= ${options.lowerAsOf.toISOString()}::timestamptz)`,
-        ),
-      );
-  }
-  return false;
+export interface BalanceSeen {
+  from: Date;
+  to: Date;
+}
+
+/**
+ * Moves the org's credit level (0 ok, 1 low, 2 exhausted) to what a balance
+ * just observed says. True only for the one caller that raised it: that
+ * caller sends the email. A lower level is stored without an email,
+ * re-arming the higher ones; with `raise` false the level may only fall.
+ *
+ * Answers from Autumn can arrive out of order, so an observation counts only
+ * if it is certainly newer than the last one that counted: it must have been
+ * asked (`from`) no earlier than that one was answered (`credit_level_at`).
+ * Every observation that counts moves `credit_level_at` on, even when the
+ * level stays the same. A stale answer changes nothing in either direction.
+ * Under the row lock, concurrent callers take turns, so a crossing is
+ * announced once.
+ */
+export async function recordCreditLevel(database: Db, orgId: string, level: number, seen: BalanceSeen, options: { raise: boolean }): Promise<boolean> {
+  return database.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ level: orgBilling.creditLevel, at: orgBilling.creditLevelAt })
+      .from(orgBilling)
+      .where(eq(orgBilling.orgId, orgId))
+      .for("update");
+    if (!row || (row.at && row.at > seen.from)) return false;
+    const raised = level > row.level && options.raise;
+    const next = level < row.level || raised ? level : row.level;
+    await tx.update(orgBilling).set({ creditLevel: next, creditLevelAt: seen.to }).where(eq(orgBilling.orgId, orgId));
+    return raised;
+  });
 }
 
 /** Reserves an org-wide email by a stable key. Exactly one caller gets true. */
@@ -138,16 +140,17 @@ export async function claimOrgNotice(database: Db, orgId: string, key: string): 
 }
 
 /**
- * Who hears about an org's billing: its admins (the people who can change it),
- * as GitHub reported them within 30 days, with a real address. No-reply
- * placeholders are skipped.
+ * Who hears about an org's billing: its admins (the people who can change it)
+ * with a real address, however long ago GitHub last confirmed them. An admin
+ * who set billing up and never came back is exactly who these emails are for.
+ * No-reply placeholders are skipped.
  */
 export async function billingRecipients(database: Db, orgId: string): Promise<string[]> {
   const rows = await database
     .selectDistinct({ email: users.email })
     .from(orgAdmins)
     .innerJoin(users, eq(users.id, orgAdmins.userId))
-    .where(and(eq(orgAdmins.orgId, orgId), sql`${orgAdmins.checkedAt} > now() - interval '30 days'`, sql`${users.email} not like '%@users.noreply.github.com'`));
+    .where(and(eq(orgAdmins.orgId, orgId), sql`${users.email} not like '%@users.noreply.github.com'`));
   return rows.map((row) => row.email);
 }
 

@@ -29,8 +29,8 @@ export function OrgSettingsForm({ orgId, threshold, email, admin }: { orgId: str
       <fieldset disabled={!admin}>
         <legend className="field-legend">Email</legend>
         <p className="field-help">
-          Findings go to everyone who has signed in and can push to the repository; paused scans go to admins. Billing emails, such as low
-          credits or a failed top-up, always go to admins.
+          Findings go to people who can push to the repository and have signed in within 30 days. Paused scans go to admins who have
+          signed in, and so do billing emails, such as low credits or a failed top-up, which can’t be turned off.
         </p>
         <label className="toggle">
           <input type="checkbox" name="emailNotifications" defaultChecked={email} />

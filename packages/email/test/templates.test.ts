@@ -7,8 +7,8 @@ const HOSTILE = `<img src=x onerror="alert(1)">&'`;
 
 const samples: Record<string, RenderedEmail> = {
   "credits-low": creditsLowEmail({ org: "acme", plan: "Lockbox", credits: 12, resetsOn: "1 Dec 2026", billingUrl: BILLING }),
-  "credits-exhausted": creditsExhaustedEmail({ org: "acme", plan: "Lockbox", resetsOn: "1 Dec 2026", billingUrl: BILLING, autoTopUp: false }),
-  "credits-exhausted-auto": creditsExhaustedEmail({ org: "acme", plan: "Chest", resetsOn: null, billingUrl: BILLING, autoTopUp: true }),
+  "credits-exhausted": creditsExhaustedEmail({ org: "acme", plan: "Lockbox", resetsOn: "1 Dec 2026", billingUrl: BILLING }),
+  "credits-exhausted-no-reset": creditsExhaustedEmail({ org: "acme", plan: "Chest", resetsOn: null, billingUrl: BILLING }),
   "auto-top-up-succeeded": autoTopUpSucceededEmail({ org: "acme", added: 25, charged: "$10.00", credits: 34, billingUrl: BILLING }),
   "auto-top-up-failed-card": autoTopUpFailedEmail({ org: "acme", reason: "card", credits: 8, billingUrl: BILLING }),
   "auto-top-up-failed-limit": autoTopUpFailedEmail({ org: "acme", reason: "limit", credits: null, billingUrl: BILLING }),
@@ -45,7 +45,7 @@ test("names and links are escaped everywhere they appear in the HTML", () => {
   const url = `https://sandchest.test/settings?x="><script>alert(1)</script>`;
   const rendered = [
     creditsLowEmail({ org: HOSTILE, plan: HOSTILE, credits: 3, resetsOn: HOSTILE, billingUrl: url }),
-    creditsExhaustedEmail({ org: HOSTILE, plan: HOSTILE, resetsOn: HOSTILE, billingUrl: url, autoTopUp: false }),
+    creditsExhaustedEmail({ org: HOSTILE, plan: HOSTILE, resetsOn: HOSTILE, billingUrl: url }),
     autoTopUpSucceededEmail({ org: HOSTILE, added: 25, charged: HOSTILE, credits: 30, billingUrl: url }),
     autoTopUpFailedEmail({ org: HOSTILE, reason: "card", credits: 2, billingUrl: url }),
     scanPausedEmail({ org: HOSTILE, repo: HOSTILE, kind: "deep", prNumber: null, scanUrl: url }),

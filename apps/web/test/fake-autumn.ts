@@ -22,6 +22,8 @@ export class FakeAutumn implements Autumn {
   readonly calls: string[] = [];
   /** Make the next call to a method fail, like an outage. */
   failNext = new Set<string>();
+  /** How long reads and reservations take, so concurrent calls overlap the way real ones do. */
+  latencyMs = 0;
 
   /** Every new customer starts with this plan (null: none), as if it had bought it. */
   constructor(private readonly defaultPlan: PlanId | null = null) {}
@@ -63,11 +65,13 @@ export class FakeAutumn implements Autumn {
 
   async customer(customerId: string): Promise<BillingState> {
     this.enter("customer");
+    if (this.latencyMs) await Bun.sleep(this.latencyMs);
     return this.state(this.get(customerId));
   }
 
   async reserve({ customerId, credits, lockId }: { customerId: string; credits: number; lockId: string; expiresAt: Date }) {
     this.enter("reserve");
+    if (this.latencyMs) await Bun.sleep(this.latencyMs);
     const customer = this.get(customerId);
     if (customer.locks.has(lockId)) return { allowed: true, remaining: null };
     if (!customer.planId && customer.credits === 0) return { allowed: false, remaining: null };

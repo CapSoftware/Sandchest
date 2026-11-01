@@ -2,10 +2,11 @@
  * Autumn's webhooks (delivered by Svix): the route verifies the signature,
  * then this reads the event. Svix retries a delivery until it gets a 2xx, and
  * may deliver one twice, so every effect is idempotent: emails are reserved
- * by a stable key (the top-up's invoice), and a billing change just re-reads
- * the org.
+ * by a stable key (the top-up's invoice), and state is only ever re-read from
+ * Autumn, never taken from a payload that may be long out of date.
  *
- * - `billing.auto_topup_succeeded`: email the admins once per invoice.
+ * - `billing.auto_topup_succeeded`: email the admins once per invoice, and
+ *   (first delivery only) re-read the org, which re-arms the credit emails.
  * - `billing.auto_topup_failed`: email them when there is something to do
  *   (the card, or the monthly limit), at most once a day per reason.
  * - `billing.updated`: re-read the org, so a plan bought in Checkout starts
@@ -15,13 +16,13 @@
  * ignored, so Autumn does not retry them.
  */
 import { CREDITS } from "@sandchest/billing/plans";
-import { orgBillingRow, staleOrgBilling } from "@sandchest/db";
+import { staleOrgBilling } from "@sandchest/db";
 import { z } from "zod";
 import { billingEnabled, syncBilling } from "./billing";
 import { db } from "./db";
-import { noticeAutoTopUp, noticeAutoTopUpFailed, noticeCredits, type NoticeOrg } from "./notices";
+import { noticeAutoTopUp, noticeAutoTopUpFailed, type NoticeOrg, type NoticeOutcome } from "./notices";
 
-/** `occurred_at`: when it happened in Autumn, in ms. Svix may deliver it much later. */
+/** `occurred_at`, when present: when it happened in Autumn, in ms. Only used to date a failure. */
 const Envelope = z.object({ type: z.string(), occurred_at: z.number().int().positive().optional(), data: z.record(z.string(), z.unknown()) });
 const Customer = z.object({ customer_id: z.uuid() });
 
@@ -55,7 +56,6 @@ export async function handleAutumnEvent(payload: unknown): Promise<AutumnWebhook
   const envelope = Envelope.safeParse(payload);
   if (!envelope.success) return { ignored: "malformed" };
   const { type, data } = envelope.data;
-  const occurredAt = new Date(envelope.data.occurred_at ?? Date.now());
   if (type !== "billing.auto_topup_succeeded" && type !== "billing.auto_topup_failed" && type !== "billing.updated") return { ignored: type };
   const customer = Customer.safeParse(data);
   if (!customer.success) return { ignored: "unknown customer" };
@@ -72,25 +72,29 @@ export async function handleAutumnEvent(payload: unknown): Promise<AutumnWebhook
     const event = TopUpSucceeded.safeParse(data);
     if (!event.success || event.data.feature_id !== CREDITS) return { ignored: "not credits" };
     const { quantity_granted: added, balance_after: credits, invoice } = event.data;
-    const sent = await noticeAutoTopUp(org, { invoiceId: invoice.stripe_id, added, credits, charged: money(invoice.total, invoice.currency) });
-    // Credits are back: re-arm the low and exhausted emails, and show the new balance on the next page view.
-    await rearm(org, credits, occurredAt);
-    return { handled: sent ? type : `${type} (already sent)` };
+    const outcome = await noticeAutoTopUp(org, { invoiceId: invoice.stripe_id, added, credits, charged: money(invoice.total, invoice.currency) });
+    // Credits are back. Read the org from Autumn again, which re-arms the low and exhausted emails from the
+    // balance as it is now. A repeat delivery of the same invoice changes nothing.
+    if (outcome !== "duplicate") await refresh(org);
+    return { handled: label(type, outcome) };
   }
 
   const event = TopUpFailed.safeParse(data);
   if (!event.success || event.data.feature_id !== CREDITS) return { ignored: "not credits" };
   const reason = FAILURE[event.data.reason];
   if (!reason) return { ignored: `auto top-up failed: ${event.data.reason}` };
-  const sent = await noticeAutoTopUpFailed(org, { reason, credits: event.data.balance ?? null }, occurredAt);
-  return { handled: sent ? type : `${type} (already sent)` };
+  const at = new Date(envelope.data.occurred_at ?? Date.now());
+  return { handled: label(type, await noticeAutoTopUpFailed(org, { reason, credits: event.data.balance ?? null }, at)) };
 }
 
-/** `asOf`: when Autumn granted the credits. A delivery retried hours later is older than what has happened since. */
-async function rearm(org: NoticeOrg, credits: number, asOf: Date): Promise<void> {
-  const stored = await orgBillingRow(db(), org.id);
-  if (stored) await noticeCredits(org, { ...stored, credits }, { source: "read", asOf });
-  await staleOrgBilling(db(), org.id);
+function label(type: string, outcome: NoticeOutcome): string {
+  return outcome === "sent" ? type : `${type} (${outcome === "duplicate" ? "already sent" : "no email"})`;
+}
+
+/** Reads the org from Autumn (which stores it and checks its credits), or with billing off lets the next page view do it. */
+async function refresh(org: NoticeOrg): Promise<void> {
+  if (billingEnabled()) await syncBilling(org);
+  else await staleOrgBilling(db(), org.id);
 }
 
 /** Stripe amounts are in the currency's smallest unit; a few currencies have none smaller. */

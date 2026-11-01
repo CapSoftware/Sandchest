@@ -85,15 +85,16 @@ export function syncBilling(org: BillingOrg): Promise<OrgBillingRow> {
 
 async function readAndStore(org: BillingOrg): Promise<OrgBillingRow> {
   const client = autumn()!;
-  const asOf = new Date();
+  const from = new Date();
   let state = await client.customer(org.id, org.githubLogin);
+  const seen = { from, to: new Date() };
   const previous = await orgBillingRow(db(), org.id);
   if (previous && previous.planId !== state.planId) state = await matchAutoTopUp(org.id, state);
   const at = new Date();
   const row = toRow(state);
   const { firstActivation, previousPlanId } = await saveOrgBilling(db(), org.id, row, at);
   if (state.planId && (firstActivation || !previousPlanId)) await startPendingRecon(org.id);
-  await noticeCredits(org, row, { source: "read", asOf }).catch(logFailure("credits email"));
+  await noticeCredits(org, row, seen).catch(logFailure("credits email"));
   return { orgId: org.id, ...row, activatedAt: previous?.activatedAt ?? (state.planId ? at : null), checkedAt: at, creditLevel: previous?.creditLevel ?? 0, creditLevelAt: previous?.creditLevelAt ?? null };
 }
 
@@ -181,7 +182,9 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
   if (credits === 0) {
     if (!(await hasPlan(org))) return { ok: false, reason: "no_plan", credits };
   } else {
+    const from = new Date();
     const result = await client.reserve({ customerId: org.id, credits, lockId: scanId, expiresAt: new Date(Date.now() + RESERVATION_MS) });
+    const seen = { from, to: new Date() };
     if (!result.allowed) {
       // Refused: read the org again, both to say why and so the dashboard shows the balance that refused it.
       // If Autumn can't be read just now, the stored copy says whether there is a plan: an outage is not "no plan".
@@ -190,7 +193,7 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
     }
     if (result.remaining !== null) {
       const stored = await setOrgCredits(db(), org.id, result.remaining);
-      if (stored) await noticeCredits(org, stored, { source: "reserve" }).catch(logFailure("credits email"));
+      if (stored) await noticeCredits(org, stored, seen).catch(logFailure("credits email"));
     }
   }
   if (record) await markScanReserved(db(), scanId, credits);

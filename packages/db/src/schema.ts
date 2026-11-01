@@ -369,7 +369,7 @@ export const orgBilling = pgTable("org_billing", {
    * credits come back, which re-arms the emails.
    */
   creditLevel: smallint("credit_level").notNull().default(0),
-  /** When the level last rose. Only a balance read from Autumn after this may lower it. */
+  /** When the last balance that counted toward the level was answered. Older answers are ignored. */
   creditLevelAt: timestamp("credit_level_at", { withTimezone: true }),
 });
 

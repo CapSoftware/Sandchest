@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
 import { signWebhook } from "@sandchest/billing";
-import { billingRecipients, createDb, orgBillingRow, schema, upsertInstallation, type Db } from "@sandchest/db";
+import { billingRecipients, createDb, orgBillingRow, saveOrgBilling, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Email, Mailer } from "@sandchest/email";
 import { POST as autumnWebhook } from "@/app/api/autumn/webhooks/route";
@@ -15,7 +15,7 @@ import { money } from "@/server/autumn-webhooks";
 import { applyAutoTopUp, reserveScan, setAutumn, syncBilling } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { setMailer } from "@/server/mailer";
-import { noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
+import { noticeAutoTopUp, noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
 import { FakeAutumn } from "./fake-autumn";
@@ -104,6 +104,13 @@ afterAll(async () => {
 const reserve = (credits: number) => reserveScan(`00000000-0000-4000-8000-${String(++lock).padStart(12, "0")}`, acme, credits, false);
 const level = async () => (await orgBillingRow(database, acme.id))!.creditLevel;
 const subjects = () => sent.map((email) => email.subject);
+/** Every admin with a real address: Alice, and Carol whom GitHub last confirmed 40 days ago. Not Bob (no-reply) or Dave (not an admin). */
+const ADMINS = ["alice@example.com", "carol@example.com"];
+/** A balance seen just now. */
+const now = () => {
+  const at = new Date();
+  return { from: at, to: at };
+};
 /** Drizzle's client takes JSON as a string cast to jsonb (FINDINGS: not `sql.json`). */
 async function setSettings(settings: Record<string, unknown>): Promise<void> {
   await database.$client`update orgs set settings = ${JSON.stringify(settings)}::jsonb where id = ${acme.id}`;
@@ -141,8 +148,9 @@ const topUpFailed = (reason: string, balance: number | null = 8) => ({
 });
 
 describe.skipIf(!available)("billing emails", () => {
-  test("go to the org's admins with a real address that GitHub confirmed within 30 days", async () => {
-    expect(await billingRecipients(database, acme.id)).toEqual(["alice@example.com"]);
+  test("go to every admin of the org with a real address, however long ago GitHub confirmed them", async () => {
+    // Carol set billing up and hasn't signed in for 40 days: she is exactly who these are for.
+    expect((await billingRecipients(database, acme.id)).sort()).toEqual(ADMINS);
     expect(sent).toHaveLength(0);
     expect(await level()).toBe(0);
   });
@@ -153,7 +161,7 @@ describe.skipIf(!available)("billing emails", () => {
     expect(sent).toHaveLength(0);
     await reserve(1); // 14
     expect(subjects()).toEqual(["14 credits left on acme"]);
-    expect(sent[0]!.to).toEqual(["alice@example.com"]);
+    expect([...sent[0]!.to].sort()).toEqual(ADMINS);
     expect(sent[0]!.html).toContain("https://sandchest.test/settings#billing");
     expect(sent[0]!.text).toContain("come back on 1 Jan 2030");
     await reserve(1);
@@ -200,78 +208,134 @@ describe.skipIf(!available)("billing emails", () => {
     expect(sent).toHaveLength(0);
   });
 
-  test("concurrent observers announce a crossing once, and late answers don't re-arm it", async () => {
-    const snapshot = { planId: "lockbox", credits: 9, creditsResetAt: null, autoTopUp: null };
-    const asOf = new Date(Date.now() - 1_000);
-    await Promise.all(Array.from({ length: 12 }, () => noticeCredits(acme, snapshot, { source: "read", asOf: new Date() })));
-    expect(subjects()).toEqual(["9 credits left on acme"]);
-    drain();
-
-    // A read that set off before the crossing, answering after it, and a reservation answered out of order: both still say 40.
-    await noticeCredits(acme, { ...snapshot, credits: 40 }, { source: "read", asOf });
-    await noticeCredits(acme, { ...snapshot, credits: 40 }, { source: "reserve" });
-    expect(await level()).toBe(1);
-    await noticeCredits(acme, { ...snapshot, credits: 8 }, { source: "reserve" });
+  test("an answer asked for before a newer one counted changes nothing, in either direction", async () => {
+    const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
+    const earlier = { from: new Date(Date.now() - 2_000), to: new Date(Date.now() - 1_000) };
+    // A healthy read leaves the level at ok, but still counts as the newest.
+    await noticeCredits(acme, { ...lockbox, credits: 60 }, now());
+    // A read of 0 that left before it and arrived late: no false "out of credits".
+    await noticeCredits(acme, { ...lockbox, credits: 0 }, earlier);
     expect(sent).toHaveLength(0);
-    // A read that started after it does re-arm.
-    await noticeCredits(acme, { ...snapshot, credits: 40 }, { source: "read", asOf: new Date() });
     expect(await level()).toBe(0);
 
-    // And concurrent scans reserving across the line: one email, whichever lands first.
+    // The other way: a crossing is announced, then a late healthy answer must not re-arm it.
+    await noticeCredits(acme, { ...lockbox, credits: 9 }, now());
+    expect(subjects()).toEqual(["9 credits left on acme"]);
+    drain();
+    await noticeCredits(acme, { ...lockbox, credits: 40 }, earlier);
+    expect(await level()).toBe(1);
+    await noticeCredits(acme, { ...lockbox, credits: 8 }, now());
+    expect(sent).toHaveLength(0);
+    // A newer healthy answer does re-arm.
+    await noticeCredits(acme, { ...lockbox, credits: 40 }, now());
+    expect(await level()).toBe(0);
+  });
+
+  test("concurrent observers announce a crossing once", async () => {
+    const snapshot = { planId: "lockbox", credits: 9, creditsResetAt: null, autoTopUp: null };
+    const seen = now();
+    await Promise.all(Array.from({ length: 12 }, () => noticeCredits(acme, snapshot, seen)));
+    expect(subjects()).toEqual(["9 credits left on acme"]);
+    drain();
+    await noticeCredits(acme, { ...snapshot, credits: 60 }, now());
+
+    // Concurrent scans reserving across the line: at most one email, even when answers overlap.
     autumn.get(acme.id).credits = 60;
     await syncBilling(acme);
-    await Promise.all(Array.from({ length: 10 }, () => reserve(5)));
+    autumn.latencyMs = 20;
+    try {
+      await Promise.all(Array.from({ length: 10 }, () => reserve(5)));
+    } finally {
+      autumn.latencyMs = 0;
+    }
     expect(autumn.get(acme.id).credits).toBe(10);
+    expect(sent.length).toBeLessThanOrEqual(1);
+    // Whatever overlapped, the scan's charge reads Autumn afterwards, and that announces it if nothing did.
+    await syncBilling(acme);
     expect(subjects()).toEqual(["10 credits left on acme"]);
     drain();
     autumn.get(acme.id).credits = 60;
     await syncBilling(acme);
   });
 
-  test("with auto top-up on, low is its job, and a balance read right after a reservation never announces", async () => {
+  test("with auto top-up on, a low or empty balance is left to it, whatever reads it", async () => {
+    // Exhausted first, with auto top-up off.
+    await noticeCredits(acme, { planId: "lockbox", credits: 0, creditsResetAt: null, autoTopUp: null }, now());
+    expect(subjects()).toEqual(["Out of credits on acme"]);
+    drain();
+    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, now());
+
     await applyAutoTopUp(acme.id, "lockbox", { enabled: true, monthlyLimitUsd: 40 });
     await syncBilling(acme);
     const on = { planId: "lockbox", creditsResetAt: null, autoTopUp: { enabled: true, threshold: 15, quantity: 25, perMonth: 4 } };
-    await noticeCredits(acme, { ...on, credits: 10 }, { source: "read", asOf: new Date() });
-    await noticeCredits(acme, { ...on, credits: 0 }, { source: "reserve" });
+    // A reservation, a refusal's read, a page refresh: all in the seconds before the top-up lands.
+    await noticeCredits(acme, { ...on, credits: 10 }, now());
+    await noticeCredits(acme, { ...on, credits: 0 }, now());
+    autumn.get(acme.id).credits = 0;
+    await syncBilling(acme);
     expect(sent).toHaveLength(0);
     expect(await level()).toBe(0);
 
-    // Read from Autumn and still empty: auto top-up didn't refill it.
-    await noticeCredits(acme, { ...on, credits: 0 }, { source: "read", asOf: new Date() });
-    expect(subjects()).toEqual(["Out of credits on acme"]);
-    expect(sent[0]!.text).toContain("Auto top-up is on but couldn’t refill it");
-    drain();
-    // A suppressed level can still fall, re-arming exhausted.
-    await noticeCredits(acme, { ...on, credits: 5 }, { source: "read", asOf: new Date() });
+    // The level can still fall, re-arming the emails for when auto top-up is turned off.
+    await database.$client`update org_billing set credit_level = 2 where org_id = ${acme.id}`;
+    await noticeCredits(acme, { ...on, credits: 5 }, now());
     expect(await level()).toBe(1);
     expect(sent).toHaveLength(0);
 
     await applyAutoTopUp(acme.id, "lockbox", { enabled: false, monthlyLimitUsd: 40 });
     autumn.get(acme.id).credits = 60;
     await syncBilling(acme);
+    expect(await level()).toBe(0);
   });
 
   test("the email toggle doesn't silence billing emails, and without a mailer the level still moves", async () => {
     await setSettings({ checkThreshold: "high", emailNotifications: false });
-    await noticeCredits(acme, { planId: "lockbox", credits: 3, creditsResetAt: null, autoTopUp: null }, { source: "read", asOf: new Date() });
+    await noticeCredits(acme, { planId: "lockbox", credits: 3, creditsResetAt: null, autoTopUp: null }, now());
     expect(subjects()).toEqual(["3 credits left on acme"]);
     drain();
 
     setMailer({ enabled: false, send: async () => void sent.push({ to: [], subject: "should not send", html: "", text: "" }) });
     try {
-      await noticeCredits(acme, { planId: "lockbox", credits: 0, creditsResetAt: null, autoTopUp: null }, { source: "read", asOf: new Date() });
+      await noticeCredits(acme, { planId: "lockbox", credits: 0, creditsResetAt: null, autoTopUp: null }, now());
       expect(await level()).toBe(2);
       expect(sent).toHaveLength(0);
     } finally {
       setMailer(recordingMailer);
     }
-    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, { source: "read", asOf: new Date() });
+    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, now());
     expect(await level()).toBe(0);
   });
 
+  test("with no admin to tell, nothing is reserved, so the email goes out once there is one", async () => {
+    const { org } = await upsertInstallation(database, 603, { githubAccountId: 6300, githubLogin: "lonely", type: "Organization" }, []);
+    const lonely = { id: org.id, githubLogin: "lonely" };
+    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 9, creditsResetAt: null, autoTopUp: null });
+    const warned: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+    try {
+      await noticeCredits(lonely, { planId: "lockbox", credits: 9, creditsResetAt: null, autoTopUp: null }, now());
+      expect(await noticeAutoTopUp(lonely, { invoiceId: "in_lonely", added: 25, charged: "$10.00", credits: 34 })).toBe("skipped");
+    } finally {
+      console.warn = original;
+    }
+    expect(sent).toHaveLength(0);
+    expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
+    expect(warned).toEqual([`No admin of org ${org.id} has an email address: low credits email not sent`, `No admin of org ${org.id} has an email address: auto top-up email not sent`]);
+
+    const [admin] = await database.insert(schema.users).values({ name: "erin", email: "erin@example.com", login: "erin" }).returning();
+    await database.insert(schema.orgAdmins).values({ userId: admin!.id, orgId: org.id });
+    await noticeCredits(lonely, { planId: "lockbox", credits: 8, creditsResetAt: null, autoTopUp: null }, now());
+    expect(await noticeAutoTopUp(lonely, { invoiceId: "in_lonely", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
+    expect(sent.map((email) => [email.to, email.subject])).toEqual([
+      [["erin@example.com"], "8 credits left on lonely"],
+      [["erin@example.com"], "Auto top-up: 25 credits added to lonely"],
+    ]);
+    drain();
+  });
+
   test("an org without a plan gets no credit emails", async () => {
-    await noticeCredits(acme, { planId: null, credits: 0, creditsResetAt: null, autoTopUp: null }, { source: "read", asOf: new Date() });
+    await noticeCredits(acme, { planId: null, credits: 0, creditsResetAt: null, autoTopUp: null }, now());
     expect(sent).toHaveLength(0);
     expect(await level()).toBe(0);
   });
@@ -303,25 +367,42 @@ describe.skipIf(!available)("Autumn webhooks", () => {
     expect(sent).toHaveLength(0);
   });
 
-  test("auto top-up succeeded: one email per invoice, however often it is delivered", async () => {
-    await database.$client`update org_billing set credit_level = 1 where org_id = ${acme.id}`;
+  test("auto top-up succeeded: one email per invoice, and only a first delivery re-reads the balance", async () => {
+    const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
+    await noticeCredits(acme, { ...lockbox, credits: 9 }, now());
+    drain();
+    // The top-up landed in Autumn.
+    autumn.get(acme.id).credits = 34;
+    const reads = autumn.calls.filter((call) => call === "customer").length;
     const response = await autumnWebhook(delivery(toppedUp("in_1", 34)));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ handled: "billing.auto_topup_succeeded" });
     expect(subjects()).toEqual(["Auto top-up: 25 credits added to acme"]);
-    expect(sent[0]!.to).toEqual(["alice@example.com"]);
+    expect([...sent[0]!.to].sort()).toEqual(ADMINS);
     expect(sent[0]!.text).toContain("bought 25 credits for $10.00");
     expect(sent[0]!.html).toContain(">34<");
-    // Credits are back: low re-armed, and the next page view reads Autumn again.
-    const row = await orgBillingRow(database, acme.id);
-    expect(row).toMatchObject({ creditLevel: 0, checkedAt: new Date(0) });
+    // Read from Autumn again: low re-armed from the balance as it is now.
+    expect(autumn.calls.filter((call) => call === "customer").length).toBe(reads + 1);
+    expect(await orgBillingRow(database, acme.id)).toMatchObject({ creditLevel: 0, credits: 34 });
     drain();
 
-    // Svix retries with a new id and timestamp; Autumn may also send the event twice.
+    // Credits run low again; then Svix redelivers the old invoice, carrying its old balance. Nothing changes.
+    autumn.get(acme.id).credits = 8;
+    await syncBilling(acme);
+    expect(subjects()).toEqual(["8 credits left on acme"]);
+    drain();
+    const before = autumn.calls.length;
     expect(await (await autumnWebhook(delivery(toppedUp("in_1", 34)))).json()).toEqual({ handled: "billing.auto_topup_succeeded (already sent)" });
+    expect(autumn.calls.length).toBe(before);
+    expect(await level()).toBe(1);
+
+    // A new invoice's payload balance is not trusted either: Autumn says 8, so it is still low.
     await Promise.all(Array.from({ length: 5 }, () => autumnWebhook(delivery(toppedUp("in_2", 59)))));
     expect(subjects()).toEqual(["Auto top-up: 25 credits added to acme"]);
+    expect(await level()).toBe(1);
     drain();
+    autumn.get(acme.id).credits = 60;
+    await syncBilling(acme);
   });
 
   test("auto top-up failed: card and limit failures email once a day each; Autumn's own errors don't", async () => {
@@ -421,7 +502,7 @@ describe.skipIf(!available)("scan paused", () => {
     const first = await scan("pr_review");
     expect(await noticeScanPaused(first, nine)).toBe(true);
     expect(subjects()).toEqual(["Scan paused: acme/api"]);
-    expect(sent[0]!.to).toEqual(["alice@example.com"]);
+    expect([...sent[0]!.to].sort()).toEqual(ADMINS);
     expect(sent[0]!.text).toContain("The review of pull request #7 in acme/api stopped");
     expect(sent[0]!.html).toContain(`https://sandchest.test/scans/${first.id}`);
     drain();
