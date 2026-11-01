@@ -1,2 +1,13 @@
 export { createMailer, type Email, type Mailer, type MailerConfig } from "./transport";
-export { criticalFindingEmail, deepScanEmail, type FindingSummary } from "./templates";
+export {
+  autoTopUpFailedEmail,
+  autoTopUpSucceededEmail,
+  creditsExhaustedEmail,
+  creditsLowEmail,
+  criticalFindingEmail,
+  deepScanEmail,
+  scanPausedEmail,
+  type CreditsInput,
+  type FindingSummary,
+  type RenderedEmail,
+} from "./templates";

@@ -28,15 +28,15 @@ function e(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
-function layout(preview: string, body: string): string {
+function layout(preview: string, body: string, footer = FOOTER): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"></head>
 <body style="margin:0;padding:0;background:${C.void}">
 <div style="display:none;max-height:0;overflow:hidden">${e(preview)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.void}" style="background:${C.void}"><tr><td align="center" style="padding:40px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;font-family:${FONT};color:${C.sand};font-size:15px;line-height:1.6">
 <tr><td style="padding-bottom:32px;color:${C.gold};font-size:18px;font-weight:700">Sandchest</td></tr>
-<tr><td>${body}</td></tr>
-<tr><td style="padding-top:24px;border-top:1px solid ${C.seam};color:${C.dust};font-size:12px">${e(FOOTER)}</td></tr>
+<tr><td style="padding-bottom:32px">${body}</td></tr>
+<tr><td style="padding-top:24px;border-top:1px solid ${C.seam};color:${C.dust};font-size:12px">${e(footer)}</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -90,4 +90,133 @@ export function deepScanEmail(input: { repo: string; scanUrl: string; findings: 
   const html = layout(lede, `${heading(title)}${paragraph(lede)}${list}${button(input.scanUrl, "Open the scan")}`);
   const text = `${lede}\n\n${count ? `${textList(input.findings)}\n\n` : ""}${input.scanUrl}\n\n${FOOTER}`;
   return { subject, html, text };
+}
+
+// ---- Billing and operational emails ------------------------------------------
+// These go to an org's admins: the people who can change its billing.
+
+/** One figure, large, with a quiet label under it. */
+function stat(value: number, label: string): string {
+  return `<p style="margin:24px 0 0;color:${C.gold};font-size:40px;font-weight:700;line-height:1">${e(value.toLocaleString("en-US"))}</p><p style="margin:6px 0 0;color:${C.dust};font-size:12px">${e(label)}</p>`;
+}
+
+const credits = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "credit" : "credits"}`;
+
+function adminFooter(org: string, canTurnOff: boolean): string {
+  return canTurnOff
+    ? `You get this because you’re an admin of ${org} on Sandchest. An admin can turn these emails off in Sandchest’s settings.`
+    : `You get this because you’re an admin of ${org} on Sandchest. Billing emails always go to admins: they’re how you hear before reviews stop.`;
+}
+
+function render(input: {
+  subject: string;
+  title: string;
+  paragraphs: string[];
+  stat?: { value: number; label: string };
+  button: { url: string; label: string };
+  footer: string;
+}): RenderedEmail {
+  const figure = input.stat ? stat(input.stat.value, input.stat.label) : "";
+  const body = `${heading(input.title)}${input.paragraphs.map(paragraph).join("")}${figure}<div style="height:28px"></div>${button(input.button.url, input.button.label)}`;
+  const text = `${input.paragraphs.join("\n\n")}\n\n${input.button.label}: ${input.button.url}\n\n${input.footer}`;
+  return { subject: input.subject, html: layout(input.paragraphs[0]!, body, input.footer), text };
+}
+
+export interface CreditsInput {
+  /** The GitHub account the plan belongs to. */
+  org: string;
+  /** The plan's name, e.g. "Lockbox". */
+  plan: string;
+  credits: number;
+  /** When the plan's monthly credits come back, already formatted, if known. */
+  resetsOn: string | null;
+  billingUrl: string;
+}
+
+/** Credits fell below the plan's low line. Sent only while auto top-up is off. */
+export function creditsLowEmail(input: CreditsInput): RenderedEmail {
+  return render({
+    subject: `${credits(input.credits)} left on ${input.org}`,
+    title: "The chest is running low.",
+    paragraphs: [
+      `${input.org} is down to ${credits(input.credits)} on ${input.plan}. When they run out, pull requests get a neutral Check instead of a review, and deep scans won’t start.`,
+      `Top up now, or turn on auto top-up so reviews never stop.${input.resetsOn ? ` The plan’s monthly credits come back on ${input.resetsOn}.` : ""}`,
+    ],
+    stat: { value: input.credits, label: `${input.credits === 1 ? "credit" : "credits"} left` },
+    button: { url: input.billingUrl, label: "Top up" },
+    footer: adminFooter(input.org, false),
+  });
+}
+
+/** Nothing left: every paid scan is refused until credits come back. */
+export function creditsExhaustedEmail(input: Omit<CreditsInput, "credits"> & { autoTopUp: boolean }): RenderedEmail {
+  return render({
+    subject: `Out of credits on ${input.org}`,
+    title: "The chest is empty.",
+    paragraphs: [
+      `${input.org} has used every credit on ${input.plan}. Until it has more, pull requests get a neutral Check instead of a review, and deep scans won’t start.`,
+      input.autoTopUp
+        ? "Auto top-up is on but couldn’t refill it. Check its monthly limit and the card in billing, or top up now."
+        : `Top up to keep digging${input.resetsOn ? `, or wait for the plan’s monthly credits on ${input.resetsOn}` : ""}.`,
+    ],
+    button: { url: input.billingUrl, label: "Top up" },
+    footer: adminFooter(input.org, false),
+  });
+}
+
+/** Auto top-up bought credits. `charged` is already formatted, e.g. "$10.00". */
+export function autoTopUpSucceededEmail(input: { org: string; added: number; charged: string; credits: number; billingUrl: string }): RenderedEmail {
+  return render({
+    subject: `Auto top-up: ${credits(input.added)} added to ${input.org}`,
+    title: "Topped up.",
+    paragraphs: [
+      `${input.org} ran low, so auto top-up bought ${credits(input.added)} for ${input.charged}. Reviews keep running.`,
+      "Change its monthly limit or turn it off in billing.",
+    ],
+    stat: { value: input.credits, label: `${input.credits === 1 ? "credit" : "credits"} now` },
+    button: { url: input.billingUrl, label: "Manage billing" },
+    footer: adminFooter(input.org, false),
+  });
+}
+
+/** Auto top-up could not buy credits: the card failed, or the monthly limit is used up. `credits` is the balance then, if known. */
+export function autoTopUpFailedEmail(input: { org: string; reason: "card" | "limit"; credits: number | null; billingUrl: string }): RenderedEmail {
+  const left = input.credits === null ? "low on credits" : `down to ${credits(input.credits)}`;
+  const card = input.reason === "card";
+  return render({
+    subject: card ? `Auto top-up failed for ${input.org}` : `Auto top-up hit its monthly limit on ${input.org}`,
+    title: card ? "The top-up didn’t go through." : "Auto top-up hit its limit.",
+    paragraphs: card
+      ? [`${input.org} is ${left}, and auto top-up couldn’t charge the card on file.`, "Update the card so reviews don’t stop when the credits run out."]
+      : [`${input.org} is ${left}, and auto top-up has already bought as many top-ups this month as its limit allows.`, "Top up now or raise the limit, or pull request reviews stop when the credits run out."],
+    button: { url: input.billingUrl, label: card ? "Manage billing" : "Top up" },
+    footer: adminFooter(input.org, false),
+  });
+}
+
+/** A scan stopped because the model provider refused for quota. Nothing was charged for it. */
+export function scanPausedEmail(input: { org: string; repo: string; kind: "recon" | "pr_review" | "deep"; prNumber: number | null; scanUrl: string }): RenderedEmail {
+  const what =
+    input.kind === "deep"
+      ? `The deep scan of ${input.repo}`
+      : input.kind === "pr_review"
+        ? `The review of pull request #${input.prNumber ?? "?"} in ${input.repo}`
+        : `Mapping ${input.repo}`;
+  const next =
+    input.kind === "deep"
+      ? "Dig again in a little while."
+      : input.kind === "pr_review"
+        ? "Its Check says the review couldn’t finish, which doesn’t block merging. Push a new commit to review it once this clears."
+        : "It runs again with the repository’s next deep scan or pull request review.";
+  return render({
+    subject: `Scan paused: ${input.repo}`,
+    title: "Digging paused.",
+    paragraphs: [
+      `${what} stopped: the model provider hit its usage limit. Nothing was charged for it.`,
+      next,
+      "If more scans on this account stop for the same reason within the hour, they won’t each get an email.",
+    ],
+    button: { url: input.scanUrl, label: "See the scan" },
+    footer: adminFooter(input.org, true),
+  });
 }
