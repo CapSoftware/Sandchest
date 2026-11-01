@@ -26,6 +26,7 @@ import {
 } from "@/server/setup";
 import { GET as healthGet } from "@/app/api/health/route";
 import { config, resetConfig } from "@/server/config";
+import { healthy, resetHealth } from "@/server/health";
 import { configurationProblem } from "@/server/readiness";
 import { migrateAll } from "../scripts/migrate";
 
@@ -460,6 +461,7 @@ describe("configuration", () => {
     try {
       Object.assign(process.env, configured, { SANDCHEST_ADMIN_TOKEN: "too-short-admin-token" });
       resetConfig();
+      resetHealth();
       const response = await healthGet();
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({ ok: false });
@@ -468,7 +470,35 @@ describe("configuration", () => {
       for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
       Object.assign(process.env, saved);
       resetConfig();
+      resetHealth();
     }
+  });
+
+  test("before setup, the health check still fails while the database is down, and quickly", async () => {
+    const setupMode = { SANDCHEST_APP_URL: "https://sandchest.example.com", BETTER_AUTH_SECRET: "s".repeat(40) };
+    resetHealth();
+    const started = Date.now();
+    expect(await healthy({ ...setupMode, DATABASE_URL: "postgres://sandchest:x@127.0.0.1:1/sandchest" })).toBe(false);
+    expect(Date.now() - started).toBeLessThan(3_000);
+    resetHealth();
+    expect(await healthy(setupMode)).toBe(false);
+  });
+
+  test("before setup, the health check passes once the database answers, and reuses the answer briefly", async () => {
+    const live = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
+    const direct = postgres(live, { max: 1, connect_timeout: 2, onnotice: () => {} });
+    const reachable = await direct`select 1`.then(
+      () => true,
+      () => false,
+    );
+    await direct.end();
+    if (!reachable) return;
+    const setupMode = { SANDCHEST_APP_URL: "https://sandchest.example.com", DATABASE_URL: live };
+    resetHealth();
+    expect(await healthy(setupMode)).toBe(true);
+    // Within two seconds the answer is reused, even for a database that would now fail.
+    expect(await healthy({ ...setupMode, DATABASE_URL: "postgres://sandchest:x@127.0.0.1:1/sandchest" })).toBe(true);
+    resetHealth();
   });
 
   test("a blank value is unset, as Docker Compose passes settings left empty in .env", () => {

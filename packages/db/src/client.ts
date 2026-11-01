@@ -7,6 +7,8 @@ export type Db = PostgresJsDatabase<typeof schema> & { $client: postgres.Sql };
 export interface DbOptions {
   /** Connections in the pool. Default 10. */
   max?: number;
+  /** Seconds to wait for a connection. Default 10. */
+  connectTimeout?: number;
 }
 
 /**
@@ -18,7 +20,7 @@ export function createDb(url: string, options: DbOptions = {}): Db {
     max: options.max ?? 10,
     prepare: false,
     idle_timeout: 20,
-    connect_timeout: 10,
+    connect_timeout: options.connectTimeout ?? 10,
     onnotice: () => {},
   });
   return drizzle(client, { schema }) as Db;

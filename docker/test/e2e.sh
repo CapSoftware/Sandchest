@@ -110,6 +110,18 @@ expect_status "$BASE/sign-in" 200
 curl -s "$BASE/sign-in" | contains "connected to GitHub yet" || fail "sign-in does not explain setup mode"
 pass "sign-in explains that setup comes first"
 
+step "The health check follows the database, before setup too"
+expect_status "$BASE/api/health" 200
+compose stop postgres >/dev/null 2>&1
+sleep 3
+expect_status "$BASE/api/health" 503
+compose start postgres >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/health")" = 200 ] && break
+  sleep 1
+done
+expect_status "$BASE/api/health" 200
+
 step "Setup is shut without the token"
 curl -s "$BASE/setup" | contains "Connect GitHub" || fail "/setup did not ask for the token"
 curl -s "$BASE/setup" | contains 'name="manifest"' && fail "/setup showed the form without the token"
