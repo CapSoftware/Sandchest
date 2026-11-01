@@ -16,7 +16,7 @@ import { money } from "@/server/autumn-webhooks";
 import { applyAutoTopUp, reserveScan, setAutumn, syncBilling } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { setMailer } from "@/server/mailer";
-import { noticeAutoTopUp, noticeAutoTopUpFailed, noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
+import { forgetAdminChecks, noticeAutoTopUp, noticeAutoTopUpFailed, noticeCredits, noticeScanPaused, type PausedScan } from "@/server/notices";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
 import { FakeAutumn } from "./fake-autumn";
@@ -655,10 +655,15 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     // Dashboard access is signing in's business only: no row removed or refreshed.
     expect(await adminRows(org.id)).toEqual(before);
     drain();
-    // So the next email asks again.
+    // Within a minute, the next email reuses GitHub's answer...
     expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_2", added: 25, charged: "$10.00", credits: 59 })).toBe("sent");
-    expect(githubAsked).toHaveLength(6);
+    expect(githubAsked).toHaveLength(3);
     expect(sent.map((email) => email.to)).toEqual([["grace@example.com"]]);
+    drain();
+    // ...and after it, asks again.
+    forgetAdminChecks();
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_3", added: 25, charged: "$10.00", credits: 59 })).toBe("sent");
+    expect(githubAsked).toHaveLength(6);
     drain();
   });
 
@@ -687,6 +692,14 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     }
     expect(sent.map((email) => [...email.to].sort())).toEqual([["ivan@example.com", "judy@example.com"]]);
     expect(await adminRows(org.id)).toEqual(before);
+    drain();
+    // A failure isn't remembered: once GitHub answers, its answer counts (Judy is still an admin, Ivan isn't).
+    const ids = Object.fromEntries((await orgAdminContacts(database, org.id)).map((admin) => [admin.login, admin.githubUserId]));
+    githubMembers.set("downco/judy", { userId: ids.judy!, role: "admin" });
+    githubAsked.length = 0;
+    expect(await noticeAutoTopUpFailed(org, { reason: "limit", credits: 3 })).toBe("sent");
+    expect(githubAsked).toHaveLength(2);
+    expect(sent.map((email) => email.to)).toEqual([["judy@example.com"]]);
     drain();
   });
 
@@ -823,6 +836,42 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
       await Promise.all(Array.from({ length: 100 }, () => noticeCredits(org, { ...lockbox, credits }, now())));
     }
     expect(subjects()).toEqual(["9 credits left on crowdco", "Out of credits on crowdco", "5 credits left on crowdco", "Out of credits on crowdco"]);
+    drain();
+  });
+});
+
+describe.skipIf(!available)("a crossing that only exists once the lock is taken", () => {
+  test("an exhausted balance that read level 2 before a healthy one committed 0 still finds recipients, and is announced once", async () => {
+    const { org } = await upsertInstallation(database, 615, { githubAccountId: 61_500, githubLogin: "lockco", type: "Organization" }, []);
+    const lockco = { id: org.id, githubLogin: "lockco" };
+    const [owner] = await database.insert(schema.users).values({ name: "uma", email: "uma@example.com", login: "uma", githubUserId: 61_501 }).returning();
+    await database.insert(schema.orgAdmins).values({ userId: owner!.id, orgId: org.id });
+    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 0, creditsResetAt: null, autoTopUp: null });
+    const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
+    await noticeCredits(lockco, { ...lockbox, credits: 0 }, now());
+    expect(subjects()).toEqual(["Out of credits on lockco"]);
+    drain();
+
+    // The reviewer's schedule: a healthy balance's update holds the row lock with level 0, not yet committed.
+    // Meanwhile a newer exhausted balance starts; anything it reads now still says level 2. It waits for the lock.
+    const healthy = now();
+    const empty = now();
+    const lockWaiters = async () => {
+      const [row] = await database.$client`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`;
+      return (row as { n: number }).n;
+    };
+    let exhausted: Promise<void> | undefined;
+    await database.$client.begin(async (tx) => {
+      await tx`select credit_level from org_billing where org_id = ${org.id} for update`;
+      await tx`update org_billing set credit_level = 0, credit_level_at = ${healthy.to.toISOString()}::timestamptz, credit_level_rev = credit_level_rev + 1 where org_id = ${org.id}`;
+      exhausted = noticeCredits(lockco, { ...lockbox, credits: 0 }, empty);
+      for (let i = 0; i < 1_000 && (await lockWaiters()) === 0; i++) await Bun.sleep(2);
+      expect(await lockWaiters()).toBe(1);
+    });
+    // The healthy update commits; the exhausted balance takes the lock: a real crossing from 0, announced once.
+    await exhausted;
+    expect(subjects()).toEqual(["Out of credits on lockco"]);
+    expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(2);
     drain();
   });
 });

@@ -104,12 +104,6 @@ export interface BalanceSeen {
   to: Date;
 }
 
-/** The org's stored credit level, read without a lock: only to skip finding recipients for a balance that can't be a crossing. */
-export async function storedCreditLevel(database: Db, orgId: string): Promise<number | undefined> {
-  const [row] = await database.select({ level: orgBilling.creditLevel }).from(orgBilling).where(eq(orgBilling.orgId, orgId));
-  return row?.level;
-}
-
 /**
  * Applies one observed balance to the org's credit level (0 ok, 1 low,
  * 2 exhausted), in one transaction under the org's row lock, so observations

@@ -23,7 +23,6 @@ import {
   claimOrgNotice,
   orgAdminContacts,
   recordCreditLevel,
-  storedCreditLevel,
   type BalanceSeen,
   type OrgAdminContact,
   type OrgBillingRow,
@@ -55,14 +54,15 @@ type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetA
  * auto top-up failed webhook says why.
  *
  * In order, with no network call under a lock:
- * 1. Read the stored level. A balance at or below it can't be an upward
- *    crossing, so nobody is looked up (an optimisation only).
- * 2. Otherwise find who to tell first, outside any lock (this may ask GitHub).
- * 3. In one transaction under the org's row lock: apply the balance if it is
+ * 1. A low or empty balance (with auto top-up off) finds who to tell first,
+ *    outside any lock. Whether it is a crossing is only known under the lock,
+ *    so it can't be skipped by reading the level beforehand: another balance
+ *    may be about to lower it. The GitHub part is remembered for a minute.
+ * 2. In one transaction under the org's row lock: apply the balance if it is
  *    fresh, and record an upward crossing, reserving its email, only if there
  *    is someone to tell. With nobody, nothing is recorded, so a later balance
  *    can announce it.
- * 4. After the commit, send if this call reserved the email.
+ * 3. After the commit, send if this call reserved the email.
  */
 export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, seen: BalanceSeen): Promise<void> {
   const plan = planById(billing.planId);
@@ -70,7 +70,7 @@ export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, se
   const level = creditLevel(plan, billing.credits);
   const index = CREDIT_LEVELS.indexOf(level);
   let to: string[] | null = null;
-  if (level !== "ok" && !billing.autoTopUp?.enabled && mailer().enabled && index > ((await storedCreditLevel(db(), org.id)) ?? Number.POSITIVE_INFINITY)) {
+  if (level !== "ok" && !billing.autoTopUp?.enabled && mailer().enabled) {
     to = await recipients(org.id, `${level} credits email`, "billing");
   }
   if (!(await recordCreditLevel(db(), org.id, index, seen, !!to?.length)) || !to) return;
@@ -159,12 +159,38 @@ async function recipients(orgId: string, what: string, who: "fresh" | "billing")
   return null;
 }
 
+/** How long GitHub's answer about an org's stale admins is reused, in this process. */
+const ADMIN_CHECK_MS = 60_000;
+const adminChecks = new Map<string, { admins: string; confirmed: Set<string>; until: number }>();
+
+/** For tests: forget GitHub's remembered answers. */
+export function forgetAdminChecks(): void {
+  adminChecks.clear();
+}
+
+/**
+ * Asks GitHub which of these admins still are, reusing its answer for the
+ * same admins for a minute, so a run of low balances asks once. Only answers
+ * are remembered, never failures.
+ */
+async function confirmAdmins(orgId: string, admins: OrgAdminContact[]): Promise<OrgAdminContact[]> {
+  const key = admins
+    .map((admin) => `${admin.userId}:${admin.githubUserId}:${admin.login}`)
+    .sort()
+    .join(",");
+  const remembered = adminChecks.get(orgId);
+  if (remembered && remembered.admins === key && remembered.until > Date.now()) return admins.filter((admin) => remembered.confirmed.has(admin.userId));
+  const confirmed = await askGitHub(orgId, admins);
+  adminChecks.set(orgId, { admins: key, confirmed: new Set(confirmed.map((admin) => admin.userId)), until: Date.now() + ADMIN_CHECK_MS });
+  return confirmed;
+}
+
 /**
  * Asks GitHub which of these admins still are. Read-only. A username can
  * change hands, so a membership counts only if it belongs to the same GitHub
  * account (`github_user_id`). Throws when GitHub can't say.
  */
-async function confirmAdmins(orgId: string, admins: OrgAdminContact[]): Promise<OrgAdminContact[]> {
+async function askGitHub(orgId: string, admins: OrgAdminContact[]): Promise<OrgAdminContact[]> {
   const org = await db().query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.id, orgId), columns: { type: true, githubLogin: true, githubAccountId: true, installationId: true } });
   if (!org) return [];
   // A personal account has one admin: its owner.
