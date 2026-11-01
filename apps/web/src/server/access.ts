@@ -117,5 +117,6 @@ export async function storeAccess(userId: string, token: string, http?: HttpOpti
   await replaceAccess(db(), userId, {
     repos: visible.flatMap((repo) => (repoIds.has(repo.id) ? [{ repoId: repoIds.get(repo.id)!, permission: repo.role as RepoPermission }] : [])),
     adminOrgIds: installations.filter((i) => i.admin).map((i) => known.get(i.installationId)!),
+    github: { id: access.userId, login: access.login },
   });
 }

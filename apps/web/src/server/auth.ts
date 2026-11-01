@@ -7,7 +7,7 @@
  * immediate. IP addresses are not recorded and telemetry is off.
  */
 import { timingSafeEqual } from "node:crypto";
-import { recordEvent, schema } from "@sandchest/db";
+import { recordEvent, schema, setGithubIdentity } from "@sandchest/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
@@ -34,12 +34,12 @@ function createAuth() {
         clientSecret: settings.GITHUB_CLIENT_SECRET,
         // GitHub App tokens carry the app's permissions; OAuth scopes do not apply.
         disableDefaultScope: true,
+        // better-auth drops githubUserId and login here (users may not set them), so the hooks below and
+        // each access refresh store them; see `setGithubIdentity`.
         mapProfileToUser: (profile) => ({
           name: profile.name || profile.login,
           // Private emails come back empty unless the app may read them; never fail sign-in over it.
           email: profile.email || `${profile.id}+${profile.login}@users.noreply.github.com`,
-          githubUserId: profile.id,
-          login: profile.login,
         }),
       },
     },
@@ -53,6 +53,15 @@ function createAuth() {
     session: { expiresIn: SESSION_EXPIRES_IN_S, updateAge: SESSION_UPDATE_AGE_S },
     // A new session is a sign-in: recorded for the funnel with the user id only. Never fails sign-in.
     databaseHooks: {
+      // The account id is GitHub's numeric user id, so admins are recognised from the first page.
+      account: {
+        create: {
+          after: async (account) => {
+            // Never fails sign-in: the next access refresh stores it too.
+            if (account.providerId === "github" && /^\d+$/.test(account.accountId)) await setGithubIdentity(db(), account.userId, { id: Number(account.accountId) }).catch(() => {});
+          },
+        },
+      },
       session: {
         create: {
           after: async (session) => {

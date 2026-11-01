@@ -3,7 +3,7 @@
  * `permission_cache`, which the web app refreshes from GitHub before it is
  * trusted (SPEC §3): a row there means GitHub reported push access or higher.
  */
-import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
 import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
 
@@ -32,14 +32,40 @@ export async function repoIdsByGithubId(database: Db, githubRepoIds: number[]): 
   return new Map(rows.map((row) => [row.githubRepoId, row.id]));
 }
 
-/** Replaces everything a user may see with what GitHub just reported. */
-export async function replaceAccess(database: Db, userId: string, access: { repos: Array<{ repoId: string; permission: RepoPermission }>; adminOrgIds: string[] }, at = new Date()): Promise<void> {
+/**
+ * Records which GitHub account a user is, as GitHub itself reported it (the
+ * OAuth account id, or `/user` read with their token). better-auth won't store
+ * profile fields that users may not set themselves, so this does. Another row
+ * still claiming the id is stale and loses it: the id is unique, and only the
+ * token's owner can be that account.
+ */
+export async function setGithubIdentity(database: Db, userId: string, github: { id: number; login?: string }): Promise<void> {
+  await database.transaction((tx) => linkGithub(tx, userId, github));
+}
+
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+async function linkGithub(tx: Tx, userId: string, github: { id: number; login?: string }, extra: { accessCheckedAt?: Date } = {}): Promise<void> {
+  await tx.update(users).set({ githubUserId: null }).where(and(eq(users.githubUserId, github.id), ne(users.id, userId)));
+  await tx
+    .update(users)
+    .set({ githubUserId: github.id, ...(github.login ? { login: github.login } : {}), ...extra })
+    .where(eq(users.id, userId));
+}
+
+/** Replaces everything a user may see with what GitHub just reported, including who they are on GitHub. */
+export async function replaceAccess(
+  database: Db,
+  userId: string,
+  access: { repos: Array<{ repoId: string; permission: RepoPermission }>; adminOrgIds: string[]; github: { id: number; login: string } },
+  at = new Date(),
+): Promise<void> {
   await database.transaction(async (tx) => {
     await tx.delete(permissionCache).where(eq(permissionCache.userId, userId));
     await tx.delete(orgAdmins).where(eq(orgAdmins.userId, userId));
     if (access.repos.length > 0) await tx.insert(permissionCache).values(access.repos.map((repo) => ({ userId, ...repo, checkedAt: at })));
     if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, checkedAt: at })));
-    await tx.update(users).set({ accessCheckedAt: at }).where(eq(users.id, userId));
+    await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
   });
 }
 

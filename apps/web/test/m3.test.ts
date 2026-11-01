@@ -14,6 +14,7 @@ import {
   notificationRecipients,
   schema,
   scanForUser,
+  setGithubIdentity,
   settingsOrgs,
   updateOrgSettings,
   upsertFindings,
@@ -170,7 +171,39 @@ describe("access from GitHub", () => {
     expect(await findingForUser(database, ids.bob, ids.findings[0]!)).toBeUndefined();
     expect(await scanForUser(database, ids.bob, ids.scan)).toBeUndefined();
   });
+
+  test("records who the person is on GitHub, as GitHub reports it, and follows a rename", async () => {
+    if (!available) return;
+    // better-auth creates users without these (they are not user-settable), so sign-in and refreshes fill them in.
+    const [carol] = await database.insert(schema.users).values({ name: "Carol", email: "carol@example.com" }).returning();
+    const [ghost] = await database.insert(schema.users).values({ name: "Old", email: "old@example.com", githubUserId: 503, login: "carol" }).returning();
+    const identity = async (id: string) => (await database.$client<Array<{ github_user_id: string | null; login: string | null }>>`select github_user_id, login from users where id = ${id}`)[0];
+
+    // At sign-in only the account id is known.
+    await setGithubIdentity(database, carol!.id, { id: 503 });
+    expect(await identity(carol!.id)).toEqual({ github_user_id: "503", login: null });
+    // The id is unique: a stale row claiming it gives it up.
+    expect(await identity(ghost!.id)).toEqual({ github_user_id: null, login: "carol" });
+
+    await storeAccess(carol!.id, "token-c", { fetch: fakeGithub({ id: 503, login: "carol" }, []) });
+    expect(await identity(carol!.id)).toEqual({ github_user_id: "503", login: "carol" });
+    await storeAccess(carol!.id, "token-c", { fetch: fakeGithub({ id: 503, login: "carol-renamed" }, []) });
+    expect(await identity(carol!.id)).toEqual({ github_user_id: "503", login: "carol-renamed" });
+    expect((await sessionUserFor(carol!.id))?.githubUserId).toBe(503);
+    await database.$client`delete from users where id in ${database.$client([carol!.id, ghost!.id])}`;
+  });
 });
+
+/** The viewer a page would see for this user: what the admin check reads. */
+async function sessionUserFor(userId: string) {
+  const token = `t-${userId}`;
+  await database.insert(schema.sessions).values({ token, userId, expiresAt: new Date(Date.now() + 60_000) });
+  try {
+    return await sessionUser(database, token);
+  } finally {
+    await database.$client`delete from sessions where token = ${token}`;
+  }
+}
 
 describe("findings", () => {
   test("lists only what the user can see, worst first, hiding low confidence unless asked", async () => {
