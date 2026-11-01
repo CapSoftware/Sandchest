@@ -1,15 +1,8 @@
 import { ChestStage } from "@/components/chest-stage";
 import { FindingStrip } from "@/components/finding-strip";
 import { HowItWorks } from "@/components/how-it-works";
-import { brandAsset, site } from "@/lib/site";
-
-const footerLinks = [
-  { label: "Docs", href: site.links.docs },
-  { label: "GitHub", href: site.githubUrl },
-  { label: "Terms", href: site.links.terms },
-  { label: "Privacy", href: site.links.privacy },
-  { label: "Acceptable use", href: site.links.acceptableUse },
-];
+import { SiteFooter, SiteHeader } from "@/components/site-chrome";
+import { site } from "@/lib/site";
 
 /** The GitHub mark, from GitHub's Octicons. */
 function GitHubMark() {
@@ -23,15 +16,7 @@ function GitHubMark() {
 export default function Home() {
   return (
     <div className="page">
-      <header className="site-header">
-        <a href="/" className="wordmark" aria-label="Sandchest home">
-          <img src={brandAsset("/sandchest-logo-dark.svg")} alt="Sandchest" width={184} height={34} />
-        </a>
-        <nav aria-label="Main" className="header-nav">
-          <a href={site.links.docs}>Docs</a>
-          <a href={site.githubUrl}>GitHub</a>
-        </nav>
-      </header>
+      <SiteHeader />
 
       <main>
         <section className="hero" aria-labelledby="hero-title">
@@ -84,18 +69,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="site-footer">
-        <nav aria-label="Footer">
-          <ul>
-            {footerLinks.map((link) => (
-              <li key={link.label}>
-                <a href={link.href}>{link.label}</a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <p>Open source under AGPL-3.0.</p>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
