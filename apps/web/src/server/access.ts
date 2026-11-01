@@ -11,7 +11,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { cache } from "react";
-import { auth } from "./auth";
+import { auth, authConfigured } from "./auth";
 import { db } from "./services";
 
 const SOFT_TTL_MS = 2 * 60_000;
@@ -29,6 +29,7 @@ export interface Viewer {
 export const currentUser = cache(async (): Promise<Viewer | undefined> => {
   // Headers first: it marks the page as per-request before anything else runs.
   const requestHeaders = await headers();
+  if (!authConfigured()) return undefined;
   const session = await auth().api.getSession({ headers: requestHeaders });
   if (!session) return undefined;
   const user = session.user as typeof session.user & { login?: string | null };

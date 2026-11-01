@@ -54,6 +54,12 @@ function createAuth() {
   });
 }
 
+/** Whether this deployment has sign-in configured. Without it the dashboard shows how to set it up. */
+export function authConfigured(): boolean {
+  const settings = config();
+  return Boolean(settings.BETTER_AUTH_SECRET && settings.GITHUB_CLIENT_ID && settings.GITHUB_CLIENT_SECRET);
+}
+
 let instance: ReturnType<typeof createAuth> | undefined;
 
 export function auth() {

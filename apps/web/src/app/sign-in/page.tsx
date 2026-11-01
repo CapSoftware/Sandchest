@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/server/access";
+import { authConfigured } from "@/server/auth";
 import { signIn } from "@/server/actions";
 import "../app.css";
 
@@ -9,6 +10,7 @@ export const metadata: Metadata = { title: "Sign in · Sandchest" };
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ expired?: string; error?: string; next?: string }> }) {
   const { expired, error, next } = await searchParams;
   const destination = safeNext(next);
+  const configured = authConfigured();
   // After an expired grant the old session can live on in its cookie cache for a few minutes: stay here.
   if (!expired && (await currentUser())) redirect(destination);
   return (
@@ -23,7 +25,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         </p>
         {expired && <p className="notice">Your GitHub sign-in expired. Sign in again to carry on.</p>}
         {error && !expired && <p className="notice">GitHub didn’t complete the sign-in. Try again.</p>}
-        <form action={signIn.bind(null, destination)}>
+        {!configured && <p className="notice">Sign-in isn’t set up on this deployment yet. Set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and BETTER_AUTH_SECRET.</p>}
+        <form action={signIn.bind(null, destination)} hidden={!configured}>
           <button type="submit" className="key key-primary key-large key-glow">
             <span className="key-face">
               <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
