@@ -1,14 +1,15 @@
 import { dashboardRepos, type DashboardRepo } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { HoverLink } from "@/components/app/hover-link";
 import { DigButton } from "@/components/app/dig-button";
 import { Heat } from "@/components/app/heat";
 import { InstallKey } from "@/components/app/install-key";
 import { When } from "@/components/app/when";
 import { plural, SCAN_KIND_LABEL, SEVERITIES, timeUntil } from "@/lib/format";
 import { ensureAccess, viewer } from "@/server/access";
-import { digState } from "@/server/dig";
-import { db } from "@/server/services";
+import { digState } from "@/lib/dig-state";
+import { db } from "@/server/db";
 
 /** "Deep scan failed 2 hr. ago". Completed scans need no verb. */
 const LAST_SCAN_VERB: Record<string, string> = { queued: "queued", running: "started", publishing: "started", failed: "failed", refused: "refused", cancelled: "cancelled" };
@@ -68,10 +69,10 @@ function RepoRow({ repo }: { repo: DashboardRepo }) {
   return (
     <div className="repo">
       <div className="repo-name">
-        <Link href={`/findings?repo=${repo.id}`}>
+        <HoverLink href={`/findings?repo=${repo.id}`}>
           <span className="repo-owner">{owner}/</span>
           {name}
-        </Link>
+        </HoverLink>
         {repo.private ? null : <span className="tag">public</span>}
       </div>
       <div className="tally">
@@ -88,9 +89,9 @@ function RepoRow({ repo }: { repo: DashboardRepo }) {
       </div>
       <div className="repo-scan">
         {repo.lastScan ? (
-          <Link href={`/scans/${repo.lastScan.id}`}>
+          <HoverLink href={`/scans/${repo.lastScan.id}`}>
             {SCAN_KIND_LABEL[repo.lastScan.kind]} {LAST_SCAN_VERB[repo.lastScan.status] ?? ""} <When date={repo.lastScan.at} />
-          </Link>
+          </HoverLink>
         ) : (
           "Not scanned yet"
         )}
@@ -106,10 +107,10 @@ function Dig({ repo }: { repo: DashboardRepo }) {
     case "running":
       return (
         <div className="repo-dig">
-          <Link href={`/scans/${state.scanId}`} className="digging">
+          <HoverLink href={`/scans/${state.scanId}`} className="digging">
             <span className="blink" aria-hidden="true" />
             Digging
-          </Link>
+          </HoverLink>
         </div>
       );
     case "cooling":

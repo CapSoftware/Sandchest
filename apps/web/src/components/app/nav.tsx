@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { HoverLink } from "./hover-link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
@@ -15,9 +16,9 @@ export function AppNav() {
   return (
     <nav className="app-nav" aria-label="Main">
       {LINKS.map((link) => (
-        <Link key={link.href} href={link.href} aria-current={section.startsWith(link.href) ? "page" : undefined}>
+        <HoverLink key={link.href} href={link.href} aria-current={section.startsWith(link.href) ? "page" : undefined}>
           {link.label}
-        </Link>
+        </HoverLink>
       ))}
     </nav>
   );

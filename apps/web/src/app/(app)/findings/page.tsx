@@ -1,12 +1,13 @@
 import { dashboardFindings, findingStatusCounts, visibleRepos, type FindingFilters } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { HoverLink } from "@/components/app/hover-link";
 import { AutoSubmitSelect } from "@/components/app/auto-submit";
 import { Heat } from "@/components/app/heat";
 import { When } from "@/components/app/when";
 import { SEVERITIES, SEVERITY_LABEL, type Severity } from "@/lib/format";
 import { viewer } from "@/server/access";
-import { db } from "@/server/services";
+import { db } from "@/server/db";
 
 export const metadata: Metadata = { title: "Findings · Sandchest" };
 
@@ -59,10 +60,10 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
       <div className="filters">
         <nav className="tabs" aria-label="Status">
           {STATUSES.map((status) => (
-            <Link key={status.id} className="tab" href={href(current, { status: status.id })} aria-current={current.status === status.id ? "page" : undefined}>
+            <HoverLink key={status.id} className="tab" href={href(current, { status: status.id })} aria-current={current.status === status.id ? "page" : undefined}>
               {status.label}
               <span className="tab-count">{counts[status.id]}</span>
-            </Link>
+            </HoverLink>
           ))}
         </nav>
         <div className="filter-set">
@@ -71,9 +72,9 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
               const on = current.severities.includes(severity);
               const severities = on ? current.severities.filter((s) => s !== severity) : [...current.severities, severity];
               return (
-                <Link key={severity} className="chip" href={href(current, { severities })} aria-pressed={on}>
+                <HoverLink key={severity} className="chip" href={href(current, { severities })} aria-pressed={on}>
                   {SEVERITY_LABEL[severity]}
-                </Link>
+                </HoverLink>
               );
             })}
           </div>
@@ -98,9 +99,9 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
               </button>
             </form>
           )}
-          <Link className="chip" href={href(current, { low: !current.low })} aria-pressed={current.low}>
+          <HoverLink className="chip" href={href(current, { low: !current.low })} aria-pressed={current.low}>
             Low confidence
-          </Link>
+          </HoverLink>
         </div>
       </div>
 
@@ -118,7 +119,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
         <ul className="rows">
           {list.map((finding) => (
             <li key={finding.id} className="row finding-row">
-              <Link href={`/findings/${finding.id}`}>
+              <HoverLink href={`/findings/${finding.id}`}>
                 <Heat severity={finding.severity} label />
                 <span className="finding-row-title">
                   {finding.title}
@@ -140,7 +141,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
                   )}
                   {finding.prNumber !== null && ` in PR #${finding.prNumber}`}
                 </span>
-              </Link>
+              </HoverLink>
             </li>
           ))}
         </ul>

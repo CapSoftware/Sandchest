@@ -5,7 +5,7 @@ import { OrgSettingsForm } from "@/components/app/org-settings";
 import { InstallKey } from "@/components/app/install-key";
 import { viewer } from "@/server/access";
 import { signOut } from "@/server/actions";
-import { db } from "@/server/services";
+import { db } from "@/server/db";
 
 export const metadata: Metadata = { title: "Settings · Sandchest" };
 

@@ -3,15 +3,14 @@
  * Everything a person can change from the dashboard. Each action checks
  * access itself: the database writes are scoped to what the viewer may see.
  */
-import { applyFindingAction, recordPromptCopied, repoForUser, updateOrgSettings, type FindingAction } from "@sandchest/db";
+import { applyFindingAction, recordPromptCopied, updateOrgSettings, type FindingAction } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { viewer } from "./access";
 import { auth } from "./auth";
-import { requestDeepScan } from "./dig";
-import { db } from "./services";
+import { db } from "./db";
 
 const Id = z.uuid();
 
@@ -26,26 +25,6 @@ export async function signIn(next: string): Promise<void> {
 export async function signOut(): Promise<void> {
   await auth().api.signOut({ headers: await headers() });
   redirect("/");
-}
-
-export type DigOutcome = { error?: string };
-
-export async function dig(repoId: string): Promise<DigOutcome> {
-  const user = await viewer();
-  const row = Id.safeParse(repoId).success ? await repoForUser(db(), user.id, repoId) : undefined;
-  if (!row) return { error: "You don’t have access to this repository." };
-  const result = await requestDeepScan({ ...row.repo, org: row.org });
-  if (!result.ok) {
-    revalidatePath("/repos");
-    const messages = {
-      not_installed: "Sandchest is no longer installed on this repository.",
-      running: "A deep scan is already running.",
-      cooling: "This repository was dug in the last 24 hours.",
-      too_large: "This repository is over a million lines. Get in touch to scan it.",
-    };
-    return { error: messages[result.reason] };
-  }
-  redirect(`/scans/${result.scanId}`);
 }
 
 const FindingForm = z.discriminatedUnion("type", [

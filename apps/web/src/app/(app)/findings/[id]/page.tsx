@@ -1,5 +1,6 @@
 import { findingForUser } from "@sandchest/db";
-import { fixPrompt, type PathStep } from "@sandchest/engine/scan";
+import { fixPrompt } from "@sandchest/engine/fix-prompt";
+import type { PathStep } from "@sandchest/engine/scan";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -12,7 +13,7 @@ import { When } from "@/components/app/when";
 import { ATTACKER_LABEL, categoryLabel, DISMISS_REASON_LABEL, githubLine, SCAN_KIND_LABEL } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { changeFinding } from "@/server/actions";
-import { db } from "@/server/services";
+import { db } from "@/server/db";
 
 type Params = { params: Promise<{ id: string }> };
 

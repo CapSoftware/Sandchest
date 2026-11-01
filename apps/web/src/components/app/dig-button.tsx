@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { dig, type DigOutcome } from "@/server/actions";
+import { dig, type DigOutcome } from "@/server/dig-action";
 import { Submit } from "./submit";
 
 /** Starts a deep scan, then opens its live feed. */

@@ -1,10 +1,13 @@
 /** Process-wide clients, created on first use. Tests can swap any of them. */
-import { createDb, type Db } from "@sandchest/db";
+import type { Db } from "@sandchest/db";
 import { createMailer, type Mailer } from "@sandchest/email";
 import { createLlmClient, loadLlmConfig, type LlmClient } from "@sandchest/engine/llm";
 import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import { GitHubApp, loadAppConfig } from "@sandchest/github";
 import { config } from "./config";
+import { db, setDb } from "./db";
+
+export { db };
 
 interface Services {
   db: Db;
@@ -20,10 +23,7 @@ const instances: Partial<Services> = {};
 /** Replaces services, for tests. */
 export function setServices(overrides: Partial<Services>): void {
   Object.assign(instances, overrides);
-}
-
-export function db(): Db {
-  return (instances.db ??= createDb(config().DATABASE_URL));
+  if (overrides.db) setDb(overrides.db);
 }
 
 export function githubApp(): GitHubApp {

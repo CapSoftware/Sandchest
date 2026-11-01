@@ -1,26 +1,8 @@
 /** Manual deep scans ("Dig"): one at a time per repo, then a 24-hour cooldown (SPEC §4). */
-import { DEEP_SCAN_COOLDOWN_HOURS, deepScanCredits } from "@sandchest/billing";
 import { activeDeepScan, createScan, type Org, type Repo } from "@sandchest/db";
+import { digState } from "@/lib/dig-state";
 import { db, githubApp } from "./services";
 import { startScan } from "./start";
-
-export type DigState =
-  | { state: "ready"; credits: number | undefined }
-  | { state: "running"; scanId: string }
-  | { state: "cooling"; retryAt: Date }
-  | { state: "too_large" };
-
-/** What the Dig button can do for a repo right now. Pure: no database. */
-export function digState(repo: { loc: number | null; lastDeepScanAt: Date | null; activeDeepScanId: string | null }, now = new Date()): DigState {
-  if (repo.activeDeepScanId) return { state: "running", scanId: repo.activeDeepScanId };
-  if (repo.lastDeepScanAt) {
-    const retryAt = new Date(repo.lastDeepScanAt.getTime() + DEEP_SCAN_COOLDOWN_HOURS * 3_600_000);
-    if (retryAt > now) return { state: "cooling", retryAt };
-  }
-  if (repo.loc === null) return { state: "ready", credits: undefined };
-  const credits = deepScanCredits(repo.loc);
-  return credits === undefined ? { state: "too_large" } : { state: "ready", credits };
-}
 
 export type DigResult = { ok: true; scanId: string } | { ok: false; reason: "not_installed" | "running" | "cooling" | "too_large"; scanId?: string; retryAt?: Date };
 
