@@ -7,3 +7,4 @@ export { runRecon, runScan, ScanRefusedError, verifyFindings, type ReconResult, 
 export * from "./schema";
 export { capChanges, changedLines, isSecurityRelevant, relevantChanges, touchesChange, type ChangedFile } from "./changes";
 export { checkFixes, reanchor, type FixCheckOptions, type FixCheckResult } from "./fixcheck";
+export { storableLeads } from "./leads";

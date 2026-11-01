@@ -33,6 +33,7 @@ import {
   runRecon,
   runScan,
   ScanRefusedError,
+  storableLeads,
   ThreatModelSchema,
   type ChangedFile,
   type Finding,
@@ -184,7 +185,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     });
     await updateScan(db(), scan.id, {
       credits,
-      leads: report.leads,
+      leads: storableLeads(report.leads),
       stats: { findingIds: ids, newFindingIds: newIds, timings: report.timings, review: report.review, warnings: report.warnings, loc: report.repo.loc },
     });
     if (scan.kind === "deep") await markDeepScanned(db(), scan.repo.id, new Date(), report.repo.loc);
@@ -244,6 +245,8 @@ export async function publishScan(scanId: string): Promise<void> {
  */
 async function notifyScan(scan: NonNullable<Awaited<ReturnType<typeof scanById>>>): Promise<void> {
   if (scan.kind !== "deep" && scan.kind !== "pr_review") return;
+  // Uninstalled or removed while the scan ran: nobody is told about code Sandchest may no longer read.
+  if (!scan.repo.org.installationId || !scan.repo.enabled) return;
   if (scan.repo.org.settings.emailNotifications === false || !mailer().enabled) return;
   const stats = (scan.stats ?? {}) as { findingIds?: string[]; newFindingIds?: string[] };
   const rows = (await findingsById(stats.findingIds ?? [])).filter((row) => row.status === "open" && row.confidence !== "low");

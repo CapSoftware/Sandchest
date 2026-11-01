@@ -101,6 +101,15 @@ export function buildLeads({ found }: CodeSignals, vulns: DependencyVulns[]): Le
   return leads;
 }
 
+/**
+ * Leads as they may be stored (SPEC §16: never source code). An injection
+ * marker's detail is the source line itself, so only its location and title
+ * are kept; secrets are already redacted and advisories are not code.
+ */
+export function storableLeads(leads: Lead[]): Lead[] {
+  return leads.map((lead) => (lead.kind === "injection_marker" ? { ...lead, detail: "" } : lead));
+}
+
 /** Leads that must be reported whatever the hunters conclude. */
 export function persistentLeads(leads: Lead[]): Lead[] {
   return leads.filter((lead) => lead.kind !== "sink");
