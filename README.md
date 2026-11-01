@@ -103,18 +103,20 @@ If the address changes later, update `SANDCHEST_APP_URL`, restart, and in the Ap
 |---|---|
 | `SMTP_URL`, `EMAIL_FROM` | Email about critical findings and finished deep scans, for example `smtps://user:password@smtp.example.com:465`. |
 | `SENTRY_DSN` | Error reports go to your own Sentry project. |
-| `SANDCHEST_ADMIN_TOKEN` | Enables `POST /api/scans` with `Authorization: Bearer <token>` and `{"repo": "owner/name"}`, which starts a deep scan. People can also start one with Dig in the dashboard. |
+| `SANDCHEST_ADMIN_TOKEN` | Enables `POST /api/scans` with `Authorization: Bearer <token>` and `{"repo": "owner/name"}`, which starts a deep scan. People can also start one with Dig in the dashboard. 24 or more characters: `openssl rand -hex 24`. |
 | `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT` | The model's prices in USD per million tokens, so each scan records what it cost. |
 | `SANDCHEST_SETUP_TOKEN` | Your own setup token (24 or more characters), instead of the one derived from `BETTER_AUTH_SECRET`. |
 | `SANDCHEST_IMAGE` | Run a prebuilt image instead of building from this checkout. |
 
 ### How it runs
 
-- The `web` image holds the Next.js server, its workflows and the `sandchest-index` indexer for its architecture (amd64 or arm64). It runs as a non-root user.
-- Scans run as durable workflows stored in Postgres, inside the `web` container. A scan interrupted by a restart picks up again when the server comes back. Every ten minutes the server also finishes or fails scans that got stuck.
+- The `web` image holds the Next.js server, its workflows and the `sandchest-index` indexer for its architecture (amd64 or arm64). It runs as a non-root user, with no Linux capabilities, a read-only root file system and a limit on processes. It writes only scan workspaces and Next's cache.
+- The server checks its settings when it starts. If one is wrong, it exits and prints which, and Compose restarts it until you fix it. The health check (`/api/health`) also fails while the database is unreachable.
+- Scans run as durable workflows stored in Postgres, inside the `web` container. A scan survives one restart: it runs again from the start when the server comes back, and fails if it is interrupted a second time. Every ten minutes the server also finishes or fails scans that got stuck.
 - Each scan clones its repository with a short-lived, read-only token into a temporary directory, which is deleted when the scan ends.
 - The workflow engine's internal route (`/.well-known/workflow/…`) has no authentication of its own. The server only answers it on loopback inside the container; from outside it is a 404, however the path is written.
 - Postgres is not published on any port. The app connects as a role that owns its database but is not a superuser.
+- The base images are pinned by digest, so rebuilding the same commit uses the same images. The two Alpine packages the image adds are not pinned: Alpine keeps only the latest build of each package, so a pinned version would stop installing at its next security fix.
 - Sandchest sends nothing to us. Next.js telemetry is off, and billing stays off because no billing key is set. Your code goes only to GitHub and to your model endpoint.
 
 ### Upgrading
@@ -146,6 +148,8 @@ docker compose up -d
 
 **Compose says a required variable is missing.** Fill it in `docker/.env`; the message names the setting.
 
+**The `web` container keeps restarting.** A setting is invalid, for example a `SANDCHEST_ADMIN_TOKEN` under 24 characters. `docker compose logs web` names it after "Sandchest cannot start".
+
 **There's no setup link in the log.** The log says what is missing instead: `SANDCHEST_APP_URL`, or `BETTER_AUTH_SECRET` (32 or more characters). After a restart, run `docker compose logs web | grep setup` again. If the App is already configured, there is no setup link.
 
 **The setup page says "Wrong address."** Open setup on `SANDCHEST_APP_URL` or on `localhost`. GitHub sends you back to the address you started from, and the setup cookie has to come back with you.
@@ -171,7 +175,9 @@ docker compose up -d
 - runs setup through the manifest flow;
 - restarts with the keys;
 - sends a signed install webhook;
-- runs recon and a deep scan as workflows, through to a stored finding;
+- runs recon and a deep scan as workflows, through to a stored finding, restarting the server mid-scan;
+- opens a pull request and checks for the in-progress Check, the inline review and the failing Check;
+- checks that a bad setting stops the server with a clear message;
 - checks that the workflow route is closed from outside.
 
 ```sh
