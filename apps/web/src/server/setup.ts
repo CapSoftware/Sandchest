@@ -50,8 +50,9 @@ export function setupAnnouncement(env: Env = process.env): string | undefined {
   const token = setupToken(env);
   if (!base) return "Sandchest is not connected to GitHub yet. Set SANDCHEST_APP_URL to this server's public URL, then restart to get a setup link.";
   if (!token) return "Sandchest is not connected to GitHub yet. Set BETTER_AUTH_SECRET (32+ characters), or SANDCHEST_SETUP_TOKEN (24+), then restart to get a setup link.";
-  const local = LOOPBACK.test(new URL(base).host) ? "" : ` (or, on the machine running it, the same path on http://localhost:<port>)`;
-  return `Sandchest is not connected to GitHub yet. To create its GitHub App, open ${base}/setup/unlock?token=${token}${local}.`;
+  const local = LOOPBACK.test(new URL(base).host) ? "" : ` (on the machine running it, the same path on http://localhost:<port> works too)`;
+  // The link ends the line, so nothing after it can be taken for part of the token.
+  return `Sandchest is not connected to GitHub yet. To create its GitHub App, open this link${local}: ${base}/setup/unlock?token=${encodeURIComponent(token)}`;
 }
 
 export function tokenMatches(given: string | null | undefined, env: Env = process.env): boolean {

@@ -90,5 +90,5 @@ RUN mkdir -p apps/web/.next/cache && chown node:node apps/web/.next/cache
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=4 \
-  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/" || exit 1
+  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/api/health" || exit 1
 ENTRYPOINT ["/sbin/tini", "--", "/app/entrypoint.sh"]

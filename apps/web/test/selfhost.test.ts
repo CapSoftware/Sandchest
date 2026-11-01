@@ -4,12 +4,14 @@
  * start-up migrations (against a real Postgres, skipped without one).
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import http from "node:http";
-import { connect } from "node:net";
-import { dirname, join } from "node:path";
+import { connect, type Socket } from "node:net";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import postgres from "postgres";
-import { createGateway, isBlocked, stopGateway } from "../../../docker/server.mjs";
+import { createGateway, isBlocked, MAX_BODY_BYTES, stopGateway } from "../../../docker/server.mjs";
 import { GET as unlockGet, POST as unlockPost } from "@/app/setup/unlock/route";
 import {
   newState,
@@ -22,10 +24,14 @@ import {
   stateValid,
   tokenMatches,
 } from "@/server/setup";
-import { config } from "@/server/config";
+import { GET as healthGet } from "@/app/api/health/route";
+import { config, resetConfig } from "@/server/config";
+import { configurationProblem } from "@/server/readiness";
 import { migrateAll } from "../scripts/migrate";
 
 // ---- Gateway --------------------------------------------------------------
+
+const GATEWAY = resolve(import.meta.dir, "../../../docker/server.mjs");
 
 describe("gateway: the workflow routes are not reachable from outside", () => {
   test("every spelling of the workflow routes is refused", () => {
@@ -50,6 +56,16 @@ describe("gateway: the workflow routes are not reachable from outside", () => {
       "/.well-known/workflow;/v1/flow",
       "/.well-known/%77orkflow/v1/flow",
       "/%E0%A4%A",
+      // The image optimiser fetches its `url` from inside the server.
+      "/_next/image?url=%2F.well-known%2Fworkflow%2Fv1%2Fwebhook%2Fx&w=64&q=75",
+      "/_next/image?url=%2Fsign-in&w=64&q=75",
+      "/_NEXT/Image?url=x",
+      "//_next//image?url=x",
+      "/x/../_next/image?url=x",
+      "/%5Fnext/image?url=x",
+      // Named anywhere, the query included.
+      "/sign-in?next=%2F.well-known%2Fworkflow%2Fv1%2Fflow",
+      "/api/scans?x=/.well-known/workflow",
       "http://localhost/.well-known/workflow/v1/flow",
       "*",
       "",
@@ -59,7 +75,7 @@ describe("gateway: the workflow routes are not reachable from outside", () => {
   });
 
   test("everything else goes through", () => {
-    for (const target of ["/", "/sign-in?next=%2Frepos", "/setup", "/api/github/webhooks", "/.well-known/security.txt", "/api/scans/abc/events?after=3", "/_next/static/chunks/app.js"]) {
+    for (const target of ["/", "/sign-in?next=%2Frepos", "/setup", "/api/github/webhooks", "/.well-known/security.txt", "/api/scans/abc/events?after=3", "/_next/static/chunks/app.js", "/_next/imagery.css"]) {
       expect([target, isBlocked(target)]).toEqual([target, false]);
     }
   });
@@ -148,6 +164,107 @@ describe("gateway: the workflow routes are not reachable from outside", () => {
     await reader.cancel();
   });
 
+  /** Opens a connection that sends a request's headers and the start of its body, then stalls. */
+  function stall(target: number): Promise<Socket> {
+    return new Promise((resolve, reject) => {
+      const socket = connect(target, "127.0.0.1", () => {
+        socket.write("POST /api/github/webhooks HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\ncontent-length: 100000\r\n\r\n{");
+        resolve(socket);
+      });
+      socket.on("error", reject);
+    });
+  }
+
+  /**
+   * The gateway in Node, as it runs in the image: Bun's http.Agent and
+   * server timeouts differ from Node's, and these tests are about Node's.
+   */
+  async function nodeGateway(options: Record<string, number>): Promise<{ port: number; stop(): void }> {
+    const script = `import(${JSON.stringify(pathToFileURL(GATEWAY).href)}).then((m) => { const g = m.createGateway(${JSON.stringify(options)}); g.listen(0, "127.0.0.1", () => console.log(g.address().port)); })`;
+    const child = spawn("node", ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+    const port = await new Promise<number>((resolve, reject) => {
+      child.stdout.once("data", (chunk: Buffer) => resolve(Number(chunk.toString().trim())));
+      child.once("error", reject);
+    });
+    return { port, stop: () => child.kill() };
+  }
+
+  test("hundreds of stalled uploads do not hold up anyone else", async () => {
+    // All in one Node process (app, gateway and clients), as in the image.
+    const script = `
+      import http from "node:http";
+      import { connect } from "node:net";
+      const { createGateway } = await import(${JSON.stringify(pathToFileURL(GATEWAY).href)});
+      let stalled = 0;
+      const app = http.createServer((request, response) => {
+        if (request.method === "POST") stalled++;
+        request.resume();
+        request.on("end", () => response.end("ok"));
+      });
+      await new Promise((done) => app.listen(0, "127.0.0.1", done));
+      const gateway = createGateway({ upstreamPort: app.address().port });
+      await new Promise((done) => gateway.listen(0, "127.0.0.1", done));
+      const port = gateway.address().port;
+      const sockets = [];
+      for (let i = 0; i < 300; i++) {
+        sockets.push(await new Promise((done) => {
+          const socket = connect(port, "127.0.0.1", () => {
+            socket.write("POST /api/github/webhooks HTTP/1.1\\r\\nhost: localhost\\r\\ncontent-length: 100000\\r\\n\\r\\n{");
+            done(socket);
+          });
+        }));
+      }
+      await new Promise((done) => setTimeout(done, 500));
+      let status = 0;
+      try {
+        status = (await fetch("http://127.0.0.1:" + port + "/", { signal: AbortSignal.timeout(3000) })).status;
+      } catch {}
+      console.log(JSON.stringify({ stalled, status }));
+      process.exit(0);
+    `;
+    const child = spawn("node", ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => (output += chunk));
+    await new Promise((done) => child.once("exit", done));
+    const result = JSON.parse(output) as { stalled: number; status: number };
+    // Every upload reached the app and is still open, and a page still loads.
+    expect(result.stalled).toBe(300);
+    expect(result.status).toBe(200);
+  }, 20_000);
+
+  test("a request that does not arrive in time is dropped", async () => {
+    const front = await nodeGateway({ upstreamPort: (upstream.address() as AddressInfo).port, requestTimeoutMs: 300, headersTimeoutMs: 300, checkIntervalMs: 50 });
+    try {
+      const socket = await stall(front.port);
+      const started = Date.now();
+      const answer = await new Promise<string>((resolve) => {
+        let data = "";
+        socket.on("data", (chunk) => (data += chunk));
+        socket.on("close", () => resolve(data));
+      });
+      expect(answer).toStartWith("HTTP/1.1 408");
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      front.stop();
+    }
+  }, 15_000);
+
+  test("bodies over the limit are refused, declared or streamed", async () => {
+    seen.length = 0;
+    expect(await raw("POST /api/github/webhooks HTTP/1.1", `content-length: ${MAX_BODY_BYTES + 1}\r\n`)).toStartWith("HTTP/1.1 413");
+    const chunk = new Uint8Array(1024 * 1024);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 26; i++) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    const response = await fetch(`http://127.0.0.1:${port}/api/github/webhooks`, { method: "POST", body, duplex: "half" } as RequestInit).catch(() => undefined);
+    // Either the 413 arrives, or the connection is cut before the client finishes sending.
+    if (response) expect(response.status).toBe(413);
+    expect(seen.filter((r) => r.body.length > MAX_BODY_BYTES)).toEqual([]);
+  });
+
   test("answers 502 while the app is down", async () => {
     const lonely = createGateway({ upstreamPort: 1 });
     await new Promise<void>((resolve) => lonely.listen(0, "127.0.0.1", resolve));
@@ -199,6 +316,16 @@ describe("setup", () => {
     expect(setupAnnouncement(env)).toContain(`https://sandchest.example.com/setup/unlock?token=${derived}`);
     expect(setupAnnouncement({ BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET })).toContain("Set SANDCHEST_APP_URL");
     expect(setupAnnouncement({ SANDCHEST_APP_URL: env.SANDCHEST_APP_URL })).toContain("Set BETTER_AUTH_SECRET");
+  });
+
+  test("the printed link carries any token intact, and ends the line", () => {
+    const token = "a+b&c#d=e/f%g h?i.j-k_l~m!n";
+    const line = setupAnnouncement({ ...env, SANDCHEST_SETUP_TOKEN: token })!;
+    const link = line.slice(line.lastIndexOf(" ") + 1);
+    expect(link).toStartWith("https://sandchest.example.com/setup/unlock?token=");
+    const given = new URL(link).searchParams.get("token");
+    expect(given).toBe(token);
+    expect(tokenMatches(given, { ...env, SANDCHEST_SETUP_TOKEN: token })).toBe(true);
   });
 
   test("tokens are compared exactly", () => {
@@ -307,6 +434,43 @@ describe("setup", () => {
 // ---- Configuration --------------------------------------------------------
 
 describe("configuration", () => {
+  const configured = {
+    DATABASE_URL: "postgres://sandchest@postgres/sandchest",
+    GITHUB_APP_ID: "1",
+    GITHUB_APP_PRIVATE_KEY: "key",
+    GITHUB_WEBHOOK_SECRET: "secret",
+    SANDCHEST_APP_URL: "https://sandchest.example.com",
+    LLM_BASE_URL: "https://models.example.com/v1",
+    LLM_API_KEY: "key",
+    LLM_MODEL: "model",
+  };
+
+  test("a bad setting is reported by name, without its value, so the server can refuse to start", () => {
+    expect(configurationProblem(configured)).toBeUndefined();
+    const short = configurationProblem({ ...configured, SANDCHEST_ADMIN_TOKEN: "too-short-admin-token" })!;
+    expect(short).toContain("SANDCHEST_ADMIN_TOKEN");
+    expect(short).not.toContain("too-short-admin-token");
+    expect(configurationProblem({ ...configured, LLM_MODEL: "" })).toContain("LLM_MODEL");
+    // Setup mode needs none of it yet.
+    expect(configurationProblem({ SANDCHEST_APP_URL: "https://sandchest.example.com" })).toBeUndefined();
+  });
+
+  test("the health check fails while a setting is bad, and says nothing about which", async () => {
+    const saved = { ...process.env };
+    try {
+      Object.assign(process.env, configured, { SANDCHEST_ADMIN_TOKEN: "too-short-admin-token" });
+      resetConfig();
+      const response = await healthGet();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false });
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+      resetConfig();
+    }
+  });
+
   test("a blank value is unset, as Docker Compose passes settings left empty in .env", () => {
     const settings = config({
       DATABASE_URL: "postgres://sandchest@postgres/sandchest",
