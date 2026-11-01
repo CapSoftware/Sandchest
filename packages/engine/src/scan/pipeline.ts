@@ -280,7 +280,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     [, validateMs] = await time(async () => {
       try {
         // Always-on: prove each finding's path through the index, no app boot.
-        await proveFindings(indexer, findings, { signal, onProgress: (message) => emit({ type: "progress", message }) });
+        await proveFindings(indexer, findings, { routes, signal, onProgress: (message) => emit({ type: "progress", message }) });
         // Stronger tier, when a runtime is supplied: reproduce live, upgrading to `verified`.
         if (options.runtime && options.validate) {
           await validateFindings(options.runtime, findings, {

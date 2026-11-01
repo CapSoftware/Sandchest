@@ -22,10 +22,54 @@
  */
 import type { IndexerClient } from "../indexer/client";
 import { normalizePath } from "./gate";
-import type { Finding, Validation } from "./schema";
-import type { SinkInfo } from "./tools";
+import type { Category, Finding, Validation } from "./schema";
+import type { RouteInfo, SinkInfo } from "./tools";
 
 const METHOD = "code-path";
+
+/**
+ * Classes whose exploitability turns on *reachability of the entry point*, not
+ * on data flowing to a sink — a public endpoint missing a rate limit, an
+ * authorisation check, an ownership check. For these the "sink" is where a
+ * control is *absent*, so no call path to it exists by design; confirming the
+ * entry point is a real, index-known, attacker-reachable handler is the
+ * relevant corroboration (the missing control remains the skeptic's ruling).
+ * Injection classes are deliberately excluded — their dataflow *is* the
+ * question, and must be traced.
+ */
+const REACHABLE_SURFACE = new Set<Category>([
+  "broken_access_control",
+  "privilege_escalation",
+  "mass_assignment",
+  "broken_authentication",
+  "resource_abuse",
+  "business_logic",
+  "denial_of_service",
+  "csrf",
+  "open_redirect",
+  "sensitive_data_exposure",
+]);
+
+/** The index's known entry points, for confirming a finding starts at a real reachable handler. */
+export interface EntryIndex {
+  /** `file\0symbol` for every resolved route/server-action handler. */
+  handlers: Set<string>;
+  /** `METHOD /path` for every HTTP route. */
+  routes: Set<string>;
+}
+
+export function buildEntryIndex(routes: RouteInfo[]): EntryIndex {
+  const handlers = new Set<string>();
+  const routeKeys = new Set<string>();
+  for (const r of routes) {
+    routeKeys.add(`${r.method.toUpperCase()} ${r.path}`);
+    for (const h of r.handlers) {
+      const [sym, loc] = h.split(" @ ");
+      if (sym && loc) handlers.add(`${loc.slice(0, loc.lastIndexOf(":"))}\u0000${sym}`);
+    }
+  }
+  return { handlers, routes: routeKeys };
+}
 
 interface LocateResult {
   locations: Array<{ file: string; line: number; exists: boolean; symbol?: string | null }>;
@@ -43,7 +87,7 @@ const inconclusive = (detail: string): Validation => ({ status: "inconclusive", 
 /** A `METHOD /path` route embedded in an entry-point description, which `trace` resolves to a handler. */
 function routeOf(description: string): string | null {
   const m = description.match(/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)/i);
-  return m ? `${m[1]!.toUpperCase()} ${m[2]!.replace(/[,.;]+$/, "")}` : null;
+  return m ? `${m[1]!.toUpperCase()} ${m[2]!.replace(/\?.*$/, "").replace(/[,.;]+$/, "")}` : null;
 }
 
 function dedupe(values: string[]): string[] {
@@ -51,7 +95,7 @@ function dedupe(values: string[]): string[] {
 }
 
 /** Proves one finding's path through the index. Pure read-only index calls. */
-export async function proveFinding(indexer: IndexerClient, finding: Finding, signal?: AbortSignal): Promise<Validation> {
+export async function proveFinding(indexer: IndexerClient, finding: Finding, entries?: EntryIndex, signal?: AbortSignal): Promise<Validation> {
   if (finding.attackPath.length === 0) return inconclusive("the finding cites no code path");
   const cited = finding.attackPath.map((step) => ({ file: normalizePath(step.file), line: step.line }));
 
@@ -84,10 +128,23 @@ export async function proveFinding(indexer: IndexerClient, finding: Finding, sig
     return confirmed("the index confirms a request handler reaches the cited sink");
   }
 
+  // Missing-control classes: the bug is the *absence* of a check on a reachable
+  // endpoint, so there is no path to trace. Confirm instead that the finding
+  // starts at a real, index-known, attacker-reachable handler.
+  if (entries && REACHABLE_SURFACE.has(finding.category) && (finding.attacker === "unauthenticated" || finding.attacker === "any_user")) {
+    const route = routeOf(finding.entryPoint.description);
+    const handlerKey = entry.symbol ? `${entry.file}\u0000${entry.symbol}` : null;
+    if ((route && entries.routes.has(route)) || (handlerKey && entries.handlers.has(handlerKey))) {
+      return { status: "path_confirmed", method: "entry-reachable", detail: "the entry point is a request handler the index lists as attacker-reachable; the missing control is in it" };
+    }
+  }
+
   return inconclusive("the index could not confirm the path on its own; the link may be dynamic or framework-invoked");
 }
 
 export interface ProveOptions {
+  /** The scan's route inventory, so missing-control findings can confirm a real reachable entry point. */
+  routes?: RouteInfo[];
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
 }
@@ -97,10 +154,11 @@ export interface ProveOptions {
  * they run together. A finding whose proof errors is left untouched.
  */
 export async function proveFindings(indexer: IndexerClient, findings: Finding[], options: ProveOptions = {}): Promise<void> {
+  const entries = options.routes ? buildEntryIndex(options.routes) : undefined;
   await Promise.all(
     findings.map(async (finding) => {
       try {
-        finding.validation = await proveFinding(indexer, finding, options.signal);
+        finding.validation = await proveFinding(indexer, finding, entries, options.signal);
         if (finding.validation.status === "path_confirmed") options.onProgress?.(`Confirmed the path for ${finding.title}.`);
       } catch {
         // Best-effort: proof must never drop a finding or fail the scan.

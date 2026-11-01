@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { IndexerClient } from "../src/indexer/client";
 import { proveFinding } from "../src/scan";
+import { buildEntryIndex } from "../src/scan/prove";
 import type { Finding } from "../src/scan";
 
 /** A fake indexer scripted per tool. Unlisted tools return empty. */
@@ -86,6 +87,32 @@ describe("proveFinding", () => {
       sinks: () => ({ sinks: [{ at: "db.ts:42", reachable: false, kind: "sql", in: "q", call: "query", input: "built", code: "" }] }),
     });
     expect((await proveFinding(indexer, findingWith([{ file: "db.ts", line: 40 }, { file: "db.ts", line: 42 }]))).status).toBe("inconclusive");
+  });
+
+  test("confirms a missing-control finding by entry-point reachability (no path to trace)", async () => {
+    // A rate-limit finding: entry is a real route, the "sink" is where a limit is absent → no trace path.
+    const indexer = indexerOf({ locate: existing(["GET", "checkRateLimit"]), trace: () => ({ paths: [] }), sinks: () => ({ sinks: [] }) });
+    const routes = [{ method: "GET", path: "/api/tools/loom-download", at: "a.ts:10", handlers: ["GET @ a.ts:10"], chain: [], framework: "nextjs" }];
+    const f = findingWith([{ file: "a.ts", line: 10 }, { file: "lib/rate-limit.ts", line: 5 }]);
+    f.category = "resource_abuse"; f.attacker = "unauthenticated"; f.entryPoint.description = "GET /api/tools/loom-download?id=x — public";
+    const v = await proveFinding(indexer, f, buildEntryIndex(routes as never));
+    expect(v.status).toBe("path_confirmed");
+    expect(v.method).toBe("entry-reachable");
+  });
+
+  test("entry-reachability does NOT confirm injection classes (their dataflow is the question)", async () => {
+    const indexer = indexerOf({ locate: existing(["GET", "query"]), trace: () => ({ paths: [] }), sinks: () => ({ sinks: [] }) });
+    const routes = [{ method: "GET", path: "/api/x", at: "a.ts:10", handlers: ["GET @ a.ts:10"], chain: [], framework: "nextjs" }];
+    const f = findingWith([{ file: "a.ts", line: 10 }, { file: "a.ts", line: 20 }]);
+    f.category = "sql_injection"; f.attacker = "unauthenticated"; f.entryPoint.description = "GET /api/x";
+    expect((await proveFinding(indexer, f, buildEntryIndex(routes as never))).status).toBe("inconclusive");
+  });
+
+  test("entry-reachability does NOT confirm an entry the index does not know (anti-hallucination)", async () => {
+    const indexer = indexerOf({ locate: existing(["GET", "x"]), trace: () => ({ paths: [] }), sinks: () => ({ sinks: [] }) });
+    const f = findingWith([{ file: "a.ts", line: 10 }, { file: "b.ts", line: 5 }]);
+    f.category = "resource_abuse"; f.attacker = "unauthenticated"; f.entryPoint.description = "GET /api/not-a-real-route";
+    expect((await proveFinding(indexer, f, buildEntryIndex([]))).status).toBe("inconclusive");
   });
 
   test("inconclusive (never dropped) when the cited code has moved", async () => {
