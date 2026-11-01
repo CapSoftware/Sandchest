@@ -14,6 +14,17 @@ export interface LlmConfig {
    * it (tests) falls back to `model` for every role.
    */
   models?: Readonly<Record<Role, string>>;
+  /**
+   * Sampling knobs, both optional and unset by default (the endpoint's own
+   * behaviour). Measured finding: pinning `temperature: 0` and a `seed` did NOT
+   * make scans reproducible — two identical NodeGoat runs still shared only
+   * ~17% of findings — because the variance is structural (parallel multi-turn
+   * agents on a non-deterministic endpoint), not sampling. So we do not force a
+   * low temperature (which would only narrow exploration); operators can still
+   * set `LLM_TEMPERATURE`/`LLM_SEED` if their endpoint honours them.
+   */
+  temperature?: number;
+  seed?: number;
 }
 
 /**
@@ -39,6 +50,8 @@ const EnvSchema = z.object({
   LLM_MODEL_HUNT: optionalModel,
   LLM_MODEL_SKEPTIC: optionalModel,
   LLM_MODEL_STRUCTURE: optionalModel,
+  LLM_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
+  LLM_SEED: z.coerce.number().int().optional(),
 });
 
 /**
@@ -64,5 +77,7 @@ export function loadLlmConfig(env: Record<string, string | undefined> = process.
     apiKey: parsed.data.LLM_API_KEY,
     model,
     models,
+    ...(parsed.data.LLM_TEMPERATURE !== undefined && { temperature: parsed.data.LLM_TEMPERATURE }),
+    ...(parsed.data.LLM_SEED !== undefined && { seed: parsed.data.LLM_SEED }),
   };
 }

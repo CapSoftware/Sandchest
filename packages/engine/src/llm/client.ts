@@ -125,7 +125,11 @@ function buildBody(config: LlmConfig, request: ChatRequest): string {
   }
   if (request.responseFormat) body.response_format = request.responseFormat;
   if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens;
-  if (request.temperature !== undefined) body.temperature = request.temperature;
+  // Sampling is sent only when configured; unset means the endpoint's own default (see LlmConfig).
+  const temperature = request.temperature ?? config.temperature;
+  if (temperature !== undefined) body.temperature = temperature;
+  const seed = request.seed ?? config.seed;
+  if (seed !== undefined) body.seed = seed;
 
   const effort = request.reasoningEffort === undefined ? ROLE_REASONING[request.role] : request.reasoningEffort;
   if (effort) body.reasoning_effort = effort;

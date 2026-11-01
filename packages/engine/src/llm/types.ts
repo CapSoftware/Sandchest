@@ -55,6 +55,7 @@ export interface ChatRequest {
   responseFormat?: JsonSchemaFormat;
   maxTokens?: number;
   temperature?: number;
+  seed?: number;
   /** Overrides the role's reasoning effort. `null` turns reasoning off. */
   reasoningEffort?: ReasoningEffort | null;
   signal?: AbortSignal;

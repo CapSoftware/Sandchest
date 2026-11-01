@@ -25,6 +25,15 @@ describe("chat", () => {
     expect(sent!.body).not.toHaveProperty("reasoning_effort");
   });
 
+  test("sends no sampling params by default; a request can set temperature", async () => {
+    endpoint.respond(() => sse(textReply("ok")), () => sse(textReply("ok")));
+    await endpoint.client().chat(ask);
+    expect(endpoint.requests[0]!.body).not.toHaveProperty("temperature");
+    expect(endpoint.requests[0]!.body).not.toHaveProperty("seed");
+    await endpoint.client().chat({ ...ask, temperature: 0.9 });
+    expect(endpoint.requests[1]!.body).toMatchObject({ temperature: 0.9 });
+  });
+
   test("reasons for hunt and skeptic unless overridden", async () => {
     endpoint.respond(...Array.from({ length: 3 }, () => () => sse(textReply("ok"))));
     const client = endpoint.client();

@@ -41,6 +41,15 @@ describe("loadLlmConfig", () => {
     expect(config).toEqual({ baseUrl: "https://llm.example.com/v1", apiKey: "key", model: "model", models: { recon: "model", hunt: "model", skeptic: "model", structure: "model" } });
   });
 
+  test("sampling knobs are unset by default (endpoint behaviour) and read from the env when given", () => {
+    const base = { LLM_BASE_URL: "https://llm.example.com/v1", LLM_API_KEY: "key", LLM_MODEL: "model" };
+    expect(loadLlmConfig(base).temperature).toBeUndefined();
+    expect(loadLlmConfig(base).seed).toBeUndefined();
+    const tuned = loadLlmConfig({ ...base, LLM_TEMPERATURE: "0.7", LLM_SEED: "42" });
+    expect(tuned.temperature).toBe(0.7);
+    expect(tuned.seed).toBe(42);
+  });
+
   test("per-role overrides fall back to the default model", () => {
     const config = loadLlmConfig({ LLM_BASE_URL: "https://llm.example.com/v1", LLM_API_KEY: "key", LLM_MODEL: "strong", LLM_MODEL_RECON: "cheap", LLM_MODEL_STRUCTURE: "cheap" });
     expect(config.models).toEqual({ recon: "cheap", hunt: "strong", skeptic: "strong", structure: "cheap" });
