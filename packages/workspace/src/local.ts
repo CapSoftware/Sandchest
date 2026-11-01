@@ -2,14 +2,18 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { chmod, writeFile } from "node:fs/promises";
 import {
   WorkspaceError,
   type CloneOptions,
   type ExecOptions,
   type ExecResult,
+  type IndexerBinary,
   type RepoRef,
   type Workspace,
 } from "./index";
+import { spawnIndexer, type IndexerHandle } from "./indexer";
 import { BASE_ENV, cloneCommand, DEFAULT_CLONE_TIMEOUT_MS, isInside, resolveInside } from "./shared";
 
 /** Largest file `readFile` will load. */
@@ -29,6 +33,7 @@ export class LocalWorkspace implements Workspace {
   readonly root: string;
   private readonly env: Record<string, string>;
   private readonly running = new Set<ChildProcess>();
+  private indexer: { close(): Promise<void> } | undefined;
   private destroyed = false;
 
   private constructor(private readonly dir: string) {
@@ -67,8 +72,30 @@ export class LocalWorkspace implements Workspace {
     return readFile(real, "utf8");
   }
 
+  async startIndexer(binary: IndexerBinary): Promise<IndexerHandle> {
+    this.assertUsable();
+    const path = "path" in binary ? binary.path : await this.download(binary);
+    const daemon = await spawnIndexer(path, this.root);
+    this.indexer = daemon;
+    return { url: daemon.url, token: daemon.token };
+  }
+
+  /** Fetches a release binary into the workspace and checks its digest before it is ever executed. */
+  private async download(binary: { url: string; sha256: string }): Promise<string> {
+    const response = await fetch(binary.url, { signal: AbortSignal.timeout(60_000) });
+    if (!response.ok) throw new WorkspaceError(`Indexer download failed: ${response.status}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== binary.sha256) throw new WorkspaceError("Indexer download does not match its checksum");
+    const path = join(this.dir, "sandchest-index");
+    await writeFile(path, bytes);
+    await chmod(path, 0o755);
+    return path;
+  }
+
   async destroy(): Promise<void> {
     this.destroyed = true;
+    await this.indexer?.close().catch(() => {});
     for (const child of this.running) killGroup(child);
     await rm(this.dir, { recursive: true, force: true, maxRetries: 3 });
   }

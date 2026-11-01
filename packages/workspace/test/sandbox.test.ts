@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 /**
  * Runs against a real Vercel Sandbox. Skipped unless credentials are present:
  *
@@ -6,6 +7,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { WorkspaceError } from "../src";
 import { SandboxWorkspace } from "../src/sandbox";
+
+/** The static Linux build: `cargo zigbuild --release -p sandchest-indexer --target x86_64-unknown-linux-musl`. */
+const LINUX_INDEXER = new URL("../../../target/x86_64-unknown-linux-musl/release/sandchest-index", import.meta.url).pathname;
 
 const hasCredentials = Boolean(process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL_TOKEN);
 const BENCHMARK = "https://github.com/juice-shop/juice-shop.git";
@@ -37,6 +41,35 @@ describe.skipIf(!hasCredentials)("SandboxWorkspace", () => {
     TIMEOUT,
   );
 
+  test.skipIf(!existsSync(LINUX_INDEXER))(
+    "runs the indexer in the microVM and answers tool calls over HTTPS",
+    async () => {
+      let started = performance.now();
+      const { url, token } = await workspace.startIndexer({ path: LINUX_INDEXER });
+      console.log(`indexer upload + start + ready: ${Math.round(performance.now() - started)}ms`);
+
+      const call = async (tool: string, body: object) => {
+        const response = await fetch(`${url}/${tool}`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+        expect(response.status).toBe(200);
+        return response.json() as Promise<Record<string, unknown>>;
+      };
+      const overview = await call("overview", {});
+      expect(overview.sourceFiles).toBeGreaterThan(100);
+
+      const timings: number[] = [];
+      for (let i = 0; i < 20; i++) {
+        started = performance.now();
+        await call("read_file", { path: "routes/login.ts", startLine: 1, endLine: 40 });
+        timings.push(performance.now() - started);
+      }
+      timings.sort((a, b) => a - b);
+      console.log(`read_file over HTTPS: p50 ${Math.round(timings[10]!)}ms, p90 ${Math.round(timings[18]!)}ms`);
+
+      const unauthorised = await fetch(`${url}/overview`, { method: "POST", body: "{}" });
+      expect(unauthorised.status).toBe(401);
+    },
+    TIMEOUT,
+  );
   test("refuses paths outside the checkout and reports missing files", async () => {
     expect(workspace.readFile("../../etc/passwd")).rejects.toThrow(WorkspaceError);
     expect(workspace.readFile("does-not-exist.txt")).rejects.toThrow(/not found/);
@@ -70,4 +103,5 @@ describe.skipIf(!hasCredentials)("SandboxWorkspace", () => {
     },
     TIMEOUT,
   );
+
 });

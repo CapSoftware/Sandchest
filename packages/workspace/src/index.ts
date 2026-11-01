@@ -1,3 +1,5 @@
+import type { IndexerHandle } from "./indexer";
+
 /**
  * A disposable environment holding one shallow checkout for the duration of
  * one scan. Created, used and destroyed by a single scan; never shared.
@@ -11,9 +13,21 @@ export interface Workspace extends AsyncDisposable {
   exec(cmd: string[], options?: ExecOptions): Promise<ExecResult>;
   /** Reads a UTF-8 file by checkout-relative path. Refuses paths that resolve outside the checkout. */
   readFile(path: string): Promise<string>;
+  /**
+   * Starts the indexer daemon on the checkout and resolves once it answers.
+   * `destroy()` stops it.
+   */
+  startIndexer(binary: IndexerBinary): Promise<IndexerHandle>;
   /** Stops anything still running and deletes everything. Idempotent. */
   destroy(): Promise<void>;
 }
+
+/**
+ * Where the indexer comes from: a binary on this machine built for the
+ * workspace's platform, or a release download verified by checksum (fetched
+ * inside the workspace, so it never passes through the caller).
+ */
+export type IndexerBinary = { path: string } | { url: string; sha256: string };
 
 export interface RepoRef {
   /** `https://` clone URL. `file://` is accepted for local evals and tests. */
@@ -44,6 +58,8 @@ export interface ExecResult {
   timedOut: boolean;
   durationMs: number;
 }
+
+export { INDEXER_PORT, type IndexerHandle } from "./indexer";
 
 export class WorkspaceError extends Error {
   override readonly name = "WorkspaceError";

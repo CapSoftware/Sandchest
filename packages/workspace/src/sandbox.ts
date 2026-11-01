@@ -1,12 +1,15 @@
 import { Sandbox } from "@vercel/sandbox";
+import { readFile } from "node:fs/promises";
 import {
   WorkspaceError,
   type CloneOptions,
   type ExecOptions,
   type ExecResult,
+  type IndexerBinary,
   type RepoRef,
   type Workspace,
 } from "./index";
+import { INDEXER_PORT, type IndexerHandle } from "./indexer";
 import { BASE_ENV, cloneCommand, DEFAULT_CLONE_TIMEOUT_MS, resolveInside } from "./shared";
 
 export interface SandboxWorkspaceOptions {
@@ -21,6 +24,30 @@ export interface SandboxWorkspaceOptions {
 
 const SIGKILL_EXIT = 137;
 
+// Arguments are positional, never interpolated into the script.
+const DOWNLOAD_SCRIPT = `set -e
+mkdir -p "$(dirname "$2")"
+curl -fsSL --retry 3 "$1" -o "$2"
+echo "$3  $2" | sha256sum -c - >/dev/null
+chmod 755 "$2"`;
+
+/** Polls `/health` until the daemon answers. */
+async function waitForHealth(url: string, token: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "no response";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${url}/health`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) });
+      if (response.ok) return;
+      last = `HTTP ${response.status}`;
+    } catch (error) {
+      last = (error as Error).message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new WorkspaceError(`Indexer did not become ready: ${last}`);
+}
+
 /** A cloud microVM per scan. Non-persistent: nothing is snapshotted, and `destroy()` deletes it. */
 export class SandboxWorkspace implements Workspace {
   readonly root: string;
@@ -33,6 +60,7 @@ export class SandboxWorkspace implements Workspace {
   static async create(options: SandboxWorkspaceOptions = {}): Promise<SandboxWorkspace> {
     const sandbox = await Sandbox.create({
       resources: { vcpus: options.vcpus ?? 4 },
+      ports: [INDEXER_PORT],
       timeout: options.timeoutMs ?? 30 * 60_000,
       persistent: false,
       signal: options.signal,
@@ -59,6 +87,33 @@ export class SandboxWorkspace implements Workspace {
     const buffer = await this.sandbox.readFileToBuffer({ path: resolveInside(this.root, path) });
     if (!buffer) throw new WorkspaceError(`File not found: ${path}`);
     return buffer.toString("utf8");
+  }
+
+  /**
+   * Puts the indexer in the microVM, runs it detached on the exposed port
+   * with a random token, and waits until it answers over HTTPS.
+   */
+  async startIndexer(binary: IndexerBinary, options: { readyTimeoutMs?: number } = {}): Promise<IndexerHandle> {
+    this.assertUsable();
+    const path = `${this.sandbox.cwd}/bin/sandchest-index`;
+    if ("path" in binary) {
+      await this.sandbox.writeFiles([{ path, content: await readFile(binary.path), mode: 0o755 }]);
+    } else {
+      // Downloaded inside the VM (fast, in-region) and verified before it runs.
+      const result = await this.run(["sh", "-c", DOWNLOAD_SCRIPT, "download", binary.url, path, binary.sha256], this.sandbox.cwd, { timeoutMs: 120_000 });
+      if (result.exitCode !== 0) throw new WorkspaceError(`Indexer download failed: ${result.stderr.trim()}`);
+    }
+
+    const token = crypto.randomUUID();
+    await this.sandbox.runCommand({
+      cmd: path,
+      args: ["serve", this.root, "--host", "0.0.0.0", "--port", String(INDEXER_PORT)],
+      env: { SANDCHEST_INDEX_TOKEN: token },
+      detached: true,
+    });
+    const url = this.sandbox.domain(INDEXER_PORT);
+    await waitForHealth(url, token, options.readyTimeoutMs ?? 30_000);
+    return { url, token };
   }
 
   destroy(): Promise<void> {

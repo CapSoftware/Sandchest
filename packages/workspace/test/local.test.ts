@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -151,5 +152,31 @@ describe("destroy", () => {
     await Bun.sleep(50);
     await workspace.destroy();
     expect((await running).exitCode).toBe(137);
+  });
+});
+
+describe("indexer", () => {
+  const binary = new URL("../../../target/release/sandchest-index", import.meta.url).pathname;
+
+  test.skipIf(!existsSync(binary))("starts on the checkout, answers, and stops with the workspace", async () => {
+    const workspace = await LocalWorkspace.create();
+    await Bun.write(`${workspace.root}/app.js`, "app.get('/x', (req, res) => res.send(req.query.q))\n");
+    const { url, token } = await workspace.startIndexer({ path: binary });
+    const response = await fetch(`${url}/routes`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: "{}" });
+    expect(((await response.json()) as { total: number }).total).toBe(1);
+
+    await workspace.destroy();
+    await expect(fetch(`${url}/health`, { headers: { authorization: `Bearer ${token}` } })).rejects.toThrow();
+  });
+
+  test("refuses a download whose checksum does not match", async () => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("not the indexer") });
+    const workspace = await LocalWorkspace.create();
+    try {
+      await expect(workspace.startIndexer({ url: `http://localhost:${server.port}/bin`, sha256: "0".repeat(64) })).rejects.toThrow("checksum");
+    } finally {
+      await workspace.destroy();
+      server.stop(true);
+    }
   });
 });
