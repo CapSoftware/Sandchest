@@ -68,9 +68,11 @@ export interface Outcomes {
   falsePositive: number;
   dismissedOther: number;
   promptCopied: number;
-  /** Dismissed as false positive, of findings shown. */
+  /** Findings someone (or a fix check) has ruled on: fixed or dismissed. Open findings are not yet judged. */
+  reviewed: number;
+  /** Dismissed as false positive, of findings reviewed. */
   falsePositiveRate: Rate;
-  /** 1 - false positive rate: production precision. */
+  /** 1 - false positive rate: production precision, over reviewed findings only. */
   precision: Rate;
   fixRate: Rate;
   /** Of fixed findings, the share a fix check caught. */
@@ -86,15 +88,19 @@ export function outcomes(tallies: FindingTally[]): Outcomes {
   const fixedManual = sum(shown, (row) => row.fixedManual);
   const falsePositive = sum(shown, (row) => row.falsePositive);
   const promptCopied = sum(shown, (row) => row.promptCopied);
-  const falsePositiveRate = ratio(falsePositive, total);
+  const dismissedOther = sum(shown, (row) => row.dismissedOther);
+  // Open findings have not been judged either way, so they count neither for nor against precision.
+  const reviewed = fixedAuto + fixedManual + falsePositive + dismissedOther;
+  const falsePositiveRate = ratio(falsePositive, reviewed);
   return {
     shown: total,
     open: sum(shown, (row) => row.open),
     fixedAuto,
     fixedManual,
     falsePositive,
-    dismissedOther: sum(shown, (row) => row.dismissedOther),
+    dismissedOther,
     promptCopied,
+    reviewed,
     falsePositiveRate,
     precision: falsePositiveRate === null ? null : 1 - falsePositiveRate,
     fixRate: ratio(fixedAuto + fixedManual, total),

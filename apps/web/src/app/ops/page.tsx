@@ -51,7 +51,9 @@ export default async function QualityPage({ searchParams }: Props) {
         <div className="stat">
           <dt>Production precision</dt>
           <dd>{percent(result.precision)}</dd>
-          <dd className="stat-note">{count(result.falsePositive)} dismissed as false positives</dd>
+          <dd className="stat-note">
+            {count(result.falsePositive)} false positives in {count(result.reviewed)} reviewed
+          </dd>
         </div>
         <div className="stat">
           <dt>Fixed</dt>
@@ -110,9 +112,7 @@ export default async function QualityPage({ searchParams }: Props) {
             </thead>
             <tbody>
               {SEVERITIES.map((severity) => {
-                const shown = cell(severity).filter((row) => row.confidence !== "low");
-                const total = shown.reduce((sum, row) => sum + row.total, 0);
-                const share = (pick: (row: (typeof shown)[number]) => number) => percent(ratio(shown.reduce((sum, row) => sum + pick(row), 0), total));
+                const rates = outcomes(cell(severity));
                 return (
                   <tr key={severity}>
                     <th scope="row">
@@ -121,16 +121,18 @@ export default async function QualityPage({ searchParams }: Props) {
                     {CONFIDENCES.map((confidence) => (
                       <td key={confidence}>{count(cell(severity, confidence).reduce((sum, row) => sum + row.total, 0))}</td>
                     ))}
-                    <td>{share((row) => row.fixedAuto + row.fixedManual)}</td>
-                    <td>{share((row) => row.falsePositive)}</td>
-                    <td>{share((row) => row.promptCopied)}</td>
+                    <td>{percent(rates.fixRate)}</td>
+                    <td>{percent(rates.falsePositiveRate)}</td>
+                    <td>{percent(rates.promptCopyRate)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-        <p className="admin-footnote">Rates count findings people are shown: high and medium confidence. Each finding is counted where it stands now.</p>
+        <p className="admin-footnote">
+          Rates count findings people are shown: high and medium confidence, each where it stands now. False positives are a share of reviewed findings (fixed or dismissed); open ones have not been judged.
+        </p>
       </section>
 
       <section className="block admin-block" aria-labelledby="scans-title">

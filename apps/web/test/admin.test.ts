@@ -126,13 +126,23 @@ describe("admin arithmetic", () => {
       tally({ severity: "low", confidence: "medium", total: 10, open: 10, promptCopied: 1 }),
       tally({ severity: "critical", confidence: "low", total: 100, falsePositive: 100 }),
     ]);
-    expect(result).toMatchObject({ shown: 20, open: 14, fixedAuto: 2, fixedManual: 1, falsePositive: 2, dismissedOther: 1, promptCopied: 6 });
-    expect(result.falsePositiveRate).toBe(0.1);
-    expect(result.precision).toBe(0.9);
+    expect(result).toMatchObject({ shown: 20, open: 14, fixedAuto: 2, fixedManual: 1, falsePositive: 2, dismissedOther: 1, promptCopied: 6, reviewed: 6 });
+    // Precision is judged on reviewed findings: 2 false positives in 6 fixed or dismissed.
+    expect(result.falsePositiveRate).toBe(2 / 6);
+    expect(result.precision).toBe(1 - 2 / 6);
     expect(result.fixRate).toBe(0.15);
     expect(result.autoFixShare).toBe(2 / 3);
     expect(result.promptCopyRate).toBe(0.3);
-    expect(outcomes([])).toMatchObject({ shown: 0, precision: null, fixRate: null, autoFixShare: null, promptCopyRate: null });
+    expect(outcomes([])).toMatchObject({ shown: 0, reviewed: 0, precision: null, fixRate: null, autoFixShare: null, promptCopyRate: null });
+  });
+
+  test("open findings count neither for nor against precision", () => {
+    const reviewed = tally({ severity: "high", confidence: "high", total: 4, fixedManual: 3, falsePositive: 1 });
+    const withOpen = outcomes([reviewed, tally({ severity: "medium", confidence: "medium", total: 96, open: 96 })]);
+    expect(withOpen.precision).toBe(0.75);
+    expect(withOpen.precision).toBe(outcomes([reviewed]).precision);
+    // Nothing reviewed yet: no precision to show, rather than 100%.
+    expect(outcomes([tally({ severity: "high", confidence: "high", total: 50, open: 50 })]).precision).toBeNull();
   });
 
   test("cost per credit: from charged scans alone, and all in", () => {
