@@ -4,10 +4,11 @@
  * browser snippet. No real DSN is ever used.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { envelope, exceptionValues, PAGE_TEMPLATES, pageTemplate, parseDsn, parseStack, safeMessage, scrub, WITHHELD } from "@/lib/sentry";
+import { createHmac } from "node:crypto";
+import { envelope, errorType, exceptionValues, PAGE_TEMPLATES, pageTemplate, parseDsn, parseStack, SAFE_MESSAGES, safeMessage, scrub, WITHHELD } from "@/lib/sentry";
 import { browserReporter } from "@/lib/sentry-browser";
-import { config } from "@/server/config";
-import { captureException, resetSentry, sentryEnabled } from "@/server/sentry";
+import { config, resetConfig } from "@/server/config";
+import { captureException, methodTag, resetSentry, sentryEnabled, webhookEventTag } from "@/server/sentry";
 
 /** Everything that must never reach Sentry, planted in one error. */
 const SECRETS = {
@@ -94,7 +95,7 @@ describe("scrubbing", () => {
     ])
       expect(safeMessage(message)).toBe(WITHHELD);
     // Shapes that carry no customer data still help.
-    expect(safeMessage("Cannot read properties of undefined (reading 'id')")).toBe("Cannot read properties of undefined (reading 'id')");
+    expect(safeMessage("Cannot read properties of undefined (reading 'id')")).toBe("Cannot read properties of undefined (reading <property>)");
     expect(safeMessage('relation "scan_metrics" does not exist')).toBe('relation "scan_metrics" does not exist');
     expect(safeMessage("Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found")).toBe("Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found");
     // A safe prefix with something after it keeps only the prefix.
@@ -120,7 +121,11 @@ describe("scrubbing", () => {
     ];
     for (const [message, sent] of cases) expect(safeMessage(message)).toBe(sent);
     // Identifier slots take identifier characters only: anything else is withheld.
-    expect(safeMessage("Cannot read properties of undefined (reading 'jane.doe@example.com')")).toBe(WITHHELD);
+    // Code can name a property after data: the name is replaced, whatever it is.
+    expect(safeMessage("Cannot read properties of undefined (reading 'AcmeCorp')")).toBe("Cannot read properties of undefined (reading <property>)");
+    expect(safeMessage("Cannot read properties of null (reading 'jane.doe@example.com')")).toBe("Cannot read properties of null (reading <property>)");
+    expect(safeMessage("Cannot set property 'AcmeCorp' of undefined")).toBe("Cannot set property <property> of undefined");
+    expect(safeMessage("acmeCustomer.render is not a function")).toBe("<expression> is not a function");
     expect(safeMessage("jane.doe@example.com is not a function")).toBe(WITHHELD);
     expect(safeMessage('relation "acme customers; drop" does not exist')).toBe(WITHHELD);
   });
@@ -175,8 +180,8 @@ describe("scrubbing", () => {
       "app:///.next/server/chunks/ssr/a1b2c3d4e5f6a7b8._.js",
       "app:///.next/server/chunks/ssr/page.js",
     ]);
-    expect(frames[2]!.function).toBeUndefined();
-    expect(frames.at(-1)).toEqual({ filename: "app:///.next/server/chunks/ssr/page.js", function: "handler", lineno: 12, colno: 34, in_app: true });
+    // Where, never what: no function name, even when the frame has one ("handler").
+    expect(frames.at(-1)).toEqual({ filename: "app:///.next/server/chunks/ssr/page.js", lineno: 12, colno: 34, in_app: true });
     expect(frames[1]!.in_app).toBe(false);
     // Other server files (a path with someone's name in it) are dropped, not scrubbed.
     expect(parseStack("Error\n    at f (/home/jane.doe/acme/tool.js:1:1)\n    at g (/var/task/apps/web/.next/server/a.js:2:2)").map((frame) => frame.filename)).toEqual(["app:///.next/server/a.js"]);
@@ -225,6 +230,65 @@ function parse(body: string) {
   const [header, item, event] = body.trim().split("\n").map((line) => JSON.parse(line));
   return { header, item, event };
 }
+
+describe("names", () => {
+  test("error types are known classes or plain Error", () => {
+    for (const name of ["TypeError", "GitHubError", "LlmQuotaError", "PostgresError", "AbortError"]) expect(errorType(name)).toBe(name);
+    for (const name of ["CustomerAcme_123", "jane.doe@example.com", "", undefined, 42]) expect(errorType(name)).toBe("Error");
+    const error = new Error("x");
+    error.name = "CustomerAcme_123";
+    expect(exceptionValues(error, { type: "t", handled: false })[0]!.type).toBe("Error");
+  });
+
+  test("frames carry no function names", () => {
+    const frames = parseStack("Error\n    at jane.doe@example.com (/srv/app/.next/server/a.js:1:2)\n    at AcmeCorp.render (/srv/app/.next/server/b.js:3:4)");
+    expect(JSON.stringify(frames)).not.toMatch(/jane|Acme/);
+    expect(frames).toEqual([
+      { filename: "app:///.next/server/b.js", lineno: 3, colno: 4, in_app: true },
+      { filename: "app:///.next/server/a.js", lineno: 1, colno: 2, in_app: true },
+    ]);
+  });
+
+  test("webhook events and request methods are named only when known", () => {
+    expect(webhookEventTag("pull_request")).toBe("pull_request");
+    expect(webhookEventTag("installation_repositories")).toBe("installation_repositories");
+    for (const event of ["CustomerAcme_123", "", null, undefined]) expect(webhookEventTag(event)).toBe("unknown");
+    expect(methodTag("POST")).toBe("POST");
+    expect(methodTag("ACME_CUSTOMER")).toBe("other");
+  });
+
+  test("every safe message shape, fed hostile values, sends only static text or our own schema", () => {
+    // One example per shape. "Acme" marks a value that must not survive; schema names, our SQL and scan ids may.
+    const examples: Array<[string, string]> = [
+      ["Cannot read properties of undefined (reading 'AcmeCorp')", "Cannot read properties of undefined (reading <property>)"],
+      ["Cannot set property 'AcmeCorp' of null", "Cannot set property <property> of null"],
+      ["AcmeCorp.render is not a function", "<expression> is not a function"],
+      ["undefined is not an object (evaluating 'AcmeCorp.id')", "undefined is not an object"],
+      ["Maximum call stack size exceeded", "Maximum call stack size exceeded"],
+      ["Unexpected end of JSON input", "Unexpected end of JSON input"],
+      ["Minified React error #31; visit https://react.dev/errors/31?args[]=AcmeCorp", "Minified React error #31"],
+      ["Hydration failed because the server rendered AcmeCorp", "Hydration failed"],
+      ["Failed to fetch", "Failed to fetch"],
+      ["connect ECONNREFUSED acme-db.example.com:5432", "connect ECONNREFUSED"],
+      ["getaddrinfo ENOTFOUND acme-db.example.com", "getaddrinfo ENOTFOUND"],
+      ["Failed query: select id from scans where org_id = $1\nparams: AcmeCorp", "Failed query: select id from scans where org_id = $1"],
+      ['duplicate key value violates unique constraint "scans_pr_head_unique"', 'duplicate key value violates unique constraint "scans_pr_head_unique"'],
+      ['relation "scan_metrics" does not exist', 'relation "scan_metrics" does not exist'],
+      ['role "acme_admin" does not exist', "role does not exist"],
+      ['password authentication failed for user "acme"', "password authentication failed"],
+      ['too many connections for role "acme"', "too many connections for role"],
+      ["deadlock detected", "deadlock detected"],
+      ["Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found", "Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found"],
+      ["Invalid server configuration:\n  ACME_SECRET: bad", "Invalid server configuration"],
+    ];
+    for (const [message, sent] of examples) {
+      expect(safeMessage(message)).toBe(sent);
+      expect(safeMessage(message)).not.toMatch(/acme/i);
+    }
+    // Every shape is exercised, so a new one cannot slip in untested.
+    for (const [pattern, flags] of SAFE_MESSAGES) expect({ pattern, covered: examples.some(([message]) => new RegExp(pattern, flags).test(message)) }).toEqual({ pattern, covered: true });
+  });
+});
 
 describe("server reporting", () => {
   test("without a DSN nothing is sent", async () => {
@@ -280,6 +344,35 @@ describe("server reporting", () => {
     const { event } = parse(received[0]!.body);
     expect(event.exception.values[0]).toMatchObject({ type: "Error", value: "(message withheld)" });
     expect(received[0]!.body).not.toContain("mailbox");
+  });
+
+  test("a failing webhook is tagged with a known event name, never the sender's header", async () => {
+    const saved = { ...process.env };
+    Object.assign(process.env, {
+      DATABASE_URL: "postgresql://sandchest:sandchest@127.0.0.1:5432/unused",
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_PRIVATE_KEY: "unused",
+      GITHUB_WEBHOOK_SECRET: "webhook-secret",
+      SANDCHEST_APP_URL: "https://sandchest.test",
+      SENTRY_DSN: `http://publickey@127.0.0.1:${server.port}/5`,
+    });
+    resetConfig();
+    resetSentry();
+    try {
+      const { POST } = await import("@/app/api/github/webhooks/route");
+      const body = "not json";
+      const signature = `sha256=${createHmac("sha256", "webhook-secret").update(body).digest("hex")}`;
+      // A signed delivery whose body fails to parse, with an event header the sender made up.
+      const response = await POST(new Request("https://sandchest.test/api/github/webhooks", { method: "POST", body, headers: { "x-hub-signature-256": signature, "x-github-event": "CustomerAcme_123", "x-github-delivery": "d-1" } }));
+      expect(response.status).toBe(500);
+      expect(received).toHaveLength(1);
+      expect(received[0]!.body).not.toContain("Acme");
+      expect(parse(received[0]!.body).event.tags).toMatchObject({ source: "webhook", event: "unknown" });
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+      resetConfig();
+    }
   });
 
   test("an unreachable endpoint never throws", async () => {
@@ -371,6 +464,34 @@ describe("browser reporting", () => {
     const { event } = parse(body);
     expect(event.tags.page).toBe("unknown");
     expect(event.exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename)).toEqual(["app:///_next/static/chunks/app.js"]);
+  });
+
+  test("a browser report names neither an unknown error type nor any function", () => {
+    const script = browserReporter({ dsn: "http://publickey@127.0.0.1:9/5" })!;
+    const listeners: Record<string, (event: unknown) => void> = {};
+    let body = "";
+    new Function("location", "addEventListener", "fetch", "crypto", script)(
+      { origin: "https://sandchest.test", pathname: "/repos" },
+      (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
+      async (_url: string, init: RequestInit) => {
+        body = String(init.body);
+        return new Response();
+      },
+      crypto,
+    );
+    const error = new Error("Cannot read properties of undefined (reading 'AcmeCorp')");
+    error.name = "CustomerAcme_123";
+    error.stack = "Error\n    at jane.doe@example.com (https://sandchest.test/_next/static/chunks/app.js:2:2)";
+    listeners.error!({ error });
+    expect(body).not.toMatch(/Acme|jane/);
+    const value = parse(body).event.exception.values[0];
+    expect(value.type).toBe("Error");
+    expect(value.value).toBe("Cannot read properties of undefined (reading <property>)");
+    expect(value.stacktrace.frames).toEqual([{ filename: "app:///_next/static/chunks/app.js", lineno: 2, colno: 2, in_app: true }]);
+    const typed = new TypeError("x");
+    typed.stack = "TypeError: x\n    at f (https://sandchest.test/_next/static/chunks/b.js:1:1)";
+    listeners.error!({ error: typed });
+    expect(parse(body).event.exception.values[0].type).toBe("TypeError");
   });
 
   test("the browser reporter stays fast on a huge message", () => {

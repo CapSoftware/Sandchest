@@ -5,7 +5,7 @@ import { describeError } from "@/server/log";
 import { db, githubApp } from "@/server/services";
 import { startScan } from "@/server/start";
 import { handleWebhook } from "@/server/webhooks";
-import { captureException } from "@/server/sentry";
+import { captureException, webhookEventTag } from "@/server/sentry";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     // Logged by delivery id and error class only: the payload and the error's message can include code and user data.
     console.error(`Webhook ${delivery} (${event}) failed: ${describeError(error)}`);
-    await captureException(error, { source: "webhook", tags: { event } });
+    await captureException(error, { source: "webhook", tags: { event: webhookEventTag(event) } });
     return Response.json({ error: "handling failed" }, { status: 500 });
   }
 }

@@ -21,6 +21,21 @@ function dsn(): Dsn | undefined {
   return state.dsn;
 }
 
+/** GitHub webhook events that may be named in a report: those Sandchest handles and those it receives and ignores. */
+const WEBHOOK_EVENTS = new Set(["installation", "installation_repositories", "pull_request", "push", "issue_comment", "ping", "check_suite", "check_run", "github_app_authorization", "installation_target", "meta", "repository"]);
+
+/** A webhook's event for a report. The header is the sender's to choose, so anything unexpected is "unknown". */
+export function webhookEventTag(event: string | null | undefined): string {
+  return event && WEBHOOK_EVENTS.has(event) ? event : "unknown";
+}
+
+const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
+
+/** An HTTP method for a report. A client can send any token as its method, so anything unusual is "other". */
+export function methodTag(method: string | undefined): string {
+  return method && METHODS.has(method) ? method : "other";
+}
+
 export function sentryEnabled(): boolean {
   return dsn() !== undefined;
 }

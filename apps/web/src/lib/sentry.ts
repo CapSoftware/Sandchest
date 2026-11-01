@@ -86,9 +86,10 @@ export function scrub(text: unknown): string {
  */
 export const SAFE_MESSAGES: ReadonlyArray<readonly [string, string, string]> = [
   // JavaScript runtime errors name code, not data. Only identifier characters pass.
-  ["^Cannot read properties of (undefined|null) \\(reading '([\\w$]{1,80})'\\)$", "", "Cannot read properties of $1 (reading '$2')"],
-  ["^Cannot (read|set) property '([\\w$]{1,80})' of (undefined|null)$", "", "Cannot $1 property '$2' of $3"],
-  ["^([\\w$.]{1,120}) is not (a function|defined|iterable|a constructor)$", "", "$1 is not $2"],
+  // Property and variable names are replaced too: code can name things after data ("reading 'AcmeCorp'").
+  ["^Cannot read properties of (undefined|null) \\(reading '[^'\\n]{1,200}'\\)$", "", "Cannot read properties of $1 (reading <property>)"],
+  ["^Cannot (read|set) property '[^'\\n]{1,200}' of (undefined|null)$", "", "Cannot $1 property <property> of $2"],
+  ["^[\\w$.]{1,120} is not (a function|defined|iterable|a constructor)$", "", "<expression> is not $1"],
   ["^(undefined|null) is not an object \\(evaluating '[^'\\n]{1,120}'\\)$", "", "$1 is not an object"],
   ["^Maximum call stack size exceeded$", "", "Maximum call stack size exceeded"],
   ["^Unexpected end of JSON input$", "", "Unexpected end of JSON input"],
@@ -151,9 +152,51 @@ export function pageTemplate(pathname: string): string {
   return "unknown";
 }
 
+/**
+ * Error types that may be sent: JavaScript's own, ours, and the database
+ * driver's. A class name is code, but code can be generated or named after
+ * data, so any other name is sent as "Error".
+ */
+export const ERROR_TYPES: readonly string[] = [
+  "Error",
+  "TypeError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "URIError",
+  "EvalError",
+  "AggregateError",
+  "AbortError",
+  "TimeoutError",
+  "DOMException",
+  "NotFoundError",
+  "SecurityError",
+  "QuotaExceededError",
+  "ChunkLoadError",
+  "AutumnError",
+  "GitHubError",
+  "IndexerError",
+  "LlmError",
+  "LlmQuotaError",
+  "ManifestError",
+  "ScanFinished",
+  "ScanRefusedError",
+  "StructuredOutputError",
+  "WorkspaceError",
+  "PostgresError",
+  "DrizzleError",
+  "DrizzleQueryError",
+];
+
+const KNOWN_TYPES = new Set(ERROR_TYPES);
+
+export function errorType(name: unknown): string {
+  return typeof name === "string" && KNOWN_TYPES.has(name) ? name : "Error";
+}
+
+/** A stack frame: where, never what. Function names are left out: they can be named after data, and file, line and column with source maps say the same. */
 export interface Frame {
   filename: string;
-  function?: string;
   lineno?: number;
   colno?: number;
   in_app: boolean;
@@ -181,7 +224,6 @@ export function parseStack(stack: string | undefined, origin?: string): Frame[] 
     if (!filename) continue;
     frames.push({
       filename,
-      ...(match[1] ? { function: match[1].replace(/^async /, "").slice(0, 200) } : {}),
       lineno: Number(match[3]),
       colno: Number(match[4]),
       in_app: !/node_modules|^node:|^internal\/|^<anonymous>/.test(filename),
@@ -220,7 +262,7 @@ export function exceptionValues(error: unknown, mechanism: { type: string; handl
   for (let depth = 0; depth < 3 && current !== undefined && current !== null; depth++) {
     if (current instanceof Error) {
       const frames = parseStack(current.stack, origin);
-      values.push({ type: scrub(current.name || "Error").slice(0, 100), value: safeMessage(current.message), ...(frames.length ? { stacktrace: { frames } } : {}), mechanism });
+      values.push({ type: errorType(current.name), value: safeMessage(current.message), ...(frames.length ? { stacktrace: { frames } } : {}), mechanism });
       current = (current as { cause?: unknown }).cause;
     } else {
       // A thrown string or object could hold anything: keep only what kind of value it was.
