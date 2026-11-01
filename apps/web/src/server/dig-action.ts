@@ -10,6 +10,7 @@ import { z } from "zod";
 import { viewer } from "./access";
 import { db } from "./db";
 import { describeError } from "./log";
+import { captureException } from "./sentry";
 
 export type DigOutcome = { error?: string; topUp?: boolean };
 
@@ -25,6 +26,7 @@ export async function dig(repoId: string): Promise<DigOutcome> {
   } catch (error) {
     // GitHub or billing unreachable. Credits held for a scan that never started are given back.
     console.error(`Dig failed: ${describeError(error)}`);
+    await captureException(error, { source: "dig", handled: true });
     return { error: "The dig couldn’t start. Nothing was charged; try again in a minute." };
   }
   if (!result.ok) {

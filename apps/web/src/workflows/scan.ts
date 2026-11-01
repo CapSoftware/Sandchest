@@ -5,6 +5,7 @@
  */
 import { FatalError, sleep } from "workflow";
 import { beginScan as begin, executeScan as execute, failScan as fail, publishScan as publish, ScanFinished } from "@/server/scans";
+import { captureException } from "@/server/sentry";
 
 /** How long a scan waits for an org concurrency slot before giving up. */
 const MAX_QUEUE_POLLS = 360; // × 20 s = 2 hours
@@ -35,34 +36,38 @@ export async function scanWorkflow(scanId: string): Promise<{ state: string }> {
 
 async function beginStep(scanId: string) {
   "use step";
-  return finishing(() => begin(scanId));
+  return finishing("begin", scanId, () => begin(scanId));
 }
 
 async function executeStep(scanId: string) {
   "use step";
-  return finishing(() => execute(scanId));
+  return finishing("execute", scanId, () => execute(scanId));
 }
 // A scan that fails twice is unlikely to pass a third time, and each attempt costs a scan's worth of model calls.
 executeStep.maxRetries = 1;
 
 async function publishStep(scanId: string) {
   "use step";
-  return finishing(() => publish(scanId));
+  return finishing("publish", scanId, () => publish(scanId));
 }
 publishStep.maxRetries = 5;
 
 async function failStep(scanId: string, message: string) {
   "use step";
-  return finishing(() => fail(scanId, message));
+  return finishing("fail", scanId, () => fail(scanId, message));
 }
 failStep.maxRetries = 5;
 
-/** Expected endings are not retried. */
-async function finishing<T>(task: () => Promise<T>): Promise<T> {
+/**
+ * Expected endings are not retried. Anything else is reported (when Sentry is
+ * set up) with the step's name and the scan's opaque id, then retried.
+ */
+async function finishing<T>(step: string, scanId: string, task: () => Promise<T>): Promise<T> {
   try {
     return await task();
   } catch (error) {
     if (error instanceof ScanFinished) throw new FatalError(error.message);
+    await captureException(error, { source: "workflow", tags: { step, scan_id: scanId } });
     throw error;
   }
 }

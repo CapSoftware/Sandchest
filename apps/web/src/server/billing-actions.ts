@@ -17,6 +17,7 @@ import { applyAutoTopUp, autumn, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
+import { captureException } from "./sentry";
 
 export type BillingOutcome = { error?: string; saved?: boolean };
 
@@ -57,6 +58,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
     ({ planId } = await syncBilling(row.org));
   } catch (error) {
     console.error(`Billing read for org ${orgId} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "read" }, handled: true });
     return { error: FAILED };
   }
   if (input.data.kind === "plan" && planId === input.data.plan) return { error: "That’s already your plan." };
@@ -88,6 +90,7 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
     }));
   } catch (error) {
     console.error(`Purchase for org ${org.id} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "purchase" }, handled: true });
     return { error: FAILED };
   }
   // Checkout, or a card step (3-D Secure, a declined card): Stripe sends them back to the return page.
@@ -104,6 +107,7 @@ export async function openPortal(orgId: string): Promise<void> {
     url = await autumn()!.portal(orgId, `${appUrl()}/billing/return?org=${orgId}`);
   } catch (error) {
     console.error(`Billing portal for org ${orgId} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "portal" }, handled: true });
     redirect("/settings?billing=unavailable#billing");
   }
   redirect(url);
@@ -130,6 +134,7 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
     await syncBilling(row.org);
   } catch (error) {
     console.error(`Auto top-up for org ${orgId} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "auto_top_up" }, handled: true });
     return { error: "Saved here, but billing didn’t take the change. Try again in a minute." };
   }
   revalidatePath("/settings");

@@ -1,3 +1,5 @@
+import type { Instrumentation } from "next";
+
 /**
  * Runs once when a server process starts.
  *
@@ -35,3 +37,28 @@ export async function register(): Promise<void> {
     if (announcement) console.log(announcement);
   }
 }
+
+/**
+ * Reports server errors in pages, layouts, route handlers, server actions
+ * and the proxy to Sentry, when SENTRY_DSN is set. Without it nothing is
+ * imported. Only the route pattern and enums go along: never the request's
+ * URL, headers, cookies or body.
+ */
+export const onRequestError: Instrumentation.onRequestError = async (error, request, context) => {
+  if (!process.env.SENTRY_DSN) return;
+  // notFound(), redirect() and friends are control flow, not errors.
+  const digest = (error as { digest?: unknown } | null)?.digest;
+  if (typeof digest === "string" && /^(NEXT_|DYNAMIC_SERVER_USAGE|BAILOUT_TO_CLIENT_SIDE_RENDERING)/.test(digest)) return;
+  const { captureException } = await import("./server/sentry");
+  await captureException(error, {
+    source: "request",
+    tags: {
+      route: context.routePath,
+      route_type: context.routeType,
+      router: context.routerKind,
+      method: request.method,
+      // Matches the digest a person sees on an error page.
+      digest: typeof digest === "string" ? digest : undefined,
+    },
+  });
+};

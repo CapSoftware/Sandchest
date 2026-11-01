@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Jersey_10 } from "next/font/google";
 import type { ReactNode } from "react";
+import { browserReporter } from "@/lib/sentry-browser";
 import { brandAsset, site } from "@/lib/site";
 import "./globals.css";
 
@@ -58,11 +59,19 @@ export const viewport: Viewport = {
  */
 const bootScript = `(function(){try{var d=document.documentElement;d.setAttribute("data-js","");setTimeout(function(){var s=document.querySelectorAll("[data-chest-stage]:not([data-canvas])");if(!s.length)return;s.forEach(function(el){el.setAttribute("data-canvas","failed")});document.querySelectorAll(".play").forEach(function(el){el.setAttribute("data-play","")})},8000);if(!matchMedia("(prefers-reduced-motion: reduce)").matches)d.setAttribute("data-motion","")}catch(e){}})()`;
 
+/** Uncaught browser errors to Sentry, only when a public DSN was set at build time. Otherwise nothing at all. */
+const errorReporter = browserReporter({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  environment: process.env.SENTRY_ENVIRONMENT || process.env.VERCEL_ENV,
+  release: process.env.VERCEL_GIT_COMMIT_SHA,
+});
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${mono.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: bootScript }} />
+        {errorReporter && <script dangerouslySetInnerHTML={{ __html: errorReporter }} />}
       </head>
       <body>{children}</body>
     </html>

@@ -31,6 +31,7 @@ import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
 import { noticeCredits } from "./notices";
+import { captureException } from "./sentry";
 
 /** Unsettled reservations return to the org after this long (Autumn allows up to 24 hours). */
 const RESERVATION_MS = 6 * 3_600_000;
@@ -218,8 +219,9 @@ export async function settleScan(scan: { id: string; orgId: string; billing: str
 }
 
 function logFailure(what: string) {
-  return (error: unknown) => {
+  return async (error: unknown) => {
     console.error(`Billing ${what} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: what }, handled: true });
     return null;
   };
 }

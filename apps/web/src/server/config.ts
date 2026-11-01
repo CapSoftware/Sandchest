@@ -21,6 +21,15 @@ const Schema = z.object({
     .string()
     .regex(/^\s*\d+(\s*,\s*\d+)*\s*$/, "a comma-separated list of GitHub user ids (numbers, not logins)")
     .optional(),
+  /**
+   * Error reporting to Sentry. Unset means nothing loads and nothing is sent.
+   * SENTRY_DSN covers the server; NEXT_PUBLIC_SENTRY_DSN (read at build time)
+   * adds a small reporter to every page. Either may be set alone.
+   */
+  SENTRY_DSN: z.url().optional(),
+  NEXT_PUBLIC_SENTRY_DSN: z.url().optional(),
+  /** Tags events with an environment, e.g. "production". Default: VERCEL_ENV or NODE_ENV. */
+  SENTRY_ENVIRONMENT: z.string().max(64).optional(),
   /** Signs sessions and encrypts stored GitHub tokens. */
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
   /** The GitHub App's OAuth client, used for sign-in. */

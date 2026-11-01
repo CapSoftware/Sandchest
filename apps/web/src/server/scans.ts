@@ -49,6 +49,7 @@ import { config } from "./config";
 import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
 import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
+import { captureException } from "./sentry";
 
 /** Concurrent scans per org (SPEC §4). */
 export const ORG_CONCURRENCY = 2;
@@ -241,7 +242,10 @@ export async function publishScan(scanId: string): Promise<void> {
   await updateScan(db(), scan.id, { status: "completed", finishedAt: new Date() });
   await charge(scan);
   // Email is best effort and at most once: it never fails or repeats a scan.
-  await notifyScan(scan).catch((error: unknown) => console.error(`Notifications for scan ${scan.id} failed: ${error instanceof Error ? error.name : "error"}`));
+  await notifyScan(scan).catch(async (error: unknown) => {
+    console.error(`Notifications for scan ${scan.id} failed: ${error instanceof Error ? error.name : "error"}`);
+    await captureException(error, { source: "notifications", tags: { scan_id: scan.id }, handled: true, withholdMessage: true });
+  });
 }
 
 /**
@@ -280,13 +284,17 @@ async function charge(scan: LoadedScan): Promise<void> {
     if ((scan.creditsReserved ?? 0) > 0) await syncBilling({ id: scan.orgId, githubLogin: scan.repo.org.githubLogin });
   } catch (error) {
     console.error(`Charging scan ${scan.id} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "charge", scan_id: scan.id }, handled: true });
   }
 }
 
 /** Records a failure, gives back the scan's credits and never leaves a PR Check spinning. */
 export async function failScan(scanId: string, message: string): Promise<void> {
   const scan = await requireScan(scanId);
-  await settleScan(scan, "release").catch((error: unknown) => console.error(`Releasing scan ${scan.id} failed: ${describeError(error)}`));
+  await settleScan(scan, "release").catch(async (error: unknown) => {
+    console.error(`Releasing scan ${scan.id} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "release", scan_id: scan.id }, handled: true });
+  });
   if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
   if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
     await githubApp()
