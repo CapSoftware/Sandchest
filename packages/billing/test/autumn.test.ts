@@ -31,14 +31,21 @@ test("a retried reservation that already went through counts as reserved", async
   expect(await autumn.reserve({ customerId: "o", credits: 5, lockId: "s", expiresAt: new Date() })).toEqual({ allowed: true, remaining: null });
 });
 
+test("an org that was never a customer is refused, not an error", async () => {
+  const { autumn } = fake({ check: [{ status: 404, body: { code: "customer_not_found", message: "Customer does not exist in this org and env" } }] });
+  expect(await autumn.reserve({ customerId: "new", credits: 1, lockId: "s", expiresAt: new Date() })).toEqual({ allowed: false, remaining: null });
+});
+
 test("finalizing twice is harmless; other errors are not swallowed", async () => {
   const { autumn } = fake({
     "balances.finalize": [
       { status: 400, body: { code: "invalid_request", message: "Lock not found for ID: already finalized or expired" } },
+      { status: 400, body: { code: "invalid_request", message: "Lock not found for ID: s" } },
       { status: 401, body: { message: "bad key" } },
     ],
   });
   await autumn.finalize({ customerId: "o", lockId: "s", action: "confirm", credits: 3 });
+  await autumn.finalize({ customerId: "o", lockId: "s", action: "release" });
   await expect(autumn.finalize({ customerId: "o", lockId: "s", action: "release" })).rejects.toBeInstanceOf(AutumnError);
 });
 

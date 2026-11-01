@@ -124,6 +124,8 @@ export function createAutumn(config: AutumnConfig): Autumn {
       } catch (error) {
         // A retry of a reservation that went through.
         if (error instanceof AutumnError && error.code === "lock_already_exists") return { allowed: true, remaining: null };
+        // An org that has never been a customer has no plan and no credits.
+        if (error instanceof AutumnError && error.code === "customer_not_found") return { allowed: false, remaining: null };
         throw error;
       }
     },
@@ -132,8 +134,8 @@ export function createAutumn(config: AutumnConfig): Autumn {
       try {
         await call("balances.finalize", { customer_id: customerId, lock_id: lockId, action, ...(credits !== undefined ? { override_value: credits } : {}) }, { retry: true });
       } catch (error) {
-        // Already finalized (a retried step) or expired (released on its own).
-        if (error instanceof AutumnError && error.status === 400 && /already finalized or expired/i.test(error.message)) return;
+        // Already finalized (a retried step), expired (released on its own), or never held.
+        if (error instanceof AutumnError && ((error.status === 400 && /lock not found/i.test(error.message)) || error.code === "customer_not_found")) return;
         throw error;
       }
     },
