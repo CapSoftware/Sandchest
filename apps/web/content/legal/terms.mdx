@@ -1,0 +1,81 @@
+---
+title: Terms of service
+description: The agreement between you and us when you use the hosted Sandchest service.
+---
+
+import { legal } from "@/lib/legal";
+
+These terms are an agreement between you and {legal.entity} ("we", "us"), of {legal.address}, for the hosted Sandchest service at this website. We've written them to be read. If you use Sandchest for an organization, you accept them on its behalf and confirm you're allowed to.
+
+Running Sandchest yourself from its source code isn't covered by these terms. That is governed by the [AGPL-3.0 licence](#open-source-and-trademarks).
+
+## The service
+
+Sandchest is a GitHub App. When you install it on repositories, it reviews pull requests, scans repositories when you ask, and reports security vulnerabilities with fix guidance. How it works is described in the [docs](/docs).
+
+We may change the service: add features, change how scans work, or retire parts of it. If we remove something you pay for, we'll tell you in advance.
+
+## Your account
+
+- You sign in with GitHub, and you're responsible for what happens under your GitHub account in Sandchest.
+- The customer is the GitHub account (personal or organization) where Sandchest is installed. Its admins control its plan and settings. People with push access to a repository can see its findings and start scans that use the account's credits.
+- Keep your GitHub account secure. Tell us at <Email to={legal.securityEmail} /> if you think someone has misused it.
+
+## Acceptable use
+
+You may only scan code you own or are authorized to test, and you must follow our [Acceptable use policy](/acceptable-use). We may suspend an account that breaks it.
+
+## Plans, credits and payment
+
+- Sandchest needs a paid plan. Plans are billed monthly in advance, at the prices on our [pricing page](/docs/pricing) when you subscribe.
+- Each plan includes monthly credits. Unused monthly credits expire at the end of each billing period. Top-up credits don't expire while your account exists.
+- Scans cost the credits shown in the docs and in the dashboard before a scan starts. A scan that fails or is refused isn't charged.
+- If you turn on auto top-up, you authorize us to buy top-ups automatically, up to the monthly limit you set.
+- Payments are processed by Stripe through our billing provider, Autumn. Prices exclude taxes unless stated; you pay any taxes that apply.
+- You can cancel at any time in Settings. Your plan keeps working until the end of the period you've paid for, and isn't renewed. Except where the law says otherwise, payments aren't refundable.
+- We may change prices with at least 30 days' notice. A change applies from your next billing period after the notice.
+
+## Your code and data
+
+- Your code stays yours. You give us permission to access and process it only to provide the service to you: to scan it, and to store findings and threat models as described in our [Privacy policy](/privacy).
+- We never store your source code. Findings keep short excerpts, which are deleted when the finding is resolved.
+- We don't use your code, findings or prompts to train models.
+
+## What Sandchest can and can't promise
+
+Sandchest looks hard for vulnerabilities, and checks each one for evidence before reporting it. But no tool finds everything, and any finding can be wrong.
+
+- A clean result doesn't mean your code is free of vulnerabilities.
+- Findings, proofs of concept and fix prompts are suggestions. Review them, and any change a coding agent makes, before you rely on them.
+- Sandchest is one part of your security, not a replacement for your own review, testing or other controls.
+
+The service is provided "as is" and "as available". To the extent the law allows, we disclaim all warranties, express or implied, including fitness for a particular purpose and non-infringement.
+
+## Liability
+
+To the extent the law allows:
+
+- We aren't liable for indirect or consequential losses, lost profits, lost data, or losses caused by vulnerabilities in your code, whether or not Sandchest reported them.
+- Our total liability for any claim relating to the service is limited to what you paid us in the 12 months before the claim arose.
+
+Nothing in these terms limits liability that can't be limited by law.
+
+## Suspension and ending
+
+You can stop using Sandchest at any time: uninstall the GitHub App, and cancel your plan in Settings. We may suspend or close an account that breaks these terms or the Acceptable use policy, that doesn't pay, or where we must by law. Where we reasonably can, we'll tell you first and give you a chance to fix the problem.
+
+## Open source and trademarks
+
+Sandchest's source code is licensed under the AGPL-3.0. The Sandchest name and logo are trademarks and aren't covered by that licence.
+
+## Changes to these terms
+
+We may update these terms. If a change matters, we'll tell you by email or in the dashboard before it takes effect. If you keep using Sandchest after that, the new terms apply.
+
+## Governing law
+
+These terms are governed by {legal.governingLaw}. Disputes go to {legal.courts}.
+
+## Contact
+
+Questions about these terms: <Email to={legal.contactEmail} />.

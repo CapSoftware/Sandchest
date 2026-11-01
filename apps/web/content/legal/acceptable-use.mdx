@@ -1,0 +1,43 @@
+---
+title: Acceptable use policy
+description: Sandchest finds real vulnerabilities. Use it only on code you're responsible for, and only to fix what it finds.
+---
+
+import { legal } from "@/lib/legal";
+
+This policy is part of our [Terms of service](/terms). It applies to everyone who uses the hosted Sandchest service.
+
+## Scan only what you're authorized to test
+
+You may only scan code that you own, or that you have explicit permission to test from whoever owns it.
+
+Sandchest enforces this by design: it only ever scans repositories where its GitHub App has been installed, and installing it takes admin rights on the GitHub account or repository. There's no way to point it at a website, a URL, or a repository you don't control. Don't try to work around that, for example by installing it on an account you've been given access to without the owner's agreement.
+
+If you scan a fork or copy of someone else's project, what you find belongs to that project's maintainers. Report it to them privately, following their security policy, and give them reasonable time to fix it before saying anything publicly.
+
+## Use findings to fix, never to attack
+
+You must not:
+
+- use findings, proofs of concept or fix prompts to attack, access or disrupt any system you aren't authorized to test
+- run a proof of concept against production systems or data that you don't control
+- sell, publish or share exploitable details of unfixed vulnerabilities in software you don't own
+- use Sandchest to build malware or tools meant to harm others
+
+## Use the service fairly
+
+You must not:
+
+- get around plans, credits, cooldowns, size limits or any other limit, or use someone else's payment details
+- try to reach another customer's findings, code or account
+- probe, scan or attack the Sandchest service itself, except by reporting a vulnerability privately to <Email to={legal.securityEmail} />
+- interfere with how the service works, for example by overloading it or planting content meant to manipulate other customers' scans
+- break the law, or GitHub's terms, while using Sandchest
+
+## What happens if this policy is broken
+
+We may suspend scanning, suspend the account, or close it, depending on how serious the problem is, and we may report illegal activity to the authorities. Where we reasonably can, we'll talk to you first.
+
+## Reporting misuse
+
+If you believe someone is using Sandchest against code they're not authorized to test, write to <Email to={legal.contactEmail} />.

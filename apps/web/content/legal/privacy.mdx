@@ -1,0 +1,93 @@
+---
+title: Privacy policy
+description: What we collect when you use the hosted Sandchest service, why, and what we never keep.
+---
+
+import { legal } from "@/lib/legal";
+
+This policy explains how {legal.entity} ("we", "us") handles information when you use the hosted Sandchest service. We are the controller of the personal information described here.
+
+The short version: **we never store your source code.** Every scan runs in a temporary environment that's deleted when the scan finishes. Model inference runs with zero data retention. We keep only your findings and the minimum code excerpts needed to explain them.
+
+A self-hosted Sandchest sends nothing to us, so this policy doesn't apply to it.
+
+## What we collect
+
+**From GitHub, when you sign in**: your GitHub user ID, username, email address and avatar, and a sign-in token, which we store encrypted. If your GitHub email is private, we use a no-reply placeholder and you won't get email notifications.
+
+**From GitHub, when you install the App**: the account it's installed on, the repositories you chose (names, whether they're private, default branches), who the account's admins are, and which repositories each signed-in person can push to.
+
+**From scans**:
+
+- findings, each with short excerpts of the code along its attack path
+- each repository's threat model: a structured summary of its entry points, trust boundaries and risky code, not the code itself
+- scan records: what ran, when, how long it took, what it found and what it cost, and its progress messages
+
+**From billing**: your plan, credit balance and auto top-up settings. Payments are made to Stripe through our billing provider, Autumn. We never see or store your card number.
+
+**From using the dashboard**: first-party usage events, such as a fix prompt being copied. They hold opaque IDs, counts and categories only: never code, finding contents, names or email addresses.
+
+## What we don't collect
+
+- **Your source code.** Each scan clones the one commit it needs into a temporary workspace, and destroys the workspace when the scan ends, whether it succeeded or failed. We keep no copies, snapshots or diffs.
+- **IP addresses** with your account. Sign-in doesn't record them.
+- **Third-party tracking.** There are no advertising or third-party analytics scripts.
+
+## How code is processed
+
+During a scan, code is read in the temporary workspace and sent to the model that analyses it. Model inference runs with zero data retention: the provider doesn't keep prompts or outputs. Prompts never include your repository's name, your organization's name, or anything that identifies a person.
+
+We don't use your code, findings or prompts to train models.
+
+## How we use information
+
+- to run scans and show you their results
+- to post reviews and Checks on your pull requests
+- to decide who can see which findings, using GitHub's own permissions
+- to bill your plan
+- to email you about new critical findings and finished deep scans (you can turn this off in Settings)
+- to keep the service secure and working, and to improve it from aggregate usage
+
+We don't sell personal information, and we don't send marketing email.
+
+## Public repositories
+
+Checks and review comments on public repositories are visible to everyone. For public repositories Sandchest posts only a count of findings by severity, and keeps the details in the dashboard.
+
+## Who we share it with
+
+We use a small number of service providers (subprocessors) to host the service, run model inference, send email and process payments. They act on our instructions and only for providing Sandchest. The current list is available on request: write to <Email to={legal.privacyEmail} />.
+
+We share information with authorities only when the law requires it.
+
+## How long we keep it
+
+- **Code excerpts** are deleted as soon as their finding is resolved (fixed or dismissed), along with the fix prompt that quoted them.
+- **Findings, threat models and scan records** are kept while Sandchest is installed, so you keep your history.
+- **If you uninstall** the App, we stop scanning and lose access to your repositories at once. Write to us and we'll delete your account's findings, threat models and scan records.
+- **Your account** is kept until you ask us to delete it.
+- **Billing records** are kept as long as tax and accounting law requires.
+
+## Your rights
+
+Depending on where you live, you may have the right to access, correct, export or delete your personal information, and to object to or restrict how we use it. Write to <Email to={legal.privacyEmail} /> and we'll respond within 30 days. You can also complain to your local data protection authority.
+
+## Cookies
+
+We use only the cookies needed to keep you signed in. No advertising or analytics cookies.
+
+## Security
+
+Access to findings follows GitHub: a person sees a repository's findings only if they have push access to it. Installation tokens are short-lived and scoped to the repository being scanned. Sign-in tokens are encrypted at rest. More detail is in [Privacy & security](/docs/security).
+
+## Changes
+
+If we change this policy in a way that matters, we'll tell you by email or in the dashboard before the change takes effect.
+
+## Contact
+
+{legal.entity}, {legal.address}.
+
+- Privacy questions and requests: <Email to={legal.privacyEmail} />
+- Security reports: <Email to={legal.securityEmail} />
+- Everything else: <Email to={legal.contactEmail} />
