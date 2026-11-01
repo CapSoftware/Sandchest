@@ -2,8 +2,9 @@
  * Sandchest's pricing in Autumn, built from `src/plans.ts`, and the webhook
  * that sends auto top-up results and plan changes to the app. Preview with
  * `bun run autumn:push`, apply with `bun run autumn:push --yes` (sandbox), or
- * add `--prod` for production. Creating the webhook writes its signing secret
- * to this package's env file (`AUTUMN_WEBHOOK_SANDCHEST_SECRET` for
+ * add `--prod` for production. Each environment's webhook URL comes from its
+ * own variable (see `webhooksFor`). Creating a webhook writes its signing
+ * secret to this package's env file (`AUTUMN_WEBHOOK_SANDCHEST_SECRET` for
  * production, `AUTUMN_WEBHOOK_SANDCHEST_SANDBOX_SECRET` for the sandbox); the
  * app reads it as AUTUMN_WEBHOOK_SECRET.
  */
@@ -39,9 +40,23 @@ export const topUp = plan({
   items: [topUpItem],
 });
 
-/** Where Autumn sends events. Set AUTUMN_WEBHOOK_URL to point an environment at another deployment. */
-const webhookUrl = process.env.AUTUMN_WEBHOOK_URL ?? "https://www.sandchest.com/api/autumn/webhooks";
+/** Production's endpoint, for live Autumn. AUTUMN_WEBHOOK_URL_LIVE overrides it. */
+export const LIVE_WEBHOOK_URL = "https://www.sandchest.com/api/autumn/webhooks";
 const events = ["billing.auto_topup_succeeded", "billing.auto_topup_failed", "billing.updated"];
-export const webhooks = (["live", "sandbox"] as const).map((env) => webhook({ id: "sandchest", env, url: webhookUrl, events, description: "Auto top-up emails and plan changes" }));
 
-export default atmn({ features: [credits], plans: [...plans, topUp], webhooks });
+/**
+ * Where each Autumn environment sends events. Live goes to production. The
+ * sandbox has a webhook only when AUTUMN_WEBHOOK_URL_SANDBOX names one (a
+ * preview deployment or a tunnel), so a sandbox push from a laptop can never
+ * point anything at production by accident. Without it, a sandbox push
+ * removes the sandbox's webhook.
+ */
+export function webhooksFor(env: Record<string, string | undefined>) {
+  const urls = { live: env.AUTUMN_WEBHOOK_URL_LIVE || LIVE_WEBHOOK_URL, sandbox: env.AUTUMN_WEBHOOK_URL_SANDBOX || undefined };
+  return (["live", "sandbox"] as const).flatMap((name) => {
+    const url = urls[name];
+    return url ? [webhook({ id: "sandchest", env: name, url, events, description: "Auto top-up emails and plan changes" })] : [];
+  });
+}
+
+export default atmn({ features: [credits], plans: [...plans, topUp], webhooks: webhooksFor(process.env) });
