@@ -181,7 +181,8 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
     const result = await client.reserve({ customerId: org.id, credits, lockId: scanId, expiresAt: new Date(Date.now() + RESERVATION_MS) });
     if (!result.allowed) {
       // Refused: read the org again, both to say why and so the dashboard shows the balance that refused it.
-      const state = await syncBilling(org).catch(() => null);
+      // If Autumn can't be read just now, the stored copy says whether there is a plan: an outage is not "no plan".
+      const state = (await syncBilling(org).catch(() => null)) ?? (await orgBillingRow(db(), org.id));
       return { ok: false, reason: state?.planId ? "out_of_credits" : "no_plan", credits };
     }
     if (result.remaining !== null) await setOrgCredits(db(), org.id, result.remaining);

@@ -191,6 +191,13 @@ describe.skipIf(!available)("billing", () => {
     expect((await orgBillingRow(database, acme.id))?.credits).toBe(0);
   });
 
+  test("out of credits while Autumn can't be read: still 'out of credits', not 'no plan'", async () => {
+    // Before, a failed re-read after a refusal was taken to mean the org had no plan.
+    autumn.failNext.add("customer");
+    expect(await reserveScan("00000000-0000-4000-8000-00000000f00d", acme, 1, false)).toEqual({ ok: false, reason: "out_of_credits", credits: 1 });
+    expect(autumn.failNext.size).toBe(0);
+  });
+
   test("Dig: refused without credits leaves no scan; with credits it holds the cost shown", async () => {
     const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
     const before = (await database.query.scans.findMany()).length;
