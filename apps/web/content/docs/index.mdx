@@ -1,0 +1,35 @@
+---
+title: Getting started
+description: Install Sandchest on GitHub, pick a plan, and get your first findings.
+---
+
+Sandchest is a GitHub App that reads your code the way an attacker would. It reviews every pull request, digs through whole repositories when you ask, and reports only vulnerabilities it can back with evidence: the way in, the path through your code, a proof of concept, and a fix prompt for your coding agent.
+
+It only ever scans repositories where you have installed it.
+
+## Set up in five steps
+
+1. **Sign in with GitHub.** Go to [Get started](/sign-in). Sandchest uses your GitHub sign-in to see which repositories you can access.
+2. **Install the GitHub App.** From [Repos](/repos), choose **Install on GitHub**, pick the account (yours or an organization) and the repositories Sandchest may read. You come back to Repos when GitHub is done.
+3. **Pick a plan for that account.** The GitHub account you installed on is the customer, so each account has its own plan and credits. Only an admin of the organization (or the owner of a personal account) can choose one. Checkout is handled by Stripe. See [Pricing & credits](/docs/pricing).
+4. **Recon maps each repository.** As soon as the account has a plan, Sandchest builds a threat model of every repository: its entry points, trust boundaries, sensitive data and dangerous code. It takes about a minute per repository and is free.
+5. **Start digging.** Press **Dig** on a repository for a full deep scan, and open a pull request to see a review. Findings appear on the [scan's live feed](/docs/scans#deep-scans) as soon as they survive verification.
+
+From then on every pull request is reviewed automatically, and pushes to your default branch check whether open findings have been fixed.
+
+## Where findings show up
+
+- **On the pull request.** A Check called **Sandchest** reports what the review found. On private repositories each finding is also posted as a review comment on the vulnerable line. On public repositories, where Checks and comments are visible to everyone, Sandchest only posts a count with a link to view the details privately. See [PR reviews](/docs/scans#pr-reviews).
+- **In the dashboard.** [Findings](/findings) lists everything across your repositories. Each finding has the full attack path, a proof of concept and a fix prompt.
+- **By email.** Everyone who can push to the repository and has signed in gets an email about new critical findings and finished deep scans. Turn this off in [Settings](/settings).
+
+## Who can see what
+
+Sandchest follows GitHub. You can see a repository's findings, and dig into it, if GitHub says you have push access or higher. Billing belongs to the GitHub account: organization admins, or the owner of a personal account, can change the plan. There are no separate Sandchest invites or roles.
+
+## Next steps
+
+- [How scans work](/docs/scans): what each scan does, and when it runs.
+- [Findings & severity](/docs/findings): how findings are rated and what to do with them.
+- [Fixing with your agent](/docs/fixing): hand a finding to Cursor, Claude Code or Codex.
+- [Self-hosting](/docs/self-hosting): run Sandchest on your own infrastructure.

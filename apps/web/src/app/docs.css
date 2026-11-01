@@ -1,0 +1,554 @@
+/*
+ * Docs and legal pages. The landing page's ground, gold and type, set for
+ * reading: one prose column, hairline seams, gold pixels for bullets and the
+ * current page, and code on the soot panel the landing uses for its strip.
+ */
+
+.docs-frame {
+  --gutter: clamp(1.25rem, 4vw, 2rem);
+  --nav: 13rem;
+  width: 100%;
+  max-width: calc(66rem + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.docs-frame .site-header {
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.header-nav a[aria-current="page"],
+.site-footer a[aria-current="page"] {
+  color: var(--color-bright);
+}
+
+/* ---- Layout -------------------------------------------------------------- */
+
+.docs-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 3.5rem;
+}
+
+@media (min-width: 56rem) {
+  .docs-body {
+    grid-template-columns: var(--nav) minmax(0, 1fr);
+  }
+}
+
+.docs-main,
+.legal-main {
+  min-width: 0;
+  max-width: 44rem;
+  padding-top: clamp(2rem, 6vh, 3.5rem);
+}
+
+/* ---- Sidebar ------------------------------------------------------------- */
+
+.docs-nav-title {
+  margin-bottom: 0.75rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.docs-nav ol {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.docs-nav a {
+  position: relative;
+  display: block;
+  padding: 0.35rem 0 0.35rem 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--color-dust);
+  text-decoration: none;
+}
+
+.docs-nav a:hover {
+  color: var(--color-sand);
+}
+
+/* The current page gets the gold pixel the landing uses for bullets. */
+.docs-nav a[aria-current="page"] {
+  color: var(--color-bright);
+}
+
+.docs-nav a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0.25rem;
+  top: calc(0.35rem + 0.5em);
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--color-gold);
+}
+
+.docs-nav-close {
+  display: none;
+}
+
+/* Desktop: the popover is simply the sidebar, always shown. */
+@media (min-width: 56rem) {
+  .docs-menu-bar {
+    display: none;
+  }
+
+  .docs-nav,
+  .docs-nav:popover-open {
+    position: sticky;
+    inset: auto;
+    top: 0;
+    display: block;
+    align-self: start;
+    width: auto;
+    height: auto;
+    max-height: 100vh;
+    margin: 0;
+    padding: clamp(2rem, 6vh, 3.5rem) 0 2rem;
+    overflow: auto;
+    border: 0;
+    background: none;
+    color: inherit;
+  }
+}
+
+/* Phone: a bar with the menu key, and the sidebar as a sheet from the top. */
+@media (max-width: 55.99rem) {
+  .docs-menu-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.875rem 0;
+    border-bottom: 1px solid var(--color-seam);
+  }
+
+  .docs-menu-current {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.875rem;
+    color: var(--color-dust);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .docs-nav:popover-open {
+    position: fixed;
+    inset: 0 0 auto 0;
+    width: auto;
+    max-height: 85vh;
+    margin: 0;
+    padding: 1.5rem var(--gutter, 1.25rem) 1.25rem;
+    overflow: auto;
+    border: 0;
+    border-bottom: 1px solid var(--color-edge);
+    background: var(--color-void);
+    color: var(--color-sand);
+  }
+
+  .docs-nav::backdrop {
+    background: color-mix(in oklab, var(--color-void) 70%, transparent);
+  }
+
+  .docs-nav a {
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+    font-size: 0.9375rem;
+  }
+
+  .docs-nav a[aria-current="page"]::before {
+    top: calc(0.6rem + 0.55em);
+  }
+
+  .docs-nav-close {
+    display: block;
+    margin-top: 1rem;
+    padding: 0.5rem 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 0.875rem;
+    color: var(--color-dust);
+    cursor: pointer;
+  }
+
+  .docs-nav-close:hover {
+    color: var(--color-sand);
+  }
+}
+
+/* ---- Keys ---------------------------------------------------------------- */
+/* The landing page's pixel-cut key, small. */
+
+.docs-key {
+  --notch: 2px;
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.docs-key-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.95rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--color-sand);
+  box-shadow: inset 0 0 0 2px var(--color-edge);
+  clip-path: polygon(
+    var(--notch) 0,
+    calc(100% - var(--notch)) 0,
+    calc(100% - var(--notch)) var(--notch),
+    100% var(--notch),
+    100% calc(100% - var(--notch)),
+    calc(100% - var(--notch)) calc(100% - var(--notch)),
+    calc(100% - var(--notch)) 100%,
+    var(--notch) 100%,
+    var(--notch) calc(100% - var(--notch)),
+    0 calc(100% - var(--notch)),
+    0 var(--notch),
+    var(--notch) var(--notch)
+  );
+  transition:
+    transform 80ms,
+    box-shadow 120ms,
+    color 120ms;
+}
+
+.docs-key:hover .docs-key-face {
+  color: var(--color-bright);
+  box-shadow: inset 0 0 0 2px var(--color-sand);
+  transform: translateY(-1px);
+}
+
+.docs-key:active .docs-key-face {
+  transform: translateY(1px);
+}
+
+.docs-key-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+/* ---- Page head ----------------------------------------------------------- */
+
+.docs-head {
+  margin-bottom: 2.5rem;
+}
+
+.docs-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 7vw, 3.75rem);
+  font-weight: 400;
+  line-height: 0.9;
+  color: var(--color-bright);
+  text-wrap: balance;
+}
+
+.docs-lede {
+  max-width: 58ch;
+  margin-top: 1rem;
+  color: var(--color-muted);
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.docs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.docs-raw,
+.legal-updated {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.docs-raw:hover {
+  color: var(--color-sand);
+}
+
+.legal-updated {
+  margin-top: 1rem;
+}
+
+/* ---- Prose --------------------------------------------------------------- */
+
+.prose {
+  color: var(--color-muted);
+  line-height: 1.75;
+}
+
+.prose > * + * {
+  margin-top: 1.1rem;
+}
+
+.prose p,
+.prose li {
+  text-wrap: pretty;
+}
+
+.prose strong {
+  font-weight: 600;
+  color: var(--color-sand);
+}
+
+.prose a {
+  color: var(--color-gold);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--color-gold) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.prose a:hover {
+  color: var(--color-gold-light);
+  text-decoration-color: var(--color-gold-light);
+}
+
+/* Headings: the display face for sections, on a hairline seam. */
+.prose h2 {
+  margin-top: 3rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--color-seam);
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-bright);
+  text-wrap: balance;
+  scroll-margin-top: 1.5rem;
+}
+
+.prose h3 {
+  margin-top: 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-bright);
+  scroll-margin-top: 1.5rem;
+}
+
+.prose h2 + *,
+.prose h3 + * {
+  margin-top: 0.75rem;
+}
+
+.prose .docs-head + h2 {
+  margin-top: 0;
+}
+
+.prose .anchor {
+  color: inherit;
+  text-decoration: none;
+}
+
+.prose .anchor:hover::after {
+  content: " #";
+  color: var(--color-gold);
+}
+
+/* Lists: a gold pixel for each bullet, gold numbers when ordered. */
+.prose ul,
+.prose ol {
+  display: grid;
+  gap: 0.45rem;
+}
+
+/* Grid items: without this a code block in a list item widens the page. */
+.prose li {
+  min-width: 0;
+}
+
+.prose ul > li {
+  position: relative;
+  padding-left: 1.5rem;
+}
+
+.prose ul > li::before {
+  content: "";
+  position: absolute;
+  left: 0.25rem;
+  top: 0.7em;
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--color-gold);
+}
+
+.prose ol {
+  padding-left: 1.5rem;
+  list-style: decimal;
+}
+
+.prose ol > li {
+  padding-left: 0.25rem;
+}
+
+.prose ol > li::marker {
+  color: var(--color-gold);
+  font-size: 0.875em;
+}
+
+.prose li > ul,
+.prose li > ol {
+  margin-top: 0.45rem;
+}
+
+.prose li > ul > li::before {
+  background: var(--color-edge);
+}
+
+.prose blockquote {
+  padding: 0.25rem 0 0.25rem 1.25rem;
+  box-shadow: inset 2px 0 0 var(--color-gold);
+  color: var(--color-sand);
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--color-seam);
+}
+
+.prose :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+  font-size: 0.875em;
+  color: var(--color-sand);
+  overflow-wrap: anywhere;
+}
+
+/* Code blocks: the soot panel, with a copy button in the corner. */
+.code {
+  position: relative;
+}
+
+.code pre {
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot) !important;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  tab-size: 2;
+}
+
+.code pre:focus-visible {
+  outline-offset: -2px;
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-void);
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.code:hover .code-copy,
+.code:focus-within .code-copy {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .code-copy {
+    opacity: 1;
+  }
+}
+
+.code-copy:hover {
+  color: var(--color-sand);
+  border-color: var(--color-edge);
+}
+
+/* Tables: rows on hairline seams, never boxes. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.prose th {
+  padding: 0 1.5rem 0.6rem 0;
+  border-bottom: 1px solid var(--color-edge);
+  font-weight: 500;
+  color: var(--color-dust);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.prose td {
+  padding: 0.65rem 1.5rem 0.65rem 0;
+  border-bottom: 1px solid var(--color-seam);
+  color: var(--color-sand);
+  vertical-align: top;
+}
+
+.prose th:last-child,
+.prose td:last-child {
+  padding-right: 0;
+}
+
+/* ---- Previous and next --------------------------------------------------- */
+
+.docs-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-seam);
+}
+
+.docs-pager a {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--color-sand);
+  text-decoration: none;
+}
+
+.docs-pager a:hover {
+  color: var(--color-bright);
+}
+
+.docs-pager a span {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.docs-pager-next {
+  margin-left: auto;
+  text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .docs-key:hover .docs-key-face,
+  .docs-key:active .docs-key-face {
+    transform: none;
+  }
+}

@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
 
@@ -32,6 +33,21 @@ const nextConfig: NextConfig = {
     // queue worker's optional config loader pulls back in.
     outputFileTracingExcludes: { "*": ["**/node_modules/typescript/**", "**/node_modules/sharp/**", "**/node_modules/@img/**"] },
   }),
+  async rewrites() {
+    // Every docs page as Markdown: /docs.md and /docs/<page>.md.
+    return {
+      beforeFiles: [
+        { source: "/docs.md", destination: "/docs-md" },
+        { source: "/docs/:path*.md", destination: "/docs-md/:path*" },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
 };
 
-export default withWorkflow(nextConfig);
+// Compiles the docs and legal MDX in content/ (see source.config.ts). Awaiting it waits for the generated index.
+// The default index is off: source.config.ts emits one without top-level await.
+const withMDX = createMDX({ index: false });
+
+export default withWorkflow(async () => withMDX(nextConfig));

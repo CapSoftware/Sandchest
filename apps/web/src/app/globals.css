@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* The docs have their own stylesheet: their prose and components must not add utilities to every page. */
+@source not "../../content";
+@source not "../components/docs";
+@source not "../../test/docs.test.ts";
 
 @theme {
   --color-void: #0d0a07;

@@ -1,0 +1,64 @@
+---
+title: Findings & severity
+description: What a finding contains, how severity and confidence are decided, and what to do with one.
+---
+
+A finding is a vulnerability Sandchest can back with evidence. If it can't show how an attacker gets in, the path through your code and what they get, it doesn't report it.
+
+## What a finding contains
+
+- **Title, severity and confidence**, and a CWE tag when one fits.
+- **What the attacker gets**, in one plain sentence.
+- **Who can exploit it**: anyone on the internet, any signed-in user, an insider, or an admin.
+- **Entry point**: the route, handler, job or command where the attack starts.
+- **Attack path**: each step from the entry point to the vulnerable code, with its file, line and a short code excerpt, linked to the line on GitHub.
+- **Proof of concept**: the request, payload or input that triggers it.
+- **The fix**: what to change, what the fix must guarantee, what it must not break, and a regression test that reproduces the attack.
+- **A fix prompt** for your coding agent. See [Fixing with your agent](/docs/fixing).
+- **Where it came from**: the pull request review or deep scan that found it, and when it was first and last seen.
+
+## Severity
+
+Severity is **who can exploit it × what they get**.
+
+| Severity | Meaning |
+| --- | --- |
+| Critical | Unauthenticated remote code execution, takeover of any account, or access to a whole data store |
+| High | Any signed-in user can read or change other people's data, escalate their privileges, or obtain secrets |
+| Medium | Exploitable, but with limited impact or uncommon preconditions |
+| Low | Defence in depth: worth fixing, not directly exploitable for much |
+
+Two rules keep severity honest:
+
+- A finding has to harm someone other than the attacker. Breaking your own account isn't a vulnerability.
+- An endpoint that is public by design and has no rate limit is medium at most. It is rated higher only when the missing limit enables something worse, such as brute-forcing logins or running up your bills.
+
+Sandchest uses CWE tags but not CVSS scores. Severity is shown as a four-step heat meter in the dashboard.
+
+## Confidence
+
+Confidence is separate from severity. It says how sure the skeptic is that the attack works, after trying to disprove it: **high**, **medium** or **low**.
+
+Low-confidence findings are hidden by default. They are never posted on pull requests, never fail a Check and never trigger an email. To see them, turn on **low confidence** in the [Findings](/findings) filters.
+
+## Statuses
+
+| Status | Meaning |
+| --- | --- |
+| Open | Still exploitable, as far as Sandchest knows |
+| Fixed | A fix check showed the attack path is gone, or someone pressed **Mark fixed** |
+| Dismissed | Someone dismissed it as a false positive, an accepted risk, or won't fix |
+
+- A dismissed finding stays dismissed if a later scan finds it again, and no longer fails pull request Checks. Dismissing asks for a reason, and the finding won't be raised again.
+- **Reopen** puts a fixed or dismissed finding back to open.
+- **Code moved** means a fix check couldn't find the cited code any more. The finding stays open until the next deep scan checks it.
+
+When a finding is resolved (fixed or dismissed), its code excerpts are deleted, along with the stored fix prompt that quoted them. A reopened finding gets a new prompt, written without code.
+
+## Duplicates
+
+The same vulnerability found again, by a later pull request or deep scan, updates the existing finding instead of creating a new one. Sandchest recognizes it by the kind of issue and the vulnerable code itself, not by line numbers, so moving code around doesn't create duplicates.
+
+## The Findings screen
+
+[Findings](/findings) lists open, fixed and dismissed findings across every repository you can push to. Filter by severity and repository, and turn low-confidence findings on or off. Each finding's page has the full attack path, the proof of concept, the fix, the fix prompt, and the **Mark fixed**, **Dismiss** and **Reopen** actions.

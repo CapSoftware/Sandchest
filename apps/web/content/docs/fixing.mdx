@@ -1,0 +1,59 @@
+---
+title: Fixing with your agent
+description: Every finding comes with a prompt that any coding agent can act on, and Sandchest checks the fix for you.
+---
+
+Every finding has a **fix prompt**: one Markdown document that gives a coding agent everything it needs to fix the vulnerability and prove it's fixed. Use it with any agent, or as a checklist for fixing it yourself.
+
+## What the prompt contains
+
+- the vulnerability, its severity and CWE, and where it lands, by file and line
+- how it is reached and who can exploit it
+- the attack path, step by step, with code excerpts
+- the proof of concept
+- how to fix it, what the fix must guarantee, and what it must not break
+- a regression test that reproduces the attack
+
+It ends by asking the agent to write the regression test first and confirm it fails, then make the smallest change that closes the attack path, and confirm the test passes along with your existing tests.
+
+The prompt quotes short excerpts of your code, so treat it like your code: paste it into tools you'd trust with the repository.
+
+## From the dashboard
+
+Open a finding from [Findings](/findings).
+
+- **Copy fix prompt**, at the top of the page, copies the prompt in one click.
+- The **Fix it with your agent** panel shows the prompt in three formats: **Prompt**, **Claude Code** and **Codex**. **Copy prompt** or **Copy command** copies whichever is showing.
+- **Open in Cursor** opens the prompt in Cursor directly. It appears when the prompt is short enough for Cursor's link, about 8,000 characters.
+
+### Claude Code and Codex one-liners
+
+The Claude Code and Codex tabs wrap the prompt in a shell command you can paste into a terminal at the root of your repository:
+
+```bash
+claude "$(cat <<'SANDCHEST'
+Fix this high-severity security vulnerability: …
+SANDCHEST
+)"
+```
+
+```bash
+codex "$(cat <<'SANDCHEST'
+Fix this high-severity security vulnerability: …
+SANDCHEST
+)"
+```
+
+The quoted heredoc passes the prompt to the agent exactly as written: quotes, backticks and dollar signs in it are not touched by your shell.
+
+## From a pull request
+
+On private repositories, every review comment ends with a collapsed **Fix prompt for your coding agent**. Expand it, copy the prompt, and give it to your agent on the pull request's branch. When you push the fix, the pull request is reviewed again.
+
+On public repositories the prompt isn't posted, because review comments are public. Use **View privately** on the Check to open the findings in the dashboard.
+
+## After the fix
+
+You don't have to close findings by hand. When the fix reaches your default branch, a [fix check](/docs/scans#fix-checks) re-checks the finding on the new code and marks it **fixed** if the attack path is gone. It's free.
+
+You can also press **Mark fixed** on the finding yourself. If a later scan finds the same vulnerability again, it shows up as open.

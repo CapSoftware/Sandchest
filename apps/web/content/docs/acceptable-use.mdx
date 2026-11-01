@@ -1,0 +1,26 @@
+---
+title: Acceptable use
+description: Scan only code you own or are allowed to test, and use what Sandchest finds to fix it.
+---
+
+Sandchest finds real, exploitable vulnerabilities and writes working proofs of concept. That is only acceptable when it's pointed at code you're responsible for. This page is the short version; the [Acceptable use policy](/acceptable-use) is the full one.
+
+## Only your code
+
+Scan only code you own, or that you have permission to test. Sandchest enforces this the simplest way it can: **it only scans repositories where its GitHub App is installed**, and installing an app on a repository takes admin rights on GitHub. There is no way to point Sandchest at a URL or someone else's repository.
+
+If you install it on a fork or copy of someone else's project and find something, report it to that project's maintainers privately, the way their security policy asks.
+
+## Use findings to fix, not to attack
+
+- Don't use findings or proofs of concept against systems you don't own or aren't authorized to test.
+- Don't publish exploitable details of an unfixed vulnerability in someone else's software.
+- Sandchest's analysis is static: it never runs the proofs of concept. If you run one, run it against your own development or test environment, never against production data you don't control.
+
+## Use the service fairly
+
+- Don't try to get around plans, credits, cooldowns or the limits on repository size.
+- Don't try to reach other customers' data, or probe the hosted service for vulnerabilities outside of a private report. If you find a problem in Sandchest itself, see [Reporting a vulnerability](/docs/security#reporting-a-vulnerability-in-sandchest).
+- Don't use automated traffic to overload the service.
+
+Accounts that break these rules can be suspended. Self-hosted installs are yours to run under the AGPL-3.0, but the same principle applies: only scan code you're authorized to test.

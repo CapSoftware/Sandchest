@@ -1,0 +1,89 @@
+---
+title: Pricing & credits
+description: Three plans, one credit balance, and exactly what each scan costs.
+---
+
+Sandchest needs a plan before it scans anything. Each plan gives the GitHub account a monthly balance of credits, and paid scans draw from it. There are no per-seat prices and no repository limits: credits are the only limit.
+
+## Plans
+
+| Plan | Per month | Credits a month | Per credit |
+| --- | --- | --- | --- |
+| Lockbox | $20 | 60 | $0.33 |
+| Chest | $100 | 350 | $0.29 |
+| Vault | $250 | 1,000 | $0.25 |
+
+- Monthly credits reset at the start of each billing period. Unused monthly credits don't roll over.
+- The customer is the GitHub account Sandchest is installed on, not a person. Everyone with access to that account's repositories shares its credits.
+- Prices are in US dollars. Stripe may show the amount in your local currency at checkout.
+
+## What scans cost
+
+| Scan | When it runs | Credits |
+| --- | --- | --- |
+| Recon | When a repository is added | Free |
+| PR review | Every pull request update | 1 to 5, by size |
+| Deep scan | When you press Dig | 15, 30 or 75, by repository size |
+| Fix check | Pushes to the default branch | Free |
+
+Recon and fix checks are free, but they still need the account to have a plan.
+
+### PR reviews
+
+A review costs credits by the number of security-relevant lines the pull request changes: lines added plus lines removed, not counting lockfiles, generated or vendored code, docs, tests and assets.
+
+| Changed lines | Credits |
+| --- | --- |
+| Up to 100 | 1 |
+| Up to 500 | 2 |
+| Up to 1,500 | 3 |
+| Up to 5,000 | 4 |
+| Over 5,000 | 5 |
+
+Above 5,000 changed lines the price stops rising, and the review covers the most security-relevant files first (those with the most entry points and dangerous code) up to 5,000 lines. A pull request that only touches docs, tests, lockfiles or generated files costs nothing.
+
+### Deep scans
+
+A deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and the **Dig** button shows the price before you start.
+
+| Repository size | Credits |
+| --- | --- |
+| Under 100,000 lines | 15 |
+| Under 300,000 lines | 30 |
+| Under 1,000,000 lines | 75 |
+| 1,000,000 lines or more | Not scanned. Get in touch. |
+
+## How credits are charged
+
+- When a paid scan starts, its credits are held. When it finishes, it is charged what it cost, and never more than the price you were shown.
+- If a scan fails, is refused or never starts, nothing is charged and the held credits go back to your balance.
+- A pull request that arrives when the account is out of credits isn't reviewed. Its Check is **neutral** ("Out of credits"), so it never blocks a merge, and it links to where you can top up. The same happens, with "Not reviewed: no plan", before the account has a plan.
+- When credits run out, **Dig** shows "Out of credits" instead of starting a scan.
+
+## Top-ups
+
+A top-up is 25 credits for $10. Top-up credits never expire, and you can buy up to 20 packs at once from **Settings → Billing**. A top-up is never cheaper per credit than a plan.
+
+### Auto top-up
+
+Auto top-up buys credits for you when the balance runs low, so pull requests keep getting reviewed. It's off until you turn it on in Settings, and it never spends more than the monthly limit you set (twice the plan's price, unless you change it).
+
+| Plan | When the balance falls below | It buys |
+| --- | --- | --- |
+| Lockbox | 15 credits | 25 credits for $10 |
+| Chest | 30 credits | 50 credits for $20 |
+| Vault | 75 credits | 75 credits for $30 |
+
+## Managing billing
+
+Everything lives in [Settings](/settings), under Billing. Only an admin of the GitHub organization, or the owner of a personal account, can change it.
+
+- **Change plan.** Upgrades start at once, and you pay the prorated difference. Downgrades start at the end of the current billing period.
+- **Confirm before charging.** When a card is already on file, every charge is shown on a confirm page, with the exact amount, before it is made.
+- **Card, invoices and cancelling** are handled in Stripe's customer portal, linked from Settings. A cancelled plan keeps working until the end of the period you paid for.
+
+Payments are processed by Stripe, through the billing service Autumn. Sandchest never sees your card number.
+
+## Self-hosted
+
+A self-hosted Sandchest has no billing at all: every scan runs, with no plans or credits. You pay only for your own servers and model usage. See [Self-hosting](/docs/self-hosting).

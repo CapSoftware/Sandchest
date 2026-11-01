@@ -7,9 +7,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "fumadocs-mdx && tsc --noEmit",
     "chest:fallback": "bun scripts/render-chest-fallback.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
     "@sandchest/billing": "workspace:*",
@@ -18,6 +19,8 @@
     "@sandchest/github": "workspace:*",
     "@sandchest/workspace": "workspace:*",
     "better-auth": "1.7.14",
+    "fumadocs-core": "16.17.9",
+    "fumadocs-mdx": "15.4.10",
     "next": "^16.4.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -29,6 +32,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/bun": "^1.4.4",
+    "@types/mdx": "^2.0.14",
     "@types/node": "^26.6.6",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19.3.0",
