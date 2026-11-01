@@ -2,9 +2,11 @@ import type { ReactNode } from "react";
 import { after } from "next/server";
 import { recordDailyVisit } from "@sandchest/db";
 import { AppHeader } from "@/components/app/app-header";
+import { SessionKeepAlive } from "@/components/app/session-keepalive";
 import { currentUser } from "@/server/access";
 import { isAdmin } from "@/server/admin";
 import { db } from "@/server/db";
+import { sessionRefreshDue } from "@/server/session-token";
 import { redirect } from "next/navigation";
 import "../app.css";
 
@@ -24,6 +26,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   }
   return (
     <>
+      {sessionRefreshDue(user.sessionExpiresAt) && <SessionKeepAlive />}
       <AppHeader user={user} admin={isAdmin(user)} />
       <main className="app-main shell">{children}</main>
     </>

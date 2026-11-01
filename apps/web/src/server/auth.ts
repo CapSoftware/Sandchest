@@ -12,6 +12,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { config } from "./config";
+import { SESSION_EXPIRES_IN_S, SESSION_UPDATE_AGE_S } from "./session-token";
 import { db } from "./db";
 
 function createAuth() {
@@ -49,6 +50,7 @@ function createAuth() {
       },
     },
     account: { encryptOAuthTokens: true, accountLinking: { enabled: false } },
+    session: { expiresIn: SESSION_EXPIRES_IN_S, updateAge: SESSION_UPDATE_AGE_S },
     // A new session is a sign-in: recorded for the funnel with the user id only. Never fails sign-in.
     databaseHooks: {
       session: {

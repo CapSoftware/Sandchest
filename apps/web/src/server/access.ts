@@ -28,6 +28,8 @@ export interface Viewer {
   image: string | null;
   /** When access was last read from GitHub. */
   accessCheckedAt: Date | null;
+  /** When this session expires; the dashboard extends it once a day while it is used. */
+  sessionExpiresAt: Date;
 }
 
 /**
