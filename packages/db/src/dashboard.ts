@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { accounts, sessions, findingEvents, findings, orgAdmins, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
+import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
 
 type Severity = "critical" | "high" | "medium" | "low";
 export type RepoPermission = (typeof permissionCache.$inferSelect)["permission"];
@@ -67,7 +67,12 @@ export interface DashboardRepo {
   id: string;
   fullName: string;
   private: boolean;
+  orgId: string;
   orgLogin: string;
+  /** Whether the user may change the org's settings and billing. */
+  orgAdmin: boolean;
+  /** The org's billing as last read from Autumn; null if never read. */
+  billing: { planId: string | null; credits: number; checkedAt: Date } | null;
   loc: number | null;
   lastDeepScanAt: Date | null;
   open: Record<Severity, number>;
@@ -81,7 +86,12 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     id: string;
     full_name: string;
     private: boolean;
+    org_id: string;
     org_login: string;
+    org_admin: boolean;
+    billing_checked_at: string | null;
+    plan_id: string | null;
+    credits: number | null;
     loc: number | null;
     last_deep_scan_at: string | null;
     critical: number;
@@ -94,7 +104,9 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     scan_at: string | null;
     active_deep_id: string | null;
   }>(sql`
-    select r.id, r.full_name, r.private, o.github_login as org_login, r.loc, r.last_deep_scan_at,
+    select r.id, r.full_name, r.private, o.id as org_id, o.github_login as org_login,
+      exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id) as org_admin,
+      ob.checked_at as billing_checked_at, ob.plan_id, ob.credits, r.loc, r.last_deep_scan_at,
       coalesce(f.critical, 0)::int as critical, coalesce(f.high, 0)::int as high,
       coalesce(f.medium, 0)::int as medium, coalesce(f.low, 0)::int as low,
       s.id as scan_id, s.kind as scan_kind, s.status as scan_status, coalesce(s.finished_at, s.started_at, s.created_at) as scan_at,
@@ -102,6 +114,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     from ${repos} r
     join ${orgs} o on o.id = r.org_id
     join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
+    left join ${orgBilling} ob on ob.org_id = o.id
     left join lateral (
       select count(*) filter (where severity = 'critical') as critical,
              count(*) filter (where severity = 'high') as high,
@@ -123,7 +136,10 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     id: row.id,
     fullName: row.full_name,
     private: row.private,
+    orgId: row.org_id,
     orgLogin: row.org_login,
+    orgAdmin: row.org_admin,
+    billing: row.billing_checked_at ? { planId: row.plan_id, credits: row.credits ?? 0, checkedAt: new Date(row.billing_checked_at) } : null,
     loc: row.loc,
     lastDeepScanAt: row.last_deep_scan_at ? new Date(row.last_deep_scan_at) : null,
     open: { critical: row.critical, high: row.high, medium: row.medium, low: row.low },
@@ -352,6 +368,8 @@ export interface SettingsOrg {
   installationId: number | null;
   settings: OrgSettings;
   admin: boolean;
+  /** The org's billing as last read from Autumn; null if never read. */
+  billing: typeof orgBilling.$inferSelect | null;
   repos: Array<{ id: string; fullName: string; private: boolean }>;
 }
 
@@ -359,21 +377,27 @@ export interface SettingsOrg {
 export async function settingsOrgs(database: Db, userId: string): Promise<SettingsOrg[]> {
   const [visible, admin] = await Promise.all([
     database
-      .select({ org: orgs, repo: { id: repos.id, fullName: repos.fullName, private: repos.private } })
+      .select({ org: orgs, billing: orgBilling, repo: { id: repos.id, fullName: repos.fullName, private: repos.private } })
       .from(repos)
       .innerJoin(orgs, eq(orgs.id, repos.orgId))
+      .leftJoin(orgBilling, eq(orgBilling.orgId, orgs.id))
       .where(and(eq(repos.enabled, true), canSee(userId)))
       .orderBy(repos.fullName),
-    database.select({ org: orgs }).from(orgAdmins).innerJoin(orgs, eq(orgs.id, orgAdmins.orgId)).where(eq(orgAdmins.userId, userId)),
+    database
+      .select({ org: orgs, billing: orgBilling })
+      .from(orgAdmins)
+      .innerJoin(orgs, eq(orgs.id, orgAdmins.orgId))
+      .leftJoin(orgBilling, eq(orgBilling.orgId, orgs.id))
+      .where(eq(orgAdmins.userId, userId)),
   ]);
   const byId = new Map<string, SettingsOrg>();
-  const add = (org: typeof orgs.$inferSelect) => {
+  const add = (org: typeof orgs.$inferSelect, billing: typeof orgBilling.$inferSelect | null) => {
     let entry = byId.get(org.id);
-    if (!entry) byId.set(org.id, (entry = { id: org.id, login: org.githubLogin, type: org.type, installationId: org.installationId, settings: org.settings, admin: false, repos: [] }));
+    if (!entry) byId.set(org.id, (entry = { id: org.id, login: org.githubLogin, type: org.type, installationId: org.installationId, settings: org.settings, admin: false, billing, repos: [] }));
     return entry;
   };
-  for (const { org } of admin) add(org).admin = true;
-  for (const { org, repo } of visible) add(org).repos.push(repo);
+  for (const { org, billing } of admin) add(org, billing).admin = true;
+  for (const { org, billing, repo } of visible) add(org, billing).repos.push(repo);
   return [...byId.values()].filter((org) => org.installationId !== null).sort((a, b) => a.login.localeCompare(b.login));
 }
 

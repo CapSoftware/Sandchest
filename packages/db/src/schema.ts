@@ -32,6 +32,8 @@ export interface OrgSettings {
   checkThreshold: "critical" | "high" | "medium" | "low";
   /** Email people with access about critical findings and finished deep scans. Default on. */
   emailNotifications?: boolean;
+  /** Buy top-ups automatically when credits run low, up to a monthly spend in USD. Unset means off. */
+  autoTopUp?: { enabled: boolean; monthlyLimitUsd: number };
 }
 
 /** One GitHub account (user or organisation) with the app installed. The billing customer. */
@@ -110,6 +112,10 @@ export const scans = pgTable(
     error: text("error"),
     /** Set when this scan's notifications were sent, so a retried step never emails twice. */
     notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    /** Credits held for this scan before it ran. `credits` is what was finally charged. */
+    creditsReserved: integer("credits_reserved"),
+    /** Where the scan's credits stand. Null for free scans and when billing is off. */
+    billing: text("billing", { enum: ["reserved", "charged", "released"] }),
     createdAt: createdAt(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -119,6 +125,8 @@ export const scans = pgTable(
     index("scans_org_status_idx").on(table.orgId, table.status),
     // A PR head is reviewed once, however many times the webhook arrives.
     uniqueIndex("scans_pr_head_unique").on(table.repoId, table.prNumber, table.headSha).where(sql`${table.kind} = 'pr_review'`),
+    // Few rows: scans holding credits, for the sweep that settles them.
+    index("scans_billing_reserved_idx").on(table.status).where(sql`${table.billing} = 'reserved'`),
   ],
 );
 
@@ -327,6 +335,32 @@ export const orgAdmins = pgTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.orgId] })],
 );
+
+/**
+ * An org's billing as last read from Autumn, so pages never wait on it. The
+ * scan gate always asks Autumn itself; this copy is for display and is
+ * refreshed in the background once it is a minute old.
+ */
+export const orgBilling = pgTable("org_billing", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  /** Null without an active plan. */
+  planId: text("plan_id"),
+  pastDue: boolean("past_due").notNull().default(false),
+  /** When a cancelled plan stops. */
+  endsAt: timestamp("ends_at", { withTimezone: true }),
+  renewsAt: timestamp("renews_at", { withTimezone: true }),
+  /** A downgrade that starts when this period ends. */
+  nextPlanId: text("next_plan_id"),
+  credits: integer("credits").notNull().default(0),
+  creditsResetAt: timestamp("credits_reset_at", { withTimezone: true }),
+  /** Auto top-up as Autumn has it: threshold and quantity in credits, top-ups per month. */
+  autoTopUp: jsonb("auto_top_up").$type<{ enabled: boolean; threshold: number; quantity: number; perMonth: number }>(),
+  /** First time a plan was seen active: recon starts then. */
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const orgRelations = relations(orgs, ({ many }) => ({ repos: many(repos) }));
 export const repoRelations = relations(repos, ({ one, many }) => ({ org: one(orgs, { fields: [repos.orgId], references: [orgs.id] }), scans: many(scans) }));

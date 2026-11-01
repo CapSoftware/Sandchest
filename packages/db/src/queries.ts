@@ -108,6 +108,10 @@ export async function saveThreatModel(database: Db, repoId: string, model: unkno
 // ---- Scans -----------------------------------------------------------------
 
 export interface NewScan {
+  /** Set when credits were reserved under this id before the scan was created. */
+  id?: string;
+  billing?: "reserved";
+  creditsReserved?: number;
   repoId: string;
   orgId: string;
   kind: ScanKind;

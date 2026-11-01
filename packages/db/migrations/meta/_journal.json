@@ -15,6 +15,13 @@
       "when": 1793496204270,
       "tag": "0001_dashboard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793500108870,
+      "tag": "0002_billing",
+      "breakpoints": true
     }
   ]
 }
