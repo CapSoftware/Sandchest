@@ -10,7 +10,7 @@ import postgres from "postgres";
 import { NextRequest } from "next/server";
 import { createDb, schema, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
-import { normalisePath, proxy, sectionOf } from "@/proxy";
+import { config, normalisePath, proxy, sectionOf } from "@/proxy";
 import { resetConfig } from "@/server/config";
 import { setDb } from "@/server/db";
 
@@ -102,6 +102,16 @@ describe("paths", () => {
       undefined,
       undefined,
     ]);
+  });
+});
+
+describe("matcher", () => {
+  test("covers every page path without naming any section", () => {
+    // Next publishes the matchers to every visitor.
+    expect(JSON.stringify(config)).not.toMatch(/admin|ops|repos|findings/);
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+    for (const path of ["/", "/admin", "/admin/cost", "/ops", "/ops/funnel", "/repos", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c", "/settings", "/sign-in"]) expect(matcher.test(path)).toBe(true);
+    for (const path of ["/_next/static/chunks/app.js", "/api/auth/callback/github", "/api/github/webhooks", "/.well-known/workflow/v1/flow", "/favicon.svg", "/og.png"]) expect(matcher.test(path)).toBe(false);
   });
 });
 

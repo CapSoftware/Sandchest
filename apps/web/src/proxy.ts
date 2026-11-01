@@ -49,7 +49,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/repos/:path*", "/findings/:path*", "/scans/:path*", "/settings/:path*", "/admin", "/admin/:path*", "/ops", "/ops/:path*"] };
+/**
+ * Every page path, named by shape rather than by section: Next publishes the
+ * matchers to every visitor, so listing the operator paths here would
+ * announce them. Paths outside the sections above pass straight through,
+ * without touching the database. Build assets, API routes, workflow routes
+ * and files with an extension are skipped.
+ */
+export const config = { matcher: ["/((?!_next/|api/|\\.well-known/)(?!.*\\.\\w+$).*)"] };
 
 /** The path as routes see it: percent-decoded, repeated and trailing slashes removed. Undefined if it does not decode. */
 export function normalisePath(pathname: string): string | undefined {
