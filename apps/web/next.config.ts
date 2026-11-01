@@ -12,6 +12,9 @@ const standalone = process.env.SANDCHEST_STANDALONE === "1";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   agentRules: false,
+  // No next/image anywhere. With the optimiser on, /_next/image fetches any same-origin path itself,
+  // which would let a request reach the workflow routes from inside the server.
+  images: { unoptimized: true },
   // Hovering a link prefetches the page's data, so the click renders at once instead of showing a skeleton.
   experimental: { dynamicOnHover: true },
   // Workspace packages ship TypeScript source.
