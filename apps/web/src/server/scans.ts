@@ -113,11 +113,14 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       const affected = open.filter((f) => citedFiles(f).some((file) => changed.has(file)));
       if (affected.length === 0 || !model) return { findings: 0 };
       onEvent({ type: "progress", message: `Re-checking ${affected.length} open ${affected.length === 1 ? "finding" : "findings"} on the new code…` });
+      const checkStarted = Date.now();
       const { results, usage, costUsd } = await checkFixes({ ...common, threatModel: model, findings: affected.map(toEngineFinding) });
+      const count = (outcome: string) => results.filter((r) => r.outcome === outcome).length;
       await markFixed(db(), results.filter((r) => r.outcome === "fixed").map((r) => r.id), scan.id);
       await markStale(db(), results.filter((r) => r.outcome === "stale").map((r) => r.id), scan.id);
-      if (usage) await recordMetrics(db(), scan.id, { ...usageOf(usage), modelCostUsd: costUsd, durationMs: 0, candidates: affected.length, survivors: results.filter((r) => r.outcome === "open").length });
-      await updateScan(db(), scan.id, { stats: { checked: affected.length, fixed: results.filter((r) => r.outcome === "fixed").length } });
+      if (usage) await recordMetrics(db(), scan.id, { ...usageOf(usage), modelCostUsd: costUsd, durationMs: Date.now() - checkStarted, candidates: affected.length, survivors: count("open") });
+      onEvent({ type: "stage", stage: "done", message: `Re-checked ${affected.length}: ${count("fixed")} fixed, ${count("open")} still open, ${count("stale")} stale.` });
+      await updateScan(db(), scan.id, { stats: { checked: affected.length, fixed: count("fixed") } });
       return { findings: 0 };
     }
 
