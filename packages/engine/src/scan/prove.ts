@@ -40,6 +40,16 @@ interface SinksResult {
 const confirmed = (detail: string): Validation => ({ status: "path_confirmed", method: METHOD, detail });
 const inconclusive = (detail: string): Validation => ({ status: "inconclusive", method: METHOD, detail });
 
+/** A `METHOD /path` route embedded in an entry-point description, which `trace` resolves to a handler. */
+function routeOf(description: string): string | null {
+  const m = description.match(/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)/i);
+  return m ? `${m[1]!.toUpperCase()} ${m[2]!.replace(/[,.;]+$/, "")}` : null;
+}
+
+function dedupe(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
 /** Proves one finding's path through the index. Pure read-only index calls. */
 export async function proveFinding(indexer: IndexerClient, finding: Finding, signal?: AbortSignal): Promise<Validation> {
   if (finding.attackPath.length === 0) return inconclusive("the finding cites no code path");
@@ -52,20 +62,25 @@ export async function proveFinding(indexer: IndexerClient, finding: Finding, sig
   const entry = locations[0]!;
   const sink = locations.at(-1)!;
 
-  // Cross-function: the index traces a call path from the entry's function to the sink's.
-  if (entry.symbol && sink.symbol && entry.symbol !== sink.symbol) {
-    const traced = await indexer
-      .call<TraceResult>("trace", { from: entry.symbol, to: sink.symbol }, signal)
-      .catch(() => ({ paths: [] }) as TraceResult);
-    if (traced.paths.length > 0) {
-      return confirmed(`the index traces a call path from ${entry.symbol} to ${sink.symbol}`);
+  // Trace a call path to the sink's function. We try several entry anchors, not
+  // just the hunter's cited symbol: the finding's own route first, because the
+  // index resolves routes to handlers framework-aware — and a route/server-action
+  // handler has no in-graph callers, so a bare function→function trace fails
+  // exactly on the framework-handler findings that matter (measured on Cap).
+  // Trying more than one real anchor also stops the result flipping run-to-run
+  // when a different hunter cites the path slightly differently.
+  if (sink.symbol) {
+    const anchors = [routeOf(finding.entryPoint.description), entry.symbol].filter((a): a is string => !!a && a !== sink.symbol);
+    for (const from of dedupe(anchors)) {
+      const traced = await indexer.call<TraceResult>("trace", { from, to: sink.symbol }, signal).catch(() => ({ paths: [] }) as TraceResult);
+      if ((traced.paths ?? []).length > 0) return confirmed(`the index traces a call path from ${from} to ${sink.symbol}`);
     }
   }
 
   // Classic sink: the index already determined a request handler reaches this line.
   const at = `${sink.file}:${sink.line}`;
-  const { sinks } = await indexer.call<SinksResult>("sinks", { path: sink.file }, signal).catch(() => ({ sinks: [] }) as SinksResult);
-  if (sinks.some((s) => s.at === at && s.reachable)) {
+  const result = await indexer.call<SinksResult>("sinks", { path: sink.file }, signal).catch(() => ({ sinks: [] }) as SinksResult);
+  if ((result.sinks ?? []).some((s) => s.at === at && s.reachable)) {
     return confirmed("the index confirms a request handler reaches the cited sink");
   }
 

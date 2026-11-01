@@ -50,6 +50,17 @@ describe("proveFinding", () => {
     expect(v.method).toBe("code-path");
   });
 
+  test("confirms via the route anchor when a framework handler has no in-graph callers", async () => {
+    // Function→function trace fails (handler invoked by the framework), but route→sink resolves.
+    const indexer = indexerOf({
+      locate: existing(["GET_handler", "findVideo"]),
+      trace: (args) => (args.from === "GET /api/doc/:id" && args.to === "findVideo" ? { paths: [{ hops: [{ symbol: "x", definedAt: "a.ts:1" }] }] } : { paths: [] }),
+    });
+    const v = await proveFinding(indexer, findingWith([{ file: "a.ts", line: 10 }, { file: "b.ts", line: 20 }]));
+    expect(v.status).toBe("path_confirmed");
+    expect(v.detail).toContain("GET /api/doc/:id");
+  });
+
   test("confirms a classic sink the index marks route-reachable", async () => {
     const indexer = indexerOf({
       locate: existing(["handler", "handler"]), // one function; trace is skipped
