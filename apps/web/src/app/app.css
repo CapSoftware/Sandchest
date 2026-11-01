@@ -127,6 +127,16 @@
   }
 }
 
+/* Operators see a fourth section; keep it and the avatar on a small phone. */
+@media (max-width: 26rem) {
+  .app-header .shell {
+    gap: 0.5rem;
+  }
+  .app-nav a {
+    padding: 0 0.4rem;
+  }
+}
+
 .app-main {
   padding-top: clamp(2rem, 6vh, 3.5rem);
   padding-bottom: 6rem;

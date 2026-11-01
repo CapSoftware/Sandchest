@@ -6,8 +6,8 @@
  * cache: server components cannot refresh it, and revocation should be
  * immediate. IP addresses are not recorded and telemetry is off.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { schema } from "@sandchest/db";
+import { timingSafeEqual } from "node:crypto";
+import { recordEvent, schema } from "@sandchest/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
@@ -49,6 +49,16 @@ function createAuth() {
       },
     },
     account: { encryptOAuthTokens: true, accountLinking: { enabled: false } },
+    // A new session is a sign-in: recorded for the funnel with the user id only. Never fails sign-in.
+    databaseHooks: {
+      session: {
+        create: {
+          after: async (session) => {
+            await recordEvent(db(), { name: "signed_in", userId: session.userId }).catch(() => {});
+          },
+        },
+      },
+    },
     advanced: { database: { generateId: "uuid" }, ipAddress: { disableIpTracking: true } },
     telemetry: { enabled: false },
     plugins: [nextCookies()],
@@ -61,25 +71,7 @@ export function authConfigured(): boolean {
   return Boolean(settings.BETTER_AUTH_SECRET && settings.GITHUB_CLIENT_ID && settings.GITHUB_CLIENT_SECRET);
 }
 
-/** better-auth's session cookie, with the `__Secure-` prefix it uses over HTTPS. */
-export function sessionCookieName(): string {
-  return config().SANDCHEST_APP_URL.startsWith("https://") ? "__Secure-better-auth.session_token" : "better-auth.session_token";
-}
-
-/**
- * The session token in a signed session cookie (`<token>.<HMAC-SHA256 in
- * base64>`, better-auth's format), or undefined if the signature is wrong.
- */
-export function verifiedSessionToken(cookie: string | undefined, secret: string | undefined): string | undefined {
-  if (!cookie || !secret) return undefined;
-  const value = cookie.includes("%") ? decodeURIComponent(cookie) : cookie;
-  const dot = value.lastIndexOf(".");
-  if (dot <= 0) return undefined;
-  const token = value.slice(0, dot);
-  const given = Buffer.from(value.slice(dot + 1));
-  const expected = Buffer.from(createHmac("sha256", secret).update(token).digest("base64"));
-  return given.length === expected.length && timingSafeEqual(given, expected) ? token : undefined;
-}
+export { sessionCookieName, verifiedSessionToken } from "./session-token";
 
 let instance: ReturnType<typeof createAuth> | undefined;
 

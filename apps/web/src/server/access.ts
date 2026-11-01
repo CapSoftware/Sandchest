@@ -23,6 +23,8 @@ export interface Viewer {
   id: string;
   name: string;
   login: string | null;
+  /** The GitHub account id: stable, unlike the login. */
+  githubUserId: number | null;
   image: string | null;
   /** When access was last read from GitHub. */
   accessCheckedAt: Date | null;

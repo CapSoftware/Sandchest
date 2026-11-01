@@ -13,6 +13,14 @@ const Schema = z.object({
   SANDCHEST_APP_URL: z.url(),
   /** Bearer token for operator-only routes (manual scans, any scan's live feed). */
   SANDCHEST_ADMIN_TOKEN: z.string().min(24).optional(),
+  /**
+   * Operators who may open /admin: GitHub user ids (numbers, which never
+   * change, unlike logins), comma-separated. Unset means nobody.
+   */
+  SANDCHEST_ADMIN_GITHUB_IDS: z
+    .string()
+    .regex(/^\s*\d+(\s*,\s*\d+)*\s*$/, "a comma-separated list of GitHub user ids (numbers, not logins)")
+    .optional(),
   /** Signs sessions and encrypts stored GitHub tokens. */
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
   /** The GitHub App's OAuth client, used for sign-in. */

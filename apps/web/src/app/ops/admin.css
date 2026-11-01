@@ -1,0 +1,366 @@
+/*
+ * The operator dashboards, on top of the dashboard's styles. Numbers in the
+ * pixel face, one gold hue per chart, hairline grids and plain tables.
+ * Charts are HTML: they stay crisp and readable at any width.
+ */
+
+.admin-stats {
+  margin-bottom: 2.5rem;
+}
+
+.admin-stats-quiet {
+  margin-bottom: 0;
+}
+
+/* A line under a figure: body type, not the figure's pixel face. */
+.stat .stat-note {
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--color-dust);
+}
+
+.admin-block + .admin-block {
+  margin-top: 3rem;
+}
+
+.admin-footnote {
+  max-width: 72ch;
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  text-wrap: pretty;
+}
+
+.admin-dim {
+  color: var(--color-dust);
+}
+
+/* Range chips are links here, so the current one is aria-current rather than aria-pressed. */
+.chip[aria-current="true"] {
+  color: var(--color-bright);
+  box-shadow: inset 0 0 0 1px var(--color-gold);
+}
+
+/* ---- Tables --------------------------------------------------------------- */
+
+.table-scroll {
+  overflow-x: auto;
+  scrollbar-color: var(--color-edge) transparent;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.6rem 0 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--color-seam);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.data-table th:first-child,
+.data-table td:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.data-table thead th {
+  font-weight: 400;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  border-bottom-color: var(--color-edge);
+}
+
+.data-table tbody th {
+  font-weight: 400;
+  color: var(--color-sand);
+}
+
+.data-table td {
+  color: var(--color-bright);
+}
+
+.data-table tr[data-total] th,
+.data-table tr[data-total] td {
+  font-weight: 600;
+  border-top: 1px solid var(--color-edge);
+}
+
+.data-table td[data-negative] {
+  color: var(--critical);
+}
+
+/* ---- Meters --------------------------------------------------------------- */
+
+.admin-meters {
+  display: grid;
+  gap: 1rem;
+  border-top: 1px solid var(--color-seam);
+  padding-top: 1.25rem;
+}
+
+.admin-meters li {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem 1.25rem;
+}
+
+.admin-meter-label {
+  color: var(--color-sand);
+}
+
+.admin-meter {
+  margin: 0;
+}
+
+.admin-meter-value {
+  grid-column: 2;
+  font-size: 0.8125rem;
+  color: var(--color-sand);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 52rem) {
+  .admin-meters li {
+    grid-template-columns: 7rem minmax(0, 1fr) 15rem;
+  }
+  .admin-meter-value {
+    grid-column: auto;
+    text-align: right;
+  }
+}
+
+/* ---- Column charts ---------------------------------------------------------- */
+
+.chart {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+}
+
+.chart-title {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.chart[data-compact] .chart-title {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--color-sand);
+}
+
+.chart-note {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart[data-compact] .chart-note {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.chart-plot {
+  position: relative;
+  height: 11rem;
+  /* Room on the left for the gridline labels. */
+  margin-left: 3.25rem;
+  border-bottom: 1px solid var(--color-edge);
+}
+
+.chart[data-compact] .chart-plot {
+  height: 5rem;
+}
+
+.chart-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid var(--color-seam);
+}
+
+.chart-tick {
+  position: absolute;
+  right: calc(100% + 0.5rem);
+  transform: translateY(-50%);
+  font-size: 0.6875rem;
+  color: var(--color-dust);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chart-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  /* The surface gap between bars. */
+  gap: 2px;
+}
+
+/* Ninety days on a phone: a 2px gap would leave no room for the bars. */
+.chart-bars[data-dense] {
+  gap: 1px;
+}
+
+.chart-bar {
+  display: flex;
+  flex: 1 1 0;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+}
+
+.chart-bar > span {
+  width: 100%;
+  max-width: 24px;
+  background: var(--color-gold);
+  transition: background 120ms;
+}
+
+.chart-bar > span[data-zero] {
+  background: transparent;
+}
+
+.chart-bar:hover > span {
+  background: var(--color-gold-light);
+}
+
+.chart-x {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 3.25rem;
+  font-size: 0.6875rem;
+  color: var(--color-dust);
+}
+
+.chart-table summary {
+  width: fit-content;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+  cursor: pointer;
+}
+
+.chart-table summary:hover {
+  color: var(--color-sand);
+}
+
+.chart-table .data-table {
+  margin-top: 0.5rem;
+  max-width: 24rem;
+}
+
+.admin-multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 2rem 2.5rem;
+}
+
+/* ---- Funnel ---------------------------------------------------------------- */
+
+.funnel {
+  display: grid;
+  border-top: 1px solid var(--color-seam);
+}
+
+.funnel-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 1.25rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.funnel-label {
+  color: var(--color-sand);
+}
+
+.funnel-track {
+  grid-column: 1 / -1;
+  height: 0.75rem;
+}
+
+.funnel-track span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  background: var(--color-gold);
+}
+
+.funnel-track span[data-zero] {
+  min-width: 0;
+}
+
+.funnel-count {
+  grid-row: 1;
+  grid-column: 2;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.funnel-rate {
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+@media (min-width: 52rem) {
+  .funnel-step {
+    grid-template-columns: 13rem minmax(0, 1fr) 5rem 12rem;
+  }
+  .funnel-track {
+    grid-column: auto;
+  }
+  .funnel-count {
+    grid-row: auto;
+    grid-column: auto;
+    text-align: right;
+  }
+  .funnel-rate {
+    grid-column: auto;
+  }
+}
+
+/* ---- Loading ---------------------------------------------------------------- */
+
+.admin-skeleton-stats {
+  height: 6rem;
+  margin: 2rem 0;
+}
+
+.admin-skeleton-chart {
+  height: 11rem;
+}
+
+@media (forced-colors: active) {
+  .chart-bar > span,
+  .funnel-track span,
+  .admin-meter span {
+    background: CanvasText;
+  }
+}
