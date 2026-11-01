@@ -77,48 +77,78 @@ export function scrub(text: unknown): string {
 }
 
 /**
- * Error messages that may be sent, as [pattern, flags]: shapes that carry no
- * customer data. The part a pattern matches, from the message's start, is
- * kept and scrubbed; every other message is withheld. Quantifiers are
+ * Error messages that may be sent, as [pattern, flags, what to send]: shapes
+ * that carry no customer data. What is sent is static text, plus groups that
+ * can only hold code identifiers, enum words, our own schema names or our own
+ * SQL. Hosts, addresses, ports, database and role names are never kept, even
+ * when the shape is known. Every other message is withheld. Quantifiers are
  * bounded, so no message makes matching slow.
  */
-export const SAFE_MESSAGES: ReadonlyArray<readonly [string, string]> = [
-  // JavaScript runtime errors name code, not data.
-  ["^Cannot read properties of (?:undefined|null) \\(reading '[^'\\n]{1,80}'\\)$", ""],
-  ["^Cannot (?:read|set) property '[^'\\n]{1,80}' of (?:undefined|null)$", ""],
-  ["^[\\w$.\\[\\]]{1,120} is not (?:a function|defined|iterable|a constructor)$", ""],
-  ["^(?:undefined|null) is not an object \\(evaluating '[^'\\n]{1,120}'\\)$", ""],
-  ["^Maximum call stack size exceeded$", ""],
-  ["^Unexpected end of JSON input$", ""],
-  ["^Minified React error #\\d{1,4}", ""],
-  ["^Hydration failed because", ""],
-  // Network failures and timeouts.
-  ["^(?:Failed to fetch|Load failed|fetch failed|NetworkError when attempting to fetch resource\\.|The operation was aborted\\.|This operation was aborted|The user aborted a request\\.|The operation timed out\\.|The operation was aborted due to timeout)$", ""],
-  ["^(?:connect|read|write) (?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|EHOSTUNREACH)(?: [0-9a-f.:\\[\\]]{1,60})?$", ""],
-  ["^getaddrinfo (?:ENOTFOUND|EAI_AGAIN) [\\w.-]{1,253}$", ""],
-  // Postgres errors that name only our schema, and the text of one of our queries (its parameters are cut).
-  ["^Failed query: [^\\n]{1,600}", ""],
-  ['^duplicate key value violates unique constraint "[\\w.]{1,63}"$', ""],
-  ['^(?:relation|column|function|database|role|schema) "[\\w.$]{1,120}" does not exist$', ""],
-  ["^(?:canceling statement due to (?:statement timeout|user request)|deadlock detected|Connection terminated unexpectedly|Connection terminated|sorry, too many clients already)$", ""],
-  // Our own messages that carry only names of settings or opaque ids.
-  ["^Scan [0-9a-f-]{36} not found$", ""],
-  ["^Invalid server configuration:", ""],
+export const SAFE_MESSAGES: ReadonlyArray<readonly [string, string, string]> = [
+  // JavaScript runtime errors name code, not data. Only identifier characters pass.
+  ["^Cannot read properties of (undefined|null) \\(reading '([\\w$]{1,80})'\\)$", "", "Cannot read properties of $1 (reading '$2')"],
+  ["^Cannot (read|set) property '([\\w$]{1,80})' of (undefined|null)$", "", "Cannot $1 property '$2' of $3"],
+  ["^([\\w$.]{1,120}) is not (a function|defined|iterable|a constructor)$", "", "$1 is not $2"],
+  ["^(undefined|null) is not an object \\(evaluating '[^'\\n]{1,120}'\\)$", "", "$1 is not an object"],
+  ["^Maximum call stack size exceeded$", "", "Maximum call stack size exceeded"],
+  ["^Unexpected end of JSON input$", "", "Unexpected end of JSON input"],
+  ["^Minified React error #(\\d{1,4})", "", "Minified React error #$1"],
+  ["^Hydration failed because", "", "Hydration failed"],
+  // Network failures and timeouts: the error code only, never the host, address or port.
+  ["^(Failed to fetch|Load failed|fetch failed|NetworkError when attempting to fetch resource\\.|The operation was aborted\\.|This operation was aborted|The user aborted a request\\.|The operation timed out\\.|The operation was aborted due to timeout)$", "", "$1"],
+  ["^(connect|read|write) (ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|EHOSTUNREACH|ENETUNREACH)\\b", "", "$1 $2"],
+  ["^getaddrinfo (ENOTFOUND|EAI_AGAIN)\\b", "", "getaddrinfo $1"],
+  // Postgres: our own SQL (its parameters are cut) and our own schema names pass; database and role names do not.
+  ["^Failed query: [^\\n]{1,600}", "", "$&"],
+  ['^duplicate key value violates unique constraint "([\\w.]{1,63})"$', "", 'duplicate key value violates unique constraint "$1"'],
+  ['^(relation|column|function|schema) "([\\w.$]{1,120})" does not exist$', "", '$1 "$2" does not exist'],
+  ['^(database|role) "[^"\\n]{1,120}" does not exist$', "", "$1 does not exist"],
+  ["^password authentication failed for user\\b", "", "password authentication failed"],
+  ["^too many connections for role\\b", "", "too many connections for role"],
+  ["^(canceling statement due to (?:statement timeout|user request)|deadlock detected|Connection terminated unexpectedly|Connection terminated|sorry, too many clients already)$", "", "$1"],
+  // Our own messages: an opaque id, or only that the configuration is wrong.
+  ["^Scan ([0-9a-f-]{36}) not found$", "", "Scan $1 not found"],
+  ["^Invalid server configuration:", "", "Invalid server configuration"],
 ];
 
-const SAFE = SAFE_MESSAGES.map(([pattern, flags]) => new RegExp(pattern, flags));
+const SAFE = SAFE_MESSAGES.map(([pattern, flags, output]) => [new RegExp(pattern, flags), output] as const);
 
 /** Sent in place of a message without a known-safe shape. */
 export const WITHHELD = "(message withheld)";
 
-/** The message to send: its known-safe part, scrubbed, or a placeholder. */
+/** The message to send: the known-safe text its shape allows, scrubbed, or a placeholder. */
 export function safeMessage(message: unknown): string {
   const text = (typeof message === "string" ? message : "").slice(0, MAX_MESSAGE * 4);
-  for (const pattern of SAFE) {
+  for (const [pattern, output] of SAFE) {
     const match = pattern.exec(text);
-    if (match) return scrub(match[0]);
+    if (match) return scrub(match[0].replace(pattern, output));
   }
   return WITHHELD;
+}
+
+/**
+ * The page an error happened on, as one of the app's own route templates, or
+ * "unknown". A raw path can hold anything a visitor typed, an email included.
+ * Operator pages are deliberately absent: naming them here would put them in
+ * every page.
+ */
+export const PAGE_TEMPLATES: ReadonlyArray<readonly [string, string]> = [
+  ["^/$", "/"],
+  ["^/repos$", "/repos"],
+  ["^/findings$", "/findings"],
+  ["^/findings/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/findings/[id]"],
+  ["^/scans/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/scans/[id]"],
+  ["^/settings$", "/settings"],
+  ["^/billing/confirm$", "/billing/confirm"],
+  ["^/billing/return$", "/billing/return"],
+  ["^/sign-in$", "/sign-in"],
+];
+
+const PAGES = PAGE_TEMPLATES.map(([pattern, template]) => [new RegExp(pattern), template] as const);
+
+export function pageTemplate(pathname: string): string {
+  for (const [pattern, template] of PAGES) if (pattern.test(pathname)) return template;
+  return "unknown";
 }
 
 export interface Frame {
@@ -132,7 +162,13 @@ export interface Frame {
 const V8 = /^\s*at (?:async )?(?:(.+?) \()?(.+?):(\d+):(\d+)\)?\s*$/;
 const GECKO = /^\s*(.*?)@(.+?):(\d+):(\d+)\s*$/;
 
-/** Stack frames, oldest call first as Sentry wants them. File names lose their query, and home directories their user. */
+/**
+ * Stack frames, oldest call first as Sentry wants them. Only our own code's
+ * files are kept, by a fixed shape: on the server the build or package path
+ * (never the directory above it), in the browser (`origin` given) our own
+ * `/_next/static/` assets. Any other frame is dropped: its file name could
+ * be a page URL, an extension or a path with a person's name in it.
+ */
 export function parseStack(stack: string | undefined, origin?: string): Frame[] {
   if (!stack) return [];
   const frames: Frame[] = [];
@@ -141,7 +177,8 @@ export function parseStack(stack: string | undefined, origin?: string): Frame[] 
     if (line.length > 1_000) continue;
     const match = V8.exec(line) ?? GECKO.exec(line);
     if (!match) continue;
-    const filename = cleanFile(match[2]!, origin);
+    const filename = ownFile(match[2]!, origin);
+    if (!filename) continue;
     frames.push({
       filename,
       ...(match[1] ? { function: match[1].replace(/^async /, "").slice(0, 200) } : {}),
@@ -153,13 +190,20 @@ export function parseStack(stack: string | undefined, origin?: string): Frame[] 
   return frames.reverse();
 }
 
-function cleanFile(file: string, origin?: string): string {
+// Bundler chunk names can carry brackets ("[turbopack]_runtime.js"), encoded in URLs.
+const STATIC_ASSET = /^\/_next\/static\/[\w./%[\]-]{1,200}$/;
+const SERVER_FILE = /\/(?:\.next|node_modules|src)\/[\w./@+[\]-]{1,300}$/;
+const RUNTIME_FILE = /^(?:node:[\w/]{1,100}|internal\/[\w/.]{1,100}|<anonymous>|native)$/;
+
+function ownFile(file: string, origin?: string): string | undefined {
   const bare = file.replace(/^file:\/\//, "").split(/[?#]/)[0]!;
-  if (origin && bare.startsWith(origin)) return `app://${bare.slice(origin.length)}`;
-  // Server paths: keep the part from the build or package folder on, never the directory above it.
-  const local = /\/(\.next|node_modules|src)\/.*/.exec(bare);
-  if (local && bare.startsWith("/")) return `app://${local[0]}`;
-  return scrub(bare);
+  if (origin !== undefined) {
+    const path = bare.startsWith(`${origin}/`) ? bare.slice(origin.length) : undefined;
+    return path && STATIC_ASSET.test(path) ? `app://${path}` : undefined;
+  }
+  if (RUNTIME_FILE.test(bare)) return bare;
+  const local = bare.startsWith("/") ? SERVER_FILE.exec(bare) : null;
+  return local ? `app://${local[0]}` : undefined;
 }
 
 export interface ExceptionValue {
@@ -185,15 +229,6 @@ export function exceptionValues(error: unknown, mechanism: { type: string; handl
     }
   }
   return values.reverse();
-}
-
-/** UUIDs and long numbers in a path become [id], so pages group and no id is needed to read the report. */
-export function routePattern(path: string): string {
-  return path
-    .split(/[?#]/)[0]!
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "[id]")
-    .replace(/\/\d{3,}(?=\/|$)/g, "/[id]")
-    .slice(0, 200);
 }
 
 export interface SentryEvent {

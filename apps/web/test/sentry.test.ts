@@ -4,7 +4,7 @@
  * browser snippet. No real DSN is ever used.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { envelope, exceptionValues, parseDsn, parseStack, routePattern, safeMessage, scrub, WITHHELD } from "@/lib/sentry";
+import { envelope, exceptionValues, PAGE_TEMPLATES, pageTemplate, parseDsn, parseStack, safeMessage, scrub, WITHHELD } from "@/lib/sentry";
 import { browserReporter } from "@/lib/sentry-browser";
 import { config } from "@/server/config";
 import { captureException, resetSentry, sentryEnabled } from "@/server/sentry";
@@ -95,12 +95,43 @@ describe("scrubbing", () => {
       expect(safeMessage(message)).toBe(WITHHELD);
     // Shapes that carry no customer data still help.
     expect(safeMessage("Cannot read properties of undefined (reading 'id')")).toBe("Cannot read properties of undefined (reading 'id')");
-    expect(safeMessage("connect ECONNREFUSED 127.0.0.1:5432")).toBe("connect ECONNREFUSED [ip]:5432");
     expect(safeMessage('relation "scan_metrics" does not exist')).toBe('relation "scan_metrics" does not exist');
     expect(safeMessage("Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found")).toBe("Scan 0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c not found");
     // A safe prefix with something after it keeps only the prefix.
     expect(safeMessage("Minified React error #418; visit https://react.dev/errors/418?args[]=acme")).toBe("Minified React error #418");
     expect(safeMessage(undefined)).toBe(WITHHELD);
+  });
+
+  test("known-safe shapes send only their static text: no hosts, addresses, ports, databases or roles", () => {
+    const cases: Array<[string, string]> = [
+      ["getaddrinfo ENOTFOUND acme-private-db.example.com", "getaddrinfo ENOTFOUND"],
+      ["getaddrinfo EAI_AGAIN db.internal.acme.example", "getaddrinfo EAI_AGAIN"],
+      ["connect ECONNREFUSED 10.0.0.5:5432", "connect ECONNREFUSED"],
+      ["connect ECONNREFUSED ::1:5432", "connect ECONNREFUSED"],
+      ["connect ETIMEDOUT [2001:db8::42]:6432", "connect ETIMEDOUT"],
+      ["read ECONNRESET acme-pooler.example.com:6432", "read ECONNRESET"],
+      ['role "acme_admin" does not exist', "role does not exist"],
+      ['database "acme_production" does not exist', "database does not exist"],
+      ['password authentication failed for user "acme_app"', "password authentication failed"],
+      ['too many connections for role "acme_app"', "too many connections for role"],
+      ["Invalid server configuration:\n  DATABASE_URL: Invalid input", "Invalid server configuration"],
+      ["Minified React error #418; visit https://react.dev/errors/418?args[]=acme", "Minified React error #418"],
+      ["null is not an object (evaluating 'jane.doe@example.com')", "null is not an object"],
+    ];
+    for (const [message, sent] of cases) expect(safeMessage(message)).toBe(sent);
+    // Identifier slots take identifier characters only: anything else is withheld.
+    expect(safeMessage("Cannot read properties of undefined (reading 'jane.doe@example.com')")).toBe(WITHHELD);
+    expect(safeMessage("jane.doe@example.com is not a function")).toBe(WITHHELD);
+    expect(safeMessage('relation "acme customers; drop" does not exist')).toBe(WITHHELD);
+  });
+
+  test("the page is a known route template or unknown, never the raw path", () => {
+    expect(pageTemplate("/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/findings/[id]");
+    expect(pageTemplate("/scans/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/scans/[id]");
+    expect(pageTemplate("/repos")).toBe("/repos");
+    for (const path of ["/findings/jane.doe@example.com", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c/x", "/acme-secret-project", "/repos/123456"]) expect(pageTemplate(path)).toBe("unknown");
+    // Operator pages are never named in what the browser carries.
+    expect(JSON.stringify(PAGE_TEMPLATES)).not.toMatch(/admin|ops/);
   });
 
   test("scrubbing and message checks stay fast on huge or hostile input", () => {
@@ -147,13 +178,19 @@ describe("scrubbing", () => {
     expect(frames[2]!.function).toBeUndefined();
     expect(frames.at(-1)).toEqual({ filename: "app:///.next/server/chunks/ssr/page.js", function: "handler", lineno: 12, colno: 34, in_app: true });
     expect(frames[1]!.in_app).toBe(false);
-    const gecko = parseStack("render@https://sandchest.test/_next/static/chunks/app.js?v=1:3:9\n@https://cdn.example.com/x.js:1:1", "https://sandchest.test");
-    expect(gecko.map((frame) => frame.filename)).toEqual(["https://cdn.example.com/x.js", "app:///_next/static/chunks/app.js"]);
+    // Other server files (a path with someone's name in it) are dropped, not scrubbed.
+    expect(parseStack("Error\n    at f (/home/jane.doe/acme/tool.js:1:1)\n    at g (/var/task/apps/web/.next/server/a.js:2:2)").map((frame) => frame.filename)).toEqual(["app:///.next/server/a.js"]);
   });
 
-  test("route patterns hide ids", () => {
-    expect(routePattern("/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c?tab=1")).toBe("/findings/[id]");
-    expect(routePattern("/repos/123456/x")).toBe("/repos/[id]/x");
+  test("browser frames keep only our own static assets", () => {
+    const stack = [
+      "render@https://sandchest.test/_next/static/chunks/app.js?v=1:3:9",
+      "@https://cdn.example.com/x.js:1:1",
+      "inline@https://sandchest.test/findings/jane.doe@example.com:4:4",
+      "ext@chrome-extension://abc/inject.js:5:5",
+      "tricky@https://sandchest.test.evil.example/_next/static/chunks/a.js:6:6",
+    ].join("\n");
+    expect(parseStack(stack, "https://sandchest.test").map((frame) => frame.filename)).toEqual(["app:///_next/static/chunks/app.js"]);
   });
 });
 
@@ -260,7 +297,7 @@ describe("browser reporting", () => {
   test("the script cannot break out of its tag", () => {
     const script = browserReporter({ dsn: "https://k@o1.ingest.sentry.io/1", environment: "</script><script>alert(1)</script>" })!;
     expect(script).not.toContain("</script>");
-    expect(script.length).toBeLessThan(6_000);
+    expect(script.length).toBeLessThan(7_000);
   });
 
   test("reports an uncaught error and an unhandled rejection to the endpoint, scrubbed", async () => {
@@ -289,10 +326,8 @@ describe("browser reporting", () => {
     expect(first).toMatchObject({ platform: "javascript", environment: "test", release: "abcdef123456", tags: { source: "browser", page: "/findings/[id]" } });
     expect(Object.keys(first).sort()).toEqual(["environment", "event_id", "exception", "level", "platform", "release", "sdk", "tags", "timestamp"]);
     const frames = first.exception.values.at(-1).stacktrace.frames;
-    expect(frames.map((frame: { filename: string; in_app: boolean }) => [frame.filename, frame.in_app])).toEqual([
-      ["https://extension.example/inject.js", false],
-      ["app:///_next/static/chunks/app.js", true],
-    ]);
+    // The extension's frame is dropped: only our own static assets are kept.
+    expect(frames.map((frame: { filename: string; in_app: boolean }) => [frame.filename, frame.in_app])).toEqual([["app:///_next/static/chunks/app.js", true]]);
     expect(parse(received[1]!.body).event.exception.values).toEqual([{ type: "NonError", value: "Non-error value thrown: object", mechanism: { type: "onunhandledrejection", handled: false } }]);
   });
 
@@ -314,6 +349,28 @@ describe("browser reporting", () => {
     listeners.error!({ error });
     const browser = parse(sent).event.exception.values.map((value: { value: string }) => value.value);
     expect(browser).toEqual(exceptionValues(error, { type: "x", handled: false }).map((value) => value.value));
+  });
+
+  test("a browser report from a path that names someone says only 'unknown'", () => {
+    const script = browserReporter({ dsn: "http://publickey@127.0.0.1:9/5" })!;
+    const listeners: Record<string, (event: unknown) => void> = {};
+    let body = "";
+    new Function("location", "addEventListener", "fetch", "crypto", script)(
+      { origin: "https://sandchest.test", pathname: "/findings/jane.doe@example.com" },
+      (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
+      async (_url: string, init: RequestInit) => {
+        body = String(init.body);
+        return new Response();
+      },
+      crypto,
+    );
+    const error = new Error("boom");
+    error.stack = "Error: boom\n    at x (https://sandchest.test/findings/jane.doe@example.com:1:1)\n    at y (https://sandchest.test/_next/static/chunks/app.js:2:2)";
+    listeners.error!({ error });
+    expect(body).not.toContain("jane");
+    const { event } = parse(body);
+    expect(event.tags.page).toBe("unknown");
+    expect(event.exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename)).toEqual(["app:///_next/static/chunks/app.js"]);
   });
 
   test("the browser reporter stays fast on a huge message", () => {
