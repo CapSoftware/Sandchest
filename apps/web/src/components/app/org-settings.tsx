@@ -28,10 +28,13 @@ export function OrgSettingsForm({ orgId, threshold, email, admin }: { orgId: str
       </fieldset>
       <fieldset disabled={!admin}>
         <legend className="field-legend">Email</legend>
-        <p className="field-help">Sent to everyone who can push to the repository and has signed in.</p>
+        <p className="field-help">
+          Findings go to everyone who has signed in and can push to the repository; paused scans go to admins. Billing emails, such as low
+          credits or a failed top-up, always go to admins.
+        </p>
         <label className="toggle">
           <input type="checkbox" name="emailNotifications" defaultChecked={email} />
-          Critical findings and finished deep scans
+          Critical findings, finished deep scans and paused scans
         </label>
       </fieldset>
       {admin && (

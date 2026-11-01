@@ -46,6 +46,7 @@ import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
 import { config } from "./config";
+import { noticeScanPaused } from "./notices";
 import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 
 /** Concurrent scans per org (SPEC §4). */
@@ -195,7 +196,11 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       await updateScan(db(), scan.id, { status: "refused", error: error.message, finishedAt: new Date() });
       throw new ScanFinished(error.message);
     }
-    if (error instanceof LlmQuotaError) throw new ScanFinished("The model provider refused for quota reasons; the scan is paused.");
+    if (error instanceof LlmQuotaError) {
+      // The fail step that follows gives the credits back. Email is best effort and at most once per scan.
+      await noticeScanPaused(scan).catch((failure: unknown) => console.error(`Scan-paused email for scan ${scan.id} failed: ${failure instanceof Error ? failure.name : "error"}`));
+      throw new ScanFinished("The model provider refused for quota reasons; the scan is paused.");
+    }
     throw error;
   } finally {
     await Promise.allSettled([events.flush(), workspace.destroy()]);

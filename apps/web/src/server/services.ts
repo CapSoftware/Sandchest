@@ -1,13 +1,13 @@
 /** Process-wide clients, created on first use. Tests can swap any of them. */
 import type { Db } from "@sandchest/db";
-import { createMailer, type Mailer } from "@sandchest/email";
+import type { Mailer } from "@sandchest/email";
 import { createLlmClient, loadLlmConfig, type LlmClient } from "@sandchest/engine/llm";
 import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import { GitHubApp, loadAppConfig } from "@sandchest/github";
-import { config } from "./config";
 import { db, setDb } from "./db";
+import { mailer, setMailer } from "./mailer";
 
-export { db };
+export { db, mailer };
 
 interface Services {
   db: Db;
@@ -24,6 +24,7 @@ const instances: Partial<Services> = {};
 export function setServices(overrides: Partial<Services>): void {
   Object.assign(instances, overrides);
   if (overrides.db) setDb(overrides.db);
+  if (overrides.mailer) setMailer(overrides.mailer);
 }
 
 export function githubApp(): GitHubApp {
@@ -42,8 +43,4 @@ export function osvClient(): OsvClient | undefined {
 export function pricing(): Pricing | undefined {
   if (!("pricing" in instances)) instances.pricing = loadPricing();
   return instances.pricing;
-}
-
-export function mailer(): Mailer {
-  return (instances.mailer ??= createMailer(config()));
 }

@@ -27,6 +27,8 @@ const Schema = z.object({
   /** Billing (Autumn). Unset means billing is off and nothing is limited, as when self-hosting. */
   AUTUMN_SECRET_KEY: z.string().min(1).optional(),
   AUTUMN_BASE_URL: z.url().optional(),
+  /** Signing secret (`whsec_…`) of the Autumn webhook endpoint. Unset means the endpoint answers 404. */
+  AUTUMN_WEBHOOK_SECRET: z.string().min(1).optional(),
   /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
   SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
   /** GitHub's REST API. Default https://api.github.com; tests point it at a fake. */

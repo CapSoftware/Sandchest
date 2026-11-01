@@ -10,12 +10,14 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import postgres from "postgres";
-import { createDb, openFindings, scanById, threatModel, type Db } from "@sandchest/db";
+import { createDb, openFindings, scanById, schema, threatModel, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
-import type { ChatRequest, ChatResult, LlmClient, ToolCall } from "@sandchest/engine/llm";
+import type { Email } from "@sandchest/email";
+import { LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient, type ToolCall } from "@sandchest/engine/llm";
 import type { GitHubApp } from "@sandchest/github";
 import { setAutumn } from "@/server/billing";
-import { beginScan, executeScan, publishScan } from "@/server/scans";
+import { setMailer } from "@/server/mailer";
+import { beginScan, executeScan, failScan, publishScan } from "@/server/scans";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
@@ -152,9 +154,13 @@ function reply(content: string, toolCalls: ToolCall[] = []): ChatResult {
 }
 const call = (name: string, args: unknown): ToolCall => ({ id: `c-${name}`, type: "function", function: { name, arguments: JSON.stringify(args) } });
 
+/** Set to make the model provider refuse every request for quota. */
+let quotaExhausted = false;
+
 const fakeLlm: LlmClient = {
   config: { baseUrl: "http://fake", apiKey: "k", model: "m" },
   async chat(request: ChatRequest) {
+    if (quotaExhausted) throw new LlmQuotaError("quota exceeded", { status: 429, retryable: false });
     const answered = request.messages.some((m) => m.role === "tool");
     if (request.responseFormat) return reply(JSON.stringify(request.role === "recon" ? threatModelJson : writeUp));
     if (request.role === "recon") return reply("Notes.");
@@ -309,6 +315,34 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(check.conclusion).toBe("failure");
     expect(check.summary).toContain("Sandchest found 1 high-severity issue.");
     expect(JSON.stringify(check)).not.toContain("app.js");
+  }, 60_000);
+
+  test("the model provider's quota stops a review: its admins hear once, and nothing is charged", async () => {
+    const org = await database.query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.installationId, 77) });
+    const [user] = await database.insert(schema.users).values({ name: "Owner", email: "owner@example.com", login: "owner" }).returning();
+    await database.insert(schema.orgAdmins).values({ userId: user!.id, orgId: org!.id });
+    const sent: Email[] = [];
+    setMailer({ enabled: true, send: async (email) => void sent.push(email) });
+    const event = prEvent(repos[0]!, head);
+    event.number = event.pull_request.number = 11;
+    const scanId = (await handleWebhook(deps(), "pull_request", "d-quota", event)).scans![0]!;
+    const credits = autumn.get(org!.id).credits;
+    try {
+      expect((await beginScan(scanId)).state).toBe("running");
+      quotaExhausted = true;
+      // What the workflow does: the execute step ends for good, then the fail step runs (and may be retried).
+      await expect(executeScan(scanId)).rejects.toThrow("the scan is paused");
+      await failScan(scanId, "The model provider refused for quota reasons; the scan is paused.");
+      await failScan(scanId, "The model provider refused for quota reasons; the scan is paused.");
+    } finally {
+      quotaExhausted = false;
+      setMailer(undefined);
+    }
+    expect(sent.map((email) => [email.to, email.subject])).toEqual([[["owner@example.com"], "Scan paused: acme/private-app"]]);
+    expect(sent[0]!.text).toContain("The review of pull request #11 in acme/private-app stopped");
+    expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+    expect(autumn.get(org!.id).credits).toBe(credits);
+    expect(recorded.completed.at(-1)).toMatchObject({ repo: "acme/private-app", conclusion: "neutral" });
   }, 60_000);
 
   test("webhook rules: drafts, public forks, other branches and the review command", async () => {

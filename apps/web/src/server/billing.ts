@@ -29,6 +29,7 @@ import {
 import { after } from "next/server";
 import { config } from "./config";
 import { db } from "./db";
+import { noticeCredits } from "./notices";
 
 /** Unsettled reservations return to the org after this long (Autumn allows up to 24 hours). */
 const RESERVATION_MS = 6 * 3_600_000;
@@ -84,6 +85,7 @@ export function syncBilling(org: BillingOrg): Promise<OrgBillingRow> {
 
 async function readAndStore(org: BillingOrg): Promise<OrgBillingRow> {
   const client = autumn()!;
+  const asOf = new Date();
   let state = await client.customer(org.id, org.githubLogin);
   const previous = await orgBillingRow(db(), org.id);
   if (previous && previous.planId !== state.planId) state = await matchAutoTopUp(org.id, state);
@@ -91,7 +93,8 @@ async function readAndStore(org: BillingOrg): Promise<OrgBillingRow> {
   const row = toRow(state);
   const { firstActivation, previousPlanId } = await saveOrgBilling(db(), org.id, row, at);
   if (state.planId && (firstActivation || !previousPlanId)) await startPendingRecon(org.id);
-  return { orgId: org.id, ...row, activatedAt: previous?.activatedAt ?? (state.planId ? at : null), checkedAt: at };
+  await noticeCredits(org, row, { source: "read", asOf }).catch(logFailure("credits email"));
+  return { orgId: org.id, ...row, activatedAt: previous?.activatedAt ?? (state.planId ? at : null), checkedAt: at, creditLevel: previous?.creditLevel ?? 0, creditLevelAt: previous?.creditLevelAt ?? null };
 }
 
 function toRow(state: BillingState): OrgBillingInput {
@@ -185,7 +188,10 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
       const state = (await syncBilling(org).catch(() => null)) ?? (await orgBillingRow(db(), org.id));
       return { ok: false, reason: state?.planId ? "out_of_credits" : "no_plan", credits };
     }
-    if (result.remaining !== null) await setOrgCredits(db(), org.id, result.remaining);
+    if (result.remaining !== null) {
+      const stored = await setOrgCredits(db(), org.id, result.remaining);
+      if (stored) await noticeCredits(org, stored, { source: "reserve" }).catch(logFailure("credits email"));
+    }
   }
   if (record) await markScanReserved(db(), scanId, credits);
   return { ok: true };
