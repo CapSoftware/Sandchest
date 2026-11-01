@@ -218,7 +218,7 @@ export const ThreatModelSchema = z.object({
 });
 export type ThreatModel = z.infer<typeof ThreatModelSchema>;
 
-export type LeadKind = "secret" | "vulnerable_dependency" | "injection_marker" | "sink";
+export type LeadKind = "secret" | "vulnerable_dependency" | "injection_marker" | "sink" | "missing_check";
 
 /** A deterministic signal. The model can investigate and rank leads, never suppress them. */
 export interface Lead {

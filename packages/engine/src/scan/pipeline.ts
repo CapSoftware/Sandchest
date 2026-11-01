@@ -32,6 +32,7 @@ import type { Runtime } from "./runtime";
 import { validateFindings, type ValidateOptions } from "./validate";
 import { proveFindings } from "./prove";
 import { trustRank, trustTier } from "./trust";
+import { authzConsistencyLeads } from "./consistency";
 
 export interface ScanOptions {
   client: LlmClient;
@@ -159,6 +160,14 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       return emptyReport(started, overview, options.threatModel, reviewed, Date.now() - started);
     }
   }
+  // Deep scans: find handlers that skip an authorization check their peers apply (RoleCast-style),
+  // deterministically, while recon runs. These leads make the hardest, most variance-prone class
+  // reliably covered instead of found on a lucky hunt. PR reviews skip it (leads must touch the change).
+  let authzN = 0;
+  const authzLeads: Promise<Lead[]> = change
+    ? Promise.resolve([])
+    : authzConsistencyLeads(indexer, routes, () => `MC${++authzN}`, signal).catch(() => []);
+
   // The advisory lookup is network-bound: let it run while recon maps the code.
   const advisories = vulnerabilities(options.osv, code.dependencies, signal).then((result) => {
     if (result.error) emit({ type: "warning", message: `Dependency vulnerability lookup failed: ${result.error}` });
@@ -190,6 +199,12 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     ? [options.threatModel, 0]
     : await time(() => recon(base, overview, routes, signals.leads));
   const sweepMs = await advisories;
+  // Merge the deterministic authorization-consistency leads (after advisories, which rebuilds signals.leads).
+  const authz = await authzLeads;
+  if (authz.length > 0) {
+    signals.leads = [...signals.leads, ...authz];
+    emit({ type: "progress", message: `Flagged ${authz.length} handler${authz.length === 1 ? "" : "s"} that skip an authorization check their peers apply.` });
+  }
   const ctx: ScanContext = { ...base, threatModelText: renderThreatModel(threatModel) };
 
   const registry = new CandidateRegistry();
