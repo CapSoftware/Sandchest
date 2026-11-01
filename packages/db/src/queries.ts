@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
 
@@ -168,7 +168,7 @@ export async function claimWorkflowStart(database: Db, scanId: string, claim: st
   const rows = await database
     .update(scans)
     .set({ workflowRunId: claim })
-    .where(and(eq(scans.id, scanId), sql`${scans.workflowRunId} is null`))
+    .where(and(eq(scans.id, scanId), isNull(scans.workflowRunId)))
     .returning({ id: scans.id });
   return rows.length === 1;
 }
@@ -184,11 +184,11 @@ export async function strandedScans(database: Db, now = new Date()): Promise<{ u
   const halfHourAgo = new Date(now.getTime() - 30 * 60_000);
   const [unstarted, stuck] = await Promise.all([
     database.query.scans.findMany({
-      where: and(eq(scans.status, "queued"), sql`${scans.workflowRunId} is null`, sql`${scans.createdAt} < ${fiveMinutesAgo}`),
+      where: and(eq(scans.status, "queued"), isNull(scans.workflowRunId), lt(scans.createdAt, fiveMinutesAgo)),
       limit: 50,
     }),
     database.query.scans.findMany({
-      where: and(inArray(scans.status, ["running", "publishing"]), sql`${scans.startedAt} < ${halfHourAgo}`),
+      where: and(inArray(scans.status, ["running", "publishing"]), lt(scans.startedAt, halfHourAgo)),
       limit: 50,
     }),
   ]);
