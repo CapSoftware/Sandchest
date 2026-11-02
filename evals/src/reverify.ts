@@ -29,6 +29,7 @@ const { values } = parseArgs({
     run: { type: "string" },
     private: { type: "boolean", default: false },
     severities: { type: "string", default: "critical,high" },
+    ground: { type: "boolean", default: false },
   },
 });
 
@@ -94,6 +95,7 @@ await Promise.all(
       threatModel: group.report.threatModel,
       findings: group.items.map((item) => item.finding),
       pricing,
+      investigateAuth: values.ground,
     });
     cost += costUsd ?? 0;
     results.forEach((result, i) => {

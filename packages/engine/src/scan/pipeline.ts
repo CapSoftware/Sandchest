@@ -479,6 +479,8 @@ export interface VerifyOptions {
   limits?: Partial<ScanLimits>;
   pricing?: Pricing;
   signal?: AbortSignal;
+  /** Investigate the app's authorization model first and ground the skeptic in it (as a deep scan does). */
+  investigateAuth?: boolean;
 }
 
 export interface Verification {
@@ -513,6 +515,10 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
     emit: () => {},
     threatModelText: renderThreatModel(options.threatModel),
   };
+  if (options.investigateAuth) {
+    const authModel = await investigateAuthModel(ctx);
+    if (authModel) ctx.authModelText = renderAuthModel(authModel);
+  }
 
   const results = await Promise.all(
     options.findings.map(async (input, i): Promise<Verification> => {
