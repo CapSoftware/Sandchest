@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Jersey_10 } from "next/font/google";
 import type { ReactNode } from "react";
 import { browserReporter } from "@/lib/sentry-browser";
-import { brandAsset, site } from "@/lib/site";
+import { brandAsset, site, socialImage, socialVideo } from "@/lib/site";
 import "./globals.css";
 
 const display = Jersey_10({
@@ -35,13 +35,14 @@ export const metadata: Metadata = {
     description: site.description,
     siteName: site.name,
     type: "website",
-    images: [{ url: brandAsset("/og.png"), width: 1200, height: 630, alt: site.name }],
+    images: [socialImage],
+    videos: [socialVideo],
   },
   twitter: {
     card: "summary_large_image",
     title: site.title,
     description: site.description,
-    images: [brandAsset("/og.png")],
+    images: [socialImage],
   },
 };
 
