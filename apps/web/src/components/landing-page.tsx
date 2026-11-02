@@ -1,6 +1,9 @@
 import { ChestStage } from "@/components/chest-stage";
 import { FindingStrip } from "@/components/finding-strip";
+import { HackerAtWork } from "@/components/hacker-at-work";
+import { HeroKey } from "@/components/hero-key";
 import { HowItWorks } from "@/components/how-it-works";
+import { LiveLines } from "@/components/recruit/live-lines";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
 import { site } from "@/lib/site";
 
@@ -34,19 +37,16 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
             unrestricted models to find real vulnerabilities in your code before attackers do.
           </p>
           <div className="hero-actions">
-            <a href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted} className="button button-primary">
-              <span className="button-face">Get started</span>
-            </a>
-            <a href={site.githubUrl} className="button button-secondary">
-              <span className="button-face">
-                <GitHubMark />
-                View on GitHub
-              </span>
+            <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted}>Get started</HeroKey>
+            <a href={site.githubUrl} className="hero-alt">
+              <GitHubMark />
+              View on GitHub
             </a>
           </div>
         </section>
 
         <ChestStage />
+        <LiveLines className="landing-live" />
 
         <section className="section" aria-labelledby="pitch-title">
           <h2 id="pitch-title" className="section-title">
@@ -75,6 +75,9 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
         </section>
       </main>
 
+      <HackerAtWork>
+        <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted}>Get started</HeroKey>
+      </HackerAtWork>
       <SiteFooter />
     </div>
   );

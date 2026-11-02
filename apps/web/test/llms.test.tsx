@@ -138,6 +138,15 @@ describe("legal pages", () => {
     expect(renderPageMarkdown(pages[1]!, "[the policy](/privacy)", base)).not.toContain("/privacy");
   });
 
+  test.skipIf(legalDraft)("published legal pages are linked from the footer, which credits Cap", () => {
+    expect(legalRobots()).toEqual({});
+    const footer = renderToStaticMarkup(<SiteFooter current="terms" />);
+    for (const href of [site.links.terms, site.links.privacy, site.links.acceptableUse]) expect(footer).toContain(`href="${href}"`);
+    expect(footer).toContain('href="/terms" aria-current="page"');
+    expect(footer).toContain(`href="${site.parent.url}"`);
+    expect(footer).toContain(legal.entity);
+  });
+
   // Before launch: SANDCHEST_LEGAL_FINAL=1 bun test fails until every placeholder is replaced.
   test.skipIf(process.env.SANDCHEST_LEGAL_FINAL !== "1")("every legal fact is filled in", () => {
     const missing = Object.entries(legal)

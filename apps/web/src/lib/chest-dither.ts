@@ -79,7 +79,7 @@ const GOLD = hex("#FEC242");
 
 const CHEST_PALETTE: readonly Rgb[] = [VOID, RUST, EMBER, AMBER, HONEY, GOLD];
 /** Light ramp, darkest to brightest, for glow, rays, glyphs and sparks. */
-const LIGHT_RAMP: readonly Rgb[] = [VOID, RUST, EMBER, AMBER, GOLD];
+export const LIGHT_RAMP: readonly Rgb[] = [VOID, RUST, EMBER, AMBER, GOLD];
 const LIGHT_STEPS = LIGHT_RAMP.length - 1;
 
 /** Per-channel jitter applied before nearest-colour matching on the chest. */
@@ -91,10 +91,10 @@ const BAYER_8 = [
   7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
 ].map((v) => (v + 0.5) / 64);
 
-const bayer = (x: number, y: number) => BAYER_8[((y & 7) << 3) | (x & 7)];
+export const bayer = (x: number, y: number) => BAYER_8[((y & 7) << 3) | (x & 7)];
 
 /** 3 × 5 hex digits, row by row. */
-const GLYPHS = [
+export const GLYPHS = [
   "111101101101111",
   "010110010010111",
   "111001111100111",
@@ -148,7 +148,7 @@ const EMBERS = Array.from({ length: 18 }, (_, i) => ({
 
 /** Smooth 2D value noise in [0, 1). */
 const lattice = (x: number, y: number) => hash(Math.imul(x, 374761393) + Math.imul(y, 668265263));
-const noise = (x: number, y: number) => {
+export const noise = (x: number, y: number) => {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
   const xf = x - xi;

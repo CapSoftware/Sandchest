@@ -49,6 +49,16 @@
   }
 }
 
+/*
+ * The landing page's ground: the void with a faint grain over it, one CSS
+ * pixel per grain like the room's dither. A static 128px tile (drawn at 2x
+ * so it stays crisp on 2x screens), painted with the background: nothing
+ * animates or repaints on scroll.
+ */
+html:has(.page) {
+  background: url("/grain.png") 0 0 / 128px 128px, var(--color-void);
+}
+
 /* One narrow, left-aligned column for the whole page. */
 
 .page {
@@ -66,11 +76,11 @@
   padding: 1.5rem 0;
 }
 
-/* Pixel art on a 2px grid, the same cell size as the chest panel. */
+/* Pixel art on a 1.5px grid: whole device pixels on high-density screens. */
 .wordmark img {
   display: block;
-  width: 184px;
-  height: 34px;
+  width: 138px;
+  height: 25.5px;
   image-rendering: pixelated;
 }
 
@@ -115,8 +125,9 @@
 
 .hero-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.25rem;
   margin-top: 2rem;
 }
 
@@ -227,6 +238,55 @@
   inset: -0.5rem -0.75rem;
 }
 
+/* The hero's key: the gold key a size up. */
+.button-hero .button-face {
+  height: 3.75rem;
+  padding: 0 2rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.button-hero:hover .button-face {
+  transform: translateY(-2px);
+}
+
+.button-hero::before {
+  inset: -1rem -1.5rem;
+}
+
+.button-hero:hover::before {
+  opacity: 0.65;
+}
+
+/* The key's fire (hero-key.tsx): behind the face, on the chest's 2px grid. */
+.key-fire {
+  position: absolute;
+  z-index: -1;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* The quiet way out, under the key. */
+.hero-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-dust);
+  text-decoration: none;
+}
+
+.hero-alt:hover {
+  color: var(--color-sand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.hero-alt .button-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
 .button-icon {
   width: 1.125rem;
   height: 1.125rem;
@@ -295,6 +355,107 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   visibility: visible;
 }
 
+/*
+ * The running total: every line Sandchest has read, rolling up as scans
+ * finish. One number in the pixel type and gold, with a dithered rust
+ * extrusion behind it and a dithered glow around it. Sized to its box's
+ * width (--ems is the number's width in ems, set by the component).
+ */
+
+.live-lines {
+  container-type: inline-size;
+  isolation: isolate;
+}
+
+.live-lines p {
+  margin: 0;
+}
+
+.live-lines-count {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: min(calc(80cqi / var(--ems)), 9rem);
+  line-height: 0.9;
+  white-space: nowrap;
+  color: var(--color-gold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The extrusion: the same number in rust, dropped down-right and drawn in every other pixel. */
+.live-lines-count::after {
+  content: attr(data-n);
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  color: var(--color-rust);
+  translate: 0.05em 0.05em;
+  mask-image: repeating-conic-gradient(#000 0 25%, transparent 0 50%);
+  mask-size: 4px 4px;
+}
+
+.live-lines-count::before {
+  content: "";
+  position: absolute;
+  inset: -45% -15% -45% -25%;
+  z-index: -2;
+  background: repeating-conic-gradient(var(--color-amber) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+  mask-image: radial-gradient(closest-side, #000 15%, transparent);
+  opacity: 0.2;
+}
+
+.live-lines-label,
+.live-lines-running {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--color-dust);
+}
+
+.live-lines-label {
+  margin-top: 1.25rem !important;
+}
+
+.live-lines-running {
+  color: var(--color-sand);
+}
+
+.live-lines-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.45rem;
+  margin-left: 0.6rem;
+  background: var(--phosphor, var(--color-gold));
+  vertical-align: 0.05rem;
+  animation: live-lines-blink 1.2s steps(2, jump-none) infinite;
+}
+
+@keyframes live-lines-blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* Waiting on the first reading: the space is kept, nothing shows. */
+.live-lines[data-pending] {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-lines-dot {
+    animation: none;
+  }
+}
+
+/* On the landing, centred under the chest panel. */
+.landing-live {
+  margin-top: clamp(2.5rem, 6vw, 3.5rem);
+  text-align: center;
+}
+
+.landing-live .live-lines-count {
+  font-size: min(calc(92cqi / var(--ems)), 6.5rem);
+}
+
 /* Finding strip: a review comment on a pull request. */
 
 .strip {
@@ -351,7 +512,7 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   width: 4ch;
   padding-right: 1ch;
   text-align: right;
-  color: color-mix(in oklab, var(--color-dust) 60%, var(--color-soot));
+  color: var(--color-dust);
   user-select: none;
 }
 
@@ -587,12 +748,15 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   background: var(--color-gold);
 }
 
-/* How it works: four steps, each with a small illustration. */
+/*
+ * How it works: four steps, each beside a small window that plays once. The
+ * windows sit on alternate sides on wide screens. Every animation here moves
+ * only opacity and transform, so it stays on the compositor.
+ */
 
 .steps {
   display: grid;
-  gap: clamp(3.5rem, 8vw, 5rem);
-  margin-top: 2.5rem;
+  gap: clamp(3.5rem, 9vw, 6rem);
 }
 
 .step {
@@ -603,24 +767,46 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
 
 @media (min-width: 44rem) {
   .step {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-    gap: 2.5rem;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: 3rem;
+  }
+
+  .step:nth-child(even) {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  }
+
+  .step:nth-child(even) .vis {
+    order: -1;
   }
 }
 
-.step-title {
+/* The step's number: a gold pixel tag, like the chest's notched keys. */
+.step-n {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.75rem;
   font-family: var(--font-display);
-  font-size: 1.875rem;
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--color-gold);
+}
+
+.step-n::after {
+  content: "";
+  flex: 1;
+  max-width: 6rem;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--color-edge) 0 2px, transparent 2px 6px);
+}
+
+.step-title {
+  margin-top: 0.75rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.875rem, 4vw, 2.25rem);
   font-weight: 400;
   line-height: 1;
   color: var(--color-bright);
-}
-
-.step-n {
-  color: var(--color-gold);
+  text-wrap: balance;
 }
 
 .step-body {
@@ -631,15 +817,59 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
 }
 
 .vis {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* A window: the title bar, then the illustration on soot. */
+.win {
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+  box-shadow: 0 1.5rem 3rem -1.5rem rgb(0 0 0 / 0.7);
+}
+
+.win-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-bottom: 1px solid var(--color-seam);
+  background: var(--color-void);
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.win-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--color-sand);
+}
+
+.win-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.win-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.win-dots i {
+  width: 5px;
+  height: 5px;
+  background: var(--color-edge);
+}
+
+.win-body {
   display: grid;
   align-content: start;
   gap: 0.5rem;
-  min-height: 15rem;
-  padding: 1.25rem;
-  border: 1px solid var(--color-seam);
-  background: var(--color-soot);
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  min-height: 15.5rem;
+  padding: 1.125rem 1.25rem 1.25rem;
 }
 
 .vis code {
@@ -647,13 +877,24 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
 }
 
 .vis-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--color-dust);
 }
 
 .vis-gap {
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
   padding-top: 0.875rem;
   border-top: 1px solid var(--color-seam);
+}
+
+.tag {
+  padding: 0 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--color-gold) 45%, transparent);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--color-gold);
 }
 
 .pixel {
@@ -664,6 +905,18 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   background: var(--color-gold);
 }
 
+/* A small gold key with a rust underside, the landing's Get started key in miniature. */
+.key-mini {
+  justify-self: start;
+  padding: 0.25rem 0.75rem;
+  background: var(--color-gold);
+  box-shadow:
+    inset 0 2px 0 var(--color-gold-light),
+    inset 0 -2px 0 var(--color-rust);
+  color: var(--color-void);
+  font-weight: 600;
+}
+
 /* Two labels sharing one spot, so one can replace the other. */
 .swap {
   display: inline-grid;
@@ -671,9 +924,39 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
 
 .swap > * {
   grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-/* 1. Connect */
+/* Several labels in one line, shown in turn: the column of them moves up a line at a time. */
+.tick {
+  --lh: 1.5em;
+  display: inline-block;
+  height: var(--lh);
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.tick-in {
+  display: grid;
+}
+
+.tick-in > * {
+  height: var(--lh);
+  line-height: var(--lh);
+  white-space: nowrap;
+}
+
+.tick[data-n="3"] .tick-in {
+  transform: translateY(calc(var(--lh) * -2));
+}
+
+.tick[data-n="4"] .tick-in {
+  transform: translateY(calc(var(--lh) * -3));
+}
+
+/* 1. Install */
 
 .repos {
   display: grid;
@@ -697,6 +980,10 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   background: var(--color-gold);
 }
 
+.repos + .key-mini {
+  margin-top: 0.375rem;
+}
+
 .map {
   display: grid;
   gap: 0.25rem;
@@ -718,11 +1005,257 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   color: var(--color-gold);
 }
 
-/* 2. Review */
+/* 2. Choose your hacker: a pocket version of the onboarding's Hacker step. */
 
-.vis-pr {
+.hk {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.hk-portrait {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--color-seam);
+  background: #000;
+}
+
+/* The stills stack in one cell; each change fades the next one in over the last. */
+.hk-portrait img {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 30%;
+}
+
+.win:has(.hk) .win-body {
+  align-content: stretch;
+}
+
+.hk-menu {
+  display: flex;
+  flex-direction: column;
+}
+
+.hk-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  border: 1px solid var(--color-edge);
+  background: rgb(0 0 0 / 0.45);
+}
+
+.hk-name .tick {
+  --lh: 1.15em;
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--color-gold);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--color-gold) 35%, transparent);
+}
+
+.hk-roll {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--color-edge);
+  font-size: 0.6875rem;
   color: var(--color-sand);
 }
+
+.hk-dice {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+.hk-lines {
+  position: relative;
+  display: grid;
+  margin-top: 0.625rem;
+  border-top: 1px solid var(--color-seam);
+}
+
+/* The lit line: one bar that moves down the menu, as the onboarding lights the line being changed. */
+.hk-lit {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(100% / 3);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-gold) 16%, transparent), transparent 85%);
+  box-shadow: inset 2px 0 0 var(--color-gold);
+  transform: translateY(200%);
+  pointer-events: none;
+}
+
+.hk-line {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.25rem 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.hk-line-name {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.hk-cycle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  color: var(--color-edge);
+}
+
+.hk-arrow {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+.hk-value {
+  min-width: 0;
+  color: var(--color-sand);
+  white-space: nowrap;
+}
+
+.hk-value .swap {
+  justify-items: center;
+}
+
+.hk-chip {
+  width: 0.55rem;
+  height: 0.55rem;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+}
+
+.hk-quote {
+  margin-top: auto;
+  padding-top: 0.625rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+  text-align: center;
+}
+
+@media (max-width: 26rem) {
+  .hk {
+    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+}
+
+/* 3. Scan */
+
+.scan-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-sand);
+}
+
+.scan-tick .tick-in > :last-child {
+  color: var(--color-ember);
+}
+
+/*
+ * Every file in the repo as a cell. The lit files are an SVG underneath; the
+ * cover on top is the same grid, dark, and slides right one column at a time,
+ * so the cells stay lined up while it moves.
+ */
+.grid-scan {
+  --rows: 5;
+  position: relative;
+  aspect-ratio: calc(var(--cols) / var(--rows) * 1.25);
+  margin: 0.375rem 0 0.25rem;
+  overflow: hidden;
+}
+
+.grid-lit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.grid-cover {
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-seam);
+  background-image:
+    linear-gradient(90deg, var(--color-soot) 14%, transparent 14% 86%, var(--color-soot) 86%),
+    linear-gradient(var(--color-soot) 14%, transparent 14% 86%, var(--color-soot) 86%);
+  background-size: calc(100% / var(--cols)) calc(100% / var(--rows));
+  transform: translateX(100%);
+}
+
+/* The leading edge of the sweep: a thin gold line, clipped away once the cover is off the grid. */
+.grid-cover::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: var(--color-gold);
+}
+
+.grid-hit {
+  position: absolute;
+  left: calc(100% / var(--cols) * (var(--c) + 0.14));
+  top: calc(100% / var(--rows) * (var(--r) + 0.14));
+  width: calc(100% / var(--cols) * 0.72);
+  height: calc(100% / var(--rows) * 0.72);
+  background: var(--color-ember);
+  box-shadow: 0 0 8px var(--color-ember);
+}
+
+.found {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.found li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-sand);
+}
+
+.found .severity {
+  min-width: 4.25rem;
+  text-align: center;
+  font-size: 0.6875rem;
+}
+
+.found-out.found-out {
+  color: var(--color-dust);
+  padding-left: 4.75rem;
+}
+
+.found-struck {
+  text-decoration: line-through;
+}
+
+.scan-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-seam);
+  color: var(--color-dust);
+}
+
+.scan-again {
+  margin-left: auto;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+/* 4. Pull requests */
 
 .vis-check {
   display: flex;
@@ -736,108 +1269,10 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   color: var(--color-ember);
 }
 
-.trace {
-  position: relative;
-  margin-top: 0.5rem;
-  padding-left: 1.5rem;
-}
-
-.trace-rail {
-  position: absolute;
-  top: 0.6rem;
-  bottom: 1.6rem;
-  left: 0.2rem;
-  width: 1px;
-  background: var(--color-gold);
-  transform-origin: top;
-}
-
-.trace ol {
-  display: grid;
-  gap: 0.875rem;
-}
-
-.trace-hop {
-  position: relative;
-  display: grid;
-}
-
-.trace-hop::before {
-  content: "";
-  position: absolute;
-  top: 0.4rem;
-  left: -1.5rem;
-  width: 0.5rem;
-  height: 0.5rem;
-  background: var(--color-gold);
-}
-
-.trace-hop code {
-  color: var(--color-sand);
-}
-
-.trace-hop span {
-  color: var(--color-dust);
-}
-
-.trace-hit::before {
-  background: var(--color-ember);
-}
-
-.trace-hit span {
-  color: var(--color-ember);
-}
-
-/* 3. Prove */
-
-.leads {
-  display: grid;
-  gap: 0.875rem;
-}
-
-.lead {
-  display: grid;
-}
-
-.lead-name {
-  position: relative;
-  justify-self: start;
-}
-
-.lead-proven .lead-name {
-  color: var(--color-gold);
-}
-
-.lead-dropped .lead-name {
-  color: var(--color-dust);
-}
-
-/* Struck through once disproved. */
-.lead-dropped .lead-name::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 52%;
-  height: 1px;
-  background: var(--color-dust);
-  transform-origin: left;
-}
-
-.lead-result {
-  font-size: 0.75rem;
-  color: var(--color-dust);
-}
-
-.lead-proven .lead-result {
-  color: var(--color-sand);
-}
-
-/* 4. Fix */
-
 .mini-comment {
   display: grid;
   gap: 0.5rem;
+  margin-top: 0.375rem;
   padding: 0.875rem;
   border: 1px solid var(--color-seam);
   background: var(--color-void);
@@ -851,21 +1286,16 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   margin-right: 0.375rem;
 }
 
-.mini-button {
-  justify-self: start;
+.mini-comment .key-mini {
   margin-top: 0.25rem;
-  padding: 0.3rem 0.75rem;
-  background: var(--color-gold);
-  color: var(--color-void);
-  font-weight: 500;
 }
 
-.mini-button .swap {
+.key-mini .swap {
   justify-items: center;
 }
 
 .mini-term {
-  margin-top: 0.5rem;
+  margin-top: 0.375rem;
   color: var(--color-sand);
 }
 
@@ -900,16 +1330,17 @@ html[data-motion] .play:not([data-play]) .fx-fill {
   background: transparent;
 }
 
-html[data-motion] .play:not([data-play]) :is(.fx-grow-x, .fx-grow-y) {
-  transform: scale(0);
-}
-
-html[data-motion] .play:not([data-play]) .lead-name {
-  color: var(--color-sand);
-}
-
-html[data-motion] .play:not([data-play]) .lead-dropped .lead-name::after {
+html[data-motion] .play:not([data-play]) .fx-grow-x {
   transform: scaleX(0);
+}
+
+html[data-motion] .play:not([data-play]) :is(.tick-in, .fx-sweep) {
+  transform: none;
+}
+
+html[data-motion] .play:not([data-play]) .hk-lit {
+  opacity: 0;
+  transform: none;
 }
 
 html[data-motion] .play[data-play] .fx-in {
@@ -928,24 +1359,28 @@ html[data-motion] .play[data-play] .fx-grow-x {
   animation: fx-grow-x 500ms steps(12) var(--d, 0s) both;
 }
 
-html[data-motion] .play[data-play] .fx-grow-y {
-  animation: fx-grow-y 1500ms steps(18) var(--d, 0s) both;
-}
-
 html[data-motion] .play[data-play] .fx-blink {
-  animation: fx-blink 500ms steps(1) var(--d, 0s) 4;
+  animation: fx-blink 500ms steps(1) var(--d, 0s) 6;
 }
 
 html[data-motion] .play[data-play] .fx-press {
   animation: fx-press 220ms ease-out var(--d, 0s);
 }
 
-html[data-motion] .play[data-play] .lead-name {
-  animation: fx-settle 300ms ease-out var(--d, 0s) both;
+html[data-motion] .play[data-play] .fx-sweep {
+  animation: fx-sweep var(--t) steps(16, jump-end) var(--d, 0s) both;
 }
 
-html[data-motion] .play[data-play] .lead-dropped .lead-name::after {
-  animation: fx-grow-x 350ms steps(10) var(--d, 0s) both;
+html[data-motion] .play[data-play] .tick[data-n="3"] .tick-in {
+  animation: fx-tick-3 var(--t) linear var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .tick[data-n="4"] .tick-in {
+  animation: fx-tick-4 var(--t) linear var(--d, 0s) both;
+}
+
+html[data-motion] .play[data-play] .hk-lit {
+  animation: fx-lit 1.8s linear var(--d, 0s) both;
 }
 
 @keyframes fx-in {
@@ -977,12 +1412,6 @@ html[data-motion] .play[data-play] .lead-dropped .lead-name::after {
   }
 }
 
-@keyframes fx-grow-y {
-  from {
-    transform: scaleY(0);
-  }
-}
-
 @keyframes fx-blink {
   50% {
     opacity: 0;
@@ -996,31 +1425,275 @@ html[data-motion] .play[data-play] .lead-dropped .lead-name::after {
   }
 }
 
-@keyframes fx-settle {
+@keyframes fx-sweep {
   from {
-    color: var(--color-sand);
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Hard cuts between lines, with a 3-frame slide so the change reads as a tick, not a fade. */
+@keyframes fx-tick-3 {
+  0%,
+  30% {
+    transform: translateY(0);
+  }
+  36%,
+  63% {
+    transform: translateY(calc(var(--lh) * -1));
+  }
+  69%,
+  100% {
+    transform: translateY(calc(var(--lh) * -2));
+  }
+}
+
+@keyframes fx-tick-4 {
+  0%,
+  22% {
+    transform: translateY(0);
+  }
+  26%,
+  47% {
+    transform: translateY(calc(var(--lh) * -1));
+  }
+  51%,
+  72% {
+    transform: translateY(calc(var(--lh) * -2));
+  }
+  76%,
+  100% {
+    transform: translateY(calc(var(--lh) * -3));
+  }
+}
+
+/* Lights Hoodie, then Screen, then Voice: the menu has three lines, so each is a third of its height. */
+@keyframes fx-lit {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  8%,
+  50% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  55%,
+  94% {
+    opacity: 1;
+    transform: translateY(100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(200%);
   }
 }
 
 /* Footer */
 
+/*
+ * The hacker at work, closing the page above the footer: wider than the
+ * column, so the room has space, and fading into the page at its edges
+ * rather than boxed.
+ */
+
+.hacker-at-work {
+  --bleed: min(76rem, 100vw);
+  width: var(--bleed);
+  margin-top: clamp(4rem, 10vw, 6rem);
+  margin-left: calc(50% - var(--bleed) / 2);
+}
+
+/* Shown once the live scene is up, since only it can be dragged. */
+.hacker-at-work {
+  --over-bottom: clamp(1.5rem, 7%, 3.5rem);
+  position: relative;
+}
+
+/* Across the top of the room, as far in as the Get started key sits from the foot. */
+.hacker-hint {
+  position: absolute;
+  top: var(--over-bottom);
+  z-index: 1;
+  left: 50%;
+  margin: 0;
+  translate: -50% 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--color-dust);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease 1.2s;
+}
+
+.hacker-at-work:has(.rig[data-ready]) .hacker-hint {
+  opacity: 0.7;
+}
+
+.hacker-at-work:has(.rig[data-ready]):active .hacker-hint {
+  opacity: 0;
+  transition-delay: 0s;
+}
+
+/* 100vw counts the scrollbar where it takes space: never let the band scroll the page sideways. */
+body:has(.hacker-at-work) {
+  overflow-x: clip;
+}
+
+.hacker-at-work .rig {
+  aspect-ratio: 2 / 1;
+  width: 100%;
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent), linear-gradient(180deg, transparent, #000 14%, #000 80%, transparent);
+  mask-composite: intersect;
+}
+
+@media (max-width: 48rem) {
+  .hacker-at-work .rig {
+    aspect-ratio: 4 / 3;
+    mask-image: linear-gradient(180deg, transparent, #000 12%, #000 85%, transparent);
+  }
+}
+
+/* The last call to action, floating over the foot of the room. Only the key takes the pointer, so the rest of the room can still be dragged. */
+.hacker-over {
+  position: absolute;
+  bottom: var(--over-bottom);
+  left: 50%;
+  z-index: 1;
+  translate: -50% 0;
+  pointer-events: none;
+}
+
+.hacker-over > * {
+  pointer-events: auto;
+}
+
+/* Under the hacker the footer spans the room's full width, not the narrow column. */
+.hacker-at-work ~ .site-footer {
+  --bleed: min(76rem, 100vw);
+  width: var(--bleed);
+  margin-top: 0;
+  margin-left: calc(50% - var(--bleed) / 2);
+  padding-inline: var(--gutter);
+}
+
 .site-footer {
+  position: relative;
+  margin-top: clamp(4rem, 10vw, 6rem);
+  padding: clamp(2.5rem, 6vw, 3.5rem) 0 2rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+/* A seam that glows gold in the middle and fades out at both ends. */
+.site-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-seam) 15%, var(--color-gold) 50%, var(--color-seam) 85%, transparent);
+  opacity: 0.7;
+}
+
+.footer-top {
+  display: grid;
+  gap: 2.5rem;
+}
+
+@media (min-width: 44rem) {
+  .footer-top {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 2fr);
+    gap: 2rem;
+  }
+}
+
+.footer-mark {
+  display: inline-block;
+}
+
+.footer-mark img {
+  display: block;
+  width: 46px;
+  height: 40px;
+  image-rendering: pixelated;
+  transition: transform 150ms ease;
+}
+
+.footer-mark:hover img {
+  transform: translateY(-2px);
+}
+
+.footer-tagline {
+  margin-top: 1rem;
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.footer-blurb {
+  max-width: 30ch;
+  margin-top: 0.5rem;
+  line-height: 1.6;
+}
+
+.footer-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 2rem 1.5rem;
+}
+
+.footer-heading {
+  margin-bottom: 0.875rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+
+.footer-column ul {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.footer-base {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem 2rem;
   align-items: center;
   justify-content: space-between;
-  margin-top: clamp(4rem, 10vw, 6rem);
-  padding: 1.5rem 0 2rem;
+  margin-top: clamp(2.5rem, 6vw, 3.5rem);
+  padding-top: 1.5rem;
   border-top: 1px solid var(--color-seam);
-  font-size: 0.8125rem;
-  color: var(--color-dust);
 }
 
-.site-footer ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
+.site-footer .footer-parent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.375rem 0.75rem 0.375rem 0.625rem;
+  border: 1px solid var(--color-seam);
+  border-radius: 999px;
+  background: var(--color-soot);
+  color: var(--color-muted);
+  transition:
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.site-footer .footer-parent:hover {
+  border-color: var(--color-edge);
+  color: var(--color-bright);
+}
+
+.footer-parent-logo {
+  display: block;
+  width: auto;
+  height: 1rem;
+  flex-shrink: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
