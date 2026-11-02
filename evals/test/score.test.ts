@@ -26,6 +26,7 @@ function finding(overrides: Partial<Finding> & { sink: [string, number] }): Find
     category: "sql_injection",
     cwe: null,
     impact: "",
+    mitigations: "",
     entryPoint: { file: "routes.ts", line: 1, description: "" },
     attackPath: [{ file: sink[0], line: sink[1], note: "", excerpt: "" }],
     attacker: "unauthenticated",

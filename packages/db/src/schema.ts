@@ -191,6 +191,8 @@ export const findings = pgTable(
     cwe: text("cwe"),
     title: text("title").notNull(),
     impact: text("impact").notNull(),
+    /** Protection in the code that limits (not eliminates) the impact; context for limited-impact cases. */
+    mitigations: text("mitigations").notNull().default(""),
     entryPoint: jsonb("entry_point").notNull(),
     /** Steps with file, line, note and a minimal excerpt. Excerpts are deleted on resolution. */
     attackPath: jsonb("attack_path").notNull(),

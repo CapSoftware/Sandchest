@@ -108,6 +108,12 @@ export const WriteUpSchema = z.object({
     .regex(/^CWE-\d+$/)
     .nullable(),
   impact: z.string().min(10).max(300).describe("One sentence: what the attacker gets"),
+  mitigations: z
+    .string()
+    .max(400)
+    .describe(
+      "Any protection already in the code that LIMITS (but does not eliminate) the impact, with where — e.g. 'writes are scoped to the caller's own ownerId at a.ts:47, so cross-tenant impact is limited'. Empty string if none. Do not invent one.",
+    ),
   preconditions: z.string().min(3).max(400).describe("Who can exploit it and what must hold, in plain English"),
   proofOfConcept: z.string().min(20).max(2_000),
   fixGuidance: z.string().min(20).max(1_500).describe("How to fix it, specific to this code"),
@@ -160,6 +166,8 @@ export interface Finding {
   category: Category;
   cwe: string | null;
   impact: string;
+  /** Protection in the code that limits (not eliminates) the impact, with where; empty if none. Context, so a reader can judge limited-impact cases. */
+  mitigations: string;
   entryPoint: Candidate["entryPoint"];
   attackPath: PathStep[];
   attacker: Attacker;

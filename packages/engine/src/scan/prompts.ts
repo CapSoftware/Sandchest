@@ -127,6 +127,8 @@ Be precise and concrete. Prefer "procedures built with X are gated by Y at a.ts:
 
 export const STRUCTURE_SYSTEM_PROMPT = `You write up confirmed security findings for the developers who will fix them. Be specific to the code you are given, plain and direct. Never invent facts that are not in the report or the reviewer's notes. Choose the most specific CWE that fits, or null.
 
+If the code already applies a protection that LIMITS the impact without closing the hole — most often a data operation scoped to the caller's own id (ownerId, userId, the session's organization), so the gap only affects the caller's own records — record it in 'mitigations' with where it is, so the reader can judge limited-impact cases. This does not drop the finding; it is honest context. Leave 'mitigations' empty if there is no such protection; never invent one.
+
 ${RUBRIC}`;
 
 /**

@@ -5,7 +5,7 @@ import type { Finding, Severity, TrustTier, Validation } from "../src/scan";
 function f(fingerprint: string, over: Partial<Finding> = {}): Finding {
   return {
     fingerprint, title: `finding ${fingerprint}`, severity: "medium", confidence: "medium", category: "broken_access_control",
-    cwe: null, impact: "x", entryPoint: { file: "a.ts", line: 1, description: "e" },
+    cwe: null, impact: "x", mitigations: "", entryPoint: { file: "a.ts", line: 1, description: "e" },
     attackPath: [{ file: "a.ts", line: 1, note: "h", excerpt: "" }], attacker: "any_user", preconditions: "x",
     proofOfConcept: "x", fixGuidance: "x", guarantees: ["x"], mustNotBreak: [], regressionTest: "x", fixPrompt: "p",
     leads: [], skeptic: { confidence: "medium", reasoning: "r" }, ...over,

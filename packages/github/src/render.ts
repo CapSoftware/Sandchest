@@ -97,6 +97,7 @@ export function reviewComment(finding: Finding): string {
     `**${LABEL[finding.severity]}** · ${finding.confidence} confidence${finding.cwe ? ` · ${finding.cwe}` : ""}`,
     `### ${finding.title}`,
     finding.impact,
+    ...(finding.mitigations ? [`**What limits the impact today:** ${finding.mitigations}`] : []),
     `**Who can exploit it:** ${finding.preconditions}`,
     `**Attack path**\n${path}`,
     `**Proof of concept**\n${fence(finding.proofOfConcept)}`,

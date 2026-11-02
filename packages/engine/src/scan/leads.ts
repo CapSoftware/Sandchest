@@ -165,6 +165,7 @@ export function dependencyFindings(vulns: DependencyVulns[], already: Finding[])
       category: "vulnerable_dependency",
       cwe: null,
       impact: top[0]?.summary ?? `${dep.name} has a known critical vulnerability.`,
+      mitigations: "",
       entryPoint: { file, line, description: `${dep.name}@${dep.version} imported here` },
       attackPath: [{ file, line, note: `Vulnerable dependency ${dep.name}@${dep.version} is imported and reachable here`, excerpt: "" }],
       attacker: "unauthenticated",

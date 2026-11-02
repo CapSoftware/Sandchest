@@ -5,7 +5,7 @@ import type { Finding } from "./schema";
  * is reached, what the fix must guarantee, what must not break, and a
  * regression test that proves it.
  */
-export function fixPrompt(finding: Pick<Finding, "severity" | "title" | "cwe" | "impact" | "entryPoint" | "preconditions" | "proofOfConcept" | "fixGuidance" | "guarantees" | "mustNotBreak" | "regressionTest"> & { attackPath: Array<Omit<Finding["attackPath"][number], "excerpt"> & { excerpt?: string }> }): string {
+export function fixPrompt(finding: Pick<Finding, "severity" | "title" | "cwe" | "impact" | "mitigations" | "entryPoint" | "preconditions" | "proofOfConcept" | "fixGuidance" | "guarantees" | "mustNotBreak" | "regressionTest"> & { attackPath: Array<Omit<Finding["attackPath"][number], "excerpt"> & { excerpt?: string }> }): string {
   const sink = finding.attackPath.at(-1)!;
   const steps = finding.attackPath
     // Excerpts are dropped once a finding is resolved; the path still reads without them.
@@ -17,7 +17,7 @@ export function fixPrompt(finding: Pick<Finding, "severity" | "title" | "cwe" | 
 
 ## The vulnerability
 ${finding.impact}
-
+${finding.mitigations ? `\nAlready limiting the impact (still fix it): ${finding.mitigations}\n` : ""}
 It is reached through ${finding.entryPoint.description} and lands at \`${sink.file}:${sink.line}\`.
 Who can exploit it: ${finding.preconditions}
 

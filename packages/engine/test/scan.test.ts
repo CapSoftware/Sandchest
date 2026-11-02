@@ -183,6 +183,7 @@ describe("fix prompt", () => {
       category: "sql_injection",
       cwe: "CWE-89",
       impact: "Anyone can log in as any user.",
+      mitigations: "",
       entryPoint: candidate.entryPoint,
       attackPath: [{ file: "routes/login.ts", line: 14, note: "concatenated", excerpt: "14| db.query(`x ${email}`)" }],
       attacker: "unauthenticated",

@@ -74,6 +74,7 @@ export default async function FindingPage({ params }: Params) {
         </div>
         <h1 className="finding-title">{finding.title}</h1>
         <p className="finding-impact">{finding.impact}</p>
+        {finding.mitigations ? <p className="finding-mitigations">What limits the impact today: {finding.mitigations}</p> : null}
       </header>
 
       <div className="finding-layout">

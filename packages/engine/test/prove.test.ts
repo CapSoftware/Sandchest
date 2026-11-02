@@ -20,7 +20,7 @@ function findingWith(path: Array<{ file: string; line: number }>): Finding {
     confidence: "medium",
     category: "broken_access_control",
     cwe: null,
-    impact: "reads another tenant's data",
+    impact: "reads another tenant's data", mitigations: "",
     entryPoint: { file: "a.ts", line: 10, description: "GET /api/doc/:id" },
     attackPath: path.map((p) => ({ ...p, note: "hop", excerpt: "" })),
     attacker: "any_user",

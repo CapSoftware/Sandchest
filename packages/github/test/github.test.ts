@@ -135,6 +135,7 @@ const finding = (severity: Finding["severity"], confidence: Finding["confidence"
   category: "sql_injection",
   cwe: "CWE-89",
   impact: "Reads every invoice.",
+  mitigations: "",
   entryPoint: { file: "a.ts", line: 1, description: "GET /x" },
   attackPath: [{ file: "a.ts", line: 3, note: "sink", excerpt: "3| secret code" }],
   attacker: "unauthenticated",

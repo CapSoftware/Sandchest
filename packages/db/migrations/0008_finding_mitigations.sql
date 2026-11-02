@@ -1,0 +1,1 @@
+ALTER TABLE "findings" ADD COLUMN "mitigations" text DEFAULT '' NOT NULL;

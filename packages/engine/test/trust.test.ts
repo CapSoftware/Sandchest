@@ -4,7 +4,7 @@ import { trustTier, trustRank, type Finding, type Validation, type Category } fr
 function finding(overrides: { category?: Category; validation?: Validation } = {}): Finding {
   return {
     fingerprint: "fp", title: "t", severity: "high", confidence: "medium", category: overrides.category ?? "broken_access_control",
-    cwe: null, impact: "x", entryPoint: { file: "a.ts", line: 1, description: "e" },
+    cwe: null, impact: "x", mitigations: "", entryPoint: { file: "a.ts", line: 1, description: "e" },
     attackPath: [{ file: "a.ts", line: 1, note: "h", excerpt: "" }], attacker: "any_user", preconditions: "x",
     proofOfConcept: "x", fixGuidance: "x", guarantees: ["x"], mustNotBreak: [], regressionTest: "x", fixPrompt: "p", leads: [],
     skeptic: { confidence: "medium", reasoning: "r" }, validation: overrides.validation,

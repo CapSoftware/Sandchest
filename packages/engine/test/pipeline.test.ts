@@ -77,6 +77,7 @@ const writeUp = {
   severity: "critical",
   cwe: "CWE-89",
   impact: "Anyone can read the users table.",
+  mitigations: "",
   preconditions: "Unauthenticated.",
   proofOfConcept: "POST /login email=' OR '1'='1",
   fixGuidance: "Bind the email as a query parameter.",
