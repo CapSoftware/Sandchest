@@ -372,6 +372,21 @@ impl Index {
         seen
     }
 
+    /// Symbols that some call in the codebase resolves to. A symbol *not* in
+    /// this set is a call-graph root: either an entry point the framework
+    /// invokes (a route handler, job or CLI command) or dead code. Resolution
+    /// is file-aware (not by bare name), so a method with a common name like
+    /// `get` is only "called" when a call actually resolves to it.
+    pub fn called_symbols(&self) -> HashSet<u32> {
+        let mut called = HashSet::new();
+        for call in &self.calls {
+            for target in self.call_targets(call) {
+                called.insert(target);
+            }
+        }
+        called
+    }
+
     pub fn sinks_in(&self, symbol: u32) -> impl Iterator<Item = &SinkAt> {
         self.sinks_by_caller.get(&symbol).into_iter().flatten().map(|&id| &self.sinks[id as usize])
     }

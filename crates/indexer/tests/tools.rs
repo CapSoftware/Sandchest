@@ -40,6 +40,28 @@ fn finds_routes_across_frameworks() {
 }
 
 #[test]
+fn definitions_enumerates_and_roots_are_a_subset_without_tests() {
+    let all = call("definitions", json!({ "limit": 20_000 }));
+    let all_files = strings(&all["definitions"], "file");
+    assert!(!all_files.is_empty(), "expected some definitions");
+    assert!(!all_files.iter().any(|f| f.starts_with("test/")), "tests are not product definitions: {all_files:?}");
+    // every entry is a function or method, never a class
+    let kinds = strings(&all["definitions"], "kind");
+    assert!(kinds.iter().all(|k| k == "function" || k == "method"), "unexpected kinds: {kinds:?}");
+
+    let roots = call("definitions", json!({ "roots": true, "limit": 20_000 }));
+    let root_total = roots["total"].as_u64().unwrap();
+    let all_total = all["total"].as_u64().unwrap();
+    assert!(root_total <= all_total, "roots ({root_total}) must be a subset of all ({all_total})");
+    assert!(root_total > 0, "expected at least one call-graph root");
+    // route handlers the framework invokes (not called in-code) are roots
+    let root_names = strings(&roots["definitions"], "name");
+    for handler in ["ping", "items"] {
+        assert!(root_names.iter().any(|n| n == handler), "expected route handler {handler} among roots: {root_names:?}");
+    }
+}
+
+#[test]
 fn resolves_route_handlers_through_imports() {
     let routes = call("routes", json!({ "filter": "/login" }));
     let handlers = routes["routes"][0]["handlers"].as_array().unwrap();

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::extract::SymbolKind;
 use crate::files::{Class, Store};
 use crate::index::{Index, SinkAt};
 use crate::search;
@@ -62,6 +63,7 @@ pub const NAMES: &[&str] = &[
     "read_file",
     "list_dir",
     "symbols",
+    "definitions",
     "callers",
     "callees",
     "routes",
@@ -87,6 +89,7 @@ pub fn call(state: &State, tool: &str, args: Value) -> Result<Value, String> {
         "read_file" => read_file(state, parse(args)?),
         "list_dir" => list_dir(state, parse(args)?),
         "symbols" => Ok(symbols(state, parse(args)?)),
+        "definitions" => Ok(definitions(state, parse(args)?)),
         "callers" => Ok(callers(state, parse(args)?)),
         "callees" => Ok(callees(state, parse(args)?)),
         "routes" => Ok(routes(state, parse(args)?)),
@@ -289,6 +292,51 @@ fn symbol_json(state: &State, index: &Index, id: u32) -> Value {
         "line": entry.symbol.line,
         "endLine": entry.symbol.end_line,
     })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DefinitionsArgs {
+    /// Only call-graph roots: symbols nothing in the codebase resolves a call
+    /// to — entry points the framework invokes, or dead code. The candidate set
+    /// for recovering handlers the route detector missed.
+    #[serde(default)]
+    roots: bool,
+    /// Only definitions under this path prefix.
+    path: Option<String>,
+    limit: Option<usize>,
+}
+
+/// Enumerate function and method definitions in product code. Unlike `symbols`
+/// (name lookup), this lists them, so a classifier can judge which are entry
+/// points when framework-specific route detection cannot see them.
+fn definitions(state: &State, args: DefinitionsArgs) -> Value {
+    let index = state.index();
+    let limit = args.limit.unwrap_or(2000).clamp(1, 20_000);
+    let prefix = args.path.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    let called = if args.roots { Some(index.called_symbols()) } else { None };
+
+    let mut definitions = Vec::new();
+    let mut total = 0usize;
+    for (id, entry) in index.symbols.iter().enumerate() {
+        if !matches!(entry.symbol.kind, SymbolKind::Function | SymbolKind::Method) {
+            continue;
+        }
+        if state.store.files[entry.file as usize].class != Class::Source {
+            continue;
+        }
+        if prefix.is_some_and(|prefix| !state.path(entry.file).starts_with(prefix)) {
+            continue;
+        }
+        if called.as_ref().is_some_and(|called| called.contains(&(id as u32))) {
+            continue;
+        }
+        total += 1;
+        if definitions.len() < limit {
+            definitions.push(symbol_json(state, index, id as u32));
+        }
+    }
+    json!({ "definitions": definitions, "total": total })
 }
 
 #[derive(Deserialize)]
