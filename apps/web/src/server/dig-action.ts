@@ -27,17 +27,17 @@ export async function dig(repoId: string): Promise<DigOutcome> {
     // GitHub or billing unreachable. Credits held for a scan that never started are given back.
     console.error(`Dig failed: ${describeError(error)}`);
     await captureException(error, { source: "dig", handled: true });
-    return { error: "The dig couldn’t start. Nothing was charged; try again in a minute." };
+    return { error: "The deep scan couldn’t start. Nothing was charged; try again in a minute." };
   }
   if (!result.ok) {
     revalidatePath("/dashboard");
     const messages = {
       not_installed: "Sandchest is no longer installed on this repository.",
       running: "A deep scan is already running.",
-      cooling: "This repository was dug in the last 24 hours.",
+      cooling: "This repository was deep scanned in the last 24 hours.",
       too_large: "This repository is over a million lines. Get in touch to scan it.",
-      no_plan: `${row.org.githubLogin} needs a plan before Sandchest can dig.`,
-      out_of_credits: `Out of credits: this dig needs ${result.credits}.`,
+      no_plan: `${row.org.githubLogin} needs a plan before Sandchest can scan.`,
+      out_of_credits: `Out of credits: this deep scan needs ${result.credits}.`,
     };
     return { error: messages[result.reason], topUp: result.reason === "no_plan" || result.reason === "out_of_credits" };
   }

@@ -4,7 +4,7 @@
  * finalizing twice is harmless, a confirm can charge less than was held, and
  * auto top-up buys more once usage drops the balance below its threshold.
  */
-import { planById, PLANS, TOP_UP, type Autumn, type BillingState, type PlanId } from "@sandchest/billing";
+import { creditsPrice, planById, PLANS, TOP_UP, type Autumn, type BillingState, type PlanId } from "@sandchest/billing";
 
 interface FakeCustomer {
   planId: PlanId | null;
@@ -60,13 +60,19 @@ export class FakeAutumn implements Autumn {
     if (!rule?.enabled || !customer.planId || customer.credits >= rule.threshold || customer.topUpsThisMonth >= rule.perMonth) return;
     customer.credits += rule.quantity;
     customer.topUpsThisMonth++;
-    customer.charges.push({ what: "auto_top_up", usd: (rule.quantity / TOP_UP.credits) * TOP_UP.price });
+    const pack = planById(customer.planId)!.pack;
+    customer.charges.push({ what: "auto_top_up", usd: (rule.quantity / pack.credits) * pack.price });
   }
 
   async customer(customerId: string): Promise<BillingState> {
     this.enter("customer");
     if (this.latencyMs) await Bun.sleep(this.latencyMs);
     return this.state(this.get(customerId));
+  }
+
+  async stripeCustomer(customerId: string): Promise<string> {
+    this.get(customerId);
+    return `cus_${customerId.replace(/-/g, "").slice(0, 14)}`;
   }
 
   async reserve({ customerId, credits, lockId }: { customerId: string; credits: number; lockId: string; expiresAt: Date }) {
@@ -91,34 +97,36 @@ export class FakeAutumn implements Autumn {
     customer.credits += action === "release" ? held : held - (credits ?? held);
   }
 
-  async attach({ customerId, planId, packs }: { customerId: string; planId: PlanId | typeof TOP_UP.id; packs?: number; successUrl: string }) {
+  async attach({ customerId, planId, credits }: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; successUrl: string }) {
     this.enter("attach");
     const customer = this.get(customerId);
     if (!customer.card) {
       customer.card = true;
-      this.settle(customer, planId, packs);
+      this.settle(customer, planId, credits);
       return { paymentUrl: `https://checkout.test/${planId}` };
     }
-    this.settle(customer, planId, packs);
+    this.settle(customer, planId, credits);
     return { paymentUrl: null };
   }
 
-  private settle(customer: FakeCustomer, planId: string, packs = 1): void {
+  private settle(customer: FakeCustomer, planId: string, credits?: number): void {
     if (planId === TOP_UP.id) {
-      customer.credits += packs * TOP_UP.credits;
-      customer.charges.push({ what: "top_up", usd: packs * TOP_UP.price });
+      const bought = credits ?? 1;
+      customer.credits += bought;
+      customer.charges.push({ what: "top_up", usd: creditsPrice(bought) });
       return;
     }
     const plan = PLANS.find((p) => p.id === planId)!;
     customer.planId = plan.id;
-    customer.credits += plan.credits;
-    customer.charges.push({ what: plan.id, usd: plan.price });
+    customer.credits += plan.credits + (credits ?? 0);
+    customer.charges.push({ what: plan.id, usd: plan.price + creditsPrice(credits ?? 0) });
   }
 
-  async preview({ planId, packs }: { customerId: string; planId: PlanId | typeof TOP_UP.id; packs?: number }) {
+  async preview({ planId, credits }: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number }) {
     this.enter("preview");
     const plan = planById(planId);
-    return { dueToday: plan ? plan.price : (packs ?? 1) * TOP_UP.price, nextCycle: plan ? plan.price : null, nextCycleAt: null };
+    const bought = creditsPrice(credits ?? (plan ? 0 : 1));
+    return { dueToday: (plan?.price ?? 0) + bought, discount: 0, nextCycle: plan ? plan.price : null, nextCycleAt: null };
   }
 
   async portal(customerId: string) {

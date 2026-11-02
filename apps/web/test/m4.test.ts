@@ -212,7 +212,7 @@ describe.skipIf(!available)("billing", () => {
     expect(await scanById(database, freeId)).toMatchObject({ billing: "reserved", creditsReserved: 0 });
     expect(autumn.get(acme.id).credits).toBe(credits);
     const loser = results.find((r) => !r.ok);
-    expect(loser).toMatchObject({ ok: false, reason: "out_of_credits", credits: 75 }); // unsized: holds the top tier
+    expect(loser).toMatchObject({ ok: false, reason: "out_of_credits", credits: 25 }); // unsized: holds the top tier
 
     // An operator's Dig (admin token) is never the org's free one, and is held like any paid Dig.
     expect(await requestDeepScan({ ...first!, loc: 50_000 }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "running" });
@@ -226,8 +226,8 @@ describe.skipIf(!available)("billing", () => {
     expect(await scanById(database, againId)).toMatchObject({ creditsReserved: 0 });
 
     // It finishes and measures 340,000 lines: still charged nothing. After that, Digs are paid.
-    await database.$client`update scans set status = 'completed', credits = 75 where id = ${againId}`;
-    await settleScan((await scanById(database, againId))!, "charge", 75);
+    await database.$client`update scans set status = 'completed', credits = 25 where id = ${againId}`;
+    await settleScan((await scanById(database, againId))!, "charge", 25);
     expect(await scanById(database, againId)).toMatchObject({ billing: "charged", credits: 0 });
     expect(await requestDeepScan(second!)).toMatchObject({ ok: false, reason: "out_of_credits" });
     expect(autumn.get(acme.id).credits).toBe(credits);
@@ -239,7 +239,7 @@ describe.skipIf(!available)("billing", () => {
     const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[2] ?? repoIds[1]!), with: { org: true } });
     await database.$client`update scans set status = 'completed' where repo_id = ${repo!.id} and kind = 'deep' and status in ('queued', 'running')`;
     // No credits: an operator Dig is refused as paid, and the free one is still to come.
-    expect(await requestDeepScan({ ...repo!, loc: 50_000, lastDeepScanAt: null }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "out_of_credits", credits: 15 });
+    expect(await requestDeepScan({ ...repo!, loc: 50_000, lastDeepScanAt: null }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "out_of_credits", credits: 5 });
     const after = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
     expect(after[0]!.free).toBeNull();
     await database.$client`update orgs set free_dig_scan_id = ${before[0]!.free} where id = ${acme.id}`;
@@ -248,17 +248,17 @@ describe.skipIf(!available)("billing", () => {
   test("Dig: refused without credits leaves no scan; with credits it holds the cost shown", async () => {
     const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
     const before = (await database.query.scans.findMany()).length;
-    // Not sized yet: a Dig holds the top tier, 75.
-    expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 75 });
+    // Not sized yet: a Dig holds the top tier, 25.
+    expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 25 });
     expect((await database.query.scans.findMany()).length).toBe(before);
 
-    // A top-up with the card on file.
-    await autumn.attach({ customerId: acme.id, planId: "top_up", packs: 1, successUrl: "" });
+    // Credits bought with the card on file.
+    await autumn.attach({ customerId: acme.id, planId: "top_up", credits: 25, successUrl: "" });
     const result = await requestDeepScan({ ...repo!, loc: 50_000 });
     expect(result.ok).toBe(true);
     const scan = await scanById(database, (result as { scanId: string }).scanId);
-    expect(scan).toMatchObject({ kind: "deep", billing: "reserved", creditsReserved: 15 });
-    expect(autumn.get(acme.id).credits).toBe(10);
+    expect(scan).toMatchObject({ kind: "deep", billing: "reserved", creditsReserved: 5 });
+    expect(autumn.get(acme.id).credits).toBe(20);
     expect(started).toContain(scan!.id);
   });
 
@@ -283,7 +283,7 @@ describe.skipIf(!available)("billing", () => {
 
   test("the sweep restarts lost starts and fails stuck PR reviews, so no Check spins forever", async () => {
     // A scan whose workflow start was lost 10 minutes ago, and a PR review stuck for an hour with its Check in progress.
-    checks.push({ repo: "acme/api", title: "Digging…" });
+    checks.push({ repo: "acme/api", title: "Scanning…" });
     const stuckCheck = checks.length;
     const [lost] = await database
       .insert(schema.scans)
@@ -319,39 +319,41 @@ describe.skipIf(!available)("billing", () => {
     expect(started).toEqual([winner]);
     const active = await database.$client<Array<{ n: number }>>`select count(*)::int as n from scans where repo_id = ${repoIds[1]!} and kind = 'deep' and status = 'queued'`;
     expect(active[0]!.n).toBe(1);
-    // Only the winner's 15 credits stay held.
-    expect(autumn.get(acme.id).credits).toBe(25);
+    // Only the winner's 5 credits stay held.
+    expect(autumn.get(acme.id).credits).toBe(35);
   });
 
   test("a Dig that loses the race never reaches Autumn: no hold, no auto top-up", async () => {
-    // Free the slot left by the previous test, then arm auto top-up below 15 credits.
+    // Free the slot left by the previous test, then arm auto top-up below 5 credits.
     await database.$client`update scans set status = 'completed' where repo_id = ${repoIds[1]!} and kind = 'deep'`;
     const customer = autumn.get(acme.id);
-    customer.credits = 40;
-    customer.autoTopUp = { enabled: true, threshold: 15, quantity: 25, perMonth: 4 };
+    customer.credits = 12;
+    customer.autoTopUp = { enabled: true, threshold: 5, quantity: 25, perMonth: 4 };
     customer.topUpsThisMonth = 0;
     const chargesBefore = customer.charges.length;
     const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[1]!), with: { org: true } });
     const results = await Promise.all([requestDeepScan({ ...repo!, loc: 50_000 }), requestDeepScan({ ...repo!, loc: 50_000 })]);
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ ok: false, reason: "running" });
-    // The winner's hold leaves 25, above the line. A hold by the loser would have left 10 and bought a top-up.
-    expect(customer.credits).toBe(25);
+    // The winner's hold leaves 7, above the line. A hold by the loser would have left 2 and bought a top-up.
+    expect(customer.credits).toBe(7);
     expect(customer.charges.slice(chargesBefore).filter((c) => c.what === "auto_top_up")).toHaveLength(0);
     customer.autoTopUp = null;
   });
 
-  test("auto top-up is sized for the plan, and follows a plan change", async () => {
-    await database.$client`update orgs set settings = ${JSON.stringify({ checkThreshold: "high", autoTopUp: { enabled: true, monthlyLimitUsd: 40 } })}::jsonb where id = ${acme.id}`;
-    await applyAutoTopUp(acme.id, "lockbox", { enabled: true, monthlyLimitUsd: 40 });
-    expect(autumn.get(acme.id).autoTopUp).toEqual({ enabled: true, threshold: 15, quantity: 25, perMonth: 4 });
+  test("auto top-up buys whole packs of the plan, and follows a plan change", async () => {
+    const choice = { enabled: true, quantity: 20, monthlyLimitUsd: 30 };
+    await database.$client`update orgs set settings = ${JSON.stringify({ checkThreshold: "high", autoTopUp: choice })}::jsonb where id = ${acme.id}`;
+    // Lockbox sells 25 credits for $10: 20 rounds up to one pack, and $30 a month is three.
+    await applyAutoTopUp(acme.id, "lockbox", choice);
+    expect(autumn.get(acme.id).autoTopUp).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 3 });
 
-    await autumn.attach({ customerId: acme.id, planId: "chest", successUrl: "" });
+    await autumn.attach({ customerId: acme.id, planId: "standard", successUrl: "" });
     const row = await syncBilling(acme);
-    expect(row.planId).toBe("chest");
-    // Chest buys 50 at a time ($20), so $40 a month is two top-ups.
-    expect(autumn.get(acme.id).autoTopUp).toEqual({ enabled: true, threshold: 30, quantity: 50, perMonth: 2 });
-    expect((await orgBillingRow(database, acme.id))?.autoTopUp).toEqual({ enabled: true, threshold: 30, quantity: 50, perMonth: 2 });
+    expect(row.planId).toBe("standard");
+    // Standard sells credits at $1: 20 for $20, so $30 a month is one top-up.
+    expect(autumn.get(acme.id).autoTopUp).toEqual({ enabled: true, threshold: 5, quantity: 20, perMonth: 1 });
+    expect((await orgBillingRow(database, acme.id))?.autoTopUp).toEqual({ enabled: true, threshold: 5, quantity: 20, perMonth: 1 });
   });
 
   test("a PR on an account with no plan gets a neutral 'no plan' Check", async () => {

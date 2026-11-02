@@ -11,7 +11,8 @@ export const metadata: Metadata = { title: "Billing · Sandchest" };
  * Back from Stripe (Checkout, a card step or the billing portal): reads the
  * org's billing again so the dashboard shows the change at once. Stripe can
  * send the person back a moment before Autumn has the payment, so a first
- * plan is waited for briefly. A first plan starts recon on every repository.
+ * plan is waited for briefly. A first plan starts recon on every repository,
+ * and the first Dig if one was chosen while recruiting.
  */
 export default async function BillingReturn({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const { org: orgId } = await searchParams;
@@ -25,6 +26,10 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     state = await syncBilling(row.org).catch(() => state);
   }
-  if (!hadPlan && state?.planId) redirect("/dashboard?plan=started");
+  if (!hadPlan && state?.planId) {
+    // A first plan: the hacker starts on the repository chosen while recruiting, if there was one.
+    const { startFirstTarget } = await import("@/server/first-target");
+    redirect(await startFirstTarget(user.id, row.org));
+  }
   redirect("/dashboard/settings#billing");
 }

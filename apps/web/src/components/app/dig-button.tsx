@@ -9,7 +9,7 @@ export function DigButton({ repoId, note }: { repoId: string; note: string }) {
   return (
     <form action={action} className="repo-dig">
       <Submit className="key key-primary" pending="Starting…">
-        Dig
+        Deep scan
       </Submit>
       {state.error ? (
         <span className="repo-dig-error" role="alert">

@@ -46,6 +46,12 @@ const Schema = z.object({
   AUTUMN_BASE_URL: z.url().optional(),
   /** Signing secret (`whsec_…`) of the Autumn webhook endpoint. Unset means the endpoint answers 404. */
   AUTUMN_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /**
+   * The Stripe account Autumn bills through. With both set, cards are taken on
+   * the page (Stripe's Payment Element) instead of on Stripe Checkout.
+   */
+  STRIPE_SECRET_KEY: z.string().regex(/^(sk|rk)_/, "a Stripe secret or restricted key (sk_… or rk_…)").optional(),
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().regex(/^pk_/, "a Stripe publishable key (pk_…)").optional(),
   /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
   SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
   /** GitHub's REST API. Default https://api.github.com; tests point it at a fake. */

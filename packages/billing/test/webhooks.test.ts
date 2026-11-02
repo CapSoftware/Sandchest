@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { creditLevel, planById, signWebhook, verifyWebhook } from "../src";
+import { creditLevel, signWebhook, verifyWebhook } from "../src";
 
 // A Standard Webhooks secret: `whsec_` and a base64 key, as Autumn (Svix) issues them.
 const SECRET = `whsec_${Buffer.from("sandchest-test-signing-key-32byt").toString("base64")}`;
@@ -48,9 +48,6 @@ test("rejects a replay outside five minutes, either way", () => {
   expect(verifyWebhook(SECRET, headers({ timestamp: "1e9" }), body, NOW)).toBe(false);
 });
 
-test("credit levels: low below the plan's line (about one deep scan), exhausted at nothing", () => {
-  const lockbox = planById("lockbox")!;
-  const vault = planById("vault")!;
-  expect([60, 15, 14, 1, 0, -2].map((n) => creditLevel(lockbox, n))).toEqual(["ok", "ok", "low", "low", "exhausted", "exhausted"]);
-  expect([75, 74].map((n) => creditLevel(vault, n))).toEqual(["ok", "low"]);
+test("credit levels: low below the price of the smallest Dig, exhausted at nothing", () => {
+  expect([60, 5, 4, 1, 0, -2].map(creditLevel)).toEqual(["ok", "ok", "low", "low", "exhausted", "exhausted"]);
 });

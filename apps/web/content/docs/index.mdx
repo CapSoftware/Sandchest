@@ -1,9 +1,9 @@
 ---
 title: Getting started
-description: Install Sandchest on GitHub, pick a plan, and get your first findings.
+description: Install Sandchest on GitHub, join the plan, and get your first findings.
 ---
 
-Sandchest is a GitHub App that reads your code the way an attacker would. It reviews your pull requests, digs through whole repositories when you ask, and reports only vulnerabilities it can back with evidence: the way in, the path through your code, a proof of concept, and a fix prompt for your coding agent.
+Sandchest is a GitHub App that reads your code the way an attacker would. It reviews your pull requests, scans whole repositories when you ask, and reports only vulnerabilities it can back with evidence: the way in, the path through your code, a proof of concept, and a fix prompt for your coding agent.
 
 It only ever scans repositories where you have installed it.
 
@@ -11,9 +11,9 @@ It only ever scans repositories where you have installed it.
 
 1. **Sign in with GitHub.** Go to [Get started](/sign-in). Sandchest uses your GitHub sign-in to see which repositories you can access.
 2. **Install the GitHub App.** From [Repos](/dashboard), choose **Install on GitHub**, pick the account (yours or an organization) and the repositories Sandchest may read. You come back to Repos when GitHub is done.
-3. **Pick a plan for that account.** The GitHub account you installed on is the customer, so each account has its own plan and credits. Only an admin of the organization (or the owner of a personal account) can choose one. Checkout is handled by Stripe. See [Pricing & credits](/docs/pricing).
+3. **Join the plan for that account.** It's $1 a month, and credits are $1 each, less when you buy more at once; your first deep scan is free. The GitHub account you installed on is the customer, so each account has its own plan and credits. Only an admin of the organization (or the owner of a personal account) can join. Payment is handled by Stripe. See [Pricing & credits](/docs/pricing).
 4. **Recon maps each repository.** As soon as the account has a plan, Sandchest builds a threat model of every repository: its entry points, trust boundaries, sensitive data and dangerous code. It takes about a minute per repository and is free.
-5. **Start digging.** Press **Dig** on a repository for a full deep scan, and open a pull request to see a review. Findings appear on the [scan's live feed](/docs/scans#deep-scans) as soon as they survive verification.
+5. **Start scanning.** Press **Deep scan** on a repository to scan all of it, and open a pull request to see a review. Findings appear on the [scan's live feed](/docs/scans#deep-scans) as soon as they survive verification.
 
 From then on pull requests are reviewed automatically (except drafts, some pull requests from forks, and any while the account has no plan or credits; see [PR reviews](/docs/scans#pr-reviews)), and pushes to your default branch check whether open findings have been fixed.
 
@@ -25,7 +25,7 @@ From then on pull requests are reviewed automatically (except drafts, some pull 
 
 ## Who can see what
 
-Sandchest follows GitHub. You can see a repository's findings, and dig into it, if GitHub says you have push access or higher. Billing belongs to the GitHub account: organization admins, or the owner of a personal account, can change the plan. There are no separate Sandchest invites or roles.
+Sandchest follows GitHub. You can see a repository's findings, and deep scan it, if GitHub says you have push access or higher. Billing belongs to the GitHub account: organization admins, or the owner of a personal account, can change the plan. There are no separate Sandchest invites or roles.
 
 ## Next steps
 

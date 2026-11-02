@@ -9,35 +9,55 @@
  * app reads it as AUTUMN_WEBHOOK_SECRET.
  */
 import { atmn, feature, plan, webhook } from "atmn";
-import { CREDITS, PLANS, TOP_UP } from "../src/plans";
+import { CREDIT_TIERS, CREDITS, PLAN, PLANS, TOP_UP, type Plan } from "../src/plans";
 
 export const credits = feature({ featureId: CREDITS, name: "Credits", type: "metered", consumable: true });
 
-/** One top-up pack, charged once. Plans carry it too: Autumn's auto top-up buys the plan's own one-off price. */
-const topUpItem = {
-  featureId: CREDITS,
-  price: { amount: TOP_UP.price, billingUnits: TOP_UP.credits, billingMethod: "prepaid", interval: "one_off" },
-} as const;
+/**
+ * A plan's credits, sold by its pack and charged once. Autumn's auto top-up
+ * buys the plan's own one-off price, so each plan carries one. Bought credits
+ * never expire.
+ */
+const packItem = (pack: Plan["pack"]) =>
+  ({ featureId: CREDITS, price: { amount: pack.price, billingUnits: pack.credits, billingMethod: "prepaid", interval: "one_off" } }) as const;
+
+/**
+ * Credits one at a time with the volume discount: the whole purchase at the
+ * rate of the tier its size reaches. Auto top-ups buy through it too.
+ */
+const creditItem = () =>
+  ({
+    featureId: CREDITS,
+    price: {
+      tiers: CREDIT_TIERS.map((tier, i) => ({ to: CREDIT_TIERS[i + 1] ? CREDIT_TIERS[i + 1]!.from - 1 : ("inf" as const), amount: tier.price })),
+      tierBehavior: "volume",
+      billingUnits: 1,
+      billingMethod: "prepaid",
+      interval: "one_off",
+    },
+  }) as const;
 
 export const plans = PLANS.map((p) =>
   plan({
     planId: p.id,
-    versionSlug: "v1",
+    // v2 of the current plan: credits with the volume discount.
+    versionSlug: p.id === PLAN.id ? "v2" : "v1",
     active: true,
     name: p.name,
     group: "sandchest",
     price: { amount: p.price, interval: "month" },
-    items: [{ featureId: CREDITS, included: p.credits, reset: { interval: "month" } }, topUpItem],
+    items: [...(p.credits > 0 ? [{ featureId: CREDITS, included: p.credits, reset: { interval: "month" } } as const] : []), p.id === PLAN.id ? creditItem() : packItem(p.pack)],
   }),
 );
 
+/** Credits on their own, with the volume discount. v1 sold packs of 25 for $10; v2 was a flat $1 each. */
 export const topUp = plan({
   planId: TOP_UP.id,
-  versionSlug: "v1",
+  versionSlug: "v3",
   active: true,
   name: TOP_UP.name,
   addOn: true,
-  items: [topUpItem],
+  items: [creditItem()],
 });
 
 /** Production's endpoint, for live Autumn. AUTUMN_WEBHOOK_URL_LIVE overrides it. */

@@ -1,5 +1,7 @@
 import { settingsOrgs, type SettingsOrg } from "@sandchest/db";
 import type { Metadata } from "next";
+import Link from "next/link";
+import { readHacker } from "@/lib/hacker";
 import { Avatar } from "@/components/app/avatar";
 import { BillingPanel } from "@/components/app/billing-panel";
 import { OrgSettingsForm } from "@/components/app/org-settings";
@@ -52,6 +54,17 @@ export default async function SettingsPage() {
           <div className="settings-form">
             {billingEnabled() && <BillingPanel org={org} billing={billing[index] ?? null} />}
             <OrgSettingsForm orgId={org.id} threshold={org.settings.checkThreshold} email={org.settings.emailNotifications !== false} admin={org.admin} />
+            <div>
+              <p className="field-legend">Hacker</p>
+              <p className="field-help">
+                {org.settings.hacker ? `${readHacker(org.settings.hacker).handle} works for ${org.login}.` : `${org.login} hasn’t recruited its hacker yet.`}{" "}
+                {org.admin && (
+                  <Link className="quiet" href={`/dashboard/recruit?org=${org.id}`}>
+                    {org.settings.hacker ? "Change its look and voice" : "Recruit one"}
+                  </Link>
+                )}
+              </p>
+            </div>
             <div>
               <p className="field-legend">Repositories</p>
               <p className="field-help">

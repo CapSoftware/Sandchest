@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { autoTopUpControl, billingState, createAutumn, PLANS, AutumnError } from "../src";
+import { billingState, createAutumn, planById, autoTopUpControl, AutumnError } from "../src";
 
 type Call = { path: string; body: Record<string, unknown> };
 
@@ -55,7 +55,7 @@ test("reads retry on 5xx; charges never retry", async () => {
     "billing.attach": [{ status: 503 }],
   });
   expect((await autumn.customer("o", "acme")).planId).toBeNull();
-  await expect(autumn.attach({ customerId: "o", planId: "top_up", packs: 2, successUrl: "https://x" })).rejects.toMatchObject({ status: 503 });
+  await expect(autumn.attach({ customerId: "o", planId: "top_up", credits: 50, successUrl: "https://x" })).rejects.toMatchObject({ status: 503 });
   expect(calls.filter((c) => c.path === "billing.attach")).toHaveLength(1);
   expect(calls.at(-1)!.body).toMatchObject({ plan_id: "top_up", feature_quantities: [{ feature_id: "credits", quantity: 50 }], redirect_mode: "if_required" });
 });
@@ -83,8 +83,17 @@ test("billing state: active plan, cancellation, scheduled downgrade, auto top-up
 });
 
 test("auto top-up: the monthly limit becomes whole top-ups; under one is off", () => {
-  const [lockbox, chest] = PLANS;
-  expect(autoTopUpControl(lockbox!, true, 40)).toEqual({ enabled: true, threshold: 15, quantity: 25, perMonth: 4 });
-  expect(autoTopUpControl(chest!, true, 200)).toEqual({ enabled: true, threshold: 30, quantity: 50, perMonth: 10 });
-  expect(autoTopUpControl(chest!, true, 15).enabled).toBe(false);
+  const standard = planById("standard")!;
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 10, monthlyLimitUsd: 50 })).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: 5 });
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 25, monthlyLimitUsd: 60 })).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 2 });
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 25, monthlyLimitUsd: 20 }).enabled).toBe(false);
+  // Older plans sell credits in packs of 25 for $10: a top-up rounds up to whole packs.
+  expect(autoTopUpControl(planById("chest")!, { enabled: true, quantity: 10, monthlyLimitUsd: 40 })).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 4 });
+});
+
+test("with a plan, credits are bought only when asked for", async () => {
+  const { calls, autumn } = fake({ "billing.attach": [{ status: 200, body: { payment_url: null } }, { status: 200, body: { payment_url: null } }] });
+  await autumn.attach({ customerId: "o", planId: "standard", credits: 25, successUrl: "https://x" });
+  await autumn.attach({ customerId: "o", planId: "standard", successUrl: "https://x" });
+  expect(calls.map((c) => (c.body as { feature_quantities?: unknown }).feature_quantities)).toEqual([[{ feature_id: "credits", quantity: 25 }], undefined]);
 });

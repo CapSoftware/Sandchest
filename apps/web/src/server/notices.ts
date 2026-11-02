@@ -68,7 +68,7 @@ type CreditsSnapshot = Pick<OrgBillingRow, "planId" | "credits" | "creditsResetA
 export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, seen: BalanceSeen): Promise<void> {
   const plan = planById(billing.planId);
   if (!plan) return;
-  const level = creditLevel(plan, billing.credits);
+  const level = creditLevel(billing.credits);
   const index = CREDIT_LEVELS.indexOf(level);
   let to: string[] | null = null;
   if (level !== "ok" && !billing.autoTopUp?.enabled && mailer().enabled) {

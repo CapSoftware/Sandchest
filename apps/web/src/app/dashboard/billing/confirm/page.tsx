@@ -1,4 +1,4 @@
-import { MAX_TOP_UP_PACKS, planById, TOP_UP } from "@sandchest/billing/plans";
+import { MAX_PURCHASE_CREDITS, planById, TOP_UP } from "@sandchest/billing/plans";
 import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -11,8 +11,8 @@ import { db } from "@/server/db";
 
 export const metadata: Metadata = { title: "Confirm · Sandchest" };
 
-/** Shows exactly what a plan change or top-up will charge the card on file, before charging it. */
-export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ org?: string; plan?: string; topup?: string }> }) {
+/** Shows exactly what a plan change or credits will charge the card on file, before charging it. */
+export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ org?: string; plan?: string; credits?: string; topup?: string }> }) {
   const params = await searchParams;
   const user = await viewer();
   const client = autumn();
@@ -20,15 +20,19 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   if (!client || !row) redirect("/dashboard/settings");
 
   const plan = planById(params.plan);
-  const packs = Number(params.topup);
-  const topUp = !plan && Number.isInteger(packs) && packs >= 1 && packs <= MAX_TOP_UP_PACKS;
+  const amount = (raw: string | undefined) => {
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 && n <= MAX_PURCHASE_CREDITS ? n : undefined;
+  };
+  const credits = amount(plan ? params.credits : params.topup);
   const current = planById(row.billing?.planId);
-  if ((!plan && !topUp) || !current || plan?.id === current.id) redirect("/dashboard/settings#billing");
+  if ((plan ? !plan.offered : !credits) || !current || plan?.id === current.id) redirect("/dashboard/settings#billing");
 
-  const preview = await client.preview({ customerId: row.org.id, planId: plan ? plan.id : TOP_UP.id, packs: topUp ? packs : undefined }).catch(() => undefined);
+  const preview = await client.preview({ customerId: row.org.id, planId: plan ? plan.id : TOP_UP.id, credits }).catch(() => undefined);
   const downgrade = plan && plan.price < current.price;
-  const title = plan ? `Switch ${row.org.githubLogin} to ${plan.name}` : `Buy ${packs * TOP_UP.credits} credits for ${row.org.githubLogin}`;
-  const fields: Record<string, string> = plan ? { kind: "plan", plan: plan.id } : { kind: "top_up", packs: String(packs) };
+  const title = plan ? `Switch ${row.org.githubLogin} to ${plan.name}` : `Buy ${credits!.toLocaleString("en-US")} credits for ${row.org.githubLogin}`;
+  const fields: Record<string, string> = plan ? { kind: "plan", plan: plan.id, ...(credits ? { credits: String(credits) } : {}) } : { kind: "top_up", credits: String(credits) };
+  const monthly = (p: { credits: number }) => (p.credits > 0 ? ` with ${p.credits.toLocaleString("en-US")} credits a month` : "");
 
   return (
     <PageShape id="confirm">
@@ -55,9 +59,9 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         <p className="field-help">
           {plan
             ? downgrade
-              ? `${current.name} stays until the end of this period, then ${plan.name} starts with ${plan.credits.toLocaleString("en-US")} credits a month.`
-              : `${plan.name} starts now with ${plan.credits.toLocaleString("en-US")} credits a month. You pay the difference for the rest of this period.`
-            : "Charged to the card on file. Top-up credits never expire and are spent after the month’s credits."}
+              ? `${current.name} stays until the end of this period, then ${plan.name} starts${monthly(plan)}. Credits you bought stay yours.`
+              : `${plan.name} starts now${monthly(plan)}. You pay the difference for the rest of this period.`
+            : "Charged to the card on file. Bought credits never expire."}
         </p>
         {preview && <ConfirmPurchase orgId={row.org.id} fields={fields} label={preview.dueToday > 0 ? `Pay ${usd(preview.dueToday)}` : "Confirm"} />}
       </div>

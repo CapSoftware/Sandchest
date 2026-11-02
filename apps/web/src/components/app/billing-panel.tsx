@@ -1,13 +1,15 @@
-import { autoTopUpPrice, defaultAutoTopUpLimit, planById, TOP_UP } from "@sandchest/billing/plans";
+import { autoTopUpSize, DEFAULT_CREDITS, defaultAutoTopUpLimit, planById } from "@sandchest/billing/plans";
 import type { OrgBillingRow, OrgSettings } from "@sandchest/db";
+import Link from "next/link";
 import { plural, shortDate, usd } from "@/lib/format";
+import { PRICE_NOTE, PRICES } from "@/lib/pricing";
 import { openPortal } from "@/server/billing-actions";
 import { AutoTopUpForm } from "./auto-top-up-form";
 import { PlanPicker } from "./plan-picker";
 import { Submit } from "./submit";
 import { TopUpForm } from "./top-up-form";
 
-/** One org's plan, credits, top-ups and auto top-up. Admins change them; everyone else sees them. */
+/** One org's plan, credits and auto top-up. Admins change them; everyone else sees them. */
 export function BillingPanel({ org, billing }: { org: { id: string; login: string; admin: boolean; settings: OrgSettings }; billing: OrgBillingRow | null }) {
   const plan = planById(billing?.planId);
   if (!billing || !plan) {
@@ -15,20 +17,25 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
       <div>
         <p className="field-legend">Plan</p>
         <p className="field-help">
-          {billing?.credits ? `${plural(billing.credits, "top-up credit")} left, but no plan. ` : ""}
-          Sandchest starts digging into {org.login}’s repositories once it has a plan. Credits pay for pull request
-          reviews (1–5 each) and deep scans (15–75); recon and fix checks are free.
-          {!org.admin && " Only an admin of this account can choose one."}
+          {billing?.credits ? `${plural(billing.credits, "credit")} left, but no plan. ` : ""}
+          Sandchest starts scanning {org.login}’s repositories once it joins the plan: {PRICES.plan} {PRICE_NOTE}
+          {!org.admin && " Only an admin of this account can join."}
         </p>
-        <PlanPicker orgId={org.id} current={null} admin={org.admin} />
+        {org.admin && (
+          <Link href={`/dashboard/recruit?org=${org.id}`} className="key key-primary">
+            Recruit {org.login}’s hacker
+          </Link>
+        )}
       </div>
     );
   }
 
-  const share = Math.min(1, billing.credits / plan.credits);
   const choice = org.settings.autoTopUp;
   const autoOn = !!billing.autoTopUp?.enabled;
+  const quantity = choice?.quantity ?? DEFAULT_CREDITS;
   const next = planById(billing.nextPlanId);
+  const auto = autoOn ? billing.autoTopUp! : null;
+  const autoSize = auto ? autoTopUpSize(plan, auto.quantity) : null;
   return (
     <>
       <div>
@@ -49,14 +56,10 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
         <p className="field-legend">Credits</p>
         <p className="credits">
           <span className="credits-left">{billing.credits.toLocaleString("en-US")}</span> left
-          {billing.creditsResetAt && <span className="field-help"> · plan credits reset {shortDate(billing.creditsResetAt)}</span>}
+          {plan.credits > 0 && billing.creditsResetAt && <span className="field-help"> · {plan.name}’s monthly credits reset {shortDate(billing.creditsResetAt)}</span>}
         </p>
-        <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={plan.credits} aria-valuenow={Math.min(billing.credits, plan.credits)} aria-label="Credits left this month">
-          <span style={{ width: `${share * 100}%` }} />
-        </div>
         <p className="field-help">
-          Reviews cost 1–5 credits by size; deep scans 15–75. Top-ups are {TOP_UP.credits} credits for {usd(TOP_UP.price)}, never expire,
-          and are spent after the month’s credits.
+          {PRICES.credits} Bought credits never expire{plan.credits > 0 ? " and are spent after the month’s credits" : ""}. {PRICE_NOTE}
         </p>
         {org.admin && <TopUpForm orgId={org.id} />}
       </div>
@@ -64,24 +67,22 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
       <div>
         <p className="field-legend">Auto top-up</p>
         <p className="field-help">
-          {autoOn
-            ? `On: below ${billing.autoTopUp!.threshold} credits, buys ${billing.autoTopUp!.quantity}, up to ${plural(billing.autoTopUp!.perMonth, "time")} a month.`
+          {auto && autoSize
+            ? `On: adds ${plural(autoSize.credits, "credit")} for ${usd(autoSize.price)} when your balance falls below ${auto.threshold}, up to ${plural(auto.perMonth, "time")} a month.`
             : "Off. Pull request reviews stop when credits run out."}
         </p>
-        {org.admin && (
-          <AutoTopUpForm
-            orgId={org.id}
-            enabled={autoOn}
-            limit={choice?.monthlyLimitUsd ?? defaultAutoTopUpLimit(plan)}
-            rule={`Buy ${plan.autoTopUp.packs * TOP_UP.credits} credits for ${usd(autoTopUpPrice(plan))} when fewer than ${plan.autoTopUp.below} are left`}
-          />
-        )}
+        {org.admin && <AutoTopUpForm orgId={org.id} planId={plan.id} enabled={autoOn} quantity={quantity} limit={choice?.monthlyLimitUsd ?? defaultAutoTopUpLimit(quantity)} />}
       </div>
 
-      <div>
-        <p className="field-legend">Change plan</p>
-        <PlanPicker orgId={org.id} current={plan.id} admin={org.admin} />
-      </div>
+      {!plan.offered && (
+        <div>
+          <p className="field-legend">Change plan</p>
+          <p className="field-help">
+            {plan.name} is no longer sold, and stays yours as long as you keep it. {PRICES.plan}
+          </p>
+          <PlanPicker orgId={org.id} current={plan.id} admin={org.admin} />
+        </div>
+      )}
 
       {org.admin && (
         <form action={openPortal.bind(null, org.id)}>

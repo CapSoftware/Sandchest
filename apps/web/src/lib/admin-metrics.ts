@@ -3,7 +3,7 @@
  * so it can be tested on its own. Rates are null when there is nothing to
  * divide by, so the page can say so instead of showing 0%.
  */
-import { PLANS, type Plan } from "@sandchest/billing/plans";
+import { CREDIT_PRICE, PLANS, type Plan } from "@sandchest/billing/plans";
 import type { AdminRange, DailyScans, FindingTally, Funnel, KindCost, PlanCost, ScanTally } from "@sandchest/db";
 
 /** The ranges offered, in days (the same as the queries accept). */
@@ -138,7 +138,7 @@ export function kindSummary(row: KindCost): KindSummary {
 }
 
 /**
- * Model cost per credit charged: from the scans that held credits alone (not free Digs), and all in
+ * Model cost per credit charged: from the scans that held credits alone (not free deep scans), and all in
  * (every scan's cost, free recon and fix checks included, over the same credits).
  */
 export function costPerCredit(total: KindCost | undefined): { paid: Rate; allIn: Rate } {
@@ -150,7 +150,7 @@ export interface PlanMargin {
   plan: Plan;
   orgs: number;
   creditsCharged: number;
-  /** List price of a plan credit. */
+  /** List price of a credit: the plan's monthly credits, or bought ones on a plan without any. */
   revenuePerCredit: number;
   costPerCredit: Rate;
   /** 1 - cost per credit / revenue per credit. */
@@ -164,7 +164,7 @@ export interface PlanMargin {
 export function planMargins(costs: PlanCost[], plans: readonly Plan[] = PLANS): PlanMargin[] {
   return plans.map((plan) => {
     const row = costs.find((cost) => cost.planId === plan.id);
-    const revenuePerCredit = plan.price / plan.credits;
+    const revenuePerCredit = plan.credits > 0 ? plan.price / plan.credits : CREDIT_PRICE;
     const cost = row ? ratio(row.modelCostUsd + row.computeCostUsd, row.creditsCharged) : null;
     return {
       plan,
@@ -209,7 +209,7 @@ export function funnelSteps(funnel: Funnel): FunnelStep[] {
     ["Installed the App", funnel.installed],
     ...(funnel.plan === null ? [] : [["Chose a plan", funnel.plan] as [string, number]]),
     ["Recon finished", funnel.recon],
-    ["Started a dig", funnel.dig],
+    ["Started a deep scan", funnel.dig],
     ["Back in the last 30 days", funnel.active30],
     ["Back in the last 7 days", funnel.active7],
   ];

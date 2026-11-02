@@ -74,9 +74,9 @@ export function criticalFindingEmail(input: { repo: string; findings: FindingSum
   const subject = count === 1 ? `Critical: ${input.findings[0]!.title}` : `${count} critical findings in ${input.repo}`;
   const lede =
     count === 1
-      ? `Sandchest dug up a critical vulnerability in ${input.repo}. Fix it before it ships.`
-      : `Sandchest dug up ${count} critical vulnerabilities in ${input.repo}. Fix them before they ship.`;
-  const html = layout(lede, `${heading(count === 1 ? "Dug up 1 critical." : `Dug up ${count} criticals.`)}${paragraph(lede)}${findingList(input.findings)}${button(input.findings[0]!.url, "See the attack path")}`);
+      ? `Sandchest found a critical vulnerability in ${input.repo}. Fix it before it ships.`
+      : `Sandchest found ${count} critical vulnerabilities in ${input.repo}. Fix them before they ship.`;
+  const html = layout(lede, `${heading(count === 1 ? "Found 1 critical." : `Found ${count} criticals.`)}${paragraph(lede)}${findingList(input.findings)}${button(input.findings[0]!.url, "See the attack path")}`);
   return { subject, html, text: `${lede}\n\n${textList(input.findings)}\n\n${FOOTER}` };
 }
 
@@ -155,7 +155,7 @@ export function creditsExhaustedEmail(input: Omit<CreditsInput, "credits">): Ren
     title: "The chest is empty.",
     paragraphs: [
       `${input.org} has used every credit on ${input.plan}. Until it has more, pull requests get a neutral Check instead of a review, and deep scans won’t start.`,
-      `Top up to keep digging, or turn on auto top-up${input.resetsOn ? `. The plan’s monthly credits come back on ${input.resetsOn}` : ""}.`,
+      `Top up to keep scanning, or turn on auto top-up${input.resetsOn ? `. The plan’s monthly credits come back on ${input.resetsOn}` : ""}.`,
     ],
     button: { url: input.billingUrl, label: "Top up" },
     footer: adminFooter(input.org, false),
@@ -202,13 +202,13 @@ export function scanPausedEmail(input: { org: string; repo: string; kind: "recon
         : `Mapping ${input.repo}`;
   const next =
     input.kind === "deep"
-      ? "Dig again in a little while."
+      ? "Scan again in a little while."
       : input.kind === "pr_review"
         ? "Its Check says the review couldn’t finish, which doesn’t block merging. Push a new commit to review it once this clears."
         : "It runs again with the repository’s next deep scan or pull request review.";
   return render({
     subject: `Scan paused: ${input.repo}`,
-    title: "Digging paused.",
+    title: "Scans paused.",
     paragraphs: [
       `${what} stopped: the model provider hit its usage limit. Nothing was charged for it.`,
       next,

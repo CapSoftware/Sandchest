@@ -1,12 +1,30 @@
 /**
- * The plans and top-ups (SPEC §12). `autumn/autumn.config.ts` is built from
- * these, so the dashboard, the scan gate and Autumn always agree.
+ * The plan, credits and auto top-up (SPEC §12). `autumn/autumn.config.ts` is
+ * built from these, so the dashboard, the scan gate and Autumn always agree.
+ *
+ * One plan, $1 a month, and credits at $1 each, less in bigger purchases,
+ * bought ahead and spent as the hacker works. Auto top-up buys more when the balance runs low, up to a
+ * monthly limit the org sets. Bought credits never expire.
  */
 
 /** The one balance every paid scan draws from. */
 export const CREDITS = "credits";
 
-export type PlanId = "lockbox" | "chest" | "vault";
+/** USD per credit, before any volume discount. */
+export const CREDIT_PRICE = 1;
+
+/**
+ * Bigger purchases cost less per credit. A purchase is priced whole at the
+ * tier its size reaches (Autumn's "volume" tiers): 25 credits are all $0.90.
+ */
+export const CREDIT_TIERS: readonly { from: number; price: number }[] = [
+  { from: 1, price: CREDIT_PRICE },
+  { from: 25, price: 0.9 },
+  { from: 50, price: 0.85 },
+  { from: 100, price: 0.8 },
+];
+
+export type PlanId = "standard" | "lockbox" | "chest" | "vault";
 
 export interface Plan {
   id: PlanId;
@@ -15,44 +33,93 @@ export interface Plan {
   price: number;
   /** Credits granted each month. They do not roll over. */
   credits: number;
-  /** Auto top-up buys `packs` top-ups when the balance falls below `below`: enough for this plan's typical scan. */
-  autoTopUp: { below: number; packs: number };
+  /** The smallest number of credits the plan's own price sells, and its USD price. Auto top-ups buy whole packs. */
+  pack: { credits: number; price: number };
+  /** Sold to new customers. Older plans keep working for the orgs already on them. */
+  offered: boolean;
 }
 
-export const PLANS: readonly Plan[] = [
-  { id: "lockbox", name: "Lockbox", price: 20, credits: 60, autoTopUp: { below: 15, packs: 1 } },
-  { id: "chest", name: "Chest", price: 100, credits: 350, autoTopUp: { below: 30, packs: 2 } },
-  { id: "vault", name: "Vault", price: 250, credits: 1_000, autoTopUp: { below: 75, packs: 3 } },
+/** The plan every org joins. */
+export const PLAN: Plan = { id: "standard", name: "Standard", price: 1, credits: 0, pack: { credits: 1, price: CREDIT_PRICE }, offered: true };
+
+/** Plans from before credits were sold one by one. Orgs on them keep their monthly credits. */
+const RETIRED: readonly Plan[] = [
+  { id: "lockbox", name: "Lockbox", price: 20, credits: 60, pack: { credits: 25, price: 10 }, offered: false },
+  { id: "chest", name: "Chest", price: 100, credits: 350, pack: { credits: 25, price: 10 }, offered: false },
+  { id: "vault", name: "Vault", price: 250, credits: 1_000, pack: { credits: 25, price: 10 }, offered: false },
 ];
 
-/** A top-up pack: never cheaper per credit than a plan. Bought credits never expire. */
-export const TOP_UP = { id: "top_up", name: "Top-up", credits: 25, price: 10 } as const;
+export const PLANS: readonly Plan[] = [PLAN, ...RETIRED];
 
-/** The most top-up packs one purchase may hold. */
-export const MAX_TOP_UP_PACKS = 20;
+/** Credits bought on their own, at the credit price, on any plan. */
+export const TOP_UP = { id: "top_up", name: "Credits" } as const;
+
+/** The amounts offered when buying credits. */
+export const CREDIT_AMOUNTS = [10, 25, 50, 100] as const;
+/** The amount picked when nothing else is. */
+export const DEFAULT_CREDITS = 10;
+/** The most credits one purchase may hold. */
+export const MAX_PURCHASE_CREDITS = 1_000;
+
+/** Auto top-up buys credits once fewer than this are left: the price of the smallest Dig. */
+export const TOP_UP_BELOW = 5;
 
 export function planById(id: string | null | undefined): Plan | undefined {
   return PLANS.find((plan) => plan.id === id);
 }
 
-/** The default monthly auto top-up limit: twice the plan's price. */
-export function defaultAutoTopUpLimit(plan: Plan): number {
-  return plan.price * 2;
+/** USD per credit in a purchase of this many. */
+export function creditRate(credits: number): number {
+  return CREDIT_TIERS.findLast((tier) => credits >= tier.from)?.price ?? CREDIT_PRICE;
+}
+
+const cents = (usd: number) => Math.round(usd * 100) / 100;
+
+/** USD for this many credits bought at once, with the volume discount. */
+export function creditsPrice(credits: number): number {
+  return cents(credits * creditRate(credits));
+}
+
+/** USD the volume discount takes off a purchase of this many credits. */
+export function creditsSaving(credits: number): number {
+  return cents(credits * CREDIT_PRICE - creditsPrice(credits));
+}
+
+/** The volume discount on a purchase of this many credits, as a whole percentage. */
+export function creditsDiscount(credits: number): number {
+  return Math.round((1 - creditRate(credits) / CREDIT_PRICE) * 100);
+}
+
+/** The default monthly auto top-up limit: five top-ups, and never under $50. */
+export function defaultAutoTopUpLimit(quantity: number): number {
+  return Math.max(50, creditsPrice(quantity) * 5);
+}
+
+/** What one auto top-up of `quantity` credits buys and costs on a plan: whole packs, rounded up. */
+export function autoTopUpSize(plan: Plan, quantity: number): { credits: number; price: number } {
+  const packs = Math.max(1, Math.ceil(quantity / plan.pack.credits));
+  // The current plan sells credits one at a time, with the volume discount.
+  if (plan.id === PLAN.id) return { credits: packs, price: creditsPrice(packs) };
+  return { credits: packs * plan.pack.credits, price: packs * plan.pack.price };
 }
 
 /**
- * Autumn's auto top-up control for a plan and a monthly spend limit in USD.
- * The limit is a whole number of top-ups per month; under one top-up means off.
+ * Autumn's auto top-up control for an org's choice: buy `quantity` credits
+ * when fewer than TOP_UP_BELOW are left, as many times a month as the
+ * monthly limit allows. Under one top-up a month means off.
  */
-export function autoTopUpControl(plan: Plan, enabled: boolean, monthlyLimitUsd: number): { enabled: boolean; threshold: number; quantity: number; perMonth: number } {
-  const perMonth = Math.floor(monthlyLimitUsd / autoTopUpPrice(plan));
-  return { enabled: enabled && perMonth >= 1, threshold: plan.autoTopUp.below, quantity: plan.autoTopUp.packs * TOP_UP.credits, perMonth: Math.max(perMonth, 1) };
+export function autoTopUpControl(
+  plan: Plan,
+  choice: { enabled: boolean; quantity: number; monthlyLimitUsd: number },
+): { enabled: boolean; threshold: number; quantity: number; perMonth: number } {
+  const size = autoTopUpSize(plan, choice.quantity);
+  const perMonth = Math.floor(choice.monthlyLimitUsd / size.price);
+  return { enabled: choice.enabled && perMonth >= 1, threshold: TOP_UP_BELOW, quantity: size.credits, perMonth: Math.max(perMonth, 1) };
 }
 
 /**
  * How an org's credits stand, for the emails that warn about them:
- * - `ok`: at least the plan's low line, which is about one typical deep scan
- *   for the plan (15, 30 or 75 credits) and the same line auto top-up buys at;
+ * - `ok`: at least TOP_UP_BELOW, the price of the smallest Dig;
  * - `low`: below it, but something left;
  * - `exhausted`: nothing left, so every paid scan is refused.
  * Ordered, so a higher level is a downward crossing.
@@ -60,12 +127,7 @@ export function autoTopUpControl(plan: Plan, enabled: boolean, monthlyLimitUsd: 
 export const CREDIT_LEVELS = ["ok", "low", "exhausted"] as const;
 export type CreditLevel = (typeof CREDIT_LEVELS)[number];
 
-export function creditLevel(plan: Plan, remaining: number): CreditLevel {
+export function creditLevel(remaining: number): CreditLevel {
   if (remaining <= 0) return "exhausted";
-  return remaining < plan.autoTopUp.below ? "low" : "ok";
-}
-
-/** USD charged by one auto top-up on this plan. */
-export function autoTopUpPrice(plan: Plan): number {
-  return plan.autoTopUp.packs * TOP_UP.price;
+  return remaining < TOP_UP_BELOW ? "low" : "ok";
 }

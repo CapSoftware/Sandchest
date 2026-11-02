@@ -19,3 +19,21 @@ test("each environment takes its URL from its own variable", () => {
     expect(hook.events).toEqual(["billing.auto_topup_succeeded", "billing.auto_topup_failed", "billing.updated"]);
   }
 });
+
+test("Standard and credits on their own sell with the volume discount, as tiers Autumn charges", async () => {
+  const { plans, topUp } = await import("../autumn/autumn.config");
+  const standard = plans.find((p) => p.planId === "standard")!;
+  for (const item of [standard.items!.at(-1)!, topUp.items![0]!]) {
+    expect(item.price).toMatchObject({
+      tierBehavior: "volume",
+      billingMethod: "prepaid",
+      interval: "one_off",
+      tiers: [
+        { to: 24, amount: 1 },
+        { to: 49, amount: 0.9 },
+        { to: 99, amount: 0.85 },
+        { to: "inf", amount: 0.8 },
+      ],
+    });
+  }
+});

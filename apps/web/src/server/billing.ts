@@ -14,7 +14,7 @@
  * This module stays light: pages import it, and the workflow runtime is
  * loaded only when an org's first plan starts its recon.
  */
-import { autoTopUpControl, createAutumn, planById, type Autumn, type BillingState } from "@sandchest/billing";
+import { autoTopUpControl, createAutumn, createStripe, DEFAULT_CREDITS, planById, type Autumn, type BillingState, type Stripe } from "@sandchest/billing";
 import {
   markScanReserved,
   orgBillingRow,
@@ -60,6 +60,30 @@ export function setAutumn(client: Autumn | undefined): void {
 
 export function billingEnabled(): boolean {
   return autumn() !== undefined;
+}
+
+let stripeInstance: Stripe | null | undefined;
+
+/**
+ * Stripe, for taking a first plan's card on the page, or undefined when its
+ * keys aren't set (then Stripe Checkout takes it, as before).
+ */
+export function stripe(): Stripe | undefined {
+  if (stripeInstance === undefined) {
+    const settings = config();
+    stripeInstance = settings.STRIPE_SECRET_KEY && settings.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ? createStripe({ secretKey: settings.STRIPE_SECRET_KEY }) : null;
+  }
+  return billingEnabled() ? (stripeInstance ?? undefined) : undefined;
+}
+
+/** For tests. */
+export function setStripe(client: Stripe | undefined): void {
+  stripeInstance = client ?? null;
+}
+
+/** The publishable key the Payment Element loads with, when cards are taken on the page. */
+export function stripePublishableKey(): string | null {
+  return stripe() ? (config().NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? null) : null;
 }
 
 // ---- The org's state ---------------------------------------------------------
@@ -151,16 +175,16 @@ export async function startPendingRecon(orgId: string): Promise<string[]> {
 
 // ---- Auto top-up -------------------------------------------------------------
 
-/** Pushes the org's auto top-up choice to Autumn, sized for its current plan. */
+/** Pushes the org's auto top-up choice to Autumn, in whole packs of its current plan. */
 export async function applyAutoTopUp(orgId: string, planId: string | null, choice: OrgSettings["autoTopUp"]): Promise<BillingState["autoTopUp"]> {
   const plan = planById(planId);
-  const control = plan && choice ? autoTopUpControl(plan, choice.enabled, choice.monthlyLimitUsd) : null;
+  const control = plan && choice ? autoTopUpControl(plan, { ...choice, quantity: choice.quantity ?? DEFAULT_CREDITS }) : null;
   const off = { enabled: false, threshold: 0, quantity: 0, perMonth: 1 };
   await autumn()!.setAutoTopUp(orgId, control ?? off);
   return control ?? off;
 }
 
-/** After a plan change: resize auto top-up for the new plan, or turn it off without one. */
+/** After a plan change: size auto top-up for the new plan's packs, or turn it off without one. */
 async function matchAutoTopUp(orgId: string, state: BillingState): Promise<BillingState> {
   const org = await db().query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.id, orgId), columns: { settings: true } });
   const choice = org?.settings.autoTopUp;

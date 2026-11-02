@@ -14,7 +14,7 @@ export const SCAN_KIND_LABEL: Record<string, string> = {
 
 export const SCAN_STATUS_LABEL: Record<string, string> = {
   queued: "Queued",
-  running: "Digging",
+  running: "Scanning",
   publishing: "Publishing",
   completed: "Done",
   failed: "Failed",

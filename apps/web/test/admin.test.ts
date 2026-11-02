@@ -175,9 +175,10 @@ describe("admin arithmetic", () => {
 
   test("margin per plan compares list price per credit with all-in cost per credit", () => {
     const plans = [
-      { id: "lockbox", name: "Lockbox", price: 20, credits: 50, autoTopUp: { below: 1, packs: 1 } },
-      { id: "chest", name: "Chest", price: 100, credits: 400, autoTopUp: { below: 1, packs: 1 } },
-      { id: "vault", name: "Vault", price: 300, credits: 1000, autoTopUp: { below: 1, packs: 1 } },
+      { id: "lockbox", name: "Lockbox", price: 20, credits: 50, pack: { credits: 25, price: 10 }, offered: false },
+      { id: "chest", name: "Chest", price: 100, credits: 400, pack: { credits: 25, price: 10 }, offered: false },
+      { id: "vault", name: "Vault", price: 300, credits: 1000, pack: { credits: 25, price: 10 }, offered: false },
+      { id: "standard", name: "Standard", price: 1, credits: 0, pack: { credits: 1, price: 1 }, offered: true },
     ] as const;
     const margins = planMargins(
       [
@@ -185,7 +186,7 @@ describe("admin arithmetic", () => {
         { planId: "chest", orgs: 1, scans: 2, creditsCharged: 0, chargedModelCostUsd: 0, modelCostUsd: 3, computeCostUsd: 0 },
         { planId: null, orgs: 9, scans: 9, creditsCharged: 0, chargedModelCostUsd: 0, modelCostUsd: 50, computeCostUsd: 0 },
       ],
-      plans.map((plan) => ({ ...plan, autoTopUp: { ...plan.autoTopUp } })),
+      plans.map((plan) => ({ ...plan, pack: { ...plan.pack } })),
     );
     // Lockbox: $0.40 a credit; cost (12 + 8) / 100 = $0.20 a credit; margin 50%.
     expect(margins[0]).toMatchObject({ orgs: 3, creditsCharged: 100, revenuePerCredit: 0.4, costPerCredit: 0.2, margin: 0.5 });
@@ -193,6 +194,8 @@ describe("admin arithmetic", () => {
     expect(margins[1]).toMatchObject({ orgs: 1, revenuePerCredit: 0.25, costPerCredit: null, margin: null });
     // Vault: no scans at all.
     expect(margins[2]).toMatchObject({ orgs: 0, creditsCharged: 0, revenuePerCredit: 0.3, costPerCredit: null, margin: null });
+    // Standard: no monthly credits, so a credit sells at the credit price.
+    expect(margins[3]).toMatchObject({ revenuePerCredit: 1 });
   });
 
   test("funnel steps report each step against the one before and the start", () => {

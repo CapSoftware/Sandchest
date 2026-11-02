@@ -4,10 +4,11 @@
  * viewer is an admin of the org: GitHub org admins, or the owner of a
  * personal account (SPEC §3).
  *
- * A first plan goes through Stripe Checkout. Once the org has a card on file,
- * every charge is shown on a confirm page first, then charged at once.
+ * Without a card on file, the plan (and any credits bought with it) goes
+ * through Stripe Checkout. Once the org has one, every charge is shown on a
+ * confirm page first, then charged at once.
  */
-import { defaultAutoTopUpLimit, MAX_TOP_UP_PACKS, planById, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
+import { DEFAULT_CREDITS, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, planById, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
 import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -22,9 +23,12 @@ import { captureException } from "./sentry";
 export type BillingOutcome = { error?: string; saved?: boolean };
 
 const Id = z.uuid();
+const Credits = z.coerce.number().int().min(1).max(MAX_PURCHASE_CREDITS);
+/** Plans that can be bought now: the retired ones keep working but aren't sold. */
+const OfferedPlan = z.enum(PLANS.filter((p) => p.offered).map((p) => p.id) as [PlanId, ...PlanId[]]);
 const Purchase = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("plan"), plan: z.enum(PLANS.map((p) => p.id) as [PlanId, ...PlanId[]]) }),
-  z.object({ kind: z.literal("top_up"), packs: z.coerce.number().int().min(1).max(MAX_TOP_UP_PACKS) }),
+  z.object({ kind: z.literal("plan"), plan: OfferedPlan, credits: z.union([z.literal("").transform(() => undefined), Credits]).optional() }),
+  z.object({ kind: z.literal("top_up"), credits: Credits }),
 ]);
 export type PurchaseInput = z.infer<typeof Purchase>;
 
@@ -41,12 +45,12 @@ function appUrl(): string {
   return config().SANDCHEST_APP_URL.replace(/\/$/, "");
 }
 
-/** Where a purchase is confirmed: the plan or the number of top-up packs, in the query string. */
+/** Where a purchase is confirmed: the plan, or the credits bought on their own, in the query string. */
 function purchaseQuery(input: PurchaseInput): string {
-  return input.kind === "plan" ? `plan=${input.plan}` : `topup=${input.packs}`;
+  return input.kind === "plan" ? `plan=${input.plan}${input.credits ? `&credits=${input.credits}` : ""}` : `topup=${input.credits}`;
 }
 
-/** Picks or changes a plan, or buys top-ups. Without a card on file this opens Stripe Checkout. */
+/** Picks or changes the plan, or buys credits. Without a card on file this opens Stripe Checkout. */
 export async function purchase(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
   const input = Purchase.safeParse(Object.fromEntries(form));
   if (!input.success) return { error: "That isn’t something you can buy." };
@@ -63,7 +67,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
   }
   if (input.data.kind === "plan" && planId === input.data.plan) return { error: "That’s already your plan." };
   if (!planId) {
-    if (input.data.kind === "top_up") return { error: "Choose a plan first: top-ups add to a plan’s credits." };
+    if (input.data.kind === "top_up") return { error: "Join the plan first: credits are bought with it." };
     return checkout(row.org, input.data);
   }
   redirect(`/dashboard/billing/confirm?org=${orgId}&${purchaseQuery(input.data)}`);
@@ -85,7 +89,7 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
     ({ paymentUrl } = await autumn()!.attach({
       customerId: org.id,
       planId: input.kind === "plan" ? input.plan : TOP_UP.id,
-      packs: input.kind === "top_up" ? input.packs : undefined,
+      credits: input.credits,
       successUrl,
     }));
   } catch (error) {
@@ -115,18 +119,20 @@ export async function openPortal(orgId: string): Promise<void> {
 
 const AutoTopUpForm = z.object({
   enabled: z.literal("on").optional(),
-  limit: z.coerce.number().int().min(TOP_UP.price).max(100_000),
+  quantity: Credits.optional(),
+  limit: z.coerce.number().int().min(1).max(100_000),
 });
 
-/** Turns auto top-up on or off, with a monthly spend limit. */
+/** Turns auto top-up on or off: how many credits it buys, and the most it may spend in a month. */
 export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
   const parsed = AutoTopUpForm.safeParse(Object.fromEntries(form));
-  if (!parsed.success) return { error: `The monthly limit must be at least $${TOP_UP.price}.` };
+  if (!parsed.success) return { error: "The monthly limit must be at least $1." };
   const row = await adminOrg(orgId);
   if (!row) return { error: NOT_ADMIN };
   const plan = planById(row.billing?.planId);
   if (!plan) return { error: "Auto top-up needs a plan." };
-  const choice = { enabled: parsed.data.enabled === "on", monthlyLimitUsd: parsed.data.limit || defaultAutoTopUpLimit(plan) };
+  const quantity = parsed.data.quantity ?? row.org.settings.autoTopUp?.quantity ?? DEFAULT_CREDITS;
+  const choice = { enabled: parsed.data.enabled === "on", quantity, monthlyLimitUsd: parsed.data.limit || defaultAutoTopUpLimit(quantity) };
   const user = await viewer();
   if (!(await updateOrgSettings(db(), user.id, orgId, { autoTopUp: choice }))) return { error: NOT_ADMIN };
   try {

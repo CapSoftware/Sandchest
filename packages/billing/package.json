@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./plans": "./src/plans.ts",
     "./costs": "./src/costs.ts",
-    "./webhooks": "./src/webhooks.ts"
+    "./webhooks": "./src/webhooks.ts",
+    "./tax-ids": "./src/tax-ids.ts"
   },
   "scripts": {
     "test": "bun test",
