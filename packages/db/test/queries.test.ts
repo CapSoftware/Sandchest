@@ -22,6 +22,8 @@ import {
   openFindings,
   removeInstallation,
   repoHistory,
+  fixedPairs,
+  outcomeStats,
   repoByGithubId,
   saveThreatModel,
   threatModel,
@@ -334,6 +336,37 @@ describe("findings", () => {
     const history = await repoHistory(database, repoId);
     expect(history.map((h) => h.outcome).sort()).toEqual(["false_positive", "fixed"]);
     expect(history[0]).toMatchObject({ title: "SQL injection", category: "sql_injection", at: "a.ts:3" });
+  });
+
+  it("learns from outcomes: per-signal stats, and fixed findings as vulnerable/patched pairs", async () => {
+    const { org, repos } = await upsertInstallation(database, 9030, { ...account, githubAccountId: 130 }, [
+      { githubRepoId: 70, fullName: "acme/public-70", private: false, defaultBranch: "main" },
+      { githubRepoId: 71, fullName: "acme/private-71", private: true, defaultBranch: "main" },
+    ]);
+    const [pub, priv] = repos;
+    const found = await createScan(database, { repoId: pub!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "aaa111" });
+    const fix = await createScan(database, { repoId: pub!.id, orgId: org.id, kind: "fix_check", trigger: "webhook", headSha: "bbb222" });
+    const { ids } = await upsertFindings(database, pub!.id, found.scan, [
+      { ...finding("l-fixed"), sources: ["missing_check"], trust: "corroborated" },
+      { ...finding("l-fp"), sources: ["hunter"], trust: "unconfirmed" },
+    ]);
+    await markFixed(database, [ids[0]!], fix.scan.id);
+    await database.$client`update findings set status = 'dismissed', dismiss_reason = 'false_positive' where id = ${ids[1]!}`;
+    // A fixed finding in a private repository.
+    const pfound = await createScan(database, { repoId: priv!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "ccc333" });
+    const pfix = await createScan(database, { repoId: priv!.id, orgId: org.id, kind: "fix_check", trigger: "webhook", headSha: "ddd444" });
+    const p = await upsertFindings(database, priv!.id, pfound.scan, [finding("l-private")]);
+    await markFixed(database, [p.ids[0]!], pfix.scan.id);
+
+    const pairs = (await fixedPairs(database)).filter((pair) => pair.repo.startsWith("acme/p"));
+    expect(pairs.map((pair) => pair.repo)).toEqual(["acme/public-70"]);
+    expect(pairs[0]).toMatchObject({ vulnerableSha: "aaa111", patchedSha: "bbb222" });
+    expect(pairs[0]!.candidate.path[0]).toEqual({ file: "a.ts", line: 3, note: "sink" }); // no excerpt
+    expect((await fixedPairs(database, { includePrivate: true })).some((pair) => pair.repo === "acme/private-71")).toBe(true);
+
+    const stats = await outcomeStats(database);
+    expect(stats).toContainEqual({ source: "missing_check", category: "sql_injection", trust: "corroborated", outcome: "fixed", count: 1 });
+    expect(stats).toContainEqual({ source: "hunter", category: "sql_injection", trust: "unconfirmed", outcome: "false_positive", count: 1 });
   });
 
   it("stores the threat model per repo and bumps its version", async () => {

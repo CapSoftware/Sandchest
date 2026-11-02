@@ -49,6 +49,7 @@
     "evals": {
       "name": "@sandchest/evals",
       "dependencies": {
+        "@sandchest/db": "workspace:*",
         "@sandchest/engine": "workspace:*",
         "zod": "^4.6.7",
       },
