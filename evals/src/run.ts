@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { createLlmClient, loadLlmConfig, startLocalIndexer } from "@sandchest/engine";
+import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig, startLocalIndexer } from "@sandchest/engine";
 import { createOsvClient, loadPricing, runScan, type ScanLimits, type ScanReport } from "@sandchest/engine/scan";
 import { z } from "zod";
 import { loadBenchmarks, type Benchmark } from "./benchmark";
@@ -62,6 +62,8 @@ async function scanAll(): Promise<{ outcomes: Outcome[]; dir: string }> {
     ...(values.concurrency && { concurrency: Number(values.concurrency) }),
   };
   const client = createLlmClient(loadLlmConfig());
+  const classifierConfig = loadClassifierConfig();
+  const classifier = classifierConfig ? createClassifier(classifierConfig) : undefined;
   const osv = values["no-osv"] ? undefined : createOsvClient();
   const pricing = loadPricing();
 
@@ -76,6 +78,7 @@ async function scanAll(): Promise<{ outcomes: Outcome[]; dir: string }> {
         await using indexer = await startLocalIndexer(root);
         const report = await runScan({
           client,
+          classifier,
           indexer: indexer.client,
           osv,
           pricing,

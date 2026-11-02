@@ -33,7 +33,9 @@ import type { Runtime } from "./runtime";
 import { validateFindings, type ValidateOptions } from "./validate";
 import { proveFindings } from "./prove";
 import { trustRank, trustTier } from "./trust";
-import { authzConsistencyLeads } from "./consistency";
+import { authzConsistencyLeads, authzScoreLeads } from "./consistency";
+import { classifyEntryPoints } from "./classify";
+import type { Classifier } from "../llm/classifier";
 
 export interface ScanOptions {
   client: LlmClient;
@@ -55,6 +57,14 @@ export interface ScanOptions {
    */
   runtime?: Runtime;
   validate?: ValidateOptions;
+  /**
+   * Optional typed-decision classifier. When present, deep scans recover
+   * handlers the indexer's framework-specific route rules missed and score each
+   * handler's authorization, so recon, the reachability proof and the
+   * peer-consistency check work on frameworks the route detector cannot see.
+   * Absent: the stage is skipped and the scan runs on deterministic facts only.
+   */
+  classifier?: Classifier;
 }
 
 export interface DismissedCandidate {
@@ -133,10 +143,11 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const { indexer } = options;
 
   emit({ type: "stage", stage: "index", message: "Indexing the code…" });
-  const [overview, { routes }] = await Promise.all([
+  const [overview, routesResult] = await Promise.all([
     indexer.call<Overview>("overview", {}, signal),
     indexer.call<{ routes: RouteInfo[] }>("routes", { limit: 1000 }, signal),
   ]);
+  let routes = routesResult.routes;
   if (overview.loc > limits.maxLoc) {
     throw new ScanRefusedError(`This repository has ${overview.loc.toLocaleString("en")} lines of code; the limit is ${limits.maxLoc.toLocaleString("en")}.`);
   }
@@ -161,13 +172,44 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       return emptyReport(started, overview, options.threatModel, reviewed, Date.now() - started);
     }
   }
-  // Deep scans: find handlers that skip an authorization check their peers apply (RoleCast-style),
-  // deterministically, while recon runs. These leads make the hardest, most variance-prone class
-  // reliably covered instead of found on a lucky hunt. PR reviews skip it (leads must touch the change).
+  // Deep scans with a classifier: recover handlers the indexer's route rules missed and score each
+  // handler's authorization, so recon/proof/consistency work on frameworks the route detector can't
+  // see. Best-effort — a classifier failure leaves the deterministic facts untouched. PR reviews skip it.
+  let classifiedHandlers: Array<{ name: string; at: string; authz: number; authLevel?: string }> = [];
+  if (!change && options.classifier) {
+    const recovery = await classifyEntryPoints(indexer, options.classifier, routes, {
+      signal,
+      onProgress: (message) => emit({ type: "progress", message }),
+    }).catch((error) => {
+      emit({ type: "warning", message: `Entry-point classification failed: ${errorMessage(error)}` });
+      return null;
+    });
+    if (recovery) {
+      classifiedHandlers = recovery.handlers;
+      if (recovery.recovered.length > 0) {
+        routes = [...routes, ...recovery.recovered];
+        emit({ type: "progress", message: `Recovered ${recovery.recovered.length} entry point${recovery.recovered.length === 1 ? "" : "s"} the route rules missed.` });
+      }
+    }
+  }
+
+  // Find handlers that skip an authorization check their peers apply (RoleCast-style), deterministically,
+  // while recon runs. These leads make the hardest, most variance-prone class reliably covered instead of
+  // found on a lucky hunt. Two detectors, unioned by location: the call-graph+token guard check (works with
+  // no classifier) and, when the classifier scored handlers, the language-agnostic authz-score check (sees
+  // decorators and unfamiliar frameworks the token list cannot). PR reviews skip both.
   let authzN = 0;
+  const nextLeadId = () => `MC${++authzN}`;
   const authzLeads: Promise<Lead[]> = change
     ? Promise.resolve([])
-    : authzConsistencyLeads(indexer, routes, () => `MC${++authzN}`, signal).catch(() => []);
+    : authzConsistencyLeads(indexer, routes, nextLeadId, signal)
+        .catch(() => [] as Lead[])
+        .then((tokenLeads) => {
+          const scoreLeads = authzScoreLeads(classifiedHandlers, nextLeadId);
+          const byLocation = new Map<string, Lead>();
+          for (const lead of [...tokenLeads, ...scoreLeads]) if (lead.at && !byLocation.has(lead.at)) byLocation.set(lead.at, lead);
+          return [...byLocation.values()];
+        });
 
   // The advisory lookup is network-bound: let it run while recon maps the code.
   const advisories = vulnerabilities(options.osv, code.dependencies, signal).then((result) => {

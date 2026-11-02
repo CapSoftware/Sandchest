@@ -11,7 +11,8 @@ export { storableLeads } from "./leads";
 export { proveFinding, proveFindings, type ProveOptions } from "./prove";
 export { trustTier, trustRank } from "./trust";
 export { mergeReports, runScanEnsemble, type EnsembleReport, type SupportedFinding } from "./ensemble";
-export { authzConsistencyLeads, detectAuthzDeviations, type Deviation, type HandlerGuards } from "./consistency";
+export { authzConsistencyLeads, authzScoreLeads, detectAuthzDeviations, detectAuthzScoreDeviations, type Deviation, type HandlerGuards, type ScoredHandler } from "./consistency";
+export { classifyEntryPoints, type ClassifiedHandler, type ClassifyOptions, type EntryRecovery } from "./classify";
 export { investigateAuthModel } from "./investigate";
 export type { Runtime, RuntimeExecOptions, RuntimeExecResult } from "./runtime";
 export {

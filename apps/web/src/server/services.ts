@@ -1,7 +1,7 @@
 /** Process-wide clients, created on first use. Tests can swap any of them. */
 import type { Db } from "@sandchest/db";
 import type { Mailer } from "@sandchest/email";
-import { createLlmClient, loadLlmConfig, type LlmClient } from "@sandchest/engine/llm";
+import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig, type Classifier, type LlmClient } from "@sandchest/engine/llm";
 import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import type { GitHubApp } from "@sandchest/github";
 import { db, setDb } from "./db";
@@ -14,6 +14,7 @@ interface Services {
   db: Db;
   github: GitHubApp;
   llm: LlmClient;
+  classifier: Classifier | undefined;
   osv: OsvClient | undefined;
   pricing: Pricing | undefined;
   mailer: Mailer;
@@ -31,6 +32,14 @@ export function setServices(overrides: Partial<Services>): void {
 
 export function llmClient(): LlmClient {
   return (instances.llm ??= createLlmClient(loadLlmConfig()));
+}
+
+export function classifier(): Classifier | undefined {
+  if (!("classifier" in instances)) {
+    const config = loadClassifierConfig();
+    instances.classifier = config ? createClassifier(config) : undefined;
+  }
+  return instances.classifier;
 }
 
 export function osvClient(): OsvClient | undefined {

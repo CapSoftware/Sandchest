@@ -136,6 +136,75 @@ export function detectAuthzDeviations(handlers: HandlerGuards[], options: Deviat
   return deviations;
 }
 
+/** A handler scored by the classifier: how likely it enforces authorization. */
+export interface ScoredHandler {
+  name: string;
+  at: string;
+  /** Probability it enforces an appropriate authorization check (0–1). */
+  authz: number;
+  /** Apparent required access. A `public` endpoint is not a missing-check deviation. */
+  authLevel?: string;
+}
+
+export interface ScoreDeviationOptions {
+  minGroup: number;
+  /** A peer counts as enforcing authorization at or above this probability. */
+  enforcingAt: number;
+  /** A handler is a candidate deviation at or below this probability. */
+  deviantAt: number;
+  /** Fraction of peers that must be enforcing for the gap to count. */
+  peerShare: number;
+}
+
+const SCORE_DEFAULTS: ScoreDeviationOptions = { minGroup: 3, enforcingAt: 0.6, deviantAt: 0.4, peerShare: 0.6 };
+
+/**
+ * Peer-consistency over classifier authorization scores: within each directory
+ * of ≥ `minGroup` handlers, a handler whose score is low while most of its
+ * peers score high is a deviation. This is the language-agnostic counterpart of
+ * {@link detectAuthzDeviations}: it reads the concept of "enforces authz" from
+ * the classifier rather than matching guard-call names, so it sees decorators
+ * and unfamiliar frameworks the token list cannot.
+ */
+export function detectAuthzScoreDeviations(handlers: ScoredHandler[], options: ScoreDeviationOptions = SCORE_DEFAULTS): Deviation[] {
+  const groups = new Map<string, ScoredHandler[]>();
+  for (const handler of handlers) {
+    const dir = directory(handler.at);
+    (groups.get(dir) ?? groups.set(dir, []).get(dir)!).push(handler);
+  }
+
+  const deviations: Deviation[] = [];
+  for (const group of groups.values()) {
+    if (group.length < options.minGroup) continue;
+    for (const handler of group) {
+      if (handler.authz > options.deviantAt) continue;
+      // An intentionally public endpoint is expected to lack authorization — not a deviation.
+      if (handler.authLevel === "public") continue;
+      const peers = group.filter((other) => other !== handler);
+      const enforcing = peers.filter((peer) => peer.authz >= options.enforcingAt).length;
+      if (peers.length > 0 && enforcing / peers.length >= options.peerShare) {
+        deviations.push({ name: handler.name, at: handler.at, expected: ["an authorization check"], has: [] });
+      }
+    }
+  }
+  return deviations;
+}
+
+/**
+ * Leads from classifier authorization scores. One `missing_check` lead per
+ * handler that scores low on authorization while its directory peers score
+ * high — the sharp, grounded question the model then investigates.
+ */
+export function authzScoreLeads(handlers: ScoredHandler[], nextId: () => string, options?: ScoreDeviationOptions): Lead[] {
+  return detectAuthzScoreDeviations(handlers, options).map((dev) => ({
+    id: nextId(),
+    kind: "missing_check",
+    title: `${dev.name} may skip an authorization check its sibling handlers apply`,
+    at: dev.at,
+    detail: `Sibling handlers in the same module appear to enforce an authorization check; this one does not. Check whether an attacker can reach or change an object they do not own or belong to.`,
+  }));
+}
+
 interface CalleesResult {
   definitions: Array<{ calls: Array<{ call: string }> }>;
 }

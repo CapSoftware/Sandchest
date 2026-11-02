@@ -13,7 +13,7 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { startLocalIndexer } from "./indexer/local";
-import { createLlmClient, loadLlmConfig } from "./llm";
+import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig } from "./llm";
 import { createOsvClient, loadPricing, runScan, ThreatModelSchema, type ScanEvent, type ScanReport } from "./scan";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
@@ -61,8 +61,10 @@ async function scan(target: string): Promise<ScanReport> {
   const started = Date.now();
 
   // `return await`: the indexer and workspace must outlive the scan.
+  const classifierConfig = loadClassifierConfig();
   return await runScan({
     client: createLlmClient(loadLlmConfig()),
+    classifier: classifierConfig ? createClassifier(classifierConfig) : undefined,
     indexer: indexer.client,
     osv: values["no-osv"] ? undefined : createOsvClient(),
     threatModel,

@@ -61,3 +61,36 @@ describe("detectAuthzDeviations", () => {
     expect(detectAuthzDeviations(group).map((x) => x.name)).toEqual([]);
   });
 });
+
+import { authzScoreLeads, detectAuthzScoreDeviations, type ScoredHandler } from "../src/scan/consistency";
+
+const sh = (name: string, dir: string, authz: number): ScoredHandler => ({ name, at: `${dir}/${name}.py:10`, authz });
+
+describe("detectAuthzScoreDeviations", () => {
+  test("flags the low-authz handler whose peers enforce authorization", () => {
+    const group = [sh("a", "handlers", 0.9), sh("b", "handlers", 0.85), sh("leak", "handlers", 0.2)];
+    const d = detectAuthzScoreDeviations(group);
+    expect(d.map((x) => x.name)).toEqual(["leak"]);
+  });
+
+  test("no deviation when the whole group is low (no policy to deviate from)", () => {
+    const group = [sh("a", "h", 0.2), sh("b", "h", 0.25), sh("c", "h", 0.3)];
+    expect(detectAuthzScoreDeviations(group)).toHaveLength(0);
+  });
+
+  test("no deviation when the whole group enforces", () => {
+    const group = [sh("a", "h", 0.9), sh("b", "h", 0.8), sh("c", "h", 0.95)];
+    expect(detectAuthzScoreDeviations(group)).toHaveLength(0);
+  });
+
+  test("ignores groups below the minimum", () => {
+    expect(detectAuthzScoreDeviations([sh("a", "h", 0.9), sh("leak", "h", 0.1)])).toHaveLength(0);
+  });
+
+  test("emits a missing_check lead with the handler location", () => {
+    const leads = authzScoreLeads([sh("a", "h", 0.9), sh("b", "h", 0.9), sh("leak", "h", 0.1)], () => "MC1");
+    expect(leads).toHaveLength(1);
+    expect(leads[0]!.kind).toBe("missing_check");
+    expect(leads[0]!.at).toBe("h/leak.py:10");
+  });
+});

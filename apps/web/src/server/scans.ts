@@ -49,7 +49,7 @@ import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from 
 import { config } from "./config";
 import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
-import { db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
+import { classifier, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
 
 /** Concurrent scans per org (SPEC §4), in each lane: recon, and everything else (see `claimScanSlot`). */
@@ -151,7 +151,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     const handle = await workspace.startIndexer(indexerBinary(settings.workspace));
     const indexer = createIndexerClient({ url: handle.url, token: handle.token });
     const model = parseThreatModel(memory?.threatModel);
-    const common = { client: llmClient(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS } };
+    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS } };
 
     if (scan.kind === "recon") {
       const result = await runRecon(common);
