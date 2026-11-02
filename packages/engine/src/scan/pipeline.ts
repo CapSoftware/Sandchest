@@ -207,18 +207,17 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     emit({ type: "progress", message: `Flagged ${authz.length} handler${authz.length === 1 ? "" : "s"} that skip an authorization check their peers apply.` });
   }
   const threatModelText = renderThreatModel(threatModel);
-  // Deep scans: investigate how this app enforces authorization (any framework, from the code)
-  // and ground every access-control review in it. Skipped for PR reviews (change-scoped, latency-sensitive).
-  let authModelText: string | undefined;
-  if (!change && !signal.aborted) {
-    emit({ type: "stage", stage: "recon", message: "Working out how authorization is enforced…" });
-    const authModel = await investigateAuthModel({ ...base, threatModelText }).catch((error) => {
-      if (isFatal(error, signal)) throw error;
-      return undefined;
-    });
-    authModelText = authModel ? renderAuthModel(authModel) : undefined;
-  }
-  const ctx: ScanContext = { ...base, threatModelText, authModelText };
+  // Deep scans: investigate how this app enforces authorization (any framework, from the code) to
+  // ground access-control reviews. Run it CONCURRENTLY with the hunt — only the skeptic needs it, and
+  // reviews start later as candidates stream — so it is off the critical path. PR reviews skip it.
+  if (!change && !signal.aborted) emit({ type: "stage", stage: "recon", message: "Working out how authorization is enforced…" });
+  const authModelPromise: Promise<string | undefined> =
+    change || signal.aborted
+      ? Promise.resolve(undefined)
+      : investigateAuthModel({ ...base, threatModelText })
+          .then((model) => (model ? renderAuthModel(model) : undefined))
+          .catch(() => undefined);
+  const ctx: ScanContext = { ...base, threatModelText };
 
   const registry = new CandidateRegistry();
   const findings: Finding[] = [];
@@ -231,6 +230,8 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       ruling = unreviewed(gated, "The time budget ran out before review");
     } else {
       try {
+        // Ground the review in the auth model once it is ready (usually finished during hunting).
+        if (ctx.authModelText === undefined) ctx.authModelText = await authModelPromise;
         ruling = await review(ctx, gated, at(0.95));
       } catch (error) {
         ruling = unreviewed(gated, `Review failed (${contain(error, `Review of ${gated.id} failed`)})`);
