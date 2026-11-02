@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="318" viewBox="0 0 760 318" role="img" aria-label="A pull request review finds one way in, the fix prompt is copied, and the push marks it fixed">
+<title>A pull request review finds one way in, the fix prompt is copied, and the push marks it fixed</title>
+<style>
+text{font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;font-size:13px}
+.blink{animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:0}}
+@keyframes review0{0.000%{opacity:1}17.500%{opacity:1;animation-timing-function:ease-in}20.000%{opacity:0}100.000%{opacity:0}}
+.review0{animation:review0 8s linear infinite}
+@keyframes review1{0.000%{opacity:0;transform:translateY(4px)}17.500%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}22.000%{opacity:1;transform:none}}
+.review1{animation:review1 8s linear infinite}
+@keyframes review2{0.000%{opacity:0;transform:translateY(4px)}20.000%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}24.500%{opacity:1;transform:none}}
+.review2{animation:review2 8s linear infinite}
+@keyframes review3{0.000%{transform:none}30.000%{transform:none;animation-timing-function:ease-out}31.375%{transform:translateY(2px)}32.750%{transform:none}}
+.review3{animation:review3 8s linear infinite}
+@keyframes review4{0.000%{opacity:1}31.250%{opacity:1;animation-timing-function:ease-in}33.750%{opacity:0}100.000%{opacity:0}}
+.review4{animation:review4 8s linear infinite}
+@keyframes review5{0.000%{opacity:0;transform:translateY(4px)}31.250%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}35.750%{opacity:1;transform:none}}
+.review5{animation:review5 8s linear infinite}
+@keyframes review6{0.000%{opacity:0;transform:translateY(4px)}37.500%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}42.000%{opacity:1;transform:none}}
+.review6{animation:review6 8s linear infinite}
+@keyframes review7{0.000%{opacity:0;transform:translateY(4px)}43.750%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}48.250%{opacity:1;transform:none}}
+.review7{animation:review7 8s linear infinite}
+@keyframes review8{0.000%{opacity:0}3.125%{opacity:1}91.250%{opacity:1}96.250%{opacity:0}100.000%{opacity:0}}
+.review8{animation:review8 8s linear infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#6b5a44" flood-opacity="0.18"/></filter></defs>
+<rect x="12.5" y="12.5" width="735" height="285" fill="#fffbf3" stroke="#eadfca" filter="url(#shadow)"/>
+<rect x="13" y="13" width="734" height="31" fill="#f7efe0"/>
+<rect x="12" y="44" width="736" height="1" fill="#eadfca"/>
+
+<text x="32" y="33" fill="#8a775c" font-size="12">#418 Add invoice download</text>
+<rect x="705" y="25" width="5" height="5" fill="#d3c3a5"/><rect x="714" y="25" width="5" height="5" fill="#d3c3a5"/><rect x="723" y="25" width="5" height="5" fill="#d3c3a5"/>
+<g class="review8">
+<rect x="32" y="69" width="8" height="8" fill="#fec242" class="blink"/><text x="48" y="78" fill="#a8700f">nightjar</text><g class="review0" opacity="0"><text x="120" y="78" fill="#8a775c">Reviewing…</text></g><g class="review1"><text x="120" y="78" fill="#b84c22">1 way in</text></g><rect x="32" y="94" width="696" height="1" fill="#eadfca"/><g class="review2"><rect x="32.5" y="108.5" width="695" height="108" fill="#f7efe0" stroke="#eadfca"/><text x="48" y="132" fill="#8a775c"><tspan fill="#15100b" font-weight="700">nightjar</tspan> on route.ts:14</text><rect x="48" y="145" width="48" height="18" fill="#d76839"/><text x="72" y="158" fill="#15100b" font-size="11" font-weight="700" text-anchor="middle">High</text><text x="108" y="158" fill="#15100b">Any signed-in user can read every customer’s invoices.</text><g class="review3"><g><rect x="48" y="176" width="140" height="26" fill="#fec242"/><rect x="48" y="176" width="140" height="2" fill="#fdd363"/><rect x="48" y="200" width="140" height="2" fill="#c25a2c"/></g><g class="review4" opacity="0"><text x="118" y="193" fill="#15100b" font-weight="600" text-anchor="middle">Copy fix prompt</text></g><g class="review5"><text x="118" y="193" fill="#15100b" font-weight="600" text-anchor="middle">Copied</text></g></g></g><g class="review6"><text x="32" y="250" fill="#2a2016"><tspan fill="#8a775c">$</tspan> git push</text></g><g class="review7"><rect x="32" y="267" width="8" height="8" fill="#fec242"/><text x="48" y="276" fill="#a8700f">Marked fixed. The path is gone.</text></g>
+</g>
+</svg>

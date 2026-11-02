@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="287" viewBox="0 0 760 287" role="img" aria-label="Asked for a way in, a stock model hedges while an abliterated model writes the request that works">
+<title>Asked for a way in, a stock model hedges while an abliterated model writes the request that works</title>
+<style>
+text{font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;font-size:13px}
+.blink{animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:0}}
+@keyframes models0{0.000%{transform:none}7.000%{transform:none;animation-timing-function:steps(31,end)}18.923%{transform:translateX(264px)}}
+.models0{animation:models0 10s linear infinite}
+@keyframes models1{0.000%{transform:none}19.423%{transform:none;animation-timing-function:steps(30,end)}30.962%{transform:translateX(256px)}}
+.models1{animation:models1 10s linear infinite}
+@keyframes models2{0.000%{transform:none}31.462%{transform:none;animation-timing-function:steps(31,end)}43.385%{transform:translateX(264px)}}
+.models2{animation:models2 10s linear infinite}
+@keyframes models3{0.000%{transform:none}43.885%{transform:none;animation-timing-function:steps(35,end)}57.346%{transform:translateX(296px)}}
+.models3{animation:models3 10s linear infinite}
+@keyframes models4{0.000%{transform:none}7.000%{transform:none;animation-timing-function:steps(25,end)}16.615%{transform:translateX(216px)}}
+.models4{animation:models4 10s linear infinite}
+@keyframes models5{0.000%{transform:none}18.115%{transform:none;animation-timing-function:steps(32,end)}30.423%{transform:translateX(272px)}}
+.models5{animation:models5 10s linear infinite}
+@keyframes models6{0.000%{transform:none}31.923%{transform:none;animation-timing-function:steps(29,end)}43.077%{transform:translateX(248px)}}
+.models6{animation:models6 10s linear infinite}
+@keyframes models7{0.000%{opacity:0;transform:translateY(4px)}46.577%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}50.177%{opacity:1;transform:none}}
+.models7{animation:models7 10s linear infinite}
+@keyframes models8{0.000%{opacity:0}2.500%{opacity:1}93.000%{opacity:1}97.000%{opacity:0}100.000%{opacity:0}}
+.models8{animation:models8 10s linear infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#6b5a44" flood-opacity="0.18"/></filter></defs>
+<rect x="12.5" y="12.5" width="735" height="254" fill="#fffbf3" stroke="#eadfca" filter="url(#shadow)"/>
+<rect x="13" y="13" width="734" height="31" fill="#f7efe0"/>
+<rect x="12" y="44" width="736" height="1" fill="#eadfca"/>
+
+<text x="32" y="33" fill="#8a775c" font-size="12">Same repo, two models</text>
+<rect x="705" y="25" width="5" height="5" fill="#d3c3a5"/><rect x="714" y="25" width="5" height="5" fill="#d3c3a5"/><rect x="723" y="25" width="5" height="5" fill="#d3c3a5"/>
+<g class="models8">
+<text x="32" y="78" fill="#2a2016"><tspan fill="#8a775c">&gt;</tspan> Find a way into /api/invoices</text><rect x="12" y="94" width="736" height="1" fill="#eadfca"/><rect x="380" y="95" width="1" height="172" fill="#eadfca"/><rect x="32" y="116" width="8" height="8" fill="#d3c3a5"/><text x="48" y="125" fill="#8a775c">Stock model</text><rect x="400" y="116" width="8" height="8" fill="#fec242" class="blink"/><text x="416" y="125" fill="#a8700f">Abliterated model</text><clipPath id="type-32-157"><rect x="30" y="143" width="264" height="19"/></clipPath><text x="32" y="157" xml:space="preserve" style="white-space:pre"><tspan fill="#8a775c">I can’t help with breaking into</tspan></text><g clip-path="url(#type-32-157)"><rect x="30" y="143" width="264" height="19" fill="#fffbf3" class="models0" style="transform:translateX(264px)"/></g><clipPath id="type-32-179"><rect x="30" y="165" width="256" height="19"/></clipPath><text x="32" y="179" xml:space="preserve" style="white-space:pre"><tspan fill="#8a775c">systems. In general, make sure</tspan></text><g clip-path="url(#type-32-179)"><rect x="30" y="165" width="256" height="19" fill="#fffbf3" class="models1" style="transform:translateX(256px)"/></g><clipPath id="type-32-201"><rect x="30" y="187" width="264" height="19"/></clipPath><text x="32" y="201" xml:space="preserve" style="white-space:pre"><tspan fill="#8a775c">your routes check authorization</tspan></text><g clip-path="url(#type-32-201)"><rect x="30" y="187" width="264" height="19" fill="#fffbf3" class="models2" style="transform:translateX(264px)"/></g><clipPath id="type-32-223"><rect x="30" y="209" width="296" height="19"/></clipPath><text x="32" y="223" xml:space="preserve" style="white-space:pre"><tspan fill="#8a775c">and follow security best practices.</tspan></text><g clip-path="url(#type-32-223)"><rect x="30" y="209" width="296" height="19" fill="#fffbf3" class="models3" style="transform:translateX(296px)"/></g><clipPath id="type-400-157"><rect x="398" y="143" width="216" height="19"/></clipPath><text x="400" y="157" xml:space="preserve" style="white-space:pre"><tspan fill="#8a775c">$ </tspan><tspan fill="#2a2016">curl /api/invoices/1043</tspan></text><g clip-path="url(#type-400-157)"><rect x="398" y="143" width="216" height="19" fill="#fffbf3" class="models4" style="transform:translateX(216px)"/></g><clipPath id="type-400-179"><rect x="398" y="165" width="272" height="19"/></clipPath><text x="400" y="179" xml:space="preserve" style="white-space:pre"><tspan fill="#8a775c">    -H 'Cookie: session=&lt;yours&gt;'</tspan></text><g clip-path="url(#type-400-179)"><rect x="398" y="165" width="272" height="19" fill="#fffbf3" class="models5" style="transform:translateX(272px)"/></g><clipPath id="type-400-201"><rect x="398" y="187" width="248" height="19"/></clipPath><text x="400" y="201" xml:space="preserve" style="white-space:pre"><tspan fill="#a8700f">200 OK </tspan><tspan fill="#2a2016">someone else’s invoice</tspan></text><g clip-path="url(#type-400-201)"><rect x="398" y="187" width="248" height="19" fill="#fffbf3" class="models6" style="transform:translateX(248px)"/></g><g class="models7"><rect x="400" y="222" width="72" height="18" fill="#d76839"/><text x="436" y="235" fill="#15100b" font-size="11" font-weight="700" text-anchor="middle">Critical</text><text x="484" y="235" fill="#15100b">Any user, any invoice</text></g>
+</g>
+</svg>

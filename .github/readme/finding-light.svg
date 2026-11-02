@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="624" viewBox="0 0 760 624" role="img" aria-label="An example finding with its severity, attack path, proof of concept, fix and a fix prompt for your coding agent">
+<title>An example finding with its severity, attack path, proof of concept, fix and a fix prompt for your coding agent</title>
+<style>
+text{font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;font-size:13px}
+.blink{animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:0}}
+@keyframes finding0{0.000%{opacity:0;transform:translateY(4px)}2.222%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}6.222%{opacity:1;transform:none}}
+.finding0{animation:finding0 9s linear infinite}
+@keyframes finding1{0.000%{opacity:0;transform:translateY(4px)}10.000%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}14.000%{opacity:1;transform:none}}
+.finding1{animation:finding1 9s linear infinite}
+@keyframes finding2{0.000%{opacity:0;transform:translateY(4px)}13.333%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}17.333%{opacity:1;transform:none}}
+.finding2{animation:finding2 9s linear infinite}
+@keyframes finding3{0.000%{opacity:0;transform:translateY(4px)}17.222%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}21.222%{opacity:1;transform:none}}
+.finding3{animation:finding3 9s linear infinite}
+@keyframes finding4{0.000%{opacity:0;transform:translateY(4px)}21.111%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}25.111%{opacity:1;transform:none}}
+.finding4{animation:finding4 9s linear infinite}
+@keyframes finding5{0.000%{opacity:0;transform:translateY(4px)}27.778%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}31.778%{opacity:1;transform:none}}
+.finding5{animation:finding5 9s linear infinite}
+@keyframes finding6{0.000%{opacity:0;transform:translateY(4px)}34.444%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}38.444%{opacity:1;transform:none}}
+.finding6{animation:finding6 9s linear infinite}
+@keyframes finding7{0.000%{opacity:0;transform:translateY(4px)}38.889%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}42.889%{opacity:1;transform:none}}
+.finding7{animation:finding7 9s linear infinite}
+@keyframes finding8{0.000%{opacity:0;transform:translateY(4px)}44.444%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}48.444%{opacity:1;transform:none}}
+.finding8{animation:finding8 9s linear infinite}
+@keyframes finding9{0.000%{opacity:0}2.778%{opacity:1}92.222%{opacity:1}96.667%{opacity:0}100.000%{opacity:0}}
+.finding9{animation:finding9 9s linear infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#6b5a44" flood-opacity="0.18"/></filter></defs>
+<rect x="12.5" y="12.5" width="735" height="591" fill="#fffbf3" stroke="#eadfca" filter="url(#shadow)"/>
+<rect x="13" y="13" width="734" height="31" fill="#f7efe0"/>
+<rect x="12" y="44" width="736" height="1" fill="#eadfca"/>
+
+<text x="32" y="33" fill="#8a775c" font-size="12">acme/api #418 · Add invoice download</text>
+<rect x="705" y="25" width="5" height="5" fill="#d3c3a5"/><rect x="714" y="25" width="5" height="5" fill="#d3c3a5"/><rect x="723" y="25" width="5" height="5" fill="#d3c3a5"/>
+<g class="finding9">
+<g class="finding0"><rect x="32" y="67" width="12" height="12" fill="#fec242"/><text x="52" y="78" fill="#8a775c"><tspan fill="#15100b" font-weight="700">sandchest</tspan> commented on lines 14–15</text><rect x="32" y="97" width="48" height="18" fill="#d76839"/><text x="56" y="110" fill="#15100b" font-size="11" font-weight="700" text-anchor="middle">High</text><text x="92" y="110" fill="#8a775c">High confidence · CWE-639</text><text x="32" y="140" fill="#15100b" font-size="15" font-weight="700">Any signed-in user can read every customer’s invoices.</text></g><g class="finding1"><text x="32" y="176" fill="#8a775c" font-size="11" letter-spacing="1">ATTACK PATH</text></g><g class="finding2"><text x="32" y="202" fill="#8a775c">1</text><text x="52" y="202" fill="#a8700f">app/api/invoices/[id]/route.ts:13</text><text x="52" y="221" fill="#2a2016">The invoice ID comes straight from the URL.</text></g><g class="finding3"><text x="32" y="246" fill="#8a775c">2</text><text x="52" y="246" fill="#a8700f">lib/billing/invoices.ts:31</text><text x="52" y="265" fill="#2a2016">getInvoice looks it up by ID alone. Nothing checks who is asking.</text></g><g class="finding4"><text x="32" y="290" fill="#8a775c">3</text><text x="52" y="290" fill="#a8700f">app/api/invoices/[id]/route.ts:15</text><text x="52" y="309" fill="#2a2016">The whole invoice is returned, billing email included.</text></g><g class="finding5"><text x="32" y="348" fill="#8a775c" font-size="11" letter-spacing="1">PROOF OF CONCEPT</text><rect x="32.5" y="362.5" width="695" height="74" fill="#f7efe0" stroke="#eadfca"/><text x="46" y="386" fill="#2a2016" xml:space="preserve" style="white-space:pre">curl https://acme.app/api/invoices/inv_000001 \</text><text x="46" y="406" fill="#2a2016" xml:space="preserve" style="white-space:pre">  -H 'cookie: session=&lt;yours&gt;'</text><text x="46" y="426" fill="#8a775c"># 200 OK, another customer’s invoice</text></g><g class="finding6"><text x="32" y="470" fill="#8a775c" font-size="11" letter-spacing="1">THE FIX MUST GUARANTEE</text><text x="32" y="494" fill="#2a2016">An invoice only goes to members of the organisation that owns it.</text></g><g class="finding7"><rect x="32" y="512" width="260" height="26" fill="#fec242"/><rect x="32" y="512" width="260" height="2" fill="#fdd363"/><rect x="32" y="536" width="260" height="2" fill="#c25a2c"/><text x="162" y="529" fill="#15100b" font-weight="600" text-anchor="middle">Copy fix prompt for your agent</text></g><g class="finding8"><rect x="12" y="560" width="736" height="1" fill="#eadfca"/><text x="32" y="588" fill="#8a775c"><tspan fill="#b84c22" font-weight="700">✕</tspan>  <tspan fill="#2a2016" font-weight="700">Sandchest</tspan> found 1 high-severity issue</text></g>
+</g>
+</svg>

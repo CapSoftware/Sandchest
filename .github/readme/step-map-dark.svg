@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="274" viewBox="0 0 760 274" role="img" aria-label="Sandchest is installed on two repositories and maps acme/api into a threat model">
+<title>Sandchest is installed on two repositories and maps acme/api into a threat model</title>
+<style>
+text{font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;font-size:13px}
+.blink{animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:0}}
+@keyframes map0{0.000%{fill:transparent;stroke:#4a3b2c}2.667%{fill:transparent;stroke:#4a3b2c;animation-timing-function:steps(2,end)}5.333%{fill:#fec242;stroke:#fec242}}
+.map0{animation:map0 7.5s linear infinite}
+@keyframes map1{0.000%{fill:transparent;stroke:#4a3b2c}6.000%{fill:transparent;stroke:#4a3b2c;animation-timing-function:steps(2,end)}8.667%{fill:#fec242;stroke:#fec242}}
+.map1{animation:map1 7.5s linear infinite}
+@keyframes map2{0.000%{transform:none}10.667%{transform:none;animation-timing-function:ease-out}12.133%{transform:translateY(2px)}13.600%{transform:none}}
+.map2{animation:map2 7.5s linear infinite}
+@keyframes map3{0.000%{opacity:0;transform:translateY(4px)}15.333%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}20.133%{opacity:1;transform:none}}
+.map3{animation:map3 7.5s linear infinite}
+@keyframes map4{0.000%{opacity:0;transform:translateY(4px)}18.000%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}22.800%{opacity:1;transform:none}}
+.map4{animation:map4 7.5s linear infinite}
+@keyframes map5{0.000%{transform:scaleX(0)}18.000%{transform:scaleX(0);animation-timing-function:steps(12,end)}24.667%{transform:scaleX(1)}}
+.map5{animation:map5 7.5s linear infinite}
+@keyframes map6{0.000%{opacity:0;transform:translateY(4px)}20.933%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}25.733%{opacity:1;transform:none}}
+.map6{animation:map6 7.5s linear infinite}
+@keyframes map7{0.000%{transform:scaleX(0)}20.933%{transform:scaleX(0);animation-timing-function:steps(12,end)}27.600%{transform:scaleX(1)}}
+.map7{animation:map7 7.5s linear infinite}
+@keyframes map8{0.000%{opacity:0;transform:translateY(4px)}23.867%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}28.667%{opacity:1;transform:none}}
+.map8{animation:map8 7.5s linear infinite}
+@keyframes map9{0.000%{transform:scaleX(0)}23.867%{transform:scaleX(0);animation-timing-function:steps(12,end)}30.533%{transform:scaleX(1)}}
+.map9{animation:map9 7.5s linear infinite}
+@keyframes map10{0.000%{opacity:0;transform:translateY(4px)}26.800%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}31.600%{opacity:1;transform:none}}
+.map10{animation:map10 7.5s linear infinite}
+@keyframes map11{0.000%{transform:scaleX(0)}26.800%{transform:scaleX(0);animation-timing-function:steps(12,end)}33.467%{transform:scaleX(1)}}
+.map11{animation:map11 7.5s linear infinite}
+@keyframes map12{0.000%{opacity:0;transform:translateY(4px)}33.333%{opacity:0;transform:translateY(4px);animation-timing-function:ease-out}38.133%{opacity:1;transform:none}}
+.map12{animation:map12 7.5s linear infinite}
+@keyframes map13{0.000%{opacity:0}3.333%{opacity:1}90.667%{opacity:1}96.000%{opacity:0}100.000%{opacity:0}}
+.map13{animation:map13 7.5s linear infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.18"/></filter></defs>
+<rect x="12.5" y="12.5" width="735" height="241" fill="#15100b" stroke="#2c2219" filter="url(#shadow)"/>
+<rect x="13" y="13" width="734" height="31" fill="#0d0a07"/>
+<rect x="12" y="44" width="736" height="1" fill="#2c2219"/>
+<path transform="translate(32 21) scale(0.875)" fill="#f3e5c8" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+<text x="54" y="33" fill="#a69479" font-size="12">Install Sandchest</text>
+<rect x="705" y="25" width="5" height="5" fill="#4a3b2c"/><rect x="714" y="25" width="5" height="5" fill="#4a3b2c"/><rect x="723" y="25" width="5" height="5" fill="#4a3b2c"/>
+<g class="map13">
+<text x="32" y="80" fill="#a69479">Repository access</text><rect x="32.5" y="98.5" width="12" height="12" fill="#fec242" stroke="#fec242" class="map0"/><text x="56" y="110" fill="#f3e5c8">acme/api</text><rect x="32.5" y="124.5" width="12" height="12" fill="#fec242" stroke="#fec242" class="map1"/><text x="56" y="136" fill="#f3e5c8">acme/web</text><rect x="32.5" y="150.5" width="12" height="12" fill="none" stroke="#4a3b2c"/><text x="56" y="162" fill="#f3e5c8">acme/billing</text><g class="map2"><rect x="32" y="182" width="84" height="26" fill="#fec242"/><rect x="32" y="182" width="84" height="2" fill="#fdd363"/><rect x="32" y="206" width="84" height="2" fill="#c25a2c"/><text x="74" y="199" fill="#0d0a07" font-weight="600" text-anchor="middle">Install</text></g><rect x="380" y="64" width="1" height="168" fill="#2c2219"/><g class="map3"><text x="404" y="80" fill="#a69479">Mapping acme/api</text></g><g class="map4"><text x="404" y="110" fill="#f3e5c8">Routes</text><line x1="540" y1="109" x2="696" y2="109" stroke="#4a3b2c" stroke-dasharray="1 3" class="map5" style="transform-box:fill-box;transform-origin:left"/><text x="728" y="110" fill="#fec242" text-anchor="end">42</text></g><g class="map6"><text x="404" y="136" fill="#f3e5c8">Auth checks</text><line x1="540" y1="135" x2="696" y2="135" stroke="#4a3b2c" stroke-dasharray="1 3" class="map7" style="transform-box:fill-box;transform-origin:left"/><text x="728" y="136" fill="#fec242" text-anchor="end">17</text></g><g class="map8"><text x="404" y="162" fill="#f3e5c8">Data stores</text><line x1="540" y1="161" x2="696" y2="161" stroke="#4a3b2c" stroke-dasharray="1 3" class="map9" style="transform-box:fill-box;transform-origin:left"/><text x="728" y="162" fill="#fec242" text-anchor="end">6</text></g><g class="map10"><text x="404" y="188" fill="#f3e5c8">Dangerous calls</text><line x1="540" y1="187" x2="696" y2="187" stroke="#4a3b2c" stroke-dasharray="1 3" class="map11" style="transform-box:fill-box;transform-origin:left"/><text x="728" y="188" fill="#fec242" text-anchor="end">23</text></g><g class="map12"><rect x="404" y="216" width="8" height="8" fill="#fec242"/><text x="420" y="224" fill="#fec242">Threat model ready</text></g>
+</g>
+</svg>
