@@ -73,6 +73,27 @@ export class GitHubApp {
   }
 }
 
+export interface InstalledRepository {
+  id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  language?: string | null;
+  description?: string | null;
+  pushed_at?: string | null;
+}
+
+/** The fields of GET /orgs/{org} and /users/{user} that Sandchest reads. Orgs have `description`, users `bio`. */
+export interface AccountProfile {
+  login: string;
+  name: string | null;
+  description?: string | null;
+  bio?: string | null;
+  blog: string | null;
+  location: string | null;
+  avatar_url: string;
+}
+
 export interface PullFile {
   filename: string;
   status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
@@ -114,8 +135,13 @@ export class Installation {
     return this.app.token(this.id, { repositoryIds: [repositoryId], permissions: { contents: "read" } });
   }
 
-  repositories(): Promise<Array<{ id: number; full_name: string; private: boolean; default_branch: string }>> {
-    return githubPaginate(this.auth, "/installation/repositories", (page: { repositories: Array<{ id: number; full_name: string; private: boolean; default_branch: string }> }) => page.repositories, {}, this.http);
+  repositories(): Promise<InstalledRepository[]> {
+    return githubPaginate(this.auth, "/installation/repositories", (page: { repositories: InstalledRepository[] }) => page.repositories, {}, this.http);
+  }
+
+  /** The installed account's public profile: what GitHub shows on its page. */
+  account(login: string, type: "User" | "Organization"): Promise<AccountProfile> {
+    return githubRequest(this.auth, `/${type === "Organization" ? "orgs" : "users"}/${encodeURIComponent(login)}`, {}, this.http);
   }
 
   pull(repo: string, number: number): Promise<{ number: number; head: { sha: string; repo: { full_name: string } | null }; base: { sha: string; ref: string }; user: { login: string }; draft: boolean }> {

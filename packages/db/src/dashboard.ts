@@ -343,9 +343,15 @@ export async function scanForUser(database: Db, userId: string, scanId: string, 
   const visibleScan = sql`exists (select 1 from ${scans} s join ${permissionCache} pc on pc.repo_id = s.repo_id and pc.user_id = ${userId} where s.id = ${scanId})`;
   const [[row], found, events] = await Promise.all([
     database
-      .select({ scan: scans, repo: { id: repos.id, fullName: repos.fullName, private: repos.private }, metrics: scanMetrics })
+      .select({
+        scan: scans,
+        repo: { id: repos.id, fullName: repos.fullName, private: repos.private },
+        org: { login: orgs.githubLogin, hacker: sql<unknown>`${orgs.settings} -> 'hacker'` },
+        metrics: scanMetrics,
+      })
       .from(scans)
       .innerJoin(repos, eq(repos.id, scans.repoId))
+      .innerJoin(orgs, eq(orgs.id, scans.orgId))
       .leftJoin(scanMetrics, eq(scanMetrics.scanId, scans.id))
       .where(and(eq(scans.id, scanId), canSee(userId))),
     // The scan's findings are listed in its stats.

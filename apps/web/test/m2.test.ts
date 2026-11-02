@@ -263,7 +263,7 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     const outcome = await handleWebhook(deps(), "pull_request", "d-pr", prEvent(repos[0]!, head));
     const [scanId] = outcome.scans!;
     await beginScan(scanId!);
-    expect(recorded.checks.at(-1)).toEqual({ repo: "acme/private-app", headSha: head, title: "Digging…" });
+    expect(recorded.checks.at(-1)).toEqual({ repo: "acme/private-app", headSha: head, title: "Scanning…" });
     await executeScan(scanId!);
     await publishScan(scanId!);
 

@@ -337,7 +337,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const assignments = change
     ? planPrAssignments(change, routes, signals.leads.filter((lead) => inChange(lead.at)), limits.prMaxHunters, wrap)
     : planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap);
-  emit({ type: "stage", stage: "hunt", message: `Digging with ${assignments.length} hunters: ${assignments.map((a) => a.name).join(", ")}.` });
+  emit({ type: "stage", stage: "hunt", message: `Hunting across ${assignments.length} areas: ${assignments.map((a) => a.name).join(", ")}.` });
   const [hunters, huntMs] = await time(() => hunt(assignments, { turns: limits.hunterTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.55) }));
 
   let coverageMs = 0;
@@ -488,7 +488,7 @@ export async function runRecon(options: Omit<ScanOptions, "threatModel" | "pullR
     routes,
     signals.leads,
   );
-  emit({ type: "stage", stage: "done", message: `Mapped ${overview.routes} entry points and ${threatModel.subsystems.length} areas to dig into.` });
+  emit({ type: "stage", stage: "done", message: `Mapped ${overview.routes} entry points and ${threatModel.subsystems.length} areas to scan.` });
   return { threatModel, loc: overview.loc, durationMs: Date.now() - started, usage: meter.total(), costUsd: options.pricing ? meter.cost(options.pricing) : undefined };
 }
 
@@ -640,5 +640,5 @@ function summary(findings: Finding[]): string {
     .map((severity) => [severity, findings.filter((f) => f.severity === severity).length] as const)
     .filter(([, n]) => n > 0)
     .map(([severity, n]) => `${n} ${severity}`);
-  return `Dug up ${findings.length} ${findings.length === 1 ? "finding" : "findings"}: ${counts.join(", ")}.`;
+  return `Found ${findings.length} ${findings.length === 1 ? "finding" : "findings"}: ${counts.join(", ")}.`;
 }

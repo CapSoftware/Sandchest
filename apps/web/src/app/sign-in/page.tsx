@@ -22,7 +22,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         <a href="/" className="sign-in-mark" aria-label="Sandchest home">
           <img src="/sandchest-logo-dark.svg" alt="Sandchest" width={184} height={34} />
         </a>
-        <h1 className="sign-in-title">Sign in to dig.</h1>
+        <h1 className="sign-in-title">Sign in to Sandchest.</h1>
         <p className="sign-in-body">
           Use your GitHub account. You’ll see findings for the repositories you can push to, nothing else.
         </p>

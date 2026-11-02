@@ -45,8 +45,8 @@ export default function Loading() {
                 <a>{repo.scan}</a>
               </div>
               <div className="repo-dig">
-                <span className="key key-primary">Dig</span>
-                <span className="repo-dig-note">Full deep scan</span>
+                <span className="key key-primary">Deep scan</span>
+                <span className="repo-dig-note">Whole repository</span>
               </div>
             </div>
           </li>

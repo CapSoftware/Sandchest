@@ -12,7 +12,7 @@ export interface FeedEvent {
   at: number;
 }
 
-interface Live {
+export interface Live {
   kind: string;
   status: string;
   createdAt: number;
@@ -27,9 +27,10 @@ interface Live {
 }
 
 const ACTIVE = new Set(["queued", "running", "publishing"]);
-const LiveContext = createContext<Live | null>(null);
+/** Exported for previews that play a made-up scan; pages use <ScanLive>. */
+export const LiveContext = createContext<Live | null>(null);
 
-function useLive(): Live {
+export function useLive(): Live {
   const live = useContext(LiveContext);
   if (!live) throw new Error("Scan live parts must sit inside <ScanLive>");
   return live;
@@ -73,7 +74,7 @@ export function ScanLive({ scanId, initial, children }: { scanId: string; initia
   return <LiveContext.Provider value={state}>{children}</LiveContext.Provider>;
 }
 
-/** "Queued 3 min. ago", "Digging, started 2 min. ago", "Done 1 hr. ago". Kept current while it runs. */
+/** "Queued 3 min. ago", "Scanning, started 2 min. ago", "Done 1 hr. ago". Kept current while it runs. */
 export function ScanStatus() {
   const { status, createdAt, startedAt, finishedAt, renderedAt } = useLive();
   const active = ACTIVE.has(status);
@@ -179,7 +180,7 @@ export function ScanFeed() {
         {following && (
           <li className="feed-line feed-cursor" ref={end}>
             <span className="feed-time" />
-            <span className="cursor" aria-label="Still digging" />
+            <span className="cursor" aria-label="Still scanning" />
           </li>
         )}
       </ol>

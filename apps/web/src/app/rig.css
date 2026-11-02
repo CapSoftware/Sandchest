@@ -1,0 +1,1707 @@
+/* The hacker's rig: the onboarding preview and the watch view on a scan. */
+
+/* ---- Onboarding ------------------------------------------------------------------ */
+/*
+ * Character creation, in the landing page's look: the room fills the screen,
+ * dithered like the chest, and one plain panel sits in the middle of it with
+ * the way forward at its foot. On the Hacker step the panel moves aside so
+ * the hacker can be seen; everywhere else the room dims behind it. The page
+ * itself is lit in the brand's gold; only the room takes the screen colour.
+ */
+
+.onboard {
+  --phosphor: var(--color-gold);
+  --notch: 2px;
+  --notched: polygon(
+    var(--notch) 0,
+    calc(100% - var(--notch)) 0,
+    calc(100% - var(--notch)) var(--notch),
+    100% var(--notch),
+    100% calc(100% - var(--notch)),
+    calc(100% - var(--notch)) calc(100% - var(--notch)),
+    calc(100% - var(--notch)) 100%,
+    var(--notch) 100%,
+    var(--notch) calc(100% - var(--notch)),
+    0 calc(100% - var(--notch)),
+    0 var(--notch),
+    var(--notch) var(--notch)
+  );
+  --line: color-mix(in srgb, var(--color-sand) 14%, transparent);
+  --lit: color-mix(in srgb, var(--phosphor) 16%, transparent);
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: #000;
+  color: var(--color-sand);
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+
+.onboard-scene {
+  position: absolute;
+  inset: 0;
+}
+
+.onboard-scene .rig-poster {
+  transition:
+    transform 0.6s ease,
+    filter 0.6s ease;
+}
+
+/* Along the top, for the progress bar. The room dims itself, in dither, behind the panel. */
+.onboard-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(0 0 0 / 0.75) 0%, transparent 14%);
+}
+
+.onboard-top {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.25rem 2.5rem 1rem;
+}
+
+.onboard-mark {
+  justify-self: start;
+}
+
+.onboard-mark img {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.onboard-leave {
+  justify-self: end;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  text-decoration: none;
+}
+
+.onboard-leave:hover {
+  color: var(--color-sand);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* Progress: a segmented bar, as a game shows chapters. Done segments are filled, the current one glows. */
+.onboard-steps {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboard-steps li {
+  width: 7.5rem;
+}
+
+.onboard-steps button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0 0 0.55rem;
+  background: none;
+  border: 0;
+  border-bottom: 3px solid var(--color-seam);
+  color: var(--color-dust);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.onboard-steps button:disabled {
+  cursor: default;
+}
+
+.onboard-steps [data-state="next"] button:disabled {
+  opacity: 0.55;
+}
+
+.onboard-step-mark {
+  display: grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 1px solid currentColor;
+  font-size: 0.6875rem;
+}
+
+.onboard-steps [data-state="done"] button {
+  border-color: color-mix(in srgb, var(--phosphor) 55%, transparent);
+  color: var(--color-sand);
+}
+
+.onboard-steps [data-state="done"] .onboard-step-mark {
+  border-color: var(--phosphor);
+  background: var(--phosphor);
+  color: #000;
+}
+
+.onboard-steps [data-state="done"] button:hover {
+  color: var(--color-bright);
+  border-color: var(--phosphor);
+}
+
+.onboard-steps [data-state="current"] button {
+  border-color: var(--phosphor);
+  color: var(--color-bright);
+  box-shadow: 0 6px 12px -8px var(--phosphor);
+}
+
+.onboard-steps [data-state="current"] .onboard-step-mark {
+  border-color: var(--phosphor);
+  color: var(--phosphor);
+}
+
+/* The panel: centred, and at the left edge for the Hacker step. It moves by transform, so nothing reflows. */
+.onboard-hud {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0.5rem 2.5rem 2.5rem;
+}
+
+.onboard-panel {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  width: min(32rem, 100%);
+  /* The same box on every step, so moving between them never shifts the page. */
+  height: min(44rem, 100%);
+  min-height: 0;
+  background: var(--color-void);
+  border: 1px solid var(--color-seam);
+  box-shadow: 0 40px 120px -40px #000;
+  transition: opacity 0.28s ease;
+}
+
+/* Changing place: gone at once, then back in at the new place. */
+.onboard-panel[data-moving] {
+  opacity: 0;
+  transition: none;
+}
+
+.onboard-panel[data-aside] {
+  translate: calc(-50vw + 50% + 2.5rem) 0;
+}
+
+/* How many credits to start with: four keys in a row. */
+.onboard-amounts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.onboard-amount {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.15rem;
+  padding: 0.6rem 0.25rem 0.55rem;
+  background: rgb(0 0 0 / 0.35);
+  box-shadow: inset 0 0 0 2px var(--color-edge);
+  clip-path: var(--notched);
+  cursor: pointer;
+  transition: box-shadow 0.12s ease;
+}
+
+.onboard-amount input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.onboard-amount:hover {
+  box-shadow: inset 0 0 0 2px var(--color-sand);
+}
+
+.onboard-amount[data-on] {
+  box-shadow: inset 0 0 0 2px var(--color-gold);
+}
+
+.onboard-amount:has(input:focus-visible) {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.onboard-amount-n {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.onboard-amount[data-on] .onboard-amount-n {
+  color: var(--color-gold);
+}
+
+.onboard-amount-usd {
+  font-size: 0.6875rem;
+  color: var(--color-dust);
+}
+
+.onboard-amount-save {
+  font-size: 0.6875rem;
+  color: var(--color-amber);
+}
+
+/* What the work costs, as a short price list rather than a paragraph. */
+.onboard-rates {
+  margin: 1rem 0 0;
+  font-size: 0.875rem;
+}
+
+.onboard-rates div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.onboard-rates div:first-child {
+  border-top: 1px solid var(--line);
+}
+
+.onboard-rates dt {
+  color: var(--color-dust);
+}
+
+.onboard-rates + .onboard-set {
+  margin-top: 1.25rem;
+}
+
+.onboard-rates dd {
+  margin: 0;
+  color: var(--color-sand);
+  font-variant-numeric: tabular-nums;
+}
+
+.onboard-check {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin-top: 0.85rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-sand);
+  cursor: pointer;
+}
+
+.onboard-check-note {
+  display: block;
+  color: var(--color-dust);
+}
+
+.onboard-check input {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.15rem;
+  accent-color: var(--phosphor);
+}
+
+/*
+ * The bill, on the Pay step: the system's sans, plain rules and Stripe's own
+ * fields, like the card forms people already trust. Only the title above it
+ * is in the game's type.
+ */
+.onboard-bill {
+  --bill-ink: #f6eee2;
+  --bill-soft: #cbbfae;
+  --bill-faint: #a1937f;
+  margin-top: 1rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--bill-ink);
+}
+
+.onboard-bill-lines {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.onboard-bill-lines div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.onboard-bill-lines dt {
+  color: var(--bill-soft);
+}
+
+.onboard-bill-lines dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.onboard-bill-saving,
+.onboard-bill-lines .onboard-bill-saving dt,
+.onboard-bill-lines .onboard-bill-saving dd {
+  color: var(--color-amber);
+}
+
+.onboard-bill-total dt,
+.onboard-bill-total dd {
+  font-weight: 600;
+  color: var(--bill-ink);
+}
+
+.onboard-bill-toggle {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.onboard-bill-toggle-name {
+  display: block;
+  color: var(--bill-ink);
+}
+
+.onboard-bill-toggle-note {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--bill-faint);
+}
+
+/* A switch in the landing's pixel shapes: a square track and a square knob, gold when on. */
+.onboard-bill-toggle input {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 2.25rem;
+  height: 1.25rem;
+  margin: 0;
+  background: var(--color-seam);
+  border: 1px solid var(--color-edge);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.onboard-bill-toggle input::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.25rem - 6px);
+  height: calc(1.25rem - 6px);
+  background: var(--bill-soft);
+  transition: translate 0.15s ease;
+}
+
+.onboard-bill-toggle input:checked {
+  background: var(--color-gold);
+  border-color: var(--color-gold-light);
+}
+
+.onboard-bill-toggle input:checked::before {
+  background: var(--color-void);
+  translate: 1rem 0;
+}
+
+.onboard-bill-toggle input:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* "Have a discount code?": a quiet link under the bill, then a field and Apply. */
+.onboard-discount {
+  margin: 0.35rem 0 0.4rem;
+  text-align: right;
+}
+
+.onboard-bill-link {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--bill-faint);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.onboard-bill-link:hover {
+  color: var(--bill-ink);
+}
+
+.onboard-bill-link:focus-visible,
+.onboard-discount-apply:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.onboard-bill-saving .onboard-bill-link {
+  margin-left: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.onboard-discount-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.onboard-discount-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.7rem;
+  background: #0d0a07;
+  border: 1px solid #3a3027;
+  border-radius: 6px;
+  outline: none;
+  color: var(--bill-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+}
+
+.onboard-discount-row input::placeholder {
+  color: #6f6355;
+  text-transform: none;
+}
+
+.onboard-discount-row input:focus {
+  border-color: var(--phosphor);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--phosphor) 22%, transparent);
+}
+
+.onboard-discount-row input[aria-invalid] {
+  border-color: #f0a084;
+}
+
+.onboard-discount-apply {
+  padding: 0 0.9rem;
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid #3a3027;
+  border-radius: 6px;
+  color: var(--bill-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.onboard-discount-apply:not(:disabled):hover {
+  border-color: var(--bill-soft);
+}
+
+.onboard-discount-apply:disabled {
+  color: var(--bill-faint);
+  cursor: default;
+}
+
+.onboard-discount-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: #f0a084;
+  text-align: left;
+}
+
+.onboard-bill-fine {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--bill-faint);
+}
+
+.onboard-bill-secure {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--bill-faint);
+}
+
+.onboard-bill-secure svg {
+  flex: none;
+  margin-top: 0.1rem;
+  color: var(--bill-soft);
+}
+
+.onboard-bill-secure strong {
+  color: var(--bill-ink);
+  font-weight: 600;
+}
+
+.onboard-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.75rem 1.75rem 1.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* Titles type themselves out, once, as each step opens. */
+.onboard-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 3.25rem;
+  line-height: 0.95;
+  color: var(--color-bright);
+  outline: none;
+  animation: onboard-type 0.45s steps(16, end) both;
+}
+
+@keyframes onboard-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.onboard-lead {
+  max-width: 44ch;
+  margin: 0.9rem 0 1.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  color: var(--color-muted);
+}
+
+.onboard-title + :not(.onboard-lead) {
+  margin-top: 1.5rem;
+}
+
+.onboard-label {
+  display: block;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.onboard-help {
+  display: block;
+  margin: 0.6rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-dust);
+}
+
+.onboard-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-muted);
+}
+
+.onboard-bad {
+  color: #f0a084;
+}
+
+.onboard-dim {
+  color: var(--color-dust);
+}
+
+.onboard-set {
+  min-width: 0;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border: 0;
+}
+
+.onboard-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--color-sand);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.onboard-link:hover {
+  color: var(--phosphor);
+}
+
+/* Menus: rows you pick from. The chosen one is lit, with a bar in the screen's colour. */
+.onboard-menu {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.onboard-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  padding: 0.75rem 0.75rem 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--color-dust);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.onboard-option:hover {
+  background: rgb(255 255 255 / 0.035);
+}
+
+.onboard-option[data-on],
+.onboard-look[data-on] {
+  background: linear-gradient(90deg, var(--lit), transparent 85%);
+  box-shadow: inset 3px 0 0 var(--phosphor);
+}
+
+.onboard-option:has(input:focus-visible),
+.onboard-look:has(input:focus-visible) {
+  outline: 1px solid var(--phosphor);
+  outline-offset: -1px;
+}
+
+/* Inputs inside drawn controls stay focusable and announced, but unseen. */
+.onboard-option input,
+.onboard-pip input,
+.onboard-sticker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.onboard-option-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.875rem;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onboard-option[data-on] .onboard-option-name {
+  color: var(--color-bright);
+}
+
+.onboard-option-note {
+  grid-column: 1 / -1;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.onboard-tag {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--phosphor);
+}
+
+/* An account: its picture beside its name. */
+.onboard-account {
+  grid-template-columns: 2.25rem 1fr;
+  align-items: center;
+}
+
+.onboard-account img {
+  grid-row: 1 / 3;
+  width: 2.25rem;
+  height: 2.25rem;
+  background: var(--color-soot);
+  image-rendering: auto;
+  filter: grayscale(0.6);
+}
+
+.onboard-account[data-on] img {
+  filter: none;
+  box-shadow: 0 0 0 1px var(--phosphor);
+}
+
+.onboard-account .onboard-option-note {
+  grid-column: 2;
+  margin-top: 0.1rem;
+}
+
+/* A plan: its name big, its price at the right. */
+/* The company, as GitHub shows it. */
+.onboard-card {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0 1.5rem;
+  padding: 1rem;
+  background: rgb(255 255 255 / 0.025);
+  border: 1px solid var(--line);
+}
+
+.onboard-card img {
+  width: 3.25rem;
+  height: 3.25rem;
+  background: var(--color-soot);
+}
+
+.onboard-card p {
+  margin: 0;
+}
+
+.onboard-card-name {
+  font-family: var(--font-display);
+  font-size: 1.85rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.onboard-card-login {
+  margin-top: 0.2rem !important;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.onboard-card-about {
+  margin-top: 0.6rem !important;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.onboard-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: 0.45rem !important;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.onboard-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.onboard-field {
+  display: block;
+  min-width: 0;
+}
+
+.onboard-field input {
+  width: 100%;
+  padding: 0.55rem 0 0.45rem;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  color: var(--color-bright);
+  font: inherit;
+  font-size: 0.9375rem;
+  transition: border-color 0.15s ease;
+}
+
+.onboard-field input::placeholder {
+  color: var(--color-edge);
+}
+
+.onboard-field input:focus {
+  border-color: var(--phosphor);
+}
+
+.onboard-repos .onboard-option {
+  padding-block: 0.6rem;
+}
+
+.onboard-repo .onboard-option-name {
+  display: block;
+}
+
+/* The name: a field of its own, set in the screen's colour so it reads as something to type in, not a second title. */
+.onboard-title + .onboard-name-label {
+  margin-top: 1.5rem;
+}
+
+.onboard-name {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.9rem;
+  background: rgb(0 0 0 / 0.45);
+  border: 1px solid var(--color-edge);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.onboard-name:focus-within {
+  border-color: var(--phosphor);
+  box-shadow: 0 0 0 1px var(--phosphor), 0 0 22px -8px var(--phosphor);
+}
+
+.onboard-name input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--phosphor);
+  caret-color: var(--phosphor);
+  caret-shape: block;
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  line-height: 1.2;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--phosphor) 35%, transparent);
+}
+
+.onboard-name button {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.6rem;
+  background: rgb(0 0 0 / 0.5);
+  border: 1px solid var(--color-edge);
+  color: var(--color-sand);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.onboard-name button:hover {
+  border-color: var(--phosphor);
+  color: var(--phosphor);
+}
+
+.onboard-name button:hover svg {
+  transform: rotate(90deg);
+}
+
+.onboard-name svg {
+  transition: transform 0.2s ease;
+}
+
+.onboard-chip {
+  width: 0.7rem;
+  height: 0.7rem;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+}
+
+/* The look: one menu line per thing, ◀ the value ▶ on every line. */
+.onboard-looks {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.onboard-look {
+  position: relative;
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  column-gap: 0.75rem;
+  margin: 0;
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+  transition: background 0.15s ease;
+}
+
+.onboard-look:hover {
+  background: rgb(255 255 255 / 0.035);
+}
+
+.onboard-look-name {
+  float: left;
+  padding: 0;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.onboard-look[data-on] .onboard-look-name {
+  color: var(--color-bright);
+}
+
+.onboard-cycle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.onboard-look-value {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.875rem;
+  color: var(--color-sand);
+}
+
+.onboard-look > .onboard-look-value {
+  justify-self: center;
+}
+
+.onboard-look[data-on] .onboard-look-value {
+  color: var(--color-bright);
+}
+
+.onboard-arrow {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--color-seam);
+  color: var(--color-muted);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.onboard-look[data-on] .onboard-arrow {
+  border-color: color-mix(in srgb, var(--phosphor) 50%, transparent);
+  color: var(--phosphor);
+}
+
+.onboard-arrow:hover {
+  border-color: var(--phosphor);
+  color: var(--color-bright);
+}
+
+.onboard-arrow:active svg {
+  transform: scale(0.8);
+}
+
+/* The pips, the choices themselves: out of sight but still there, so the keyboard and screen readers reach
+   them. Nothing on a line grows when it's lit, so the menu never moves. */
+.onboard-pips {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* The stickers are picked by eye, so their grid is always out. */
+.onboard-stickers {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(5, 2.4rem);
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.2rem;
+}
+
+.onboard-look-detail {
+  min-height: 1.5em;
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-dust);
+  text-align: center;
+}
+
+.onboard-pip {
+  position: relative;
+  width: 0.6rem;
+  height: 0.6rem;
+  background: var(--swatch, var(--color-edge));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.15);
+  cursor: pointer;
+}
+
+.onboard-pip[data-on] {
+  box-shadow:
+    0 0 0 2px #000,
+    0 0 0 3px var(--phosphor);
+}
+
+.onboard-pip:not([data-on]):not([style]) {
+  opacity: 0.6;
+}
+
+.onboard-sticker {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  background: rgb(0 0 0 / 0.5);
+  border: 1px solid var(--color-seam);
+  cursor: pointer;
+}
+
+.onboard-sticker img {
+  width: 80%;
+  height: auto;
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.onboard-sticker:hover img {
+  opacity: 0.75;
+}
+
+.onboard-sticker:has(input:focus-visible) {
+  outline: 1px solid var(--phosphor);
+  outline-offset: 2px;
+}
+
+.onboard-sticker[data-on] {
+  border-color: var(--phosphor);
+}
+
+.onboard-sticker[data-on] img {
+  opacity: 1;
+  filter: none;
+}
+
+.onboard-sticker[data-off] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.onboard-sticker-blank {
+  width: 60%;
+  aspect-ratio: 1;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.onboard-stripe {
+  min-height: 12.5rem;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.onboard-stripe[data-ready] {
+  opacity: 1;
+}
+
+/* Business invoices: Stripe's address fields, then the tax ID, then the card. */
+.onboard-stripe-address,
+.onboard-demo-card:has(+ .onboard-bill-field),
+.onboard-demo-card:has(+ .onboard-demo-card) {
+  margin-bottom: 0.75rem;
+}
+
+.onboard-bill-field {
+  margin-bottom: 0.75rem;
+}
+
+.onboard-bill-toggle + .onboard-bill-toggle {
+  border-top: 0;
+}
+
+.onboard-bill-toggle:has(+ :not(.onboard-bill-toggle)) {
+  margin-bottom: 0.75rem;
+}
+
+.onboard-bill-optional {
+  color: #6f6355;
+}
+
+/* The dev preview's stand-in card fields, drawn like Stripe's on the bill. */
+.onboard-demo-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.onboard-demo-card > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.onboard-demo-card label,
+.onboard-bill-field {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+  color: var(--bill-soft);
+}
+
+.onboard-demo-card input,
+.onboard-demo-card select,
+.onboard-bill-field input {
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  background: #0d0a07;
+  border: 1px solid #3a3027;
+  border-radius: 6px;
+  outline: none;
+  color: var(--bill-ink);
+  font: inherit;
+  font-size: 0.9375rem;
+}
+
+.onboard-demo-card input::placeholder,
+.onboard-bill-field input::placeholder {
+  color: #6f6355;
+}
+
+.onboard-demo-card input:focus,
+.onboard-demo-card select:focus,
+.onboard-bill-field input:focus {
+  border-color: var(--phosphor);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--phosphor) 22%, transparent);
+}
+
+.onboard-card-loading {
+  height: 12.5rem;
+  border-radius: 6px;
+  background: repeating-linear-gradient(180deg, #221c15 0 2.6rem, transparent 2.6rem 4rem);
+}
+
+/* The running total: every line Sandchest has read, rolling up as scans finish. */
+/*
+ * The running count, as a piece in the empty side of the screen: one number
+ * filling the width beside the centred panel (its look is in globals.css,
+ * shared with the landing). Only where the panel is centred and there's room.
+ */
+.onboard-live {
+  position: absolute;
+  top: 50%;
+  right: clamp(2rem, 3.5vw, 4rem);
+  z-index: 1;
+  width: calc((100vw - 32rem) / 2 - clamp(4rem, 7vw, 8rem));
+  container-type: inline-size;
+  translate: 0 -50%;
+  text-align: right;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.onboard-live[data-hidden] {
+  opacity: 0;
+  transition-duration: 0.12s;
+}
+
+@media (max-width: 1099px) {
+  .onboard-live {
+    display: none;
+  }
+}
+
+.onboard-error {
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: rgb(240 160 132 / 0.08);
+  box-shadow: inset 2px 0 0 #f0a084;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #f0a084;
+}
+
+/* The panel's foot: Back, and the way on, always in the same place. */
+.onboard-foot {
+  display: flex;
+  gap: 0.6rem;
+  padding: 1rem 1.75rem 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.onboard-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6rem;
+  height: 1.4rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--color-edge);
+  border-bottom-width: 2px;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  color: var(--color-sand);
+}
+
+/*
+ * Back and the way on are the landing page's keys: the button carries the
+ * glow, the face inside it the stepped pixel corners. The way on is the gold
+ * key, lit along the top with a rust underside.
+ */
+.onboard-back,
+.onboard-go {
+  position: relative;
+  display: flex;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  isolation: isolate;
+}
+
+.onboard-face {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  clip-path: var(--notched);
+  transition:
+    transform 80ms,
+    background-color 120ms,
+    box-shadow 120ms;
+}
+
+.onboard-back .onboard-face {
+  gap: 0.55rem;
+  height: 3rem;
+  padding: 0 1rem 0 0.75rem;
+  color: var(--color-sand);
+  font-size: 0.8125rem;
+  box-shadow: inset 0 0 0 2px var(--color-edge);
+}
+
+.onboard-back:hover:not(:disabled) .onboard-face {
+  color: var(--color-bright);
+  box-shadow: inset 0 0 0 2px var(--color-sand);
+}
+
+.onboard-go {
+  flex: 1;
+}
+
+.onboard-go .onboard-face {
+  justify-content: space-between;
+  gap: 1rem;
+  height: 3rem;
+  padding: 0 0.85rem 0 1.25rem;
+  background: var(--color-gold);
+  color: var(--color-void);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  box-shadow:
+    inset 0 2px 0 var(--color-gold-light),
+    inset 0 -3px 0 var(--color-rust);
+}
+
+/* The landing page's dithered glow behind the key, brighter on hover. */
+.onboard-go::before {
+  content: "";
+  position: absolute;
+  inset: -0.75rem -1rem;
+  z-index: -1;
+  background: repeating-conic-gradient(var(--color-amber) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+  mask-image: radial-gradient(closest-side, #000 35%, transparent);
+  opacity: 0.22;
+  transition: opacity 160ms;
+  pointer-events: none;
+}
+
+.onboard-go:not(:disabled):hover::before {
+  opacity: 0.45;
+}
+
+.onboard-go:not(:disabled):hover .onboard-face {
+  background: var(--color-gold-light);
+}
+
+.onboard-back:not(:disabled):hover .onboard-face,
+.onboard-go:not(:disabled):hover .onboard-face {
+  transform: translateY(-1px);
+}
+
+.onboard-back:not(:disabled):active .onboard-face,
+.onboard-go:not(:disabled):active .onboard-face {
+  transform: translateY(1px);
+}
+
+.onboard-back:focus-visible,
+.onboard-go:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 3px;
+}
+
+.onboard-go-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.onboard-go .onboard-key {
+  border-color: rgb(0 0 0 / 0.35);
+  color: var(--color-void);
+}
+
+.onboard-go:disabled {
+  cursor: not-allowed;
+}
+
+.onboard-go:disabled::before {
+  opacity: 0;
+}
+
+.onboard-go:disabled .onboard-face {
+  background: var(--color-seam);
+  color: var(--color-dust);
+  box-shadow: none;
+}
+
+.onboard-go:disabled .onboard-key {
+  border-color: var(--color-edge);
+  color: var(--color-dust);
+}
+
+/* The other keys, bottom right, as a game shows them. */
+.onboard-hints {
+  position: absolute;
+  right: 2.5rem;
+  bottom: 1.5rem;
+  display: flex;
+  gap: 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.onboard-hints .onboard-key {
+  margin-right: 0.35rem;
+}
+
+@media (pointer: coarse) {
+  .onboard-hints,
+  .onboard-foot .onboard-key {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboard-title {
+    animation: none;
+  }
+
+  .onboard-bill-toggle input,
+  .onboard-bill-toggle input::before {
+    transition: none;
+  }
+
+  .onboard-panel {
+    transition: none;
+  }
+
+  .onboard-face {
+    transform: none !important;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 861px) {
+  .onboard-title {
+    font-size: 2.75rem;
+  }
+
+  .onboard-body {
+    padding-top: 1.25rem;
+  }
+
+  .onboard-hud {
+    padding-bottom: 1.5rem;
+  }
+}
+
+/* Narrow screens: the picture on top, the panel under it, the way on stuck to the bottom. */
+@media (max-width: 860px) {
+  .onboard {
+    position: absolute;
+    display: block;
+    min-height: 100%;
+    overflow-y: auto;
+  }
+
+  .onboard-scene {
+    position: relative;
+    height: 38vh;
+    min-height: 13rem;
+  }
+
+  .onboard-shade {
+    bottom: auto;
+    height: calc(38vh + 1px);
+    min-height: 13rem;
+    background: linear-gradient(0deg, #000 0%, transparent 35%), linear-gradient(180deg, rgb(0 0 0 / 0.7) 0%, transparent 30%);
+  }
+
+  .onboard-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    grid-template-columns: auto 1fr;
+    padding: 1rem 1.25rem;
+  }
+
+  .onboard-top nav {
+    display: none;
+  }
+
+  .onboard-hud {
+    display: block;
+    padding: 0;
+  }
+
+  .onboard-panel,
+  .onboard-panel[data-aside] {
+    display: block;
+    width: auto;
+    height: auto;
+    translate: none;
+    max-height: none;
+    background: #000;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .onboard-body {
+    overflow: visible;
+    padding: 0.5rem 1.25rem 1.5rem;
+  }
+
+  .onboard-title {
+    font-size: 2.6rem;
+  }
+
+  .onboard-name input {
+    font-size: 1.9rem;
+  }
+
+  .onboard-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .onboard-foot {
+    position: sticky;
+    bottom: 0;
+    padding: 0.85rem 1.25rem;
+    background: #000;
+  }
+
+  .onboard-hints {
+    display: none;
+  }
+}
+
+/* ---- Watching a scan -------------------------------------------------------------- */
+
+.watch {
+  --phosphor: #ffb02e;
+  position: relative;
+  margin: 0 0 1.5rem;
+  background: var(--color-void);
+  isolation: isolate;
+}
+
+.watch .rig {
+  aspect-ratio: 16 / 8.2;
+  width: 100%;
+}
+
+.watch:fullscreen .rig {
+  aspect-ratio: auto;
+  height: 100vh;
+}
+
+.watch-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem 2.5rem;
+  background: linear-gradient(to bottom, rgb(13 10 7 / 0.7), transparent);
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.watch-who {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.watch-who strong {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+/* Recording: a red square, steady once the scan is over. */
+.watch-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #ff3b2f;
+  animation: watch-rec 1.4s steps(2) infinite;
+}
+
+.watch[data-live="off"] .watch-dot {
+  background: var(--color-dust);
+  animation: none;
+}
+
+@keyframes watch-rec {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-dot {
+    animation: none;
+  }
+}
+
+.watch-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 1rem;
+}
+
+.watch-tools button,
+.watch-tools a {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--color-muted);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.watch-tools button:hover,
+.watch-tools a:hover {
+  color: var(--color-bright);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.watch-off {
+  display: flex;
+  justify-content: flex-end;
+  margin: -0.5rem 0 1rem;
+}
+
+.watch-off button {
+  background: none;
+  border: 0;
+  color: var(--color-dust);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* On the dashboard, for an org with no plan yet. */
+.recruit-cta {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1.5rem;
+  margin: 0 0 1rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--color-soot);
+  border: 1px solid var(--color-seam);
+  color: inherit;
+  text-decoration: none;
+}
+
+.recruit-cta:hover {
+  border-color: var(--color-edge);
+}
+
+.recruit-cta-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.recruit-cta-note {
+  display: block;
+  max-width: 48ch;
+  margin-top: 0.4rem;
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.recruit-cta-go {
+  padding: 0.6rem 1rem;
+  background: var(--color-sand);
+  color: var(--color-void);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.recruit-cta:hover .recruit-cta-go {
+  background: var(--color-bright);
+}
+
+@media (max-width: 640px) {
+  .recruit-cta {
+    grid-template-columns: 1fr;
+  }
+  .recruit-cta-go {
+    justify-self: start;
+  }
+}
+
+/* Holds the watch view's space until the browser says whether it's hidden, so the page doesn't jump. */
+.watch-placeholder {
+  aspect-ratio: 16 / 8.2;
+  margin: 0 0 1.5rem;
+  background: var(--color-void);
+}
+
+.recruit-skip {
+  margin-top: 0.25rem;
+}
+
+.recruit-skip > summary {
+  width: fit-content;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.recruit-skip[open] > summary {
+  margin-bottom: 1rem;
+}
+
+
+
+.rig-fill {
+  position: absolute;
+  inset: 0;
+}

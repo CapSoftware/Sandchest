@@ -33,8 +33,25 @@ export interface OrgSettings {
   checkThreshold: "critical" | "high" | "medium" | "low";
   /** Email people with access about critical findings and finished deep scans. Default on. */
   emailNotifications?: boolean;
-  /** Buy top-ups automatically when credits run low, up to a monthly spend in USD. Unset means off. */
-  autoTopUp?: { enabled: boolean; monthlyLimitUsd: number };
+  /** Buy `quantity` credits automatically when they run low, up to a monthly spend in USD. Unset means off. Older choices have no quantity. */
+  autoTopUp?: { enabled: boolean; monthlyLimitUsd: number; quantity?: number };
+  /** The org's hacker, as chosen when recruiting it. Only how the rig looks and talks; scans ignore it. */
+  hacker?: HackerProfile;
+  /** Who the org is, for receipts: given while recruiting, prefilled from GitHub. */
+  company?: { name: string; email: string };
+  /** The repository the org chose for its hacker's first Dig (a repos.id in this org). */
+  firstTarget?: string;
+}
+
+/** The hacker an org recruits: a name, a look and a way of talking. Validated by the web app before it is stored. */
+export interface HackerProfile {
+  handle: string;
+  hoodie: string;
+  shell: string;
+  phosphor: string;
+  room: string;
+  stickers: string[];
+  voice: string;
 }
 
 /** One GitHub account (user or organisation) with the app installed. The billing customer. */

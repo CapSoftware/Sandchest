@@ -92,7 +92,7 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
         headSha: scan.headSha,
         externalId: scan.id,
         detailsUrl: detailsUrl(scan.id),
-        output: { title: "Digging…", summary: "Reviewing this change for exploitable vulnerabilities." },
+        output: { title: "Scanning…", summary: "Reviewing this change for exploitable vulnerabilities." },
       });
     await updateScan(db(), scan.id, { checkRunId });
   }

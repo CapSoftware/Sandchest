@@ -1,4 +1,5 @@
 import { PageSkeleton } from "@/components/app/skeleton";
+import "../../../rig.css";
 
 /** A feed to measure the first skeleton from, before a scan has been seen on this browser. */
 const SAMPLE_FEED = ["Cloning the repository", "Mapping entry points", "Following request handlers into the data layer", "Checking each path"];
@@ -20,6 +21,7 @@ export default function Loading() {
           </p>
         </div>
       </div>
+      <div className="watch-placeholder" />
       <dl className="stats">
         {["Took", "Findings", "Lines read"].map((label) => (
           <div key={label} className="stat">

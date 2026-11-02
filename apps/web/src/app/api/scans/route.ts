@@ -1,4 +1,4 @@
-/** Manual deep scans for operators (`Authorization: Bearer <SANDCHEST_ADMIN_TOKEN>`). People use the dashboard's Dig button. */
+/** Manual deep scans for operators (`Authorization: Bearer <SANDCHEST_ADMIN_TOKEN>`). People use the dashboard's Deep scan button. */
 import { repoByFullName } from "@sandchest/db";
 import { z } from "zod";
 import { isOperator } from "@/server/auth";

@@ -366,7 +366,7 @@ describe("notifications", () => {
 describe("dig", () => {
   const now = new Date("2026-11-01T12:00:00Z");
   test("costs credits by size, waits out the cooldown, refuses huge repos", () => {
-    expect(digState({ loc: 48_000, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "ready", credits: 15 });
+    expect(digState({ loc: 48_000, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "ready", credits: 5 });
     expect(digState({ loc: null, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "ready", credits: undefined });
     expect(digState({ loc: 2_000_000, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "too_large" });
     expect(digState({ loc: 10, lastDeepScanAt: new Date("2026-11-01T02:00:00Z"), activeDeepScanId: null }, now)).toEqual({ state: "cooling", retryAt: new Date("2026-11-02T02:00:00Z") });

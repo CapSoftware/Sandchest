@@ -1,0 +1,66 @@
+/* Wherever a rig is drawn: the still, the scene fading in over it, and the cut between rooms. */
+
+.rig {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-void);
+}
+
+/* A still of the scene, where the live scene can't be drawn. */
+.rig-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: filter 0.6s ease;
+}
+
+/* The room comes up out of black, like lights coming on, rather than popping in. */
+.rig canvas:not(.rig-still) {
+  opacity: 0;
+  transition: opacity 0.4s ease-out;
+}
+
+.rig[data-ready] canvas {
+  opacity: 1;
+}
+
+/*
+ * The still, drawn to match the scene's first frame (still.ts). The scene fades in over it and,
+ * once fully in, the still goes. Where the scene can't be drawn it stays.
+ */
+.rig-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.rig-still:not([data-drawn="1"]) {
+  visibility: hidden;
+}
+
+/* Where the scene can't be drawn and the still could be, the still stands in rather than the older poster. */
+.rig-still[data-drawn="1"] ~ .rig-poster {
+  display: none;
+}
+
+.rig[data-ready] .rig-still {
+  visibility: hidden;
+  transition: visibility 0s linear 0.4s;
+}
+
+/* The cut between rooms: black over everything for a moment. */
+.rig-cut {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 170ms ease;
+}
+
+.rig-cut[data-on] {
+  opacity: 1;
+}

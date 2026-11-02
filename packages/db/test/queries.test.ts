@@ -3,8 +3,13 @@
  * (docker compose -f docker/compose.dev.yml up -d). Skips if it is not running.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import {
+  adminOrgs,
+  linesScanned,
+  orgRepos,
+  schema,
   claimDelivery,
   claimWorkflowStart,
   releaseWorkflowStart,
@@ -122,6 +127,49 @@ describe("installations", () => {
 
     await removeInstallation(database, 9011);
     expect(await quoted(repos[0]!.id)).toEqual({ excerpt: undefined, prompt: "", title: "SQL injection" });
+  });
+});
+
+describe("recruiting", () => {
+  it("lists the installed accounts a person administers, and an account's repos largest first", async () => {
+    const { org, repos } = await upsertInstallation(database, 9301, { githubAccountId: 301, githubLogin: "acme-recruit", type: "Organization" }, [repo(301), repo(302), repo(303)]);
+    await upsertInstallation(database, 9302, { githubAccountId: 302, githubLogin: "acme-other", type: "Organization" }, [repo(304)]);
+    const [person] = await database.insert(schema.users).values({ name: "Fictional", email: "recruit@example.com" }).returning();
+    await database.insert(schema.orgAdmins).values({ userId: person!.id, orgId: org.id });
+    expect((await adminOrgs(database, person!.id)).map((row) => row.login)).toEqual(["acme-recruit"]);
+
+    await database.update(schema.repos).set({ loc: 500 }).where(eq(schema.repos.id, repos[0]!.id));
+    await database.update(schema.repos).set({ loc: 90_000 }).where(eq(schema.repos.id, repos[2]!.id));
+    await disableRepos(database, [302]);
+    expect((await orgRepos(database, org.id)).map((row) => [row.fullName, row.loc])).toEqual([
+      ["acme/app-303", 90_000],
+      ["acme/app-301", 500],
+    ]);
+
+    // Uninstalled accounts can't be set up.
+    await removeInstallation(database, 9301);
+    expect(await adminOrgs(database, person!.id)).toEqual([]);
+  });
+
+  it("totals the lines every completed scan read, and counts the scans running", async () => {
+    const before = await linesScanned(database);
+    const { org, repos } = await upsertInstallation(database, 9303, { githubAccountId: 303, githubLogin: "acme-lines", type: "Organization" }, [repo(305)]);
+    const scan = (kind: "recon" | "deep" | "pr_review", headSha: string, prNumber?: number) =>
+      createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind, trigger: "webhook", headSha, prNumber }).then((made) => made.scan);
+    const recon = await scan("recon", "a");
+    const review = await scan("pr_review", "b", 7);
+    const oldReview = await scan("pr_review", "e", 9);
+    const running = await scan("pr_review", "c", 8);
+    const failed = await scan("recon", "d");
+    await updateScan(database, recon.id, { status: "completed", stats: { loc: 12_000 } });
+    await updateScan(database, review.id, { status: "completed", stats: { loc: 8_000, review: { files: 2, changedLines: 340, reviewedFiles: [], skippedFiles: [] } } });
+    // A review that recorded no repository size counts its changed lines.
+    await updateScan(database, oldReview.id, { status: "completed", stats: { review: { files: 1, changedLines: 25, reviewedFiles: [], skippedFiles: [] } } });
+    await updateScan(database, running.id, { status: "running" });
+    await updateScan(database, failed.id, { status: "failed", stats: { loc: 99_999 } });
+    const after = await linesScanned(database);
+    expect(after.lines - before.lines).toBe(20_025);
+    expect(after.running - before.running).toBe(1);
   });
 });
 

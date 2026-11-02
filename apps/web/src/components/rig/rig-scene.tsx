@@ -1,0 +1,642 @@
+"use client";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { BloomEffect, EffectComposer, EffectPass, RenderPass, VignetteEffect, type Effect } from "postprocessing";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { ACESFilmicToneMapping, Color, DirectionalLight, Fog, Group, HalfFloatType, HemisphereLight, MathUtils, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PMREMGenerator, Vector3 } from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import type { HackerProfile } from "@/lib/hacker";
+import { PHOSPHORS, ROOMS, swatch } from "@/lib/hacker";
+import { loadFonts, pageFonts } from "./art";
+import { DitherEffect } from "./dither";
+import { Figure, loadHacker } from "./figure";
+import { Laptop } from "./laptop";
+import { Room } from "./room";
+import { Kit, type Painter } from "./screen";
+import { SHOTS, type Shot, type ShotName } from "./shots";
+import type { Signals } from "./signals";
+import { STILL_TIME, VIGNETTE } from "./still";
+import { loadSurfaces } from "./textures";
+
+/**
+ * How hard the scene works. `high`: up to 1.5 pixels per pixel, shadows,
+ * bloom, 60 frames a second while the camera moves and 30 at rest. `low`:
+ * one pixel per pixel, no shadows or bloom, 30 frames moving and 20 at
+ * rest, and a smaller screen texture. Both look like the same room.
+ */
+export type Tier = "high" | "low";
+
+export interface RigSceneProps {
+  profile: HackerProfile;
+  org: string;
+  shot: ShotName;
+  paint: RefObject<Painter | null>;
+  signals: RefObject<Signals>;
+  tier: Tier;
+  /** The camera follows the pointer a little. */
+  parallax?: boolean;
+  /** Dragging swings the camera around the desk, within limits, and it drifts back to the shot a moment after letting go. */
+  drag?: boolean;
+  /** Animation off: the camera cuts, nothing sways. */
+  still?: boolean;
+  /** Moves the picture right by this share of the width (left, if negative), to clear something on the other side. */
+  frameShift?: number;
+  /** How lit the room is, 0 to 1: lower thins it to sparse dither, for when a form sits over it. */
+  light?: number;
+  /** Draw at all: false while scrolled away. */
+  active?: boolean;
+  /** Once the hacker and the room's surfaces are drawn (or after ASSETS_WAIT_MS), so the page can fade the scene in whole. */
+  onReady?: () => void;
+  /** The machine can't keep up at this tier. */
+  onSlow?: () => void;
+  /**
+   * Development only: draw the still's master instead (see still.ts): no
+   * vignette or dither, and the clock held at STILL_TIME.
+   */
+  master?: boolean;
+}
+
+/**
+ * Frames a second while something moves (`fps`) and at rest (`rest`), how
+ * often the laptop's screen and the shadows are redrawn, and the screen's
+ * resolution. At rest only the slow sway, the breathing and the screen
+ * change, and they look the same at half the frames for half the work.
+ */
+const BUDGET = {
+  high: { fps: 60, rest: 30, screenFps: 15, shadowFps: 15, screenScale: 1 },
+  low: { fps: 30, rest: 20, screenFps: 10, shadowFps: 0, screenScale: 0.75 },
+} as const;
+
+/** Between the camera, which knows when it is moving, and the ticker, which sets the pace. */
+interface Pace {
+  /** Draw at the full rate until then (performance.now(), in ms). */
+  busyUntil: number;
+  /** The rate being asked for right now. */
+  fps: number;
+}
+
+/** A redraw due every `1 / rate` seconds, with a little slack so frame timing jitter doesn't skip one. Always due after the clock restarts. */
+const due = (now: number, last: number, rate: number) => now < last || now - last >= 1 / rate - 0.004;
+
+
+/** The longest the scene waits for its model and textures before showing anyway, with what it has. */
+const ASSETS_WAIT_MS = 3000;
+
+/** True once the hacker and the surfaces have loaded (or failed), or ASSETS_WAIT_MS has passed. */
+function useAssetsLoaded(): boolean {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const cap = new Promise<void>((resolve) => setTimeout(resolve, ASSETS_WAIT_MS));
+    void Promise.race([Promise.allSettled([loadHacker(), loadSurfaces()]), cap]).then(() => alive && setLoaded(true));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return loaded;
+}
+
+/**
+ * Starts the clock at 0 on the first frame after the files are in, so the
+ * first frames shown are always the same moment (the one the still shows).
+ * Runs before everything else in the frame. The master holds it there.
+ */
+function Start({ loaded, started, master }: { loaded: boolean; started: RefObject<boolean>; master: boolean }) {
+  // Development only: `?rig-hold` holds the live scene at that moment too, for comparing it with the still.
+  const [hold] = useState(() => master || (process.env.NODE_ENV === "development" && new URLSearchParams(location.search).has("rig-hold")));
+  useFrame((state) => {
+    if (!started.current) {
+      if (!loaded) return;
+      state.clock.start();
+      started.current = true;
+    }
+    if (hold) state.clock.elapsedTime = STILL_TIME;
+  }, -1);
+  return null;
+}
+
+/**
+ * The hacker's corner: desk, laptop, hacker and room. What changes rarely
+ * comes in as props; the screen's painter and the signals change every
+ * frame, so they come in as refs.
+ *
+ * It draws only when asked (`frameloop="demand"`): a ticker asks at the
+ * tier's frame rate while the scene is on screen, and not at all otherwise.
+ * The picture is drawn into the effect passes' own buffers, so the canvas
+ * itself needs no antialiasing; past 1.5 pixels per pixel the dither's
+ * cells hide any extra detail.
+ */
+export default function RigScene(props: RigSceneProps) {
+  const { tier } = props;
+  const budget = BUDGET[tier];
+  const pace = useRef<Pace>({ busyUntil: 0, fps: budget.fps });
+  const loaded = useAssetsLoaded();
+  // Set on the frame the clock starts: from then on everything moves and the screen is painted.
+  const started = useRef(false);
+  return (
+    <Canvas
+      key={tier}
+      shadows={tier === "high" ? { type: PCFShadowMap } : false}
+      dpr={tier === "high" ? [1, 1.5] : 1}
+      frameloop="demand"
+      gl={{ antialias: false, stencil: false, powerPreference: tier === "high" ? "high-performance" : "default", toneMapping: ACESFilmicToneMapping, toneMappingExposure: 0.82 }}
+      camera={{ position: SHOTS[props.shot].position, fov: SHOTS[props.shot].fov, near: 0.02, far: 20 }}
+      aria-hidden="true"
+    >
+      <Start loaded={loaded} started={started} master={!!props.master} />
+      <Ticker fast={budget.fps} rest={props.still ? budget.screenFps : budget.rest} pace={pace} active={props.active !== false} />
+      <Watchdog pace={pace} started={started} onReady={props.onReady} onSlow={props.onSlow} />
+      {budget.shadowFps > 0 && <ShadowPace fps={budget.shadowFps} />}
+      <Reflections />
+      <World {...props} pace={pace} started={started} />
+      <Post bloom={tier === "high"} light={props.light ?? 1} still={!!props.still} master={!!props.master} />
+      {process.env.NODE_ENV === "development" && <DevCapture shot={props.shot} started={started} />}
+    </Canvas>
+  );
+}
+
+/**
+ * Development only, for checking renders by script. `window.__rig.capture()`
+ * draws a frame and returns it as a PNG data URL. Pass `view` to frame any
+ * point ({ position, target, fov }, in the scene's metres) and `studio` to
+ * see bare geometry: everything plain grey under even light, no fog.
+ */
+function DevCapture({ shot, started }: { shot: ShotName; started: RefObject<boolean> }) {
+  const get = useThree((state) => state.get);
+  // `?rig-probe`: keep the first frames after the clock starts, with their times, in window.__rigFrames.
+  const [probe] = useState(() => new URLSearchParams(location.search).has("rig-probe"));
+  const kept = useRef<{ t: number; url: string }[]>([]);
+  useFrame((state) => {
+    if (!probe || !started.current || kept.current.length >= 8) return;
+    kept.current.push({ t: state.clock.elapsedTime, url: state.gl.domElement.toDataURL("image/png") });
+    Object.assign(window, { __rigFrames: kept.current });
+  }, 2);
+  useEffect(() => {
+    const capture = (options: { view?: Shot; studio?: boolean } = {}) => {
+      const state = get();
+      const saved = SHOTS[shot];
+      const fog = state.scene.fog;
+      const lights = new Group();
+      if (options.view) (SHOTS as Record<string, Shot>)[shot] = options.view;
+      if (options.studio) {
+        state.scene.overrideMaterial = new MeshStandardMaterial({ color: "#b8b8b8", roughness: 0.8 });
+        state.scene.fog = null;
+        lights.add(new HemisphereLight("#ffffff", "#444444", 0.9));
+        const key = new DirectionalLight("#ffffff", 1.1);
+        key.position.set(1, 2, 1.5);
+        lights.add(key);
+        state.scene.add(lights);
+      }
+      // Let the camera glide all the way to a new view; otherwise one frame.
+      let time = performance.now();
+      for (let i = options.view ? 40 : 1; i > 0; i--) state.advance((time += 100));
+      const url = state.gl.domElement.toDataURL("image/png");
+      (SHOTS as Record<string, Shot>)[shot] = saved;
+      if (options.studio) {
+        state.scene.overrideMaterial?.dispose();
+        state.scene.overrideMaterial = null;
+        state.scene.fog = fog;
+        state.scene.remove(lights);
+      }
+      return url;
+    };
+    Object.assign(window, { __rig: { capture, scene: get().scene, camera: get().camera } });
+    return () => {
+      Object.assign(window, { __rig: undefined });
+    };
+  }, [get, shot]);
+  return null;
+}
+
+/** Asks for a frame `fast` times a second while the camera is busy, `rest` times otherwise, while active. */
+function Ticker({ fast, rest, pace, active }: { fast: number; rest: number; pace: RefObject<Pace>; active: boolean }) {
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => {
+    if (!active) return;
+    let raf = 0;
+    let last = 0;
+    const loop = (now: number) => {
+      raf = requestAnimationFrame(loop);
+      const fps = now < pace.current.busyUntil ? fast : rest;
+      pace.current.fps = fps;
+      // Two milliseconds early, so a 60 Hz display's frames aren't missed by a hair.
+      if (now - last >= 1000 / fps - 2) {
+        last = now;
+        invalidate();
+      }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [fast, rest, pace, active, invalidate]);
+  return null;
+}
+
+/** Redraws the shadows `fps` times a second rather than every frame: only the hacker's breathing moves them. */
+function ShadowPace({ fps }: { fps: number }) {
+  const gl = useThree((state) => state.gl);
+  const last = useRef(-1);
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    return () => {
+      gl.shadowMap.autoUpdate = true;
+    };
+  }, [gl]);
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    if (!due(t, last.current, fps)) return;
+    last.current = t;
+    gl.shadowMap.needsUpdate = true;
+  });
+  return null;
+}
+
+/**
+ * Says when the first frame is up, then watches the frame rate: if frames
+ * keep arriving at well under the rate asked for, the machine is
+ * struggling and the page steps down. Ignores the first moments, while
+ * shaders compile.
+ */
+function Watchdog({ pace, started, onReady, onSlow }: { pace: RefObject<Pace>; started: RefObject<boolean>; onReady?: () => void; onSlow?: () => void }) {
+  const frames = useRef(0);
+  // Frames drawn since the clock started: the files are in, and the first of these compiles their shaders.
+  const framesLoaded = useRef(0);
+  const since = useRef(-1);
+  const told = useRef(false);
+  const last = useRef(0);
+  // The lowest rate asked for in this stretch: the pace drops to the resting rate when the camera settles.
+  const asked = useRef(Infinity);
+  useFrame(() => {
+    const now = performance.now() / 1000;
+    const gap = now - last.current;
+    last.current = now;
+    frames.current++;
+    asked.current = Math.min(asked.current, pace.current.fps);
+    if (started.current && ++framesLoaded.current === 3) onReady?.();
+    // One long frame is a stall (a shader compiling, a texture uploading, the tab
+    // coming back), not a slow machine: start counting again after it.
+    if (frames.current < 20 || (frames.current > 20 && gap > 0.25)) {
+      since.current = now;
+      asked.current = pace.current.fps;
+      if (frames.current > 20) frames.current = 20;
+      return;
+    }
+    const elapsed = now - since.current;
+    if (elapsed < 3) return;
+    const rate = (frames.current - 20) / elapsed;
+    const floor = asked.current * 0.55;
+    asked.current = pace.current.fps;
+    // Hidden tabs and scrolled-away canvases don't draw at all; only judge time spent drawing.
+    if (document.visibilityState === "visible" && rate > 0 && rate < floor && !told.current) {
+      told.current = true;
+      onSlow?.();
+    }
+    since.current = now;
+    frames.current = 20;
+  });
+  return null;
+}
+
+/** Soft reflections for the metal and glass, from a small built-in studio: no files to fetch. */
+function Reflections() {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  useEffect(() => {
+    const generator = new PMREMGenerator(gl);
+    const environment = generator.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = environment;
+    scene.environmentIntensity = 0.05;
+    generator.dispose();
+    return () => {
+      scene.environment = null;
+      environment.dispose();
+    };
+  }, [gl, scene]);
+  return null;
+}
+
+/**
+ * The finish: bloom on the screen's glow (high tier only), a vignette, then
+ * the landing page's ordered dither over everything, in 3-pixel cells.
+ */
+function Post({ bloom, light, still, master }: { bloom: boolean; light: number; still: boolean; master: boolean }) {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const dpr = useThree((state) => state.viewport.dpr);
+  const { composer, dither } = useMemo(() => {
+    const c = new EffectComposer(gl, { multisampling: bloom ? Math.min(4, gl.capabilities.maxSamples) : 0, frameBufferType: HalfFloatType });
+    c.addPass(new RenderPass(scene, camera));
+    // The still's master leaves the vignette to the page, which draws it for the size it's shown at.
+    const effects: Effect[] = master ? [] : [new VignetteEffect({ offset: VIGNETTE.offset, darkness: VIGNETTE.darkness })];
+    if (bloom) effects.unshift(new BloomEffect({ mipmapBlur: true, intensity: 1.2, luminanceThreshold: 0.5, luminanceSmoothing: 0.3, radius: 0.7 }));
+    const d = new DitherEffect();
+    d.light = light;
+    d.master = master;
+    c.addPass(new EffectPass(camera, ...effects, d));
+    return { composer: c, dither: d };
+    // The light eases in below; a new composer only for a new tier.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gl, scene, camera, bloom, master]);
+  useEffect(() => composer.setSize(size.width, size.height), [composer, size]);
+  useEffect(() => {
+    dither.cell = Math.round(2 * dpr);
+  }, [dither, dpr]);
+  useEffect(() => () => composer.dispose(), [composer]);
+  // Priority 1: this renders the frame in place of the default render.
+  useFrame((_, delta) => {
+    dither.light = still ? light : MathUtils.damp(dither.light, light, 3, Math.min(delta, 0.1));
+    composer.render(delta);
+  }, 1);
+  return null;
+}
+
+function World({ profile, org, shot, paint, signals, parallax, drag, still, frameShift, tier, pace, started }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean> }) {
+  const room = swatch(ROOMS, profile.room);
+  const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
+  const budget = BUDGET[tier];
+  const kit = useMemo(() => new Kit(pageFonts(), budget.screenScale), [budget.screenScale]);
+  const [fontsReady, setFontsReady] = useState(false);
+  const scene = useThree((state) => state.scene);
+
+  useEffect(() => {
+    loadFonts(kit.fonts).then(() => setFontsReady(true));
+    return () => kit.texture.dispose();
+  }, [kit]);
+  useEffect(() => {
+    kit.phosphor = phosphor;
+  }, [kit, phosphor]);
+  useEffect(() => {
+    scene.background = new Color(room.haze);
+    // Haze: the room falls away into the dark beyond the desk.
+    scene.fog = new Fog(room.haze, 1.05, 3.1);
+  }, [scene, room.haze]);
+
+  // The screen is a canvas uploaded to the GPU: repaint it a few times a second, not every frame.
+  const lastPaint = useRef(-1);
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    if (signals.current) signals.current.now = t;
+    // Nothing is shown before the clock starts, and the screen's first paint should be at its start.
+    if (!started.current || !fontsReady || !due(t, lastPaint.current, budget.screenFps)) return;
+    lastPaint.current = t;
+    kit.clear();
+    paint.current?.(kit, t);
+    kit.texture.needsUpdate = true;
+  });
+
+  return (
+    <>
+      <CameraRig shot={shot} parallax={!!parallax && !still} drag={!!drag} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} />
+      <ambientLight intensity={0.01} color={room.rim} />
+      <hemisphereLight args={[room.rim, "#000000", 0.015]} />
+      {/* Key: the room's one real light, over the left shoulder. */}
+      <spotLight
+        position={[-0.9, 1.25, 0.2]}
+        angle={0.62}
+        penumbra={0.85}
+        intensity={room.keyIntensity * 0.09}
+        color={room.key}
+        distance={4}
+        decay={1.4}
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.02}
+        target-position={[0, 0, 0]}
+      />
+      {/* Rim: behind and to the right, to cut the hood out of the dark. */}
+      <spotLight position={[-0.7, 1.0, -0.6]} angle={0.45} penumbra={0.9} intensity={room.rimIntensity * 1.1} color={room.rim} distance={4} decay={1.5} target-position={[0, 0.35, 0.55]} />
+      <spotLight position={[0.8, 0.8, -0.5]} angle={0.45} penumbra={0.9} intensity={room.rimIntensity * 0.6} color={room.rim} distance={4} decay={1.5} target-position={[0, 0.3, 0.6]} />
+      {/* The screen's spill: on the hands, the keys and into the hood. */}
+      <pointLight position={[0, 0.2, -0.16]} intensity={0.35} distance={1.2} decay={2} color={phosphor} />
+
+      <Room room={room} profile={profile} org={org} />
+      <Laptop profile={profile} org={org} kit={kit} signals={signals} />
+      <Figure profile={profile} signals={signals} />
+    </>
+  );
+}
+
+/**
+ * One value that eases toward a goal like a game camera: it gathers speed,
+ * then settles, with no jolt when the goal moves mid-flight (a critically
+ * damped spring; the velocity carries over). `time` is roughly how long it
+ * takes to get most of the way.
+ */
+function follow(value: number, goal: number, velocity: number[], i: number, time: number, step: number): number {
+  const omega = 2 / time;
+  const x = omega * step;
+  const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const change = value - goal;
+  const temp = (velocity[i]! + omega * change) * step;
+  velocity[i] = (velocity[i]! - omega * temp) * decay;
+  return goal + (change + temp) * decay;
+}
+
+/**
+ * The camera orbits this point between shots rather than cutting straight
+ * across the room, so a move from behind the laptop to the hacker's side
+ * swings around the desk instead of passing through it.
+ */
+const PIVOT = new Vector3(0, 0.25, 0.2);
+
+/** A shot as the orbit sees it: distance, angle around, angle up, then where it looks and its field of view. */
+function orbit(shot: Shot): number[] {
+  const dx = shot.position[0] - PIVOT.x;
+  const dy = shot.position[1] - PIVOT.y;
+  const dz = shot.position[2] - PIVOT.z;
+  const radius = Math.hypot(dx, dy, dz);
+  return [radius, Math.atan2(dx, dz), Math.asin(dy / radius), ...shot.target, shot.fov];
+}
+
+/** How long a move between shots takes to mostly settle, in seconds. */
+const MOVE_TIME = 0.7;
+
+/**
+ * How far from its goal each orbit value (metres, radians, then the field
+ * of view in degrees) and the framing shift (a share of the width) can be
+ * and still count as settled: well under a pixel, so the next frame looks
+ * the same at either rate. The same per thirtieth of a second for speed.
+ */
+const SETTLED = [3e-4, 3e-4, 3e-4, 3e-4, 3e-4, 3e-4, 0.01];
+const SETTLED_SHIFT = 3e-4;
+const near = (offBy: number, speed: number, tolerance: number) => Math.abs(offBy) <= tolerance && Math.abs(speed) / 30 <= tolerance;
+
+/**
+ * How far a drag can swing the camera from the shot, in radians around the
+ * desk and up over it: enough to see the room from the side and from above,
+ * never far enough to go through the wall or under the desk.
+ */
+const DRAG_AROUND = 0.7;
+const DRAG_UP: [number, number] = [-0.14, 0.42];
+/** Radians per pixel dragged. */
+const DRAG_RATE = 0.006;
+/** How long after letting go the camera starts back to the shot, in seconds. */
+const DRAG_HOLD = 3.5;
+
+interface Drag {
+  /** Where the drag has put the camera, as offsets from the shot: around, then up. */
+  goal: [number, number];
+  /** The same, eased. */
+  now: [number, number];
+  velocity: number[];
+  /** The pointer being followed, if a drag is under way. */
+  pointer: number | null;
+  x: number;
+  y: number;
+  /** When the last drag ended (performance.now(), in ms). */
+  releasedAt: number;
+}
+
+/**
+ * Lets a drag on the canvas swing the camera. Vertical swipes on touch
+ * screens still scroll the page; only sideways ones turn the camera.
+ */
+function useDrag(enabled: boolean, shot: ShotName, pace: RefObject<Pace>): RefObject<Drag> {
+  const element = useThree((state) => state.gl.domElement);
+  const drag = useRef<Drag>({ goal: [0, 0], now: [0, 0], velocity: [0, 0], pointer: null, x: 0, y: 0, releasedAt: 0 });
+
+  // A new shot is the page asking to show something: let it, unless someone is mid-drag.
+  useEffect(() => {
+    if (drag.current.pointer === null) drag.current.goal.fill(0);
+  }, [shot]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const state = drag.current;
+    element.style.cursor = "grab";
+    element.style.touchAction = "pan-y";
+    const down = (event: PointerEvent) => {
+      if (state.pointer !== null || (event.pointerType === "mouse" && event.button !== 0)) return;
+      state.pointer = event.pointerId;
+      state.x = event.clientX;
+      state.y = event.clientY;
+      element.style.cursor = "grabbing";
+      // Keep following outside the canvas; a pointer that's already gone can't be captured.
+      try {
+        element.setPointerCapture(event.pointerId);
+      } catch {}
+    };
+    const move = (event: PointerEvent) => {
+      if (event.pointerId !== state.pointer) return;
+      const [around, up] = state.goal;
+      state.goal = [
+        MathUtils.clamp(around - (event.clientX - state.x) * DRAG_RATE, -DRAG_AROUND, DRAG_AROUND),
+        MathUtils.clamp(up + (event.clientY - state.y) * DRAG_RATE, DRAG_UP[0], DRAG_UP[1]),
+      ];
+      state.x = event.clientX;
+      state.y = event.clientY;
+      pace.current.busyUntil = performance.now() + 400;
+    };
+    const up = (event: PointerEvent) => {
+      if (event.pointerId !== state.pointer) return;
+      state.pointer = null;
+      state.releasedAt = performance.now();
+      element.style.cursor = "grab";
+    };
+    element.addEventListener("pointerdown", down);
+    element.addEventListener("pointermove", move);
+    element.addEventListener("pointerup", up);
+    element.addEventListener("pointercancel", up);
+    element.addEventListener("lostpointercapture", up);
+    return () => {
+      element.removeEventListener("pointerdown", down);
+      element.removeEventListener("pointermove", move);
+      element.removeEventListener("pointerup", up);
+      element.removeEventListener("pointercancel", up);
+      element.removeEventListener("lostpointercapture", up);
+      element.style.cursor = "";
+      element.style.touchAction = "";
+      state.pointer = null;
+      state.goal = [0, 0];
+    };
+  }, [enabled, element, pace]);
+
+  return drag;
+}
+
+/** Glides between shots, drifts a little, follows the pointer, turns when dragged and flinches at a find. Says when it is moving, so the scene draws at the full rate. */
+function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace }: { shot: ShotName; parallax: boolean; drag: boolean; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace> }) {
+  const camera = useThree((state) => state.camera) as PerspectiveCamera;
+  const pointer = useThree((state) => state.pointer);
+  const size = useThree((state) => state.size);
+  const drag = useDrag(draggable, shot, pace);
+  const now = useRef<number[]>(orbit(SHOTS[shot]));
+  const velocity = useRef<number[]>(now.current.map(() => 0));
+  const look = useRef({ x: 0, y: 0, vx: [0, 0] });
+  const eased = useRef(shift);
+  const shiftVelocity = useRef([0]);
+  const offset = useMemo(() => new Vector3(), []);
+  const aim = useMemo(() => new Vector3(), []);
+
+  useFrame((state, delta) => {
+    const goal = orbit(SHOTS[shot]);
+    const t = state.clock.elapsedTime;
+    // Long gaps between frames (a tab coming back) shouldn't fling the camera.
+    const step = Math.max(Math.min(delta, 0.1), 1e-4);
+    const values = now.current;
+    // Go the short way round.
+    goal[1] = values[1]! + Math.atan2(Math.sin(goal[1]! - values[1]!), Math.cos(goal[1]! - values[1]!));
+    for (let i = 0; i < values.length; i++) {
+      if (still) {
+        values[i] = goal[i]!;
+        velocity.current[i] = 0;
+      } else values[i] = follow(values[i]!, goal[i]!, velocity.current, i, MOVE_TIME, step);
+    }
+    const [radius, shotAround, shotUp, tx, ty, tz, fov] = values as [number, number, number, number, number, number, number];
+    camera.fov = fov;
+
+    // The drag, on top of the shot: it follows the hand closely, and a while after letting go eases back.
+    const turn = drag.current;
+    if (turn.pointer === null && performance.now() - turn.releasedAt > DRAG_HOLD * 1000) turn.goal.fill(0);
+    for (let i = 0; i < 2; i++) {
+      const settling = turn.pointer === null && turn.goal[i] === 0;
+      if (still) turn.now[i] = turn.goal[i]!;
+      else turn.now[i] = follow(turn.now[i]!, turn.goal[i]!, turn.velocity, i, settling ? MOVE_TIME * 1.6 : 0.18, step);
+      if (!near(turn.now[i]! - turn.goal[i]!, turn.velocity[i]!, 3e-4)) pace.current.busyUntil = performance.now() + 400;
+    }
+    const around = shotAround + turn.now[0];
+    const up = shotUp + turn.now[1];
+
+    offset.set(0, 0, 0);
+    if (!still) {
+      offset.x += Math.sin(t * 0.31) * 0.004;
+      offset.y += Math.sin(t * 0.47) * 0.003;
+      if (parallax) {
+        // The pointer leads the camera gently, never drags it.
+        look.current.x = follow(look.current.x, pointer.x, look.current.vx, 0, 0.6, step);
+        look.current.y = follow(look.current.y, pointer.y, look.current.vx, 1, 0.6, step);
+        offset.x += look.current.x * 0.02;
+        offset.y += look.current.y * 0.012;
+      }
+      const jolt = Math.max(0, (signals.current?.joltUntil ?? 0) - t);
+      if (jolt > 0) offset.addScalar((Math.random() - 0.5) * 0.005 * jolt);
+      const moving =
+        jolt > 0 ||
+        values.some((value, i) => !near(value - goal[i]!, velocity.current[i]!, SETTLED[i]!)) ||
+        !near(eased.current - shift, shiftVelocity.current[0]!, SETTLED_SHIFT) ||
+        (parallax && (Math.abs(look.current.x - pointer.x) > 1e-3 || Math.abs(look.current.y - pointer.y) > 1e-3));
+      // Keep the full rate a moment past settling, so the last of the glide isn't drawn at half speed.
+      if (moving) pace.current.busyUntil = performance.now() + 400;
+    }
+    // Off-centre framing: render the left part of a wider picture to move it right, the right part to move it left.
+    eased.current = still ? shift : follow(eased.current, shift, shiftVelocity.current, 0, 0.5, step);
+    const by = Math.abs(eased.current);
+    if (by > 0.001) camera.setViewOffset(size.width * (1 + 2 * by), size.height, eased.current < 0 ? 2 * by * size.width : 0, 0, size.width, size.height);
+    else if (camera.view?.enabled) {
+      // setViewOffset widened the aspect to the whole wider picture; put it back.
+      camera.clearViewOffset();
+      camera.aspect = size.width / size.height;
+    }
+    camera.position.set(
+      PIVOT.x + radius * Math.cos(up) * Math.sin(around),
+      PIVOT.y + radius * Math.sin(up),
+      PIVOT.z + radius * Math.cos(up) * Math.cos(around),
+    );
+    camera.position.add(offset);
+    camera.lookAt(aim.set(tx, ty, tz));
+    camera.updateProjectionMatrix();
+  });
+  return null;
+}

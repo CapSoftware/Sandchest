@@ -97,7 +97,7 @@ await db.insert(schema.scanEvents).values(
     ["stage", "Indexing the code…"],
     ["stage", "Sweeping for secrets, vulnerable dependencies and dangerous sinks…"],
     ["progress", "2 vulnerable dependencies, 41 sinks, 0 secrets."],
-    ["stage", "Digging with 8 hunters: billing, auth, search, coupons, webhooks, admin, abuse, leads."],
+    ["stage", "Hunting across 8 areas: billing, auth, search, coupons, webhooks, admin, abuse, leads."],
     ["finding", "Found: SQL injection in invoice search via the q parameter"],
     ["finding", "Found: Any user can read other customers' invoices"],
     ["warning", "One hunter ran out of turns in src/admin."],

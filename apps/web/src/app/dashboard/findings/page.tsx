@@ -159,7 +159,7 @@ function emptyTitle(status: Status, filtered: boolean): string {
 
 function emptyBody(status: Status, filtered: boolean): string {
   if (filtered) return "No findings match these filters.";
-  if (status === "open") return "No open findings. New ones appear here as pull request reviews and deep scans dig them up.";
+  if (status === "open") return "No open findings. New ones appear here as pull request reviews and deep scans find them.";
   if (status === "fixed") return "Findings move here when a push removes the attack path, or when you mark them fixed.";
   return "Findings you dismiss move here, with the reason you gave.";
 }

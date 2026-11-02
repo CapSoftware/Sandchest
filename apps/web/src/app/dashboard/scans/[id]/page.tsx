@@ -1,4 +1,4 @@
-import { scanForUser } from "@sandchest/db";
+import { orgForAdmin, scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { HoverLink } from "@/components/app/hover-link";
@@ -6,7 +6,10 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { Heat } from "@/components/app/heat";
 import { ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack } from "@/components/app/scan-live";
+import { ScanWatch } from "@/components/app/scan-watch";
 import { PageShape } from "@/components/app/skeleton";
+import { readHacker } from "@/lib/hacker";
+import "../../../rig.css";
 import { compactNumber, plural, SCAN_KIND_LABEL } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
@@ -33,7 +36,8 @@ export default async function ScanPage({ params }: Params) {
   const { id } = await params;
   const row = await load(id);
   if (!row) notFound();
-  const { scan, repo, metrics, findings, events } = row;
+  const { scan, repo, org, metrics, findings, events } = row;
+  const admin = !!(await orgForAdmin(db(), (await viewer()).id, scan.orgId));
   const live = ACTIVE.has(scan.status);
   const shown = findings.filter((finding) => finding.confidence !== "low");
   const stats = (scan.stats ?? {}) as { loc?: number; checked?: number; fixed?: number };
@@ -76,6 +80,8 @@ export default async function ScanPage({ params }: Params) {
 
         {scan.error && <p className="scan-error">{scan.error}</p>}
 
+        <ScanWatch profile={readHacker(org.hacker)} repo={repo.fullName} findings={shown.length} recruitHref={admin ? `/dashboard/recruit?org=${scan.orgId}` : null} recruited={!!org.hacker} />
+
         <dl className="stats">
           <ScanClock />
           {scan.kind === "fix_check" ? (
@@ -97,7 +103,7 @@ export default async function ScanPage({ params }: Params) {
               <dd>{compactNumber(stats.loc)}</dd>
             </div>
           )}
-          {/* What was charged, once it was: a free Dig, or a scan still running, shows no cost. */}
+          {/* What was charged, once it was: a free deep scan, or a scan still running, shows no cost. */}
           {scan.billing === "charged" && scan.credits > 0 && (
             <div className="stat">
               <dt>Cost</dt>
@@ -109,7 +115,7 @@ export default async function ScanPage({ params }: Params) {
         {shown.length > 0 && (
           <section className="block" aria-labelledby="found-title">
             <h2 id="found-title" className="block-title">
-              Dug up
+              Found
             </h2>
             <ul className="rows">
               {shown.map((finding) => (
