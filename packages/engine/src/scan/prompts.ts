@@ -5,7 +5,7 @@
  * Each role's system prompt is followed by the threat model, and both stay
  * byte-identical for the whole scan, so the endpoint caches them as a prefix.
  */
-import type { ThreatModel } from "./schema";
+import type { AuthModel, ThreatModel } from "./schema";
 
 const RUBRIC = `Severity = who can exploit it × what they get:
 - critical: unauthenticated remote code execution, takeover of any account, full access to a data store, or taking money or paid service at will
@@ -109,6 +109,22 @@ Find out:
 Use the overview and inventory you are given, read the key files (server setup, routing, auth middleware, data access), and stop once you can describe the map accurately. Keep tool calls to what you need.`;
 }
 
+export function authInvestigationSystemPrompt(tag: string): string {
+  return `You are a security reviewer figuring out exactly how one application enforces authorization, so other reviewers can judge access-control findings against how it really works — not against a guess.
+
+${untrustedRules(tag)}
+
+Investigate from the code. Do not assume a framework or a convention: read the actual source and infer the mechanism, whatever the language or framework (middleware chains, tRPC/procedure wrappers, route guards and decorators, before-actions/filters, per-handler identity checks, policy objects, row-level scoping). Read the request-handling setup, the authentication code, the shared authorization helpers, and a sample of handlers to confirm how enforcement is applied in practice.
+
+Answer four questions, each grounded in file:line you have actually read:
+1. How is a caller's identity established (session, token, API key, signed cookie, OAuth)?
+2. What enforces authorization, and where? Name every mechanism (a middleware, a procedure wrapper, a decorator, a guard, an explicit check) and what it actually verifies — merely authenticated, a role, or ownership of the specific object requested.
+3. How do handlers ensure a caller may act on the SPECIFIC object they name (not just that they are logged in)? This is usually a query scoped by the caller's user or organization id, or an explicit ownership check. Give a concrete example file:line, or say none is applied consistently.
+4. Which entry points or patterns skip the enforcement above? Cite them.
+
+Be precise and concrete. Prefer "procedures built with X are gated by Y at a.ts:40; handlers calling the raw client are not" over vague summaries. This map is only useful if it reflects how THIS code works.`;
+}
+
 export const STRUCTURE_SYSTEM_PROMPT = `You write up confirmed security findings for the developers who will fix them. Be specific to the code you are given, plain and direct. Never invent facts that are not in the report or the reviewer's notes. Choose the most specific CWE that fits, or null.
 
 ${RUBRIC}`;
@@ -149,4 +165,23 @@ ${list(model.abuseSurfaces)}
 
 ## Subsystems
 ${list(model.subsystems?.map((s) => `${s.name} (${s.risk} risk; ${s.paths.join(", ")}): ${s.description}`))}`;
+}
+
+/** Renders the investigated authorization model, for grounding access-control reviews. */
+export function renderAuthModel(model: AuthModel): string {
+  const list = (items: string[] | undefined) => (items?.length ? items.map((item) => `- ${item}`).join("\n") : "- (none identified)");
+  return `# How this application enforces authorization (investigated from the code)
+
+${model.summary}
+
+## Enforcement points
+${list(model.enforcementPoints?.map((e) => `${e.mechanism} — ${e.where}: ${e.protects}`))}
+
+## Object-ownership check
+${model.ownershipPattern}
+
+## Gaps (entry points or patterns that skip the above)
+${list(model.gaps)}
+
+Judge an access-control finding against this: if the handler applies the enforcement this app uses elsewhere (a listed mechanism, or the ownership check), the finding is likely a false positive — say so and cite it. If it is in the gaps or skips the pattern its peers apply, it is likely real.`;
 }

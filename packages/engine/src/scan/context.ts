@@ -82,6 +82,8 @@ export interface ScanContext {
   wrap: Wrap;
   /** Rendered threat model; part of the cached prompt prefix. */
   threatModelText: string;
+  /** How this app enforces authorization, investigated from the code; grounds access-control reviews. Part of the cached prefix. */
+  authModelText?: string;
   counters: { rejected: number; duplicates: number };
   /** PR reviews: the files under review. Findings must touch them. */
   change?: ChangedFile[];

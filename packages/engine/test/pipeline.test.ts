@@ -51,6 +51,13 @@ const threatModel: ThreatModel = {
   subsystems: [{ name: "auth", paths: ["src"], description: "Login.", risk: "high" }],
 };
 
+const authModel = {
+  summary: "Login service; identity via session cookie.",
+  enforcementPoints: [{ mechanism: "requireAuth middleware", where: "src/login.ts:1", protects: "authenticated routes" }],
+  ownershipPattern: "none found",
+  gaps: [],
+};
+
 const candidate = {
   title: "SQL injection in login via email",
   category: "sql_injection",
@@ -104,8 +111,10 @@ function fakeClient(hunter?: Script, overrides: { reconObject?: Script } = {}): 
     async chat(request) {
       if (request.responseFormat) {
         if (request.role === "recon") return overrides.reconObject ? overrides.reconObject(request) : reply(JSON.stringify(threatModel));
+        if (request.role === "skeptic") return reply(JSON.stringify(authModel)); // auth-model investigation
         return reply(JSON.stringify(writeUp));
       }
+      const hasVerdictTool = JSON.stringify(request.tools ?? []).includes("submit_verdict");
       switch (request.role) {
         case "recon":
           return reply("Notes: one login route.");
@@ -113,9 +122,10 @@ function fakeClient(hunter?: Script, overrides: { reconObject?: Script } = {}): 
           if (hunter) return hunter(request);
           return answered(request) ? reply("Covered login.") : reply("", [toolCall("report_finding", candidate)]);
         case "skeptic":
-          return reply("", [
-            toolCall("submit_verdict", { verdict: "confirmed", confidence: "high", disproof: [], severity: "critical", reasoning: "Read every hop; the email is concatenated." }),
-          ]);
+          // The review skeptic has the verdict tool; the auth-model investigation does not.
+          return hasVerdictTool
+            ? reply("", [toolCall("submit_verdict", { verdict: "confirmed", confidence: "high", disproof: [], severity: "critical", reasoning: "Read every hop; the email is concatenated." })])
+            : reply("Auth notes: requireAuth guards routes at src/login.ts:1.");
         default:
           throw new Error(`unexpected role ${request.role}`);
       }

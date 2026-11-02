@@ -218,6 +218,31 @@ export const ThreatModelSchema = z.object({
 });
 export type ThreatModel = z.infer<typeof ThreatModelSchema>;
 
+/**
+ * How the application actually enforces authorization, investigated from the
+ * code rather than assumed from a framework. Language- and framework-agnostic:
+ * the model reads whatever is there (tRPC procedures, Rails before_actions,
+ * Express middleware, Next server actions, Spring guards, decorators…) and
+ * describes the real mechanism. This grounds the skeptic so it judges an
+ * access-control finding against how this app enforces authz, not a guess.
+ */
+export const AuthModelSchema = z.object({
+  summary: z.string().min(10).describe("How identity is established and how authorization is enforced here, in plain English"),
+  enforcementPoints: z
+    .array(
+      z.object({
+        mechanism: z.string().describe("The concrete mechanism, e.g. 'tRPC authedProcedure', 'Express requireAuth middleware', 'getCurrentUser() guard in each server action'"),
+        where: z.string().describe("file:line where it is defined or applied"),
+        protects: z.string().describe("What it gates, and what it checks (identity only, role, object ownership)"),
+      }),
+    )
+    .max(20)
+    .describe("The checks that enforce authorization, each with where it lives"),
+  ownershipPattern: z.string().describe("How handlers ensure a caller may act on the SPECIFIC object they request (e.g. queries scoped by session user/org id), with an example file:line, or 'none found'"),
+  gaps: z.array(z.string()).max(20).describe("Entry points or patterns that skip the enforcement above, each with file:line"),
+});
+export type AuthModel = z.infer<typeof AuthModelSchema>;
+
 export type LeadKind = "secret" | "vulnerable_dependency" | "injection_marker" | "sink" | "missing_check";
 
 /** A deterministic signal. The model can investigate and rank leads, never suppress them. */

@@ -22,8 +22,9 @@ import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assig
 import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
-import { renderThreatModel } from "./prompts";
+import { renderAuthModel, renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
+import { investigateAuthModel } from "./investigate";
 import { severityRank, type Candidate, type Finding, type Lead, type ThreatModel } from "./schema";
 import { review, unreviewed, type Review } from "./skeptic";
 import { structure } from "./structure";
@@ -205,7 +206,19 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     signals.leads = [...signals.leads, ...authz];
     emit({ type: "progress", message: `Flagged ${authz.length} handler${authz.length === 1 ? "" : "s"} that skip an authorization check their peers apply.` });
   }
-  const ctx: ScanContext = { ...base, threatModelText: renderThreatModel(threatModel) };
+  const threatModelText = renderThreatModel(threatModel);
+  // Deep scans: investigate how this app enforces authorization (any framework, from the code)
+  // and ground every access-control review in it. Skipped for PR reviews (change-scoped, latency-sensitive).
+  let authModelText: string | undefined;
+  if (!change && !signal.aborted) {
+    emit({ type: "stage", stage: "recon", message: "Working out how authorization is enforced…" });
+    const authModel = await investigateAuthModel({ ...base, threatModelText }).catch((error) => {
+      if (isFatal(error, signal)) throw error;
+      return undefined;
+    });
+    authModelText = authModel ? renderAuthModel(authModel) : undefined;
+  }
+  const ctx: ScanContext = { ...base, threatModelText, authModelText };
 
   const registry = new CandidateRegistry();
   const findings: Finding[] = [];
