@@ -5,19 +5,17 @@ description: What we collect when you use the hosted Sandchest service, why, and
 
 import { legal } from "@/lib/legal";
 
-This policy explains how {legal.entity} ("we", "us") handles information when you use the hosted Sandchest service. We are the controller of the personal information described here.
+Sandchest is run by {legal.entity} ("Cap", "we", "us"), of {legal.address}. This policy explains how we handle information when you use the hosted Sandchest service. We are the controller of the personal information described here.
 
-The short version: **we never store your source code.** Every scan runs in a temporary environment that's deleted when the scan finishes. Model inference runs with zero data retention. We keep only your findings and the minimum code excerpts needed to explain them.
+The short version: **we never store your source code.** Every scan runs in a temporary environment that's deleted when the scan finishes. Model inference runs with zero data retention. We keep only your findings and the minimum code excerpts needed to explain them. We don't sell personal information.
 
 A self-hosted Sandchest sends nothing to us, so this policy doesn't apply to it.
 
 ## What we collect
 
-**From GitHub, when you sign in**: your GitHub user ID, username, display name, avatar and primary email address, and a sign-in token, which we store encrypted. We get your primary email even if it is private on GitHub, because the App has permission to read email addresses. Only if GitHub returns no address do we use a no-reply placeholder, and then you get no email.
+**When you sign in with GitHub**: your GitHub user ID, username, display name, avatar and primary email address, and a sign-in token, which we store encrypted. We get your primary email even if it's private on GitHub, because the App has permission to read email addresses. If GitHub returns none, you get no email from us. Each session also stores your browser's user agent.
 
-**From each sign-in session**: your browser's user agent, stored with the session.
-
-**From GitHub, when you install the App**: the account it's installed on, the repositories you chose (names, whether they're private, default branches), who the account's admins are, and which repositories each signed-in person can push to.
+**When you install the App**: the account it's installed on, the repositories you chose (names, whether they're private, default branches), who the account's admins are, and which repositories each signed-in person can push to.
 
 **From scans**:
 
@@ -33,7 +31,7 @@ A self-hosted Sandchest sends nothing to us, so this policy doesn't apply to it.
 
 - **Your source code.** Each scan clones the one commit it needs into a temporary workspace, and destroys the workspace when the scan ends, whether it succeeded or failed. We keep no copies, snapshots or diffs.
 - **IP addresses** with your account. Sign-in doesn't record them.
-- **Third-party tracking.** There are no advertising or third-party analytics scripts.
+- **Third-party tracking.** There are no advertising or third-party analytics scripts, and the only cookies are the ones that keep you signed in.
 
 ## How code is processed
 
@@ -45,15 +43,17 @@ We don't use your code, findings or prompts to train models.
 
 ## How we use information
 
-- to run scans and show you their results
-- to post reviews and Checks on your pull requests
+- to run scans, show you their results, and post reviews and Checks on your pull requests
 - to decide who can see which findings, using GitHub's own permissions
 - to bill your plan
-- to email people with access about new critical findings and finished deep scans (an admin can turn these emails off for the account in Settings)
+- to email people with access about new critical findings and finished deep scans (an admin can turn these off in Settings)
 - to email the account's admins about billing: credits running low or out, auto top-ups, and scans stopped by the model provider. Billing emails can't be turned off; the scan-stopped email follows the account's email setting
 - to keep the service secure and working, and to improve it from aggregate usage
+- to meet our legal obligations
 
-We don't sell personal information, and we don't send marketing email.
+If you're in the EU or UK, our legal bases are: performing our contract with you, our legitimate interest in running a secure and working service, and complying with the law.
+
+We don't sell or share personal information for advertising, and we don't send marketing email.
 
 ## Public repositories
 
@@ -61,9 +61,11 @@ Checks and review comments on public repositories are visible to everyone. For p
 
 ## Who we share it with
 
-We use a small number of service providers (subprocessors) to host the service, run model inference, send email and process payments. They act on our instructions and only for providing Sandchest. The current list is available on request: write to <Email to={legal.privacyEmail} />.
+We use a small number of service providers (subprocessors) to host the service, run model inference, send email and process payments. They act on our instructions and only to provide Sandchest. The current list is available on request at <Email to={legal.email} />.
 
-We share information with authorities only when the law requires it.
+We disclose information to authorities only when the law requires it, and to a buyer or successor if Cap is involved in a merger, acquisition or sale of assets, under this policy.
+
+We're based in the United States, and information is processed there and wherever our providers operate. Where the law requires it, we protect transfers with safeguards such as the European Commission's standard contractual clauses.
 
 ## How long we keep it
 
@@ -75,11 +77,9 @@ We share information with authorities only when the law requires it.
 
 ## Your rights
 
-Depending on where you live, you may have the right to access, correct, export or delete your personal information, and to object to or restrict how we use it. Write to <Email to={legal.privacyEmail} /> and we'll respond within 30 days. You can also complain to your local data protection authority.
+Depending on where you live, you may have the right to access, correct, export or delete your personal information, and to object to or restrict how we use it. Write to <Email to={legal.email} /> and we'll respond within 30 days. We won't treat you differently for using these rights. You can also complain to your local data protection authority.
 
-## Cookies
-
-We use only the cookies needed to keep you signed in. No advertising or analytics cookies.
+Sandchest isn't for children, and we don't knowingly collect information from anyone under 16.
 
 ## Security
 
@@ -93,6 +93,4 @@ If we change this policy in a way that matters, we'll tell you by email or in th
 
 {legal.entity}, {legal.address}.
 
-- Privacy questions and requests: <Email to={legal.privacyEmail} />
-- Security reports: <Email to={legal.securityEmail} />
-- Everything else: <Email to={legal.contactEmail} />
+Privacy questions, requests and security reports: <Email to={legal.email} />.
