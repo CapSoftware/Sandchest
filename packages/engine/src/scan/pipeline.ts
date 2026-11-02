@@ -22,10 +22,10 @@ import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assig
 import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
-import { renderAuthModel, renderThreatModel } from "./prompts";
+import { renderAuthModel, renderHistoryForHunt, renderHistoryForSkeptic, renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
 import { investigateAuthModel } from "./investigate";
-import { severityRank, type Candidate, type Finding, type Lead, type ThreatModel } from "./schema";
+import { severityRank, type Candidate, type Finding, type Lead, type RepoHistory, type ThreatModel } from "./schema";
 import { review, unreviewed, type Review } from "./skeptic";
 import { structure } from "./structure";
 import { createWrap, repoTools, type RouteInfo } from "./tools";
@@ -65,6 +65,11 @@ export interface ScanOptions {
    * Absent: the stage is skipped and the scan runs on deterministic facts only.
    */
   classifier?: Classifier;
+  /**
+   * The team's verdicts on this repository's earlier findings. Real ones point hunters at
+   * variants; false-positive verdicts ground the skeptic. Omit for a first scan.
+   */
+  history?: RepoHistory;
 }
 
 export interface DismissedCandidate {
@@ -269,7 +274,12 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       : investigateAuthModel({ ...base, threatModelText })
           .then((model) => (model ? renderAuthModel(model) : undefined))
           .catch(() => undefined);
-  const ctx: ScanContext = { ...base, threatModelText };
+  const ctx: ScanContext = {
+    ...base,
+    threatModelText,
+    historyHuntText: renderHistoryForHunt(options.history, wrap),
+    historySkepticText: renderHistoryForSkeptic(options.history, wrap),
+  };
 
   const registry = new CandidateRegistry();
   const findings: Finding[] = [];
@@ -390,6 +400,13 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
 
   // Trust is set from the evidence each finding now carries (validation, origin).
   for (const finding of findings) finding.trust = trustTier(finding);
+  // Attribute each finding to the signals that raised it, so outcomes can be traced back to them.
+  const leadKinds = new Map(signals.leads.map((lead) => [lead.id, lead.kind] as const));
+  for (const finding of findings) {
+    const kinds = [...new Set(finding.leads.map((id) => leadKinds.get(id)).filter((kind): kind is Lead["kind"] => !!kind))];
+    // Deterministic findings (dependency advisories) set their own source; everything else an agent raised.
+    finding.sources = kinds.length > 0 ? kinds : (finding.sources ?? ["hunter"]);
+  }
   // Most severe first, then best-corroborated, then most confident: proven findings surface above lone judgments.
   findings.sort(
     (a, b) => severityRank(a.severity) - severityRank(b.severity) || trustRank(a.trust) - trustRank(b.trust) || confidenceRank(a) - confidenceRank(b),

@@ -380,6 +380,12 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
           proofOfConcept: sql`excluded.proof_of_concept`,
           fixGuidance: sql`excluded.fix_guidance`,
           fixPrompt: sql`case when ${findings.status} = 'dismissed' then '' else excluded.fix_prompt end`,
+          // The latest scan's evidence: trust and validation can rise as proof improves.
+          mitigations: sql`excluded.mitigations`,
+          trust: sql`excluded.trust`,
+          validation: sql`excluded.validation`,
+          // Every signal that has ever raised this finding, so outcomes credit all of them.
+          sources: sql`array(select distinct unnest(${findings.sources} || excluded.sources) order by 1)`,
         },
       })
       // xmax = 0 only for freshly inserted rows.
@@ -391,6 +397,35 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
 
 function withoutExcerpts(path: unknown): unknown {
   return Array.isArray(path) ? path.map((step) => (step && typeof step === "object" ? Object.fromEntries(Object.entries(step).filter(([key]) => key !== "excerpt")) : step)) : path;
+}
+
+/** A finding the team has resolved, with their verdict. No code, no user: what scans learn from. */
+export interface ResolvedFinding {
+  title: string;
+  category: string;
+  /** `file:line` where it landed. */
+  at: string;
+  outcome: "fixed" | "false_positive" | "accepted_risk" | "wont_fix";
+}
+
+/**
+ * The team's verdicts on a repository's findings — fixed, or dismissed with a reason — most
+ * recent first. Scans of the same repository learn from them: real issues seed variant hunting,
+ * false-positive verdicts ground the skeptic. Capped so prompts stay small.
+ */
+export async function repoHistory(database: Db, repoId: string, limit = 60): Promise<ResolvedFinding[]> {
+  const rows = await database
+    .select({ title: findings.title, category: findings.category, attackPath: findings.attackPath, status: findings.status, dismissReason: findings.dismissReason })
+    .from(findings)
+    .where(and(eq(findings.repoId, repoId), inArray(findings.status, ["fixed", "dismissed"])))
+    .orderBy(desc(findings.lastSeenAt))
+    .limit(limit);
+  return rows.flatMap((row) => {
+    const outcome = row.status === "fixed" ? "fixed" : row.dismissReason;
+    if (!outcome) return [];
+    const last = (row.attackPath as Array<{ file: string; line: number }>).at(-1);
+    return [{ title: row.title, category: row.category, at: last ? `${last.file}:${last.line}` : "", outcome }];
+  });
 }
 
 export async function openFindings(database: Db, repoId: string): Promise<FindingRow[]> {

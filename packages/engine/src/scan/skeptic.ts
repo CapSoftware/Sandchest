@@ -45,7 +45,7 @@ export async function review(ctx: ScanContext, gated: GatedCandidate, deadline?:
     return "Verdict recorded.";
   });
 
-  const grounding = ctx.authModelText ? `\n\n${ctx.authModelText}` : "";
+  const grounding = `${ctx.authModelText ? `\n\n${ctx.authModelText}` : ""}${ctx.historySkepticText ? `\n\n${ctx.historySkepticText}` : ""}`;
   const messages: Message[] = [
     { role: "system", content: `${skepticSystemPrompt(ctx.tag)}\n\n${ctx.threatModelText}${grounding}` },
     { role: "user", content: `${renderCandidate(gated)}\n\nCited code:\n${ctx.wrap(await citedCode(ctx, gated))}` },

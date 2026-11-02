@@ -206,6 +206,8 @@ export const findings = pgTable(
     fixPrompt: text("fix_prompt").notNull(),
     /** How much independent evidence backs the finding (the trust gate). Null on findings written before validation shipped. */
     trust: text("trust", { enum: ["confirmed", "corroborated", "unconfirmed"] }),
+    /** Signals that raised the finding (lead kinds, or `hunter`), so outcomes can be attributed to them. */
+    sources: text("sources").array().notNull().default(sql`'{}'::text[]`),
     /** The validation outcome, if the finding went through it: { status, method, detail }. No code or secrets. */
     validation: jsonb("validation").$type<{ status: string; method: string; detail: string }>(),
     sourceScanId: uuid("source_scan_id").references(() => scans.id, { onDelete: "set null" }),

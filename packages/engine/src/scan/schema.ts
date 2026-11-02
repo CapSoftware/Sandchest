@@ -185,6 +185,31 @@ export interface Finding {
   validation?: Validation;
   /** How much independent evidence backs the finding; set by the trust gate. See `trust.ts`. */
   trust?: TrustTier;
+  /**
+   * Which signals produced it: the kinds of the leads it explains (e.g. `missing_check`,
+   * `vulnerable_dependency`), or `hunter` when an agent found it unprompted. Recorded so
+   * outcomes (fixed, dismissed) can be attributed to the signal that raised them.
+   */
+  sources?: string[];
+}
+
+/** A finding from an earlier scan of the same repository, with the team's verdict on it. */
+export interface PriorFinding {
+  title: string;
+  category: string;
+  /** `file:line` of where it landed. */
+  at: string;
+  /** `fixed`, or the dismissal reason: `false_positive`, `accepted_risk`, `wont_fix`. */
+  outcome: "fixed" | "false_positive" | "accepted_risk" | "wont_fix";
+}
+
+/**
+ * What a team has already decided about this repository's findings. Real issues (fixed or
+ * knowingly accepted) point hunters at variants of the same root cause; false-positive
+ * verdicts tell the skeptic where this team's code is safer than it looks.
+ */
+export interface RepoHistory {
+  findings: PriorFinding[];
 }
 
 const EntryPoint = z.object({

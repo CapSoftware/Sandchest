@@ -5,7 +5,7 @@
  * Each role's system prompt is followed by the threat model, and both stay
  * byte-identical for the whole scan, so the endpoint caches them as a prefix.
  */
-import type { AuthModel, ThreatModel } from "./schema";
+import type { AuthModel, PriorFinding, RepoHistory, ThreatModel } from "./schema";
 
 const RUBRIC = `Severity = who can exploit it × what they get:
 - critical: unauthenticated remote code execution, takeover of any account, full access to a data store, or taking money or paid service at will
@@ -186,4 +186,43 @@ ${model.ownershipPattern}
 ${list(model.gaps)}
 
 Judge an access-control finding against this: if the handler applies the enforcement this app uses elsewhere (a listed mechanism, or the ownership check), the finding is likely a false positive — say so and cite it. If it is in the gaps or skips the pattern its peers apply, it is likely real.`;
+}
+
+const PRIOR_LIMIT = 25;
+
+function priorLines(items: PriorFinding[]): string {
+  return items
+    .slice(0, PRIOR_LIMIT)
+    .map((f) => `- [${f.category}] ${f.title} — ${f.at}`)
+    .join("\n");
+}
+
+/**
+ * For hunters: real issues this team has already had. A fixed bug is the best predictor of
+ * its siblings — the same root cause in another handler, another field, another tenant check —
+ * so we point hunters at variants. Returns "" when there is nothing to learn from.
+ */
+export function renderHistoryForHunt(history: RepoHistory | undefined, wrap: (text: string) => string): string {
+  const real = (history?.findings ?? []).filter((f) => f.outcome !== "false_positive");
+  if (real.length === 0) return "";
+  return `# Real issues this team has already had in this codebase
+
+${wrap(priorLines(real))}
+
+These were confirmed real (fixed, or knowingly accepted). Do not report them again. Treat each as a pattern: hunt for variants with the same root cause elsewhere — sibling handlers, other fields, other object types, other code paths that copy the same approach.`;
+}
+
+/**
+ * For the skeptic: findings this team reviewed and judged not exploitable. A candidate with the
+ * same root cause is probably safe here for the same reason — but the team can be wrong, so this
+ * is strong evidence, not a veto. Returns "" when there are no such verdicts.
+ */
+export function renderHistoryForSkeptic(history: RepoHistory | undefined, wrap: (text: string) => string): string {
+  const rejected = (history?.findings ?? []).filter((f) => f.outcome === "false_positive");
+  if (rejected.length === 0) return "";
+  return `# Findings this team reviewed and marked as false positives
+
+${wrap(priorLines(rejected))}
+
+If the candidate has the same root cause as one of these, it is likely a false positive for the same reason: find what makes the earlier one safe (a guard, a constraint, an invariant) and check whether it covers this candidate. Confirm only if you can cite code showing this candidate differs in a way that makes it exploitable.`;
 }

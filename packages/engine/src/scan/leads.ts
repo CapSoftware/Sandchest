@@ -176,6 +176,7 @@ export function dependencyFindings(vulns: DependencyVulns[], already: Finding[])
       mustNotBreak: [],
       regressionTest: `After upgrading, re-run the scan and confirm ${ids} no longer appears for ${dep.name}.`,
       leads: [],
+      sources: ["vulnerable_dependency"],
       skeptic: { confidence: "high", reasoning: "Deterministic software-composition fact: the critical advisory applies to the imported version." },
     };
     findings.push({ ...base, fixPrompt: fixPrompt(base) });

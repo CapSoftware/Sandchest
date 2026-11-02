@@ -16,6 +16,7 @@ import {
   notificationRecipients,
   openFindings,
   recordMetrics,
+  repoHistory,
   saveThreatModel,
   scanById,
   setRepoLoc,
@@ -183,6 +184,8 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     const report = await runScan({
       ...common,
       threatModel: model,
+      // What this team already decided about the repo's findings: scans learn from it.
+      history: { findings: await repoHistory(db(), scan.repo.id) },
       pullRequest: pullFiles ? { files: pullFiles.map(toChangedFile) } : undefined,
       onEvent,
     });
@@ -375,6 +378,7 @@ function toFindingInput(finding: Finding): FindingInput {
     regressionTest: finding.regressionTest,
     fixPrompt: finding.fixPrompt,
     trust: finding.trust ?? null,
+    sources: finding.sources ?? [],
     validation: finding.validation ?? null,
   };
 }
@@ -403,6 +407,7 @@ function toEngineFinding(row: FindingRow): Finding & { id: string } {
     leads: [],
     skeptic: { confidence: row.confidence, reasoning: "" },
     trust: row.trust ?? undefined,
+    sources: row.sources ?? [],
     validation: (row.validation as Finding["validation"]) ?? undefined,
   };
 }

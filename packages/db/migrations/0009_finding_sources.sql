@@ -1,0 +1,1 @@
+ALTER TABLE "findings" ADD COLUMN "sources" text[] DEFAULT '{}'::text[] NOT NULL;

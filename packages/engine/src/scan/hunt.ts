@@ -235,7 +235,7 @@ export async function runHunter(
   const started = Date.now();
   const stats: HunterStats = { name: assignment.name, turns: 0, toolCalls: 0, reported: 0, accepted: 0, ms: 0 };
   const messages: Message[] = [
-    { role: "system", content: `${huntSystemPrompt(ctx.tag)}\n\n${ctx.threatModelText}` },
+    { role: "system", content: `${huntSystemPrompt(ctx.tag)}\n\n${ctx.threatModelText}${ctx.historyHuntText ? `\n\n${ctx.historyHuntText}` : ""}` },
     { role: "user", content: assignment.brief },
   ];
   const result = await runAgent({

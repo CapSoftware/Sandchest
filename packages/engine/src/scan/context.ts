@@ -84,6 +84,10 @@ export interface ScanContext {
   threatModelText: string;
   /** How this app enforces authorization, investigated from the code; grounds access-control reviews. Part of the cached prefix. */
   authModelText?: string;
+  /** Real issues this team already had, for variant hunting. Empty when none. */
+  historyHuntText?: string;
+  /** Findings this team judged false positives, for the skeptic. Empty when none. */
+  historySkepticText?: string;
   counters: { rejected: number; duplicates: number };
   /** PR reviews: the files under review. Findings must touch them. */
   change?: ChangedFile[];

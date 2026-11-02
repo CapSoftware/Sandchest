@@ -21,6 +21,7 @@ import {
   markFixed,
   openFindings,
   removeInstallation,
+  repoHistory,
   repoByGithubId,
   saveThreatModel,
   threatModel,
@@ -310,6 +311,29 @@ describe("findings", () => {
 
     await upsertFindings(database, repoId, scan, [finding("fp-1")]);
     expect((await openFindings(database, repoId)).map((f) => f.fingerprint).sort()).toEqual(["fp-1", "fp-2"]);
+  });
+
+  it("refreshes evidence on re-seen findings and unions the signals that raised them", async () => {
+    const { org, repos } = await upsertInstallation(database, 9020, { ...account, githubAccountId: 120 }, [repo(60)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    await upsertFindings(database, repoId, scan, [{ ...finding("fp-ev"), trust: "unconfirmed", sources: ["hunter"], mitigations: "" }]);
+    await upsertFindings(database, repoId, scan, [{ ...finding("fp-ev"), trust: "corroborated", sources: ["missing_check"], mitigations: "Rate limited." }]);
+    const [row] = await database.$client<Array<{ trust: string; sources: string[]; mitigations: string }>>`select trust, sources, mitigations from findings where repo_id = ${repoId} and fingerprint = 'fp-ev'`;
+    expect(row).toEqual({ trust: "corroborated", sources: ["hunter", "missing_check"], mitigations: "Rate limited." });
+  });
+
+  it("returns a repo's resolved findings with the team's verdict, and nothing open", async () => {
+    const { org, repos } = await upsertInstallation(database, 9021, { ...account, githubAccountId: 121 }, [repo(61)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const { ids } = await upsertFindings(database, repoId, scan, [finding("h-fixed"), finding("h-fp"), finding("h-open")]);
+    await markFixed(database, [ids[0]!], scan.id);
+    await database.$client`update findings set status = 'dismissed', dismiss_reason = 'false_positive' where id = ${ids[1]!}`;
+
+    const history = await repoHistory(database, repoId);
+    expect(history.map((h) => h.outcome).sort()).toEqual(["false_positive", "fixed"]);
+    expect(history[0]).toMatchObject({ title: "SQL injection", category: "sql_injection", at: "a.ts:3" });
   });
 
   it("stores the threat model per repo and bumps its version", async () => {

@@ -291,3 +291,48 @@ describe("runScan with an entry-point classifier", () => {
     expect(events.some((e) => e.type === "warning")).toBe(false);
   });
 });
+
+describe("runScan learns from the team's verdicts on this repo", () => {
+  const history = {
+    findings: [
+      { title: "IDOR on invoice download", category: "broken_access_control", at: "src/invoices.ts:40", outcome: "fixed" as const },
+      { title: "Open redirect after login", category: "open_redirect", at: "src/login.ts:2", outcome: "false_positive" as const },
+    ],
+  };
+
+  test("fixed issues seed variant hunting; false-positive verdicts ground the skeptic", async () => {
+    const systems: Record<string, string[]> = { hunt: [], skeptic: [] };
+    const base = fakeClient();
+    const client: LlmClient = {
+      ...base,
+      chat: (request) => {
+        const system = request.messages.find((m) => m.role === "system")?.content;
+        const isReview = JSON.stringify(request.tools ?? []).includes("submit_verdict");
+        if (typeof system === "string" && (request.role === "hunt" || (request.role === "skeptic" && isReview))) systems[request.role]!.push(system);
+        return base.chat(request);
+      },
+    };
+    const report = await runScan({ client, indexer: fakeIndexer(), history, limits: { maxHunters: 3 } });
+    expect(report.findings).toHaveLength(1);
+    const hunt = systems.hunt!.join("\n");
+    const skeptic = systems.skeptic!.join("\n");
+    expect(hunt).toContain("IDOR on invoice download");
+    expect(hunt).toContain("variants");
+    expect(hunt).not.toContain("Open redirect after login"); // false positives don't steer hunters
+    expect(skeptic).toContain("Open redirect after login");
+    expect(skeptic).not.toContain("IDOR on invoice download");
+  });
+
+  test("with no history the prompts carry no history section", async () => {
+    const systems: string[] = [];
+    const base = fakeClient();
+    const client: LlmClient = { ...base, chat: (request) => (systems.push(String(request.messages[0]?.content ?? "")), base.chat(request)) };
+    await runScan({ client, indexer: fakeIndexer(), limits: { maxHunters: 3 } });
+    expect(systems.join("\n")).not.toContain("this team");
+  });
+
+  test("findings are attributed to the signal that raised them", async () => {
+    const report = await runScan({ client: fakeClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 } });
+    expect(report.findings[0]!.sources).toEqual(["hunter"]);
+  });
+});
