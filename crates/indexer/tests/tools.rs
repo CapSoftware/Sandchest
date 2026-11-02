@@ -131,5 +131,95 @@ fn searches_with_globs() {
     let found = call("search", json!({ "pattern": "SELECT", "glob": "*.py" }));
     assert_eq!(found["matches"].as_array().unwrap().len(), 0);
     let found = call("search", json!({ "pattern": "select \\*", "ignoreCase": true }));
-    assert_eq!(found["filesWithMatches"], 3);
+    // The JS, Go and Java fixtures, plus the Rust one's built query.
+    assert_eq!(found["filesWithMatches"], 4);
+}
+
+fn routes_of(framework: &str) -> Vec<(String, String, String)> {
+    call("routes", json!({ "limit": 1000 }))["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["framework"] == framework)
+        .map(|r| {
+            let handlers = r["handlers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| h.as_str().unwrap().split(" @ ").next().unwrap().to_owned())
+                .collect::<Vec<_>>();
+            (r["method"].as_str().unwrap().to_owned(), r["path"].as_str().unwrap().to_owned(), handlers.join(","))
+        })
+        .collect()
+}
+
+#[test]
+fn rust_routes_from_axum_and_actix() {
+    let axum = routes_of("axum");
+    assert!(
+        axum.iter().any(|(m, p, h)| m == "GET,POST" && p == "/items" && h.contains("list_items") && h.contains("create_item")),
+        "{axum:?}"
+    );
+    assert!(
+        axum.iter().any(|(m, p, h)| m == "GET" && p == "/run" && h == "GET /run"),
+        "closure handlers are named after their route: {axum:?}"
+    );
+    let actix = routes_of("actix");
+    assert!(actix.iter().any(|(m, p, h)| m == "GET" && p == "/files/{name}" && h == "read_named"), "{actix:?}");
+}
+
+#[test]
+fn ruby_routes_from_rails_controllers_and_sinatra() {
+    let rails = routes_of("rails");
+    let paths: Vec<&str> = rails.iter().map(|(_, p, _)| p.as_str()).collect();
+    for expected in ["/users#index", "/users#show", "/users#export", "/admin/reports#destroy"] {
+        assert!(paths.contains(&expected), "missing {expected} in {paths:?}");
+    }
+    assert!(!paths.iter().any(|p| p.ends_with("#user_params")), "private helpers are not actions: {paths:?}");
+    assert!(rails.iter().any(|(m, p, _)| m == "DELETE" && p == "/admin/reports#destroy"));
+    let sinatra = routes_of("sinatra");
+    assert!(sinatra.iter().any(|(m, p, _)| m == "GET" && p == "/hello/:name"), "{sinatra:?}");
+}
+
+#[test]
+fn rust_and_ruby_sinks_are_found_and_reachable() {
+    let sinks = call("sinks", json!({ "limit": 500 }));
+    let found: Vec<String> = sinks["sinks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["reachable"] == true)
+        .map(|s| format!("{} {} {}", s["kind"].as_str().unwrap(), s["input"].as_str().unwrap(), s["at"].as_str().unwrap()))
+        .collect();
+    for expected in [
+        "sql built rails/app/controllers/users_controller.rb:5",
+        "command built rails/app/controllers/users_controller.rb:13",
+        "redirect variable rails/app/controllers/admin/reports_controller.rb:4",
+        "command built rs/src/main.rs:15",
+        "path built rs/src/actix.rs:6",
+        "sql variable rs/src/main.rs:25",
+        // Reached across files through `require_relative`.
+        "command built sinatra/helpers.rb:2",
+    ] {
+        assert!(found.contains(&expected.to_owned()), "missing reachable sink {expected} in {found:?}");
+    }
+}
+
+#[test]
+fn traces_a_rust_route_through_helpers_to_its_sink() {
+    let trace = call("trace", json!({ "from": "GET /items", "to": "sql" }));
+    let paths: Vec<String> = trace["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["hops"].as_array().unwrap().iter().map(|h| h["symbol"].as_str().unwrap().to_owned()).collect::<Vec<_>>().join(" > "))
+        .collect();
+    assert!(paths.iter().any(|p| p.starts_with("list_items > load_items > db_query")), "{paths:?}");
+}
+
+#[test]
+fn counts_rust_and_ruby_as_languages() {
+    let overview = call("overview", json!({}));
+    let languages: Vec<&str> = overview["languages"].as_array().unwrap().iter().map(|l| l["language"].as_str().unwrap()).collect();
+    assert!(languages.contains(&"rust") && languages.contains(&"ruby"), "{languages:?}");
 }

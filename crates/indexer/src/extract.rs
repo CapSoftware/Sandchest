@@ -16,6 +16,8 @@ static SQL_STATEMENT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::n
 
 /// Longest callee text kept; longer chains keep their last segments.
 const MAX_CALLEE: usize = 120;
+/// axum method-routing constructors and actix `web::` verbs.
+const RUST_VERBS: &[&str] = &["get", "post", "put", "patch", "delete", "head", "options", "trace", "any"];
 const HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "head", "options", "all", "any", "use", "handle", "handlefunc"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -236,6 +238,11 @@ impl<'a> Extractor<'a> {
                 return None;
             }
         }
+        if self.family == Family::Rust && node.kind() == "impl_item" {
+            // `impl<T> Trait for path::Type<T>`: methods belong to `Type`.
+            let ty = normalize_callee(self.text(node.child_by_field_name("type")?));
+            return Some(last_segment(&ty).to_owned()).filter(|name| !name.is_empty());
+        }
         node.child_by_field_name("name").map(|name| self.text(name).to_owned())
     }
 
@@ -284,6 +291,9 @@ impl<'a> Extractor<'a> {
         if let Some(args) = args {
             self.route_from_call(&callee, args, line);
         }
+        if self.family == Family::Ruby {
+            self.ruby_block_route(node, &callee, args, line);
+        }
 
         let args_text = args.map(|args| self.text(args)).unwrap_or("");
         let target = self.aliases.get(&callee).unwrap_or(&callee);
@@ -324,6 +334,15 @@ impl<'a> Extractor<'a> {
             (Family::Php, "require_expression") => "require".to_owned(),
             (Family::Php, "require_once_expression") => "require_once".to_owned(),
             (Family::Php, "shell_command_expression") => "shell_exec".to_owned(),
+            (Family::Ruby, "call") => {
+                let method = self.text(node.child_by_field_name("method")?);
+                match node.child_by_field_name("receiver") {
+                    Some(receiver) => format!("{}.{method}", self.text(receiver)),
+                    None => method.to_owned(),
+                }
+            }
+            (Family::Ruby, "subshell") => "subshell".to_owned(),
+            (Family::Rust, "macro_invocation") => self.text(node.child_by_field_name("macro")?).to_owned(),
             _ => self.text(node.child_by_field_name("function")?).to_owned(),
         };
         let callee = normalize_callee(&raw);
@@ -333,7 +352,7 @@ impl<'a> Extractor<'a> {
     fn arguments(&self, node: Node<'a>) -> Option<Node<'a>> {
         match node.kind() {
             "include_expression" | "include_once_expression" | "require_expression" | "require_once_expression" => node.named_child(0),
-            "shell_command_expression" => Some(node),
+            "shell_command_expression" | "subshell" => Some(node),
             _ => node.child_by_field_name("arguments"),
         }
     }
@@ -358,6 +377,8 @@ impl<'a> Extractor<'a> {
         match arg.kind() {
             "argument" | "parenthesized_expression" => arg.named_child(arg.named_child_count().saturating_sub(1) as u32).unwrap_or(arg),
             "keyword_argument" => arg.child_by_field_name("value").unwrap_or(arg),
+            // Rust `&value`.
+            "reference_expression" => arg.child_by_field_name("value").map(|value| self.unwrap_argument(value)).unwrap_or(arg),
             _ => arg,
         }
     }
@@ -374,7 +395,8 @@ impl<'a> Extractor<'a> {
             | "encapsed_string"
             | "concatenated_string"
             | "heredoc"
-            | "shell_command_expression" => true,
+            | "shell_command_expression"
+            | "subshell" => true,
             _ if self.family.is_call(node.kind()) => self.callee(node).is_some_and(|callee| {
                 let last = callee.rsplit('.').next().unwrap_or(&callee);
                 matches!(last, "format" | "sprintf" | "Sprintf" | "concat" | "join" | "replace" | "printf" | "f")
@@ -396,8 +418,17 @@ impl<'a> Extractor<'a> {
         let mut depth = 0;
         loop {
             let kind = cursor.node().kind();
-            if matches!(kind, "identifier" | "variable_name" | "this" | "self" | "shorthand_property_identifier" | "dynamic_variable_name")
-                || self.family.is_interpolation(kind)
+            if matches!(
+                kind,
+                "identifier"
+                    | "variable_name"
+                    | "this"
+                    | "self"
+                    | "shorthand_property_identifier"
+                    | "dynamic_variable_name"
+                    | "instance_variable"
+                    | "class_variable"
+            ) || self.family.is_interpolation(kind)
             {
                 return true;
             }
@@ -432,6 +463,12 @@ impl<'a> Extractor<'a> {
             Some((receiver, method)) => (receiver, method),
             None => ("", callee),
         };
+        if self.family == Family::Rust {
+            if !receiver.is_empty() && method == "route" {
+                self.rust_route(args, line);
+            }
+            return;
+        }
         let (framework, method) = match self.family {
             Family::Js | Family::Go if !receiver.is_empty() && HTTP_METHODS.contains(&method.to_ascii_lowercase().as_str()) => {
                 // `handle`/`handleFunc` only exist on routers; verbs also exist on HTTP clients.
@@ -493,10 +530,83 @@ impl<'a> Extractor<'a> {
         }
     }
 
+    /// axum `.route("/x", get(list).post(create))` and actix `.route("/x", web::post().to(handler))`:
+    /// the verbs and handlers are calls nested in the second argument.
+    fn rust_route<'t>(&mut self, args: Node<'t>, line: u32) {
+        let mut cursor = args.walk();
+        let values: Vec<Node<'t>> = args.named_children(&mut cursor).map(unwrap_reference).collect();
+        if values.len() < 2 {
+            return;
+        }
+        let Some(path) = self.string_value(values[0]) else { return };
+        if !path.starts_with('/') {
+            return;
+        }
+        let mut methods: Vec<String> = Vec::new();
+        let mut handlers: Vec<String> = Vec::new();
+        let mut actix = false;
+        let mut stack: Vec<Node<'t>> = values[1..].to_vec();
+        while let Some(node) = stack.pop() {
+            if node.kind() == "call_expression"
+                && let Some(callee) = self.callee(node)
+            {
+                let last = last_segment(&callee).to_ascii_lowercase();
+                actix |= callee.starts_with("web.");
+                let verb = RUST_VERBS.contains(&last.as_str());
+                if verb {
+                    methods.push(if last == "any" { "ANY".to_owned() } else { last.to_ascii_uppercase() });
+                }
+                if (verb || last == "to")
+                    && let Some(args) = node.child_by_field_name("arguments")
+                {
+                    let mut cursor = args.walk();
+                    let inner: Vec<Node<'t>> = args.named_children(&mut cursor).map(unwrap_reference).collect();
+                    for arg in inner {
+                        if self.family.is_lambda(arg.kind()) {
+                            let name = format!("{} {path}", methods.last().map_or("ANY", String::as_str));
+                            self.handler_names.insert(arg.id(), name.clone());
+                            handlers.push(name);
+                        } else if matches!(arg.kind(), "identifier" | "scoped_identifier" | "field_expression") {
+                            handlers.push(last_segment(&normalize_callee(self.text(arg))).to_owned());
+                        }
+                    }
+                }
+            }
+            let mut cursor = node.walk();
+            stack.extend(node.named_children(&mut cursor));
+        }
+        methods.sort();
+        methods.dedup();
+        let method = if methods.is_empty() || methods.iter().any(|m| m == "ANY") { "ANY".to_owned() } else { methods.join(",") };
+        handlers.dedup();
+        self.facts.routes.push(Route { method, path, line, handlers, framework: if actix { "actix" } else { "axum" } });
+    }
+
+    /// Sinatra-style `get '/path' do ... end`: the block is the handler.
+    fn ruby_block_route(&mut self, node: Node, callee: &str, args: Option<Node>, line: u32) {
+        let verb = callee.to_ascii_lowercase();
+        if callee.contains('.') || !matches!(verb.as_str(), "get" | "post" | "put" | "patch" | "delete" | "head" | "options") {
+            return;
+        }
+        let Some(block) = node.child_by_field_name("block") else { return };
+        let Some(path) = args.and_then(|args| self.first_string_arg(args)) else { return };
+        if !path.starts_with('/') {
+            return;
+        }
+        let method = verb.to_ascii_uppercase();
+        let name = format!("{method} {path}");
+        self.handler_names.insert(block.id(), name.clone());
+        self.facts.routes.push(Route { method, path, line, handlers: vec![name], framework: "sinatra" });
+    }
+
     /// Routes declared by decorators or annotations on a function.
     fn decorator_routes(&mut self, node: Node, name: &str, prefix: Option<&str>) {
         for decorator in self.decorators(node) {
             let (callee, args) = match decorator.kind() {
+                // Rust `#[get("/x")]`: the path is the first child, the arguments a token tree.
+                "attribute" if self.family == Family::Rust => {
+                    (decorator.named_child(0).map(|path| normalize_callee(self.text(path))), decorator.child_by_field_name("arguments"))
+                }
                 "call" | "call_expression" => (self.callee(decorator), self.arguments(decorator)),
                 "annotation" => {
                     (decorator.child_by_field_name("name").map(|n| self.text(n).to_owned()), decorator.child_by_field_name("arguments"))
@@ -526,6 +636,13 @@ impl<'a> Extractor<'a> {
                 Family::Js => match last {
                     "Get" | "Post" | "Put" | "Patch" | "Delete" | "All" | "Head" | "Options" => {
                         (last.to_ascii_uppercase(), Some(first_string.unwrap_or_default()), "nestjs")
+                    }
+                    _ => continue,
+                },
+                Family::Rust => match last {
+                    "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "route" => {
+                        let framework = if self.import_specs.iter().any(|spec| spec.starts_with("rocket")) { "rocket" } else { "actix" };
+                        (if last == "route" { "ANY".to_owned() } else { last.to_ascii_uppercase() }, first_string, framework)
                     }
                     _ => continue,
                 },
@@ -565,6 +682,17 @@ impl<'a> Extractor<'a> {
                 }
                 let mut cursor = node.walk();
                 found.extend(node.children_by_field_name("decorator", &mut cursor).filter_map(|d| d.named_child(0)));
+            }
+            Family::Rust => {
+                let mut sibling = node.prev_named_sibling();
+                while let Some(item) = sibling {
+                    match item.kind() {
+                        "attribute_item" => found.extend(item.named_child(0)),
+                        "line_comment" | "block_comment" => {}
+                        _ => break,
+                    }
+                    sibling = item.prev_named_sibling();
+                }
             }
             Family::Java => {
                 let mut cursor = node.walk();
@@ -649,6 +777,10 @@ impl<'a> Extractor<'a> {
                     }
                 }
             }
+            Family::Ruby => {
+                let routes = self.rails_actions(path);
+                self.facts.routes.extend(routes);
+            }
             Family::Php => {
                 const INPUTS: &[&str] = &["$_GET", "$_POST", "$_REQUEST", "$_COOKIE", "$_FILES", "php://input", "$_SERVER['QUERY_STRING']"];
                 if let Some(offset) = INPUTS.iter().filter_map(|input| self.src.find(input)).min() {
@@ -664,6 +796,53 @@ impl<'a> Extractor<'a> {
             }
             _ => {}
         }
+    }
+
+    /// Rails: every public instance method of a controller is an action the router can reach.
+    /// Convention, not `config/routes.rb`, so it holds however the routes are drawn.
+    fn rails_actions(&self, path: &str) -> Vec<Route> {
+        let Some(controller) = path.split_once("app/controllers/").and_then(|(_, rest)| rest.strip_suffix("_controller.rb")) else {
+            return Vec::new();
+        };
+        let mut routes = Vec::new();
+        for symbol in &self.facts.symbols {
+            if symbol.kind != SymbolKind::Method || !symbol.container.as_deref().is_some_and(|c| c.ends_with("Controller")) {
+                continue;
+            }
+            let own = self.line_text(symbol.line).trim_start();
+            if own.starts_with("def self.") || own.starts_with("private") || own.starts_with("protected") {
+                continue;
+            }
+            let class = self.facts.symbols.iter().find(|c| {
+                c.kind == SymbolKind::Class
+                    && Some(c.name.as_str()) == symbol.container.as_deref()
+                    && c.line <= symbol.line
+                    && symbol.line <= c.end_line
+            });
+            let start = class.map_or(1, |c| c.line);
+            let hidden = (start..symbol.line).any(|line| {
+                let text = self.line_text(line).trim();
+                matches!(text, "private" | "protected") || text == format!("private :{}", symbol.name)
+            });
+            if hidden {
+                continue;
+            }
+            let method = match symbol.name.as_str() {
+                "index" | "show" | "new" | "edit" => "GET",
+                "create" => "POST",
+                "update" => "PATCH",
+                "destroy" => "DELETE",
+                _ => "ANY",
+            };
+            routes.push(Route {
+                method: method.to_owned(),
+                path: format!("/{controller}#{}", symbol.name),
+                line: symbol.line,
+                handlers: vec![symbol.name.clone()],
+                framework: "rails",
+            });
+        }
+        routes
     }
 
     fn line_text(&self, line: u32) -> &'a str {
@@ -761,6 +940,23 @@ impl<'a> Extractor<'a> {
                     self.facts.imports.push(Import { spec: text.to_owned(), line: line_of(node) });
                     descend = false;
                 }
+                (Family::Rust, "use_declaration") => {
+                    if let Some(argument) = node.child_by_field_name("argument") {
+                        self.facts.imports.push(Import { spec: self.text(argument).to_owned(), line: line_of(node) });
+                    }
+                    descend = false;
+                }
+                (Family::Ruby, "call") => {
+                    let method = node.child_by_field_name("method").map(|m| self.text(m));
+                    if node.child_by_field_name("receiver").is_none() && matches!(method, Some("require" | "require_relative" | "load")) {
+                        let first = node.child_by_field_name("arguments").and_then(|args| args.named_child(0));
+                        if let Some(spec) = first.and_then(|arg| self.string_value(arg)) {
+                            let relative = method == Some("require_relative") && !spec.starts_with('.');
+                            let spec = if relative { format!("./{spec}") } else { spec };
+                            self.facts.imports.push(Import { spec, line: line_of(node) });
+                        }
+                    }
+                }
                 (Family::Php, "namespace_use_clause") => {
                     let text = self.text(node).split_whitespace().next().unwrap_or("").trim_start_matches('\\');
                     self.facts.imports.push(Import { spec: text.to_owned(), line: line_of(node) });
@@ -805,6 +1001,14 @@ impl<'a> Extractor<'a> {
     }
 }
 
+/// Rust `&value` → `value`.
+fn unwrap_reference(node: Node) -> Node {
+    match node.kind() {
+        "reference_expression" => node.child_by_field_name("value").map(unwrap_reference).unwrap_or(node),
+        _ => node,
+    }
+}
+
 fn line_of(node: Node) -> u32 {
     node.start_position().row as u32 + 1
 }
@@ -827,6 +1031,9 @@ fn is_collection(kind: &str) -> bool {
             | "array_initializer"
             | "list_splat"
             | "dictionary_splat"
+            | "array_expression"
+            | "tuple_expression"
+            | "hash"
     )
 }
 

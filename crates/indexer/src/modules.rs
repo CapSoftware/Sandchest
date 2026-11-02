@@ -87,7 +87,12 @@ impl<'a> Modules<'a> {
                 let candidates = self.java_files.get(format!("{class}.java").as_str()).into_iter().flatten();
                 candidates.copied().filter(|&id| store.files[id as usize].path.ends_with(&path)).collect()
             }
-            Family::Php => Vec::new(),
+            Family::Ruby => match spec.starts_with('.').then(|| join(dir, spec)).flatten() {
+                Some(base) => first_existing(store, &[base], &[".rb", ""]),
+                None => Vec::new(),
+            },
+            // Rust paths name modules, not files; calls fall back to name resolution.
+            Family::Php | Family::Rust => Vec::new(),
         }
     }
 }

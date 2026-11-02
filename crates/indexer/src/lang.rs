@@ -13,9 +13,45 @@ pub enum Lang {
     Go,
     Java,
     Php,
+    Rust,
+    Ruby,
 }
 
 impl Lang {
+    /// The language of a source file we recognise as code but cannot parse yet. Such files
+    /// still count as hand-written source — attack surface, lines of code, test detection —
+    /// so a repository in an unparsed language is sized and scoped correctly; they just
+    /// contribute no symbols, calls, routes or sinks.
+    pub fn unparsed_code(path: &str) -> Option<&'static str> {
+        let ext = path.rsplit_once('.')?.1;
+        Some(match ext {
+            "cs" => "csharp",
+            "kt" | "kts" => "kotlin",
+            "swift" => "swift",
+            "scala" => "scala",
+            "c" | "h" => "c",
+            "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => "cpp",
+            "m" | "mm" => "objective-c",
+            "ex" | "exs" => "elixir",
+            "erl" | "hrl" => "erlang",
+            "dart" => "dart",
+            "lua" => "lua",
+            "pl" | "pm" => "perl",
+            "groovy" => "groovy",
+            "clj" | "cljs" => "clojure",
+            "hs" => "haskell",
+            "fs" => "fsharp",
+            "vb" => "visual-basic",
+            "zig" => "zig",
+            "sol" => "solidity",
+            "cr" => "crystal",
+            "jl" => "julia",
+            "vue" => "vue",
+            "svelte" => "svelte",
+            _ => return None,
+        })
+    }
+
     pub fn from_path(path: &str) -> Option<Lang> {
         let ext = path.rsplit_once('.')?.1;
         Some(match ext {
@@ -26,6 +62,8 @@ impl Lang {
             "go" => Lang::Go,
             "java" => Lang::Java,
             "php" => Lang::Php,
+            "rs" => Lang::Rust,
+            "rb" | "rake" => Lang::Ruby,
             _ => return None,
         })
     }
@@ -39,6 +77,8 @@ impl Lang {
             Lang::Go => tree_sitter_go::LANGUAGE.into(),
             Lang::Java => tree_sitter_java::LANGUAGE.into(),
             Lang::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Lang::Ruby => tree_sitter_ruby::LANGUAGE.into(),
         }
     }
 
@@ -50,6 +90,8 @@ impl Lang {
             Lang::Go => Family::Go,
             Lang::Java => Family::Java,
             Lang::Php => Family::Php,
+            Lang::Rust => Family::Rust,
+            Lang::Ruby => Family::Ruby,
         }
     }
 
@@ -62,6 +104,8 @@ impl Lang {
             Lang::Go => "go",
             Lang::Java => "java",
             Lang::Php => "php",
+            Lang::Rust => "rust",
+            Lang::Ruby => "ruby",
         }
     }
 }
@@ -73,6 +117,8 @@ pub enum Family {
     Go,
     Java,
     Php,
+    Rust,
+    Ruby,
 }
 
 impl Family {
@@ -84,6 +130,8 @@ impl Family {
             Family::Go => matches!(kind, "function_declaration" | "method_declaration"),
             Family::Java => matches!(kind, "method_declaration" | "constructor_declaration"),
             Family::Php => matches!(kind, "function_definition" | "method_declaration"),
+            Family::Rust => kind == "function_item",
+            Family::Ruby => matches!(kind, "method" | "singleton_method"),
         }
     }
 
@@ -95,6 +143,8 @@ impl Family {
             Family::Go => kind == "func_literal",
             Family::Java => kind == "lambda_expression",
             Family::Php => matches!(kind, "anonymous_function" | "arrow_function" | "anonymous_function_creation_expression"),
+            Family::Rust => kind == "closure_expression",
+            Family::Ruby => matches!(kind, "do_block" | "block" | "lambda"),
         }
     }
 
@@ -105,6 +155,9 @@ impl Family {
             Family::Go => kind == "type_spec",
             Family::Java => matches!(kind, "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"),
             Family::Php => matches!(kind, "class_declaration" | "trait_declaration" | "interface_declaration"),
+            // `impl` blocks give methods their type as container; the type items themselves are classes too.
+            Family::Rust => matches!(kind, "impl_item" | "trait_item" | "struct_item" | "enum_item"),
+            Family::Ruby => matches!(kind, "class" | "module"),
         }
     }
 
@@ -127,6 +180,10 @@ impl Family {
                     | "require_once_expression"
                     | "shell_command_expression"
             ),
+            // Macros (`format!`, `sqlx::query!`) behave like calls for building inputs and the call graph.
+            Family::Rust => matches!(kind, "call_expression" | "macro_invocation"),
+            // Backticks run a shell command.
+            Family::Ruby => matches!(kind, "call" | "subshell"),
         }
     }
 

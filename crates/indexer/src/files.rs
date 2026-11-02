@@ -209,7 +209,8 @@ fn classify(path: &str, lang: Option<Lang>, text: &str) -> Class {
     {
         return Class::Generated;
     }
-    if lang.is_none() {
+    // Code we cannot parse yet is still hand-written source: count it, scope it, detect its tests.
+    if lang.is_none() && Lang::unparsed_code(path).is_none() {
         return Class::Other;
     }
     let head = &text[..floor_char_boundary(text, SNIFF_BYTES.min(text.len()))];

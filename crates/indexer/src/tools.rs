@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use crate::extract::SymbolKind;
 use crate::files::{Class, Store};
 use crate::index::{Index, SinkAt};
+use crate::lang::Lang;
 use crate::search;
 use crate::sinks::{Input, SinkKind};
 
@@ -137,7 +138,7 @@ fn overview(state: &State) -> Value {
                 let lines = file.loc();
                 source_files += 1;
                 loc += lines;
-                let lang = file.lang.map_or("other", |lang| lang.name());
+                let lang = file.lang.map(|lang| lang.name()).or_else(|| Lang::unparsed_code(&file.path)).unwrap_or("other");
                 let entry = languages.entry(lang).or_default();
                 entry.0 += 1;
                 entry.1 += lines;
