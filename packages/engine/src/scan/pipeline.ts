@@ -186,9 +186,19 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     });
     if (recovery) {
       classifiedHandlers = recovery.handlers;
-      if (recovery.recovered.length > 0) {
-        routes = [...routes, ...recovery.recovered];
-        emit({ type: "progress", message: `Recovered ${recovery.recovered.length} entry point${recovery.recovered.length === 1 ? "" : "s"} the route rules missed.` });
+      const { candidates, classified, failures, refusals } = recovery.stats;
+      if (recovery.recovered.length > 0) routes = [...routes, ...recovery.recovered];
+      if (candidates > 0) {
+        emit({
+          type: "progress",
+          message: `Classified ${classified} definitions; recovered ${recovery.recovered.length} entry point${recovery.recovered.length === 1 ? "" : "s"} the route rules missed.`,
+        });
+      }
+      // Individual failures are isolated so they never sink the scan — but if most calls fail the
+      // classifier is misconfigured or down, and that must be visible rather than look like "nothing found".
+      const lost = failures + refusals;
+      if (lost > 0 && lost >= classified) {
+        emit({ type: "warning", message: `Entry-point classifier failed on ${lost} of ${lost + classified} calls; check LLM_CLASSIFIER_* configuration.` });
       }
     }
   }

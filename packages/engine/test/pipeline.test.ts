@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { IndexerError, type IndexerClient } from "../src/indexer";
 import { LlmError, LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient, type ToolCall } from "../src/llm";
 import { runScan, type ScanEvent, type ThreatModel } from "../src/scan";
+import type { Classifier } from "../src/llm/classifier";
 
 const FILE = ["export function login(req) {", "  const email = req.body.email;", "  return db.query(\"SELECT * FROM users WHERE email = '\" + email + \"'\");", "}"];
 
@@ -251,5 +252,42 @@ describe("PR review", () => {
     expect(report.findings).toEqual([]);
     expect(report.review?.files).toBe(0);
     expect(report.usage.total.requests).toBe(0);
+  });
+});
+
+describe("runScan with an entry-point classifier", () => {
+  const definitions = () => ({
+    definitions: [
+      { name: "login", kind: "function", file: "src/login.ts", line: 1, endLine: 4 },
+      { name: "Admin.post", kind: "method", file: "src/admin.ts", line: 1, endLine: 4 },
+    ],
+    total: 2,
+  });
+
+  test("a misconfigured classifier warns loudly and never fails the scan", async () => {
+    const events: ScanEvent[] = [];
+    const broken: Classifier = { model: "x", ask: async () => Promise.reject(new Error("classifier 401: bad key")) };
+    const report = await runScan({ client: fakeClient(), classifier: broken, indexer: fakeIndexer({ definitions }), limits: { maxHunters: 3 }, onEvent: (e) => events.push(e) });
+    expect(report.findings).toHaveLength(1);
+    expect(events.some((e) => e.type === "warning" && e.message.includes("LLM_CLASSIFIER_"))).toBe(true);
+  });
+
+  test("a working classifier recovers missed handlers and reports it", async () => {
+    const events: ScanEvent[] = [];
+    const works: Classifier = {
+      model: "x",
+      ask: async (state) => ({
+        answers: {
+          is_http_handler: { type: "noul", noul: state.includes("Admin.post") || state.includes("# login") ? 0.97 : 0.02 },
+          enforces_authz: { type: "noul", noul: 0.9 },
+          auth_level: { type: "choice", choice: "authenticated", confidence: 0.9, probabilities: {} },
+        },
+        inputTokens: 10,
+      }),
+    };
+    const report = await runScan({ client: fakeClient(), classifier: works, indexer: fakeIndexer({ definitions }), limits: { maxHunters: 3 }, onEvent: (e) => events.push(e) });
+    expect(report.findings).toHaveLength(1);
+    expect(events.some((e) => e.type === "progress" && /recovered 1 entry point /.test(e.message))).toBe(true);
+    expect(events.some((e) => e.type === "warning")).toBe(false);
   });
 });
