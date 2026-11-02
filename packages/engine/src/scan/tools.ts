@@ -8,6 +8,7 @@ import type { IndexerClient } from "../indexer/client";
 import type { Signals } from "./leads";
 import { defineTool, type Tool } from "../llm";
 import type { Lead } from "./schema";
+import { findDefinitions, librarySource } from "./library";
 
 export interface AgentTool<Args = unknown> {
   tool: Tool<Args>;
@@ -123,7 +124,17 @@ const leads = defineTool({
   args: z.object({ kind: z.enum(["secret", "vulnerable_dependency", "injection_marker", "sink"]).optional() }),
 });
 
-/** The exploration tools every agent gets. */
+const library = defineTool({
+  name: "library_source",
+  description:
+    "Read a third-party dependency's real source at the exact version this repository installs, and return where a function, method or class is defined. Use it whenever an attack depends on how a library behaves — what it returns, its defaults, whether it validates, verifies or escapes — instead of relying on memory: APIs change between versions.",
+  args: z.object({
+    package: z.string().min(1).describe("Package name as in the lockfile, e.g. 'jsonwebtoken', 'totp-rs', 'golang.org/x/crypto', 'com.auth0:java-jwt'"),
+    symbol: z.string().min(1).describe("Function, method or class to find, optionally qualified: 'verify', 'Totp.check_current', 'JWT::decode'"),
+  }),
+});
+
+/** The exploration tools every agent gets. *//** The exploration tools every agent gets. */
 export function repoTools(ctx: RepoToolContext): AgentTool[] {
   const call = <T>(tool: string, args: object, signal?: AbortSignal) => ctx.indexer.call<T>(tool, stripUndefined(args), signal);
 
@@ -209,6 +220,25 @@ export function repoTools(ctx: RepoToolContext): AgentTool[] {
         });
       if (rows.length === 0) return args.vulnerableOnly ? "No dependencies with known vulnerabilities." : "No dependencies found.";
       return ctx.wrap(rows.join("\n"));
+    }),
+    agentTool(library, async (args, signal) => {
+      const { dependencies } = await call<{ dependencies: Dependency[] }>("deps", {}, signal);
+      const wanted = args.package.trim().toLowerCase();
+      const matches = dependencies.filter((dep) => dep.name.toLowerCase() === wanted && dep.version);
+      if (matches.length === 0) return `${args.package} is not a dependency in this repository's lockfiles, so its installed version is unknown.`;
+      // Prefer what the code actually imports, then direct dependencies.
+      const dep = matches.sort((a, b) => Number(b.reachability === "imported") - Number(a.reachability === "imported") || Number(b.direct) - Number(a.direct))[0]!;
+      const version = dep.version.replace(/^[=^~v]+(?=\d)/, "");
+      let files;
+      try {
+        files = await librarySource({ ecosystem: dep.ecosystem, name: dep.name, version: dep.ecosystem === "Go" ? dep.version : version });
+      } catch (error) {
+        return `Could not fetch ${dep.name}@${dep.version} from its registry: ${(error as Error).message}. Judge from the repository's own code.`;
+      }
+      if (files.length === 0) return `No readable source published for ${dep.ecosystem} ${dep.name}@${dep.version}.`;
+      const found = findDefinitions(files, args.symbol);
+      if (found.length === 0) return `${args.symbol} is not defined in ${dep.name}@${dep.version} (${files.length} source files searched). Try the unqualified name or the module that exports it.`;
+      return ctx.wrap(`${dep.ecosystem} ${dep.name}@${dep.version} — where ${args.symbol} is defined:\n\n${found.join("\n\n")}`);
     }),
     agentTool(leads, async (args) => {
       const all = ctx.signals.leads.filter((lead) => !args.kind || lead.kind === args.kind);

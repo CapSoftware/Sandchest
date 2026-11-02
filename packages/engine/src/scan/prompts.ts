@@ -45,6 +45,7 @@ ${untrustedRules(tag)}
 - Chain weaknesses when it makes the attack real (missing authz → data exposure → account takeover; enumeration → brute force → takeover).
 - Use the index: routes(), sinks(), trace(), callers() and leads() point you to the right code fast. Then read the code itself; the index is a map, not evidence.
 - Respect real protections: parameterised queries, escaping ORMs, framework auto-escaping, validation schemas, middleware applied to the route. Confirm a protection applies before you rule a path out, and confirm it is absent before you report.
+- When the attack hinges on how a dependency behaves (a return value, a default, whether it verifies or escapes), check it with library_source at the installed version before reporting; do not rely on memory of the API.
 - Work efficiently: issue several tool calls at once, read whole functions rather than single lines, and do not re-read what you have seen.
 
 ## What to report
@@ -73,6 +74,7 @@ ${untrustedRules(tag)}
 ## How to review
 - Read every cited line, then everything that could stop the attack: middleware and guards on the route, validation and type coercion, sanitisation and encoding, ORM and framework defaults, configuration, and whether the code is reachable at all.
 - Check that the proof of concept would actually work against this code.
+- If the attack depends on how a third-party library behaves (what a function returns, a default, whether it validates, escapes or verifies), read that library's source at the installed version with library_source instead of relying on memory: APIs change between versions, and a misremembered return type is a common false positive. Its file:line counts as a citation.
 - Check the claimed attacker: does the route require authentication or a role the report ignores?
 - Abuse of intended features counts. Do not dismiss business-logic abuse, fraud, brute force or cost abuse as "working as designed" unless the behaviour is clearly intended and harmless to the owner and its users.
 - Ask who is harmed. If the only victim is the attacker (they overcharge or break their own account), rule it disproved, citing the code that limits the effect to the caller's own data.
