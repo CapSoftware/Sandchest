@@ -7,7 +7,8 @@
     "evals": "bun --env-file=../.env.local src/run.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "reverify": "bun --env-file=../.env.local src/reverify.ts"
+    "reverify": "bun --env-file=../.env.local src/reverify.ts",
+    "fpcheck": "bun --env-file=../.env.local src/fpcheck.ts"
   },
   "dependencies": {
     "@sandchest/engine": "workspace:*",
