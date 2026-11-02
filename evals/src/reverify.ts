@@ -30,6 +30,7 @@ const { values } = parseArgs({
     private: { type: "boolean", default: false },
     severities: { type: "string", default: "critical,high" },
     ground: { type: "boolean", default: false },
+    repeat: { type: "string", default: "1" },
   },
 });
 
@@ -58,6 +59,15 @@ if (values.run) {
     });
     if (items.length > 0) groups.push({ name: benchmark.name, root: await checkout(benchmark), report, items });
   }
+  // Clean, well-maintained repos should surface no serious bugs: any shown finding here is a false
+  // positive (this is what the clean benchmarks are for — measuring the FP rate).
+  for (const benchmark of (await loadBenchmarks()).filter((b) => b.kind === "clean")) {
+    const file = join(dir, `${benchmark.name}.scan.json`);
+    if (!existsSync(file)) continue;
+    const report = JSON.parse(await readFile(file, "utf8")) as ScanReport;
+    const items = report.findings.flatMap((finding): Group["items"] => (severities.has(finding.severity) ? [{ finding, label: "false" as const }] : []));
+    if (items.length > 0) groups.push({ name: benchmark.name, root: await checkout(benchmark), report, items });
+  }
 }
 
 if (values.private) {
@@ -82,34 +92,34 @@ if (groups.length === 0) {
 
 const client = createLlmClient(loadLlmConfig());
 const pricing = loadPricing();
+const repeat = Math.max(1, Math.floor(Number(values.repeat)) || 1);
 type Outcome = "shown" | "hidden" | "dropped" | "rejected" | "error";
-const rows: Array<{ group: string; label: Label; before: Outcome; after: Outcome; title: string; reason: string }> = [];
+// Each finding, reviewed `repeat` times: keepRate is the fraction of runs that still showed it.
+const rows: Array<{ group: string; label: Label; title: string; keepRate: number }> = [];
 let cost = 0;
 
 await Promise.all(
   groups.map(async (group) => {
     await using indexer = await startLocalIndexer(group.root);
-    const { results, costUsd } = await verifyFindings({
-      client,
-      indexer: indexer.client,
-      threatModel: group.report.threatModel,
-      findings: group.items.map((item) => item.finding),
-      pricing,
-      investigateAuth: values.ground,
-    });
-    cost += costUsd ?? 0;
-    results.forEach((result, i) => {
-      const { finding, label } = group.items[i]!;
-      rows.push({
-        group: group.name,
-        label,
-        before: finding.confidence === "low" ? "hidden" : "shown",
-        after: outcomeOf(result),
-        title: finding.title,
-        reason: result.error ?? result.rejected?.join("; ") ?? result.review?.verdict.reasoning.slice(0, 300) ?? "",
+    const kept = new Array<number>(group.items.length).fill(0);
+    for (let run = 0; run < repeat; run++) {
+      const { results, costUsd } = await verifyFindings({
+        client,
+        indexer: indexer.client,
+        threatModel: group.report.threatModel,
+        findings: group.items.map((item) => item.finding),
+        pricing,
+        investigateAuth: values.ground,
       });
+      cost += costUsd ?? 0;
+      results.forEach((result, i) => {
+        if (outcomeOf(result) === "shown") kept[i]!++;
+      });
+    }
+    group.items.forEach((item, i) => {
+      rows.push({ group: group.name, label: item.label, title: item.finding.title, keepRate: kept[i]! / repeat });
     });
-    console.error(`[${group.name}] ${group.items.length} findings replayed`);
+    console.error(`[${group.name}] ${group.items.length} findings × ${repeat}`);
   }),
 );
 
@@ -121,22 +131,24 @@ function outcomeOf(result: Verification): Outcome {
   return verdict.confidence === "low" ? "hidden" : "shown";
 }
 
-const tally = (label: Label, when: "before" | "after", outcomes: Outcome[]) =>
-  rows.filter((r) => r.label === label && outcomes.includes(r[when])).length;
-const real = rows.filter((r) => r.label === "real").length;
-const fake = rows.filter((r) => r.label === "false").length;
-const pct = (n: number, d: number) => (d === 0 ? "—" : `${Math.round((100 * n) / d)}%`);
+const reals = rows.filter((r) => r.label === "real");
+const fakes = rows.filter((r) => r.label === "false");
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const pct = (x: number) => `${Math.round(100 * x)}%`;
+// Majority vote across the repeats: a finding "survives" if shown in >half the runs.
+const survives = (r: { keepRate: number }) => r.keepRate > 0.5;
+// Unstable = the skeptic disagreed with itself across runs (not pinned to keep or drop).
+const unstable = (r: { keepRate: number }) => r.keepRate > 0 && r.keepRate < 1;
 
-console.log(`\n${"group".padEnd(22)} label  before  after    title`);
+console.log(`\n${"group".padEnd(22)} label  keep%  title`);
 for (const r of [...rows].sort((a, b) => a.label.localeCompare(b.label) || a.group.localeCompare(b.group))) {
-  console.log(`${r.group.padEnd(22)} ${r.label.padEnd(6)} ${r.before.padEnd(7)} ${r.after.padEnd(8)} ${r.title.slice(0, 90)}`);
+  console.log(`${r.group.padEnd(22)} ${r.label.padEnd(6)} ${pct(r.keepRate).padStart(4)}  ${r.title.slice(0, 84)}`);
 }
-const shownBefore = tally("real", "before", ["shown"]);
-const shownAfter = tally("real", "after", ["shown"]);
-console.log(`\nReal findings shown:   ${shownAfter}/${real} (${pct(shownAfter, real)}), before ${shownBefore}/${real}`);
-console.log(`False findings shown:  ${tally("false", "after", ["shown"])}/${fake}, before ${tally("false", "before", ["shown"])}/${fake}`);
-console.log(`False findings removed (dropped or hidden): ${pct(tally("false", "after", ["dropped", "hidden"]), fake)}`);
-console.log(`Errors: ${rows.filter((r) => r.after === "error").length}. Cost: $${cost.toFixed(2)}`);
+console.log(`\nRepeats per finding: ${repeat}${values.ground ? " (auth-grounded)" : ""}`);
+console.log(`REAL  (${reals.length}): recall ${pct(mean(reals.map((r) => (survives(r) ? 1 : 0))))} by majority; mean keep-rate ${pct(mean(reals.map((r) => r.keepRate)))}`);
+console.log(`FALSE (${fakes.length}): removed ${pct(mean(fakes.map((r) => (survives(r) ? 0 : 1))))} by majority; mean keep-rate ${pct(mean(fakes.map((r) => r.keepRate)))} (lower is better)`);
+console.log(`Self-disagreement (shown in some runs, not others): real ${reals.filter(unstable).length}/${reals.length}, false ${fakes.filter(unstable).length}/${fakes.length}`);
+console.log(`Cost: $${cost.toFixed(2)}`);
 
 const outDir = values.private ? join(REPO_ROOT, "evals/private/results") : join(REPO_ROOT, "evals/results");
 await mkdir(outDir, { recursive: true });
