@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { DEEP_SCAN_COOLDOWN_HOURS, DEEP_SCAN_TIERS, MAX_TOP_UP_PACKS, PLANS, PR_REVIEW_TIERS, TOP_UP } from "@sandchest/billing";
+import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_COOLDOWN_HOURS, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
 import { site } from "@/lib/site";
 
 const root = join(import.meta.dir, "..");
@@ -35,8 +35,8 @@ function table(source: string, heading: string): string[][] {
 describe("pricing matches the billing package", () => {
   const pricing = doc("pricing");
 
-  test("plans", () => {
-    expect(table(pricing, "## Plans")).toEqual(PLANS.map((plan) => [plan.name, money(plan.price), count(plan.credits), `$${(plan.price / plan.credits).toFixed(2)}`]));
+  test("the plan", () => {
+    expect(table(pricing, "## Plans")).toEqual([[PLAN.name, money(PLAN.price), "Bought as you need them", `${money(CREDIT_PRICE)}, down to $${CREDIT_TIERS.at(-1)!.price.toFixed(2)} in bulk`]]);
   });
 
   test("PR review tiers", () => {
@@ -52,17 +52,32 @@ describe("pricing matches the billing package", () => {
     expect(rows.at(-1)![0]).toBe(`${count(DEEP_SCAN_TIERS.at(-1)!.maxLoc)} lines or more`);
   });
 
-  test("top-ups and auto top-up", () => {
-    expect(pricing).toContain(`A top-up is ${TOP_UP.credits} credits for ${money(TOP_UP.price)}`);
-    expect(pricing).toContain(`up to ${MAX_TOP_UP_PACKS} packs at once`);
-    expect(table(pricing, "### Auto top-up")).toEqual(
-      PLANS.map((plan) => [plan.name, `${plan.autoTopUp.below} credits`, `${plan.autoTopUp.packs * TOP_UP.credits} credits for ${money(plan.autoTopUp.packs * TOP_UP.price)}`]),
+  test("buying credits and auto top-up", () => {
+    const amounts = CREDIT_AMOUNTS.map(String);
+    expect(pricing).toContain(`Credits are ${money(CREDIT_PRICE)} each and never expire. Buy ${amounts.slice(0, -1).join(", ")} or ${amounts.at(-1)} when you join, and up to ${count(MAX_PURCHASE_CREDITS)} at once`);
+    const [, ...bulk] = CREDIT_TIERS.map((tier) => `${tier.from} or more${tier === CREDIT_TIERS[1] ? " are" : ""} $${tier.price.toFixed(2)}${tier === CREDIT_TIERS[1] ? " each" : ""}`);
+    expect(pricing).toContain(`Buying more at once costs less per credit: ${bulk.slice(0, -1).join(", ")}, and ${bulk.at(-1)}.`);
+    // The credit price table, one row per tier, with a worked example at its first amount offered.
+    const cash = (n: number) => (Number.isInteger(n) ? money(n) : `$${n.toFixed(2)}`);
+    const example = (credits: number) => {
+      const saving = creditsSaving(credits);
+      return `${credits} for ${cash(creditsPrice(credits))}${saving > 0 ? `, saving ${cash(saving)}` : ""}`;
+    };
+    expect(table(pricing, "## Buying credits")).toEqual(
+      CREDIT_TIERS.map((tier, i) => {
+        const next = CREDIT_TIERS[i + 1];
+        const amount = CREDIT_AMOUNTS.find((n) => n >= tier.from && (!next || n < next.from))!;
+        return [next ? `${tier.from} to ${next.from - 1}` : `${tier.from} or more`, `$${tier.price.toFixed(2)}`, example(amount)];
+      }),
     );
-    expect(pricing).toContain("twice the plan's price");
+    expect(pricing).toContain(`when fewer than ${TOP_UP_BELOW} are left`);
+    expect(pricing).toContain(`run low (below ${TOP_UP_BELOW})`);
+    expect(pricing).toContain(`${money(defaultAutoTopUpLimit(CREDIT_AMOUNTS[0]))}, or five top-ups if that is more`);
   });
 
   test("the summary ranges and the cooldown", () => {
     const pr = `${PR_REVIEW_TIERS[0]!.credits} to ${PR_REVIEW_TIERS.at(-1)!.credits}`;
+    expect(pricing).toContain(`the button says "Up to ${DEEP_SCAN_TIERS.at(-1)!.credits} credits"`);
     const deep = `${DEEP_SCAN_TIERS.slice(0, -1).map((t) => t.credits).join(", ")} or ${DEEP_SCAN_TIERS.at(-1)!.credits}`;
     for (const page of [pricing, doc("scans")]) {
       expect(page).toContain(pr);

@@ -36,7 +36,7 @@ export const mdxComponents: MDXComponents = {
   h3: anchored("h3"),
   a: Link,
   pre: CodeBlock,
-  /** `<Email to={legal.contactEmail} />` in the legal pages. */
+  /** `<Email to={legal.email} />` in the legal pages. */
   Email: ({ to }: { to: string }) => <a href={`mailto:${to}`}>{to}</a>,
   // Tables scroll sideways on a phone rather than squashing.
   table: (props: ComponentProps<"table">) => (

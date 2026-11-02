@@ -6,15 +6,18 @@
 
 .docs-frame {
   --gutter: clamp(1.25rem, 4vw, 2rem);
-  --nav: 13rem;
+  --nav: 15rem;
+  --toc: 12rem;
   width: 100%;
-  max-width: calc(66rem + 2 * var(--gutter));
+  max-width: calc(80rem + 2 * var(--gutter));
   margin: 0 auto;
   padding: 0 var(--gutter);
 }
 
+/* The header seam runs the full width of the window, so the sidebar's panel meets it. */
 .docs-frame .site-header {
-  border-bottom: 1px solid var(--color-seam);
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(var(--color-seam), var(--color-seam)) 0 0 1 0 / 0 0 1px 0 / 0 100vmax;
 }
 
 .header-nav a[aria-current="page"],
@@ -27,13 +30,6 @@
 .docs-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0 3.5rem;
-}
-
-@media (min-width: 56rem) {
-  .docs-body {
-    grid-template-columns: var(--nav) minmax(0, 1fr);
-  }
 }
 
 .docs-main,
@@ -43,15 +39,52 @@
   padding-top: clamp(2rem, 6vh, 3.5rem);
 }
 
+@media (min-width: 56rem) {
+  .docs-body {
+    grid-template-columns: var(--nav) minmax(0, 1fr);
+  }
+
+  .docs-main {
+    padding-left: clamp(2.5rem, 5vw, 4rem);
+  }
+}
+
+@media (min-width: 76rem) {
+  .docs-body {
+    grid-template-columns: var(--nav) minmax(0, 1fr) var(--toc);
+  }
+
+  .docs-main {
+    width: 100%;
+    max-width: calc(44rem + 4rem);
+    padding-right: 3rem;
+    justify-self: center;
+  }
+}
+
 /* ---- Sidebar and phone menu ------------------------------------------------ */
 /* Two navs with the same links: .docs-sidebar on desktop, .docs-menu (a popover) on phones. */
 
 .docs-nav-title {
-  margin-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
   font-family: var(--font-display);
   font-size: 1.5rem;
   line-height: 1;
   color: var(--color-bright);
+}
+
+.docs-nav-section + .docs-nav-section {
+  margin-top: 1.75rem;
+}
+
+.docs-nav-heading {
+  margin-bottom: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--color-dust);
 }
 
 :is(.docs-sidebar, .docs-menu) ol {
@@ -62,33 +95,40 @@
 :is(.docs-sidebar, .docs-menu) a {
   position: relative;
   display: block;
-  padding: 0.35rem 0 0.35rem 1.25rem;
+  /* The row bleeds left so its text lines up with the section headings; the pixel sits in the bleed. */
+  margin-left: -1.5rem;
+  padding: 0.4rem 0.75rem 0.4rem 1.5rem;
   font-size: 0.875rem;
   line-height: 1.4;
-  color: var(--color-dust);
+  color: var(--color-muted);
   text-decoration: none;
+  transition:
+    color 120ms,
+    background-color 120ms;
 }
 
 :is(.docs-sidebar, .docs-menu) a:hover {
-  color: var(--color-sand);
+  color: var(--color-bright);
+  background: color-mix(in oklab, var(--color-seam) 45%, transparent);
 }
 
-/* The current page gets the gold pixel the landing uses for bullets. */
+/* The current page: a lit row with the gold pixel the landing uses for bullets. */
 :is(.docs-sidebar, .docs-menu) a[aria-current="page"] {
   color: var(--color-bright);
+  background: var(--color-seam);
 }
 
 :is(.docs-sidebar, .docs-menu) a[aria-current="page"]::before {
   content: "";
   position: absolute;
-  left: 0.25rem;
-  top: calc(0.35rem + 0.5em);
+  left: 0.6rem;
+  top: calc(0.4rem + 0.5em);
   width: 0.4rem;
   height: 0.4rem;
   background: var(--color-gold);
 }
 
-/* Desktop: a sticky sidebar. The phone menu and its key don't exist here. */
+/* Desktop: the sidebar is a soot panel, bled to the window's left edge, behind a seam. */
 @media (min-width: 56rem) {
   .docs-menu-bar,
   .docs-menu,
@@ -97,14 +137,65 @@
   }
 
   .docs-sidebar {
+    position: relative;
+    border-right: 1px solid var(--color-seam);
+    background: var(--color-soot);
+    box-shadow: 0 0 0 100vmax var(--color-soot);
+    clip-path: inset(0 0 0 -100vmax);
+  }
+
+  .docs-sidebar nav {
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    /* Room on the left for the rows' bleed, which the scroll box would otherwise clip. */
+    margin-left: -1.5rem;
+    padding: clamp(2rem, 6vh, 3.5rem) 1.25rem 3rem 1.5rem;
+    overflow: auto;
+    scrollbar-width: thin;
+  }
+}
+
+/* ---- On this page -------------------------------------------------------- */
+
+.docs-toc {
+  display: none;
+}
+
+@media (min-width: 76rem) {
+  .docs-toc {
+    display: block;
     position: sticky;
     top: 0;
     align-self: start;
     max-height: 100vh;
-    /* Room on both sides so focus outlines aren't clipped by the scroll box. */
-    margin: 0 -0.5rem;
-    padding: clamp(2rem, 6vh, 3.5rem) 0.5rem 2rem;
+    padding-top: calc(clamp(2rem, 6vh, 3.5rem) + 0.5rem);
+    padding-bottom: 2rem;
     overflow: auto;
+  }
+
+  .docs-toc ol {
+    display: grid;
+    border-left: 1px solid var(--color-seam);
+  }
+
+  .docs-toc a {
+    display: block;
+    margin-left: -1px;
+    padding: 0.3rem 0 0.3rem 0.875rem;
+    border-left: 1px solid transparent;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--color-dust);
+    text-decoration: none;
+    transition:
+      color 120ms,
+      border-color 120ms;
+  }
+
+  .docs-toc a:hover {
+    color: var(--color-bright);
+    border-left-color: var(--color-gold);
   }
 }
 
@@ -150,8 +241,10 @@
   }
 
   .docs-menu a {
+    margin-left: calc(-1 * var(--gutter));
     padding-top: 0.6rem;
     padding-bottom: 0.6rem;
+    padding-left: var(--gutter);
     font-size: 0.9375rem;
   }
 

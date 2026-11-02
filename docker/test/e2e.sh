@@ -260,7 +260,7 @@ node -e '
   const fail = (message) => { console.error(message, JSON.stringify({ checks, reviews })); process.exit(1); };
   if (checks.length !== 1) fail("expected one Check run");
   const [check] = checks;
-  if (check.headSha !== process.argv[2] || check.createdAs !== "in_progress" || check.firstTitle !== "Digging…") fail("the Check did not start in progress on the head commit");
+  if (check.headSha !== process.argv[2] || check.createdAs !== "in_progress" || check.firstTitle !== "Scanning…") fail("the Check did not start in progress on the head commit");
   if (check.status !== "completed" || check.conclusion !== "failure") fail("the Check did not fail on a high finding");
   if (!check.detailsUrl?.startsWith(process.argv[3] + "/dashboard/scans/")) fail("the Check does not link to the scan");
   if (reviews.length !== 1 || reviews[0].commitId !== process.argv[2]) fail("expected one review on the head commit");

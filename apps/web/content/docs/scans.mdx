@@ -8,11 +8,11 @@ Sandchest runs four kinds of scan. All of them read your code in a temporary wor
 | Scan | Runs when | What it does | Cost |
 | --- | --- | --- | --- |
 | Recon | A repository is added | Builds the repository's threat model | Free |
-| PR review | A pull request is opened or updated | Reviews the change for vulnerabilities | 1 to 5 credits |
-| Deep scan | You press Dig | Hunts across the whole repository | 15, 30 or 75 credits |
+| PR review | A pull request is opened or updated | Reviews the change for vulnerabilities | 1 to 3 credits, usually 1 |
+| Deep scan | You press **Deep scan** | Hunts across the whole repository | 5, 10 or 25 credits |
 | Fix check | You push to the default branch | Re-checks open findings whose cited files the push changed | Free |
 
-An account runs at most two scans at a time, and recon has two slots of its own, so a dig or a review never waits behind it. Others wait in a queue: each checks for a free slot every 10 seconds, says on its page that it is waiting, and gives up as failed after waiting two hours.
+An account runs at most two scans at a time, and recon has two slots of its own, so a deep scan or a review never waits behind it. Others wait in a queue: each checks for a free slot every 10 seconds, says on its page that it is waiting, and gives up as failed after waiting two hours.
 
 Repositories of a million lines of code or more aren't scanned, by any kind of scan. Get in touch if you need one scanned.
 
@@ -36,7 +36,7 @@ A pull request is reviewed when it is opened, gets new commits, is reopened, or 
 - pull requests from forks of public repositories, and from outside contributors' forks of private ones (see [below](#pull-requests-from-forks))
 - pull requests on an account with no plan, or out of credits: these get a neutral Check instead
 
-1. Sandchest posts a **Sandchest** Check straight away, showing "Digging…".
+1. Sandchest posts a **Sandchest** Check straight away, showing "Scanning…".
 2. It reviews the change in the context of the threat model. A finding has to touch the lines the pull request changed: issues that were already there are left for deep scans.
 3. It completes the Check, and on private repositories posts the findings as review comments.
 
@@ -75,9 +75,9 @@ Sandchest never opens GitHub issues.
 
 ## Deep scans
 
-A deep scan hunts across the whole repository. It only runs when someone presses **Dig** on the [Repos](/dashboard) page. Anyone who can push to the repository can start one, and the button shows the cost first.
+A deep scan hunts across the whole repository. It only runs when someone presses **Deep scan** on the [Repos](/dashboard) page. Anyone who can push to the repository can start one, and the button shows the cost first.
 
-- One deep scan runs at a time per repository. The 24-hour wait before the next starts once a deep scan's results are saved, even if something later goes wrong. A dig that fails before then doesn't start the wait.
+- One deep scan runs at a time per repository. The 24-hour wait before the next starts once a deep scan's results are saved, even if something later goes wrong. A deep scan that fails before then doesn't start the wait.
 - The scan's page shows a live feed of what Sandchest is doing, and findings appear as they survive verification.
 - When it finishes, people with access get an email with what it found, unless an admin has turned emails off.
 

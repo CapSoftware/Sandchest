@@ -4,7 +4,7 @@ import { CopyMarkdown } from "@/components/docs/copy";
 import { mdxComponents } from "@/components/docs/mdx";
 import { DocsShell } from "@/components/docs/shell";
 import { docsInOrder, docsParams, getDocsPage, markdownUrl } from "@/lib/docs";
-import { site } from "@/lib/site";
+import { site, socialImage, socialVideo } from "@/lib/site";
 
 // Every docs page is built ahead of time; anything else is a 404.
 export const dynamicParams = false;
@@ -23,7 +23,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title,
     description: page.data.description,
     alternates: { canonical: page.url, types: { "text/markdown": markdownUrl(page) } },
-    openGraph: { title, description: page.data.description, url: page.url },
+    // A page's openGraph replaces the layout's whole, so the preview is repeated here.
+    openGraph: {
+      title,
+      description: page.data.description,
+      url: page.url,
+      siteName: site.name,
+      type: "website",
+      images: [socialImage],
+      videos: [socialVideo],
+    },
   };
 }
 
