@@ -7,6 +7,7 @@ import { Heat } from "@/components/app/heat";
 import { InstallKey } from "@/components/app/install-key";
 import { PlanPicker } from "@/components/app/plan-picker";
 import { When } from "@/components/app/when";
+import { PageShape } from "@/components/app/skeleton";
 import { plural, SCAN_KIND_LABEL, SEVERITIES, timeUntil } from "@/lib/format";
 import { ensureAccess, viewer } from "@/server/access";
 import { digState } from "@/lib/dig-state";
@@ -43,7 +44,7 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
 
   if (repos.length === 0) {
     return (
-      <>
+      <PageShape id="repos">
         <h1 className="page-title">Repos</h1>
         <div className="empty" style={{ marginTop: "2rem" }}>
           <h2 className="empty-title">Nothing to dig into yet</h2>
@@ -53,14 +54,14 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
           </p>
           <InstallKey />
         </div>
-      </>
+      </PageShape>
     );
   }
 
   const critical = repos.reduce((sum, repo) => sum + repo.open.critical, 0);
   const open = repos.reduce((sum, repo) => sum + SEVERITIES.reduce((n, s) => n + repo.open[s], 0), 0);
   return (
-    <>
+    <PageShape id="repos">
       <div className="page-head">
         <div>
           <h1 className="page-title">Repos</h1>
@@ -96,7 +97,7 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
           </li>
         ))}
       </ul>
-    </>
+    </PageShape>
   );
 }
 

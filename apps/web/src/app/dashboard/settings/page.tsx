@@ -4,6 +4,7 @@ import { Avatar } from "@/components/app/avatar";
 import { BillingPanel } from "@/components/app/billing-panel";
 import { OrgSettingsForm } from "@/components/app/org-settings";
 import { InstallKey } from "@/components/app/install-key";
+import { ForgetShapesForm, PageShape } from "@/components/app/skeleton";
 import { viewer } from "@/server/access";
 import { signOut } from "@/server/actions";
 import { billingEnabled, pageBilling } from "@/server/billing";
@@ -24,7 +25,7 @@ export default async function SettingsPage() {
   // Each org's billing, read from Autumn only where the stored copy is missing or old.
   const billing = billingEnabled() ? await Promise.all(orgs.map((org) => pageBilling({ id: org.id, githubLogin: org.login }, org.billing))) : [];
   return (
-    <>
+    <PageShape id="settings">
       <div className="page-head">
         <h1 className="page-title">Settings</h1>
         <InstallKey secondary />
@@ -84,12 +85,12 @@ export default async function SettingsPage() {
           </h2>
           <p className="account-role">Signed in with GitHub</p>
         </div>
-        <form action={signOut}>
+        <ForgetShapesForm action={signOut}>
           <button type="submit" className="key key-secondary">
             <span className="key-face">Sign out</span>
           </button>
-        </form>
+        </ForgetShapesForm>
       </section>
-    </>
+    </PageShape>
   );
 }

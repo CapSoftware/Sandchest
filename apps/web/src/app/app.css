@@ -1685,36 +1685,6 @@ html:not([data-js]) .no-js-submit {
   }
 }
 
-/* ---- Loading ------------------------------------------------------------- */
-/* Skeletons are dithered: the same 2px checker the chest is drawn with. */
-
-.skeleton {
-  display: block;
-  background: repeating-conic-gradient(var(--color-seam) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .skeleton {
-    animation: shimmer 1.2s steps(4) infinite;
-  }
-}
-
-@keyframes shimmer {
-  50% {
-    opacity: 0.45;
-  }
-}
-
-.skeleton-title {
-  width: 12rem;
-  height: 3rem;
-}
-
-.skeleton-line {
-  height: 1rem;
-  margin: 1.4rem 0;
-}
-
 /* ---- Billing ------------------------------------------------------------ */
 
 .paywall {

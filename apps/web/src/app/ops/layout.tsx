@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AppHeader } from "@/components/app/app-header";
+import { Skeletons } from "@/components/app/skeleton";
 import { requireAdmin } from "@/server/admin";
 import "../app.css";
 import "./admin.css";
@@ -16,9 +17,9 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const user = await requireAdmin();
   return (
-    <>
+    <Skeletons>
       <AppHeader user={user} admin />
       <main className="app-main shell">{children}</main>
-    </>
+    </Skeletons>
   );
 }

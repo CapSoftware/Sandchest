@@ -346,17 +346,6 @@
   }
 }
 
-/* ---- Loading ---------------------------------------------------------------- */
-
-.admin-skeleton-stats {
-  height: 6rem;
-  margin: 2rem 0;
-}
-
-.admin-skeleton-chart {
-  height: 11rem;
-}
-
 @media (forced-colors: active) {
   .chart-bar > span,
   .funnel-track span,

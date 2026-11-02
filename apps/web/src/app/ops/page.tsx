@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { AdminHead } from "@/components/admin/admin-head";
 import { Meter } from "@/components/admin/charts";
 import { Heat } from "@/components/app/heat";
+import { PageShape } from "@/components/app/skeleton";
 import { count, percent } from "@/lib/admin-format";
 import { outcomes, parseRange, ratio, survival } from "@/lib/admin-metrics";
 import { SCAN_KIND_LABEL, SEVERITIES } from "@/lib/format";
@@ -37,7 +38,7 @@ export default async function QualityPage({ searchParams }: Props) {
   const cell = (severity: string, confidence?: string) => findings.filter((row) => row.severity === severity && (!confidence || row.confidence === confidence));
 
   return (
-    <>
+    <PageShape id="ops-quality">
       <AdminHead page="/admin" range={range} scope="Scans started and findings first seen" />
 
       <dl className="stats admin-stats">
@@ -202,6 +203,6 @@ export default async function QualityPage({ searchParams }: Props) {
         </dl>
         <p className="admin-footnote">Findings acted on in this range, whenever they were found.</p>
       </section>
-    </>
+    </PageShape>
   );
 }

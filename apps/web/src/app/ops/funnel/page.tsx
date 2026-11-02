@@ -2,6 +2,7 @@ import { adminActivity, adminDailySignups, adminFunnel } from "@sandchest/db";
 import type { Metadata } from "next";
 import { AdminHead } from "@/components/admin/admin-head";
 import { ColumnChart, FunnelBars } from "@/components/admin/charts";
+import { PageShape } from "@/components/app/skeleton";
 import { count, percent } from "@/lib/admin-format";
 import { funnelSteps, lastDays, parseRange, perDay, ratio } from "@/lib/admin-metrics";
 import { requireAdmin } from "@/server/admin";
@@ -24,7 +25,7 @@ export default async function FunnelPage({ searchParams }: Props) {
   const signIns = perDay(days, daily, (row) => row.signIns);
 
   return (
-    <>
+    <PageShape id="ops-funnel">
       <AdminHead page="/admin/funnel" range={range} scope="People who signed up" />
 
       <section className="block admin-block" aria-labelledby="funnel-title">
@@ -77,6 +78,6 @@ export default async function FunnelPage({ searchParams }: Props) {
         <ColumnChart counts title="Sign-ups per day" note={count(funnel.signedUp)} days={days} values={signups} format={count} />
         <ColumnChart counts title="Sign-ins per day" note={count(signIns.reduce((a, b) => a + b, 0))} days={days} values={signIns} format={count} />
       </section>
-    </>
+    </PageShape>
   );
 }

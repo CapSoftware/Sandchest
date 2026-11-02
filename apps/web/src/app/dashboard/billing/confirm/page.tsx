@@ -3,6 +3,7 @@ import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { ConfirmPurchase } from "@/components/app/confirm-purchase";
+import { PageShape } from "@/components/app/skeleton";
 import { shortDate, usd } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { autumn } from "@/server/billing";
@@ -30,34 +31,36 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const fields: Record<string, string> = plan ? { kind: "plan", plan: plan.id } : { kind: "top_up", packs: String(packs) };
 
   return (
-    <div className="confirm">
-      <h1 className="page-title">{title}</h1>
-      {preview ? (
-        <dl className="stats confirm-stats">
-          <div className="stat">
-            <dt>Charged now</dt>
-            <dd>{usd(preview.dueToday)}</dd>
-          </div>
-          {plan && preview.nextCycle !== null && (
+    <PageShape id="confirm">
+      <div className="confirm">
+        <h1 className="page-title">{title}</h1>
+        {preview ? (
+          <dl className="stats confirm-stats">
             <div className="stat">
-              <dt>Then{preview.nextCycleAt ? ` from ${shortDate(preview.nextCycleAt)}` : ""}</dt>
-              <dd>{usd(preview.nextCycle)} a month</dd>
+              <dt>Charged now</dt>
+              <dd>{usd(preview.dueToday)}</dd>
             </div>
-          )}
-        </dl>
-      ) : (
-        <p className="form-error" role="alert">
-          Billing couldn’t price this right now. Try again in a minute.
+            {plan && preview.nextCycle !== null && (
+              <div className="stat">
+                <dt>Then{preview.nextCycleAt ? ` from ${shortDate(preview.nextCycleAt)}` : ""}</dt>
+                <dd>{usd(preview.nextCycle)} a month</dd>
+              </div>
+            )}
+          </dl>
+        ) : (
+          <p className="form-error" role="alert">
+            Billing couldn’t price this right now. Try again in a minute.
+          </p>
+        )}
+        <p className="field-help">
+          {plan
+            ? downgrade
+              ? `${current.name} stays until the end of this period, then ${plan.name} starts with ${plan.credits.toLocaleString("en-US")} credits a month.`
+              : `${plan.name} starts now with ${plan.credits.toLocaleString("en-US")} credits a month. You pay the difference for the rest of this period.`
+            : "Charged to the card on file. Top-up credits never expire and are spent after the month’s credits."}
         </p>
-      )}
-      <p className="field-help">
-        {plan
-          ? downgrade
-            ? `${current.name} stays until the end of this period, then ${plan.name} starts with ${plan.credits.toLocaleString("en-US")} credits a month.`
-            : `${plan.name} starts now with ${plan.credits.toLocaleString("en-US")} credits a month. You pay the difference for the rest of this period.`
-          : "Charged to the card on file. Top-up credits never expire and are spent after the month’s credits."}
-      </p>
-      {preview && <ConfirmPurchase orgId={row.org.id} fields={fields} label={preview.dueToday > 0 ? `Pay ${usd(preview.dueToday)}` : "Confirm"} />}
-    </div>
+        {preview && <ConfirmPurchase orgId={row.org.id} fields={fields} label={preview.dueToday > 0 ? `Pay ${usd(preview.dueToday)}` : "Confirm"} />}
+      </div>
+    </PageShape>
   );
 }

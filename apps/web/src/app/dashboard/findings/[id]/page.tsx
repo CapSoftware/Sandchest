@@ -10,6 +10,7 @@ import { FixPrompt } from "@/components/app/fix-prompt";
 import { Heat } from "@/components/app/heat";
 import { Submit } from "@/components/app/submit";
 import { When } from "@/components/app/when";
+import { PageShape } from "@/components/app/skeleton";
 import { ATTACKER_LABEL, categoryLabel, DISMISS_REASON_LABEL, githubLine, SCAN_KIND_LABEL } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { changeFinding } from "@/server/actions";
@@ -51,7 +52,7 @@ export default async function FindingPage({ params }: Params) {
   const timeline = history.filter((event, i) => event.type !== "seen" || history.slice(i + 1).every((later) => later.type !== "seen"));
 
   return (
-    <>
+    <PageShape id="finding">
       <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/dashboard/findings">Findings</Link>
         <span aria-hidden="true">/</span>
@@ -236,7 +237,7 @@ export default async function FindingPage({ params }: Params) {
           </dl>
         </aside>
       </div>
-    </>
+    </PageShape>
   );
 }
 

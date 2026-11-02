@@ -2,6 +2,7 @@ import { adminCostByKind, adminDailyScans, adminPlanCosts } from "@sandchest/db"
 import type { Metadata } from "next";
 import { AdminHead } from "@/components/admin/admin-head";
 import { ColumnChart } from "@/components/admin/charts";
+import { PageShape } from "@/components/app/skeleton";
 import { count, money, percent } from "@/lib/admin-format";
 import { costPerCredit, dailySeries, kindSummary, lastDays, parseRange, planMargins } from "@/lib/admin-metrics";
 import { compactNumber, duration, SCAN_KIND_LABEL } from "@/lib/format";
@@ -31,7 +32,7 @@ export default async function CostPage({ searchParams }: Props) {
   const rows = [...KINDS.map((kind) => byKind.find((row) => row.kind === kind)).filter((row) => row !== undefined), ...(total ? [total] : [])].map(kindSummary);
 
   return (
-    <>
+    <PageShape id="ops-cost">
       <AdminHead page="/admin/cost" range={range} scope="Scans started" />
 
       <dl className="stats admin-stats">
@@ -156,6 +157,6 @@ export default async function CostPage({ searchParams }: Props) {
         </div>
         <p className="admin-footnote">Each chart has its own scale.</p>
       </section>
-    </>
+    </PageShape>
   );
 }

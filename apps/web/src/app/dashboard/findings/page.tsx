@@ -5,6 +5,7 @@ import { HoverLink } from "@/components/app/hover-link";
 import { AutoSubmitSelect } from "@/components/app/auto-submit";
 import { Heat } from "@/components/app/heat";
 import { When } from "@/components/app/when";
+import { PageShape } from "@/components/app/skeleton";
 import { SEVERITIES, SEVERITY_LABEL, type Severity } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
@@ -52,7 +53,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
   const filtered = current.severities.length > 0 || current.repo !== undefined;
 
   return (
-    <>
+    <PageShape id="findings">
       <div className="page-head">
         <h1 className="page-title">Findings</h1>
       </div>
@@ -146,7 +147,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
           ))}
         </ul>
       )}
-    </>
+    </PageShape>
   );
 }
 

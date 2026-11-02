@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { recordDailyVisit } from "@sandchest/db";
 import { AppHeader } from "@/components/app/app-header";
 import { SessionKeepAlive } from "@/components/app/session-keepalive";
+import { Skeletons } from "@/components/app/skeleton";
 import { currentUser } from "@/server/access";
 import { isAdmin } from "@/server/admin";
 import { db } from "@/server/db";
@@ -25,10 +26,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     after(() => recordDailyVisit(db(), user.id).catch(() => visited.delete(user.id)));
   }
   return (
-    <>
+    <Skeletons>
       {sessionRefreshDue(user.sessionExpiresAt) && <SessionKeepAlive />}
       <AppHeader user={user} admin={isAdmin(user)} />
       <main className="app-main shell">{children}</main>
-    </>
+    </Skeletons>
   );
 }
