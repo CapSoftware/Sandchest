@@ -130,8 +130,6 @@ export function safeMessage(message: unknown): string {
 /**
  * The page an error happened on, as one of the app's own route templates, or
  * "unknown". A raw path can hold anything a visitor typed, an email included.
- * Operator pages are deliberately absent: naming them here would put them in
- * every page.
  */
 export const PAGE_TEMPLATES: ReadonlyArray<readonly [string, string]> = [
   ["^/$", "/"],

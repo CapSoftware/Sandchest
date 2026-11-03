@@ -147,13 +147,11 @@ with views as (
 select next_path, count(*) from views where path = '/' and next_path is not null group by 1 order by 2 desc limit 10;
 ```
 
-The signed-up funnel (install, plan, recon, first deep scan, coming back) is already computed by `adminFunnel` in `src/admin.ts`, and shown at `/admin/funnel`.
-
 ## How it stays off the app's back
 
 - The beacon at `/api/e` never reads the database, and the browser batches a page's clicks and steps into the page's own requests, so a page view costs about one request and one insert.
 - Every analytics write runs after the response, through the pooler (`DATABASE_POOLER_URL`), on one connection per server instance that closes after 5 idle seconds. Each write is one insert in a transaction that gives up after 200 ms waiting on a lock or 1 s running, so a write can be lost but never hold anything up.
-- The operator dashboards (`/admin`) and analysis read the replica.
+- Analysis reads the replica, as the read-only role.
 - The app's own queries go through the same pooler, so the database's connection count is set by the pooler, not by traffic. The app's role stops statements after 30 s and transactions left idle after 60 s.
 
 ## Adding an event

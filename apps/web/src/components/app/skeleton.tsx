@@ -23,7 +23,7 @@ const THEME: SkulletTheme = {
   radius: "0",
 };
 
-/** Skullet's settings for the app and the operator dashboards. The site is dark only. */
+/** Skullet's settings for the app. The site is dark only. */
 export function Skeletons({ children }: { children: ReactNode }) {
   return (
     <SkulletProvider mode="dark" theme={THEME}>

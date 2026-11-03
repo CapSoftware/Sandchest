@@ -7,7 +7,6 @@ const ICONS: Record<string, readonly string[]> = {
   "/dashboard/findings": ["X.......X", ".X.XXX.X.", "..XXXXX..", "XXX.X.XXX", "..XXXXX..", "XXXXXXXXX", "..XXXXX..", ".X.XXX.X.", "X.......X"],
   "/dashboard/repos": [".XXXXXXX.", "X.......X", "XXXXXXXXX", "X...X...X", "X..XXX..X", "X...X...X", "X.......X", "XXXXXXXXX", "........."],
   "/dashboard/settings": ["..X......", "XXXXXXXXX", "..X......", "......X..", "XXXXXXXXX", "......X..", "...X.....", "XXXXXXXXX", "...X....."],
-  "/admin": ["XXXXXXXXX", "X.......X", "X..XXX..X", "X..XXX..X", "X...X...X", ".X.....X.", "..X...X..", "...XXX...", "....X...."],
 };
 const PATHS = Object.fromEntries(Object.entries(ICONS).map(([href, rows]) => [href, pixelPath(rows)]));
 

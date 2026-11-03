@@ -14,8 +14,6 @@ const Schema = z.object({
    * connection and never use it. Default DATABASE_URL.
    */
   DATABASE_POOLER_URL: z.string().min(1).optional(),
-  /** A read replica, for the operator dashboards and analysis, so heavy reads never touch the primary. Default DATABASE_URL. */
-  DATABASE_REPLICA_URL: z.string().min(1).optional(),
   GITHUB_APP_ID: z.string().min(1),
   GITHUB_APP_PRIVATE_KEY: z.string().min(1),
   GITHUB_WEBHOOK_SECRET: z.string().min(1),
@@ -23,14 +21,6 @@ const Schema = z.object({
   SANDCHEST_APP_URL: z.url(),
   /** Bearer token for operator-only routes (manual scans, any scan's live feed). */
   SANDCHEST_ADMIN_TOKEN: z.string().min(24).optional(),
-  /**
-   * Operators who may open /admin: GitHub user ids (numbers, which never
-   * change, unlike logins), comma-separated. Unset means nobody.
-   */
-  SANDCHEST_ADMIN_GITHUB_IDS: z
-    .string()
-    .regex(/^\s*\d+(\s*,\s*\d+)*\s*$/, "a comma-separated list of GitHub user ids (numbers, not logins)")
-    .optional(),
   /**
    * Error reporting to Sentry. Unset means nothing loads and nothing is sent.
    * SENTRY_DSN covers the server; NEXT_PUBLIC_SENTRY_DSN (read at build time)

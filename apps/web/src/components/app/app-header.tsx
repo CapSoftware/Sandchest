@@ -7,7 +7,8 @@ import { readHacker } from "@/lib/hacker";
 import type { Viewer } from "@/server/access";
 import { myHackers } from "@/server/hackers";
 
-const SECTIONS = [
+/** The dashboard's sections, in nav order. */
+export const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/scans", label: "Scans" },
   { href: "/dashboard/findings", label: "Findings" },
@@ -15,20 +16,15 @@ const SECTIONS = [
   { href: "/dashboard/settings", label: "Settings" },
 ];
 
-/** The sections a person sees: operators also get Admin. Decided here, on the server. */
-export function navLinks(admin: boolean): Array<{ href: string; label: string }> {
-  return admin ? [...SECTIONS, { href: "/admin", label: "Admin" }] : SECTIONS;
-}
-
 /** The dashboard's header: mark, sections, the hacker and the signed-in person. */
-export function AppHeader({ user, admin }: { user: Viewer; admin: boolean }) {
+export function AppHeader({ user }: { user: Viewer }) {
   return (
     <header className="app-header">
       <div className="shell">
         <Link href="/dashboard" className="app-mark" aria-label="Sandchest">
           <img src="/sandchest-icon-small.svg" alt="" width={30} height={28} />
         </Link>
-        <AppNav links={navLinks(admin)} />
+        <AppNav links={NAV_LINKS} />
         <div className="app-user">
           {/* Streams in after the header, so the header never waits on the query. */}
           <Suspense fallback={<span className="app-hacker app-hacker-pending" aria-hidden="true" />}>

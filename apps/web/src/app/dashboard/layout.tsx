@@ -6,7 +6,6 @@ import { AppHeader } from "@/components/app/app-header";
 import { SessionKeepAlive } from "@/components/app/session-keepalive";
 import { Skeletons } from "@/components/app/skeleton";
 import { currentUser } from "@/server/access";
-import { isAdmin } from "@/server/admin";
 import { anonId } from "@/server/analytics";
 import { analyticsDb } from "@/server/db";
 import { sessionRefreshDue } from "@/server/session-token";
@@ -43,7 +42,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <Skeletons>
       {sessionRefreshDue(user.sessionExpiresAt) && <SessionKeepAlive />}
-      <AppHeader user={user} admin={isAdmin(user)} />
+      <AppHeader user={user} />
       <main className="app-main shell">{children}</main>
     </Skeletons>
   );

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
-import { navLinks } from "@/components/app/app-header";
+import { NAV_LINKS } from "@/components/app/app-header";
 import { currentSection } from "@/components/app/nav";
 import { SiteHeader } from "@/components/site-chrome";
 import { appRedirects, homeRewrites, SESSION_COOKIES } from "@/lib/app-routes";
@@ -83,7 +83,7 @@ describe("old dashboard links", () => {
 describe("dashboard nav", () => {
   test("lights exactly one section on every dashboard page", () => {
     const id = "0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c";
-    const links = navLinks(true);
+    const links = NAV_LINKS;
     const cases: Array<[string, string | undefined]> = [
       ["/dashboard", "/dashboard"],
       ["/dashboard/scans", "/dashboard/scans"],
@@ -94,7 +94,6 @@ describe("dashboard nav", () => {
       [`/dashboard/findings/${id}`, "/dashboard/findings"],
       ["/dashboard/settings", "/dashboard/settings"],
       ["/dashboard/billing/confirm", "/dashboard"],
-      ["/admin/cost", "/admin"],
       ["/dashboardx", undefined],
     ];
     for (const [path, section] of cases) expect([path, currentSection(path, links)]).toEqual([path, section]);

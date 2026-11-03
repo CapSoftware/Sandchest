@@ -12,15 +12,12 @@
  * - `analyticsDb()`: analytics writes, the same way on a connection of their
  *   own, so they never queue behind the app. Writes run after the response
  *   and give way under load (see `recordEvents`).
- * - `replicaDb()`: the operator dashboards' aggregates, on a read replica
- *   when there is one.
  */
 import { createDb, type Db } from "@sandchest/db";
 import { config } from "./config";
 
 let instance: Db | undefined;
 let analytics: Db | undefined;
-let replica: Db | undefined;
 
 /** The URL the app's queries use: the pooler when there is one. Migrations and the workflow World use their own. */
 export function appDatabaseUrl(): string {
@@ -44,15 +41,8 @@ export function analyticsDb(): Db {
   }));
 }
 
-export function replicaDb(): Db {
-  const settings = config();
-  if (!settings.DATABASE_REPLICA_URL) return db();
-  return (replica ??= createDb(settings.DATABASE_REPLICA_URL, { max: 3, applicationName: "sandchest-ops" }));
-}
-
 /** For tests: every handle uses this database. */
 export function setDb(database: Db): void {
   instance = database;
   analytics = database;
-  replica = database;
 }

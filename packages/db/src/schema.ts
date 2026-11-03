@@ -147,7 +147,7 @@ export const scans = pgTable(
   (table) => [
     index("scans_repo_idx").on(table.repoId, table.createdAt),
     index("scans_org_status_idx").on(table.orgId, table.status),
-    // Operator dashboards read scans by when they started.
+    // Analysis reads scans by when they started.
     index("scans_created_idx").on(table.createdAt),
     // A PR head is reviewed once, however many times the webhook arrives.
     uniqueIndex("scans_pr_head_unique").on(table.repoId, table.prNumber, table.headSha).where(sql`${table.kind} = 'pr_review'`),
@@ -257,7 +257,7 @@ export const findingEvents = pgTable(
     scanId: uuid("scan_id").references(() => scans.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
-  // By type and time for operator dashboards: "seen" rows, by far the most, are skipped.
+  // By type and time for analysis: "seen" rows, by far the most, are skipped.
   (table) => [
     index("finding_events_finding_idx").on(table.findingId),
     index("finding_events_type_created_idx").on(table.type, table.createdAt),

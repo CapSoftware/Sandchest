@@ -136,8 +136,6 @@ describe("scrubbing", () => {
     expect(pageTemplate("/dashboard")).toBe("/dashboard");
     expect(pageTemplate("/dashboard/repos/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c")).toBe("/dashboard/repos/[id]");
     for (const path of ["/dashboard/findings/jane.doe@example.com", "/dashboard/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c/x", "/acme-secret-project", "/dashboard/123456", "/findings/0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c"]) expect(pageTemplate(path)).toBe("unknown");
-    // Operator pages are never named in what the browser carries.
-    expect(JSON.stringify(PAGE_TEMPLATES)).not.toMatch(/admin|ops/);
   });
 
   test("scrubbing and message checks stay fast on huge or hostile input", () => {

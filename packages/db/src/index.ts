@@ -6,6 +6,6 @@ export { EVENT_NAMES } from "./schema";
 export * from "./dashboard";
 export * from "./billing";
 export * from "./recruit";
-export * from "./admin";
+export * from "./events";
 export * from "./learning";
 export * from "./agents";
