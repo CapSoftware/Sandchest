@@ -12,6 +12,11 @@ use crate::lang::Lang;
 
 /// Files larger than this are listed but not loaded.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// Default ceiling on text (plus line index) held for one checkout: several
+/// times what the engine's one-million-line scan limit needs.
+pub const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+/// Default ceiling on files held for one checkout.
+pub const MAX_FILES: usize = 100_000;
 /// Bytes inspected when sniffing for binary content or generated-file markers.
 const SNIFF_BYTES: usize = 8 * 1024;
 
@@ -102,6 +107,21 @@ pub struct Skipped {
     pub bytes: u64,
 }
 
+/// How much of a checkout the store may hold. Files past either limit are
+/// listed as skipped ("over_budget") instead of loaded.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// Total bytes of text and line index across loaded files.
+    pub max_bytes: u64,
+    pub max_files: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Limits {
+        Limits { max_bytes: MAX_TOTAL_BYTES, max_files: MAX_FILES }
+    }
+}
+
 pub struct Store {
     /// Sorted by path.
     pub files: Vec<File>,
@@ -112,8 +132,19 @@ impl Store {
     /// Walks `root` in parallel and loads every text file. Honours `.gitignore`,
     /// never follows symlinks, and leaves out vendored directories entirely.
     pub fn load(root: &Path) -> Store {
-        let files = Mutex::new(Vec::new());
+        Store::load_within(root, Limits::default())
+    }
+
+    /// [`Store::load`], holding no more than `limits` in memory.
+    pub fn load_within(root: &Path, limits: Limits) -> Store {
+        // Loaded files and the bytes they hold, under one lock so the budget is exact.
+        let loaded = Mutex::new((Vec::new(), 0u64));
         let skipped = Mutex::new(Vec::new());
+        // Checked before reading too, so a huge repository is not read only to be dropped.
+        let has_room = |bytes: u64| {
+            let (files, used) = &*loaded.lock().unwrap();
+            files.len() < limits.max_files && used + bytes <= limits.max_bytes
+        };
 
         WalkBuilder::new(root)
             .hidden(false)
@@ -130,15 +161,28 @@ impl Store {
                         return WalkState::Continue;
                     }
                     let Some(path) = relative_path(root, entry.path()) else { return WalkState::Continue };
-                    match load_file(entry.path(), path) {
-                        Ok(file) => files.lock().unwrap().push(file),
-                        Err(skip) => skipped.lock().unwrap().push(skip),
+                    let file = match load_file(entry.path(), path, &has_room) {
+                        Ok(file) => file,
+                        Err(skip) => {
+                            skipped.lock().unwrap().push(skip);
+                            return WalkState::Continue;
+                        }
+                    };
+                    let cost = (file.text.capacity() + file.line_starts.capacity() * 4) as u64;
+                    let mut loaded = loaded.lock().unwrap();
+                    if loaded.0.len() < limits.max_files && loaded.1 + cost <= limits.max_bytes {
+                        loaded.0.push(file);
+                        loaded.1 += cost;
+                    } else {
+                        drop(loaded);
+                        let bytes = file.text.len() as u64;
+                        skipped.lock().unwrap().push(Skipped { path: file.path, reason: "over_budget", bytes });
                     }
                     WalkState::Continue
                 })
             });
 
-        let mut files = files.into_inner().unwrap();
+        let mut files = loaded.into_inner().unwrap().0;
         files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         let mut skipped = skipped.into_inner().unwrap();
         skipped.sort_unstable_by(|a, b| a.path.cmp(&b.path));
@@ -176,10 +220,13 @@ fn relative_path(root: &Path, path: &Path) -> Option<String> {
     Some(if std::path::MAIN_SEPARATOR == '/' { relative.to_owned() } else { relative.replace(std::path::MAIN_SEPARATOR, "/") })
 }
 
-fn load_file(full: &Path, path: String) -> Result<File, Skipped> {
+fn load_file(full: &Path, path: String, has_room: &dyn Fn(u64) -> bool) -> Result<File, Skipped> {
     let bytes = std::fs::metadata(full).map(|m| m.len()).unwrap_or(0);
     if bytes > MAX_FILE_BYTES {
         return Err(Skipped { path, reason: "too_large", bytes });
+    }
+    if !has_room(bytes) {
+        return Err(Skipped { path, reason: "over_budget", bytes });
     }
     let data = std::fs::read(full).map_err(|_| Skipped { path: path.clone(), reason: "unreadable", bytes })?;
     let head = &data[..data.len().min(SNIFF_BYTES)];
