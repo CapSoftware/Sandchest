@@ -59,6 +59,30 @@ export async function claimOffers(user: { id: string; githubUserId: number | nul
   return offers;
 }
 
+/** A code as typed, for comparing: trimmed and upper-cased. */
+const normaliseCode = (code: string) => code.trim().toUpperCase();
+const CODE = /^[A-Z0-9_-]{4,64}$/;
+
+/** Whether a code typed at checkout is one that gives free credits (SANDCHEST_FREE_CREDIT_CODES). */
+export function isFreeCreditCode(code: string, setting: string | undefined = config().SANDCHEST_FREE_CREDIT_CODES): boolean {
+  const typed = normaliseCode(code);
+  if (!CODE.test(typed) || !setting) return false;
+  return setting
+    .split(",")
+    .map(normaliseCode)
+    .some((known) => CODE.test(known) && known === typed);
+}
+
+/**
+ * What a code typed at checkout does for this person's account: null when it
+ * isn't a free-credit code (so it may be a Stripe promotion code), otherwise
+ * the account's offer, open or closed under the same rules as /claim.
+ */
+export async function codeOffer(user: { id: string; githubUserId: number | null }, orgId: string, code: string): Promise<ClaimOffer | null> {
+  if (!billingEnabled() || !isFreeCreditCode(code)) return null;
+  return (await claimOffers(user))[orgId] ?? { open: false, reason: "has_plan" };
+}
+
 /**
  * The recruit flow's free credits: set when the person came from `/claim`
  * (the cookie) and billing is on, with what each of their accounts can claim.

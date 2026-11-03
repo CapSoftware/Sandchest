@@ -52,6 +52,13 @@ const Schema = z.object({
    */
   STRIPE_SECRET_KEY: z.string().regex(/^(sk|rk)_/, "a Stripe secret or restricted key (sk_… or rk_…)").optional(),
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().regex(/^pk_/, "a Stripe publishable key (pk_…)").optional(),
+  /**
+   * Codes that give free credits (FREE_CREDITS) when typed into the code box
+   * at checkout, comma-separated, any case. Entries that aren't 4–64 letters,
+   * digits, dashes or underscores are ignored, never an error. Unset means
+   * no codes; the /claim page works either way.
+   */
+  SANDCHEST_FREE_CREDIT_CODES: z.string().max(2_000).optional(),
   /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
   SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
   /** GitHub's REST API. Default https://api.github.com; tests point it at a fake. */

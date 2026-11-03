@@ -12,7 +12,7 @@ import { migrate } from "@sandchest/db/migrate";
 import type { GitHubApp } from "@sandchest/github";
 import { applyAutoTopUp, canScan, reserveScan, setAutumn, syncBilling } from "@/server/billing";
 import { requestDeepScan } from "@/server/dig";
-import { claimFreeCredits, claimOffers } from "@/server/free-credits";
+import { claimFreeCredits, claimOffers, codeOffer, isFreeCreditCode } from "@/server/free-credits";
 import { beginScan } from "@/server/scans";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
@@ -86,7 +86,7 @@ beforeAll(async () => {
   }
   const url = new URL(ADMIN_URL);
   url.pathname = `/${NAME}`;
-  Object.assign(process.env, { DATABASE_URL: url.toString(), GITHUB_APP_ID: "1", GITHUB_APP_PRIVATE_KEY: "unused", GITHUB_WEBHOOK_SECRET: "unused", SANDCHEST_APP_URL: "https://sandchest.test", CRON_SECRET: "cron-secret" });
+  Object.assign(process.env, { DATABASE_URL: url.toString(), GITHUB_APP_ID: "1", GITHUB_APP_PRIVATE_KEY: "unused", GITHUB_WEBHOOK_SECRET: "unused", SANDCHEST_APP_URL: "https://sandchest.test", CRON_SECRET: "cron-secret", SANDCHEST_FREE_CREDIT_CODES: " testers-2026 , x, not a code!, BETA_CREW " });
   resetConfig();
   database = createDb(url.toString(), { max: 5 });
   await migrate(database);
@@ -113,11 +113,24 @@ afterAll(async () => {
 
 const claimRow = async (githubAccountId: number) => database.query.creditClaims.findFirst({ where: (c, { eq }) => eq(c.githubAccountId, githubAccountId) });
 
+test("free-credit codes: any case and spacing; malformed entries in the setting are ignored, never an error", () => {
+  const setting = " testers-2026 , x, not a code!, BETA_CREW ";
+  for (const typed of ["testers-2026", "TESTERS-2026", "  Testers-2026 ", "beta_crew"]) expect(isFreeCreditCode(typed, setting)).toBe(true);
+  for (const typed of ["x", "X", "not a code!", "testers", "", "testers-2026,beta_crew"]) expect(isFreeCreditCode(typed, setting)).toBe(false);
+  expect(isFreeCreditCode("testers-2026", "")).toBe(false);
+});
+
 describe.skipIf(!available)("free credits", () => {
   test("before claiming, an account with no plan scans nothing: recon waits", async () => {
     const outcome = await handleWebhook(deps(), "installation", "install-acme", { action: "created", installation: { id: 601, account: { id: 9001, login: "acme", type: "Organization" } } });
     expect(outcome).toMatchObject({ status: "handled", scans: [] });
     expect(await claimOffers(alice)).toMatchObject({ [acme.id]: { open: true, credits: FREE_CREDITS.credits }, [globex.id]: { open: true } });
+  });
+
+  test("a code at checkout opens the claim for an account that may claim, and only then", async () => {
+    expect(await codeOffer(alice, acme.id, "SAVE10")).toBeNull(); // not ours: a Stripe promotion code, maybe
+    expect(await codeOffer(alice, acme.id, "Testers-2026")).toEqual({ open: true, credits: FREE_CREDITS.credits });
+    expect(await codeOffer(bob, globex.id, "testers-2026")).toEqual({ open: false, reason: "has_plan" }); // not bob's account
   });
 
   test("a claim that dies half way (the grant fails) charges nothing and can be finished by trying again", async () => {
@@ -161,6 +174,11 @@ describe.skipIf(!available)("free credits", () => {
     expect(await claimFreeCredits(bob, acme.id)).toEqual({ ok: false, reason: "org_claimed" });
     // Someone who isn't an admin can't claim for an account at all.
     expect(await claimFreeCredits(bob, globex.id)).toEqual({ ok: false, reason: "not_admin" });
+  });
+
+  test("once claimed, the code gives nothing more, to the same person or another account", async () => {
+    expect(await codeOffer(alice, globex.id, "TESTERS-2026")).toEqual({ open: false, reason: "claimed_elsewhere", login: "acme" });
+    expect(await codeOffer(bob, acme.id, "BETA_CREW")).toEqual({ open: false, reason: "org_claimed" });
   });
 
   test("an account that has, or has had, a plan can't claim", async () => {

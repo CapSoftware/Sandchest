@@ -121,7 +121,9 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   const [taxId, setTaxId] = useState("");
   const [taxCountry, setTaxCountry] = useState<string | null>(null);
   // A promotion code, checked against this purchase. A different amount of credits needs it checked again.
-  const [discount, setDiscount] = useState<Extract<DiscountCheck, { code: string }> | null>(null);
+  const [discount, setDiscount] = useState<Extract<DiscountCheck, { discount: number }> | null>(null);
+  // A tester's code typed at checkout: free credits for this account instead of paying.
+  const [codeClaim, setCodeClaim] = useState<{ orgId: string; code: string; credits: number } | null>(null);
   const [discountFor, setDiscountFor] = useState(credits);
   if (discountFor !== credits) {
     setDiscountFor(credits);
@@ -129,7 +131,11 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   }
   const applyDiscount = async (code: string): Promise<string | null> => {
     if (demo) {
-      // The dev preview has no billing: DEMO20 takes 20% off, anything else is refused.
+      // The dev preview has no billing: DEMO20 takes 20% off, DEMOFREE gives free credits, anything else is refused.
+      if (code.trim().toUpperCase() === "DEMOFREE") {
+        takeFreeCode({ code: "DEMOFREE", freeCredits: 20 });
+        return null;
+      }
       if (code.trim().toUpperCase() !== "DEMO20") return "That code isn’t valid, or has expired.";
       const full = PLAN.price + creditsPrice(credits);
       setDiscount({ code: "DEMO20", discount: Math.round(full * 20) / 100, dueToday: Math.round(full * 80) / 100 });
@@ -138,8 +144,16 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (!brief) return "Codes can’t be checked right now. Try again in a minute.";
     const checked = await checkDiscount(brief.orgId, code, order);
     if ("error" in checked) return checked.error;
-    setDiscount(checked);
+    if ("freeCredits" in checked) takeFreeCode(checked);
+    else setDiscount(checked);
     return null;
+  };
+  /** A tester's code: back to the Credits step, which now claims the free credits with no card. */
+  const takeFreeCode = (checked: { code: string; freeCredits: number }) => {
+    if (!brief) return;
+    setCodeClaim({ orgId: brief.orgId, code: checked.code, credits: checked.freeCredits });
+    setStep(3);
+    nudge(1);
   };
   const [look, setLook] = useState(-1);
   const [payment, setPayment] = useState<Payment>({ state: "idle" });
@@ -153,9 +167,12 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   const wide = useWide();
 
   // Free credits: what this account would get from claiming, unless the server found it can't after all.
-  const offer: ClaimOffer | null = claim && brief ? (claim.offers[brief.orgId] ?? null) : null;
+  // From /claim (the cookie), or from a code typed at checkout for this account.
+  const code = codeClaim && codeClaim.orgId === brief?.orgId ? codeClaim : null;
+  const intent: ClaimIntent | null = claim ?? (code ? { credits: code.credits, offers: { [code.orgId]: { open: true, credits: code.credits } } } : null);
+  const offer: ClaimOffer | null = intent && brief ? (code ? { open: true, credits: code.credits } : (intent.offers[brief.orgId] ?? null)) : null;
   const claimClosedHere = !!state.claimClosed;
-  const claiming = billing && !!claim && !brief?.currentPlan && !claimClosedHere && (!brief || offer?.open === true);
+  const claiming = billing && !!intent && !brief?.currentPlan && !claimClosedHere && (!brief || offer?.open === true);
   const payOnPage = billing && !claiming && !!publishableKey && !brief?.currentPlan && payment.state !== "failed";
   // Paying on this page is a step of its own, in the same panel as every other, so nothing moves when it opens.
   const steps: StepId[] = payOnPage ? ["connect", "company", "hacker", "plan", "pay"] : ["connect", "company", "hacker", "plan"];
@@ -197,7 +214,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     autoTopUp,
     currentPlan: brief?.currentPlan ?? null,
     billing,
-    claim: claiming ? (claim?.credits ?? null) : null,
+    claim: claiming ? (intent?.credits ?? null) : null,
   };
   const model = useRef<RecruitModel>(now);
   useEffect(() => {
@@ -435,7 +452,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (current === "plan") {
       if (!billing) return `Add ${name} to ${org}`;
       if (brief?.currentPlan) return "Save";
-      if (claiming) return `Claim ${claim!.credits} free credits`;
+      if (claiming) return `Claim ${intent!.credits} free credits`;
       if (!payOnPage) return `Pay ${usd(total)} on Stripe`;
       return "Continue to payment";
     }
@@ -512,8 +529,9 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
                 setCredits={setCredits}
                 autoTopUp={autoTopUp}
                 setAutoTopUp={setAutoTopUp}
-                claim={claiming ? claim!.credits : null}
-                closed={billing && claim && brief && !brief.currentPlan && !claiming ? (offer && !offer.open ? closedMessage(offer, org) : null) : null}
+                claim={claiming ? intent!.credits : null}
+                code={claiming && code ? { code: code.code, remove: () => setCodeClaim(null) } : null}
+                closed={billing && intent && brief && !brief.currentPlan && !claiming ? (offer && !offer.open ? closedMessage(offer, org) : null) : null}
               />
             )}
             {current === "pay" && (
@@ -901,6 +919,7 @@ function Credits({
   autoTopUp,
   setAutoTopUp,
   claim,
+  code,
   closed,
 }: {
   heading: RefObject<HTMLHeadingElement | null>;
@@ -915,6 +934,8 @@ function Credits({
   setAutoTopUp: (on: boolean) => void;
   /** Free credits to claim instead of paying. */
   claim: number | null;
+  /** The code at checkout that gave them, which can be taken back to pay instead. */
+  code: { code: string; remove: () => void } | null;
   /** Why free credits aren't on offer for this account, when the person came for them. */
   closed: string | null;
 }) {
@@ -974,6 +995,14 @@ function Credits({
             </span>
           </span>
         </div>
+        {code && (
+          <p className="onboard-help onboard-gift-code">
+            Code {code.code} applied.{" "}
+            <button type="button" className="onboard-bill-link" onClick={code.remove}>
+              Remove
+            </button>
+          </p>
+        )}
         <p className="onboard-lead onboard-gift-lead">
           On us, to test {name} on {org}’s code. They work like any credits, and the first deep scan doesn’t touch them.
         </p>
@@ -1069,7 +1098,7 @@ function Pay({
   setTaxId: (value: string) => void;
   taxCountry: string | null;
   setTaxCountry: (country: string | null) => void;
-  discount: Extract<DiscountCheck, { code: string }> | null;
+  discount: Extract<DiscountCheck, { discount: number }> | null;
   applyDiscount: (code: string) => Promise<string | null>;
   removeDiscount: () => void;
   payment: Payment;
@@ -1174,7 +1203,7 @@ function Pay({
   );
 }
 
-/** "Have a discount code?": a link until it's wanted, then a field and Apply. */
+/** "Have a code?": a link until it's wanted, then a field and Apply. A discount code, or a tester's code for free credits. */
 function DiscountCode({ apply }: { apply: (code: string) => Promise<string | null> }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -1194,7 +1223,7 @@ function DiscountCode({ apply }: { apply: (code: string) => Promise<string | nul
     return (
       <p className="onboard-discount">
         <button type="button" className="onboard-bill-link" onClick={() => setOpen(true)}>
-          Have a discount code?
+          Have a code?
         </button>
       </p>
     );
@@ -1216,8 +1245,8 @@ function DiscountCode({ apply }: { apply: (code: string) => Promise<string | nul
               void submit();
             }
           }}
-          placeholder="Discount code"
-          aria-label="Discount code"
+          placeholder="Code"
+          aria-label="Discount or free credits code"
           aria-invalid={!!error || undefined}
           aria-describedby={error ? "discount-error" : undefined}
           maxLength={64}

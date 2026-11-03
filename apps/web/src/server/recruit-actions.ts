@@ -24,7 +24,7 @@ import { briefing } from "./briefing";
 import { config } from "./config";
 import { db } from "./db";
 import { CLAIM_COOKIE, closedMessage } from "@/lib/free-credits";
-import { claimFreeCredits } from "./free-credits";
+import { claimFreeCredits, codeOffer } from "./free-credits";
 import { HackerSchema } from "./hacker-schema";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
@@ -215,7 +215,8 @@ const PromotionCode = z
   .trim()
   .regex(/^[A-Za-z0-9_-]{1,64}$/);
 
-export type DiscountCheck = { error: string } | { code: string; discount: number; dueToday: number };
+/** A promotion code's discount, or (for a tester's code) free credits instead of paying. */
+export type DiscountCheck = { error: string } | { code: string; discount: number; dueToday: number } | { code: string; freeCredits: number };
 
 /** Checks a promotion code against this purchase: what it takes off, and what's then due today. Nothing is charged. */
 export async function checkDiscount(orgId: string, rawCode: string, rawOrder: RecruitOrder): Promise<DiscountCheck> {
@@ -226,6 +227,9 @@ export async function checkDiscount(orgId: string, rawCode: string, rawOrder: Re
   if (!order.success || !Id.safeParse(orgId).success || !autumn()) return { error: "Codes can’t be checked right now. Try again in a minute." };
   const row = await orgForAdmin(db(), user.id, orgId);
   if (!row) return { error: NOT_ADMIN };
+  // A tester's code: free credits with no card, under the same rules as /claim.
+  const offer = await codeOffer(user, orgId, code.data);
+  if (offer) return offer.open ? { code: code.data.toUpperCase(), freeCredits: offer.credits } : { error: closedMessage(offer, row.org.githubLogin) };
   try {
     const preview = await autumn()!.preview({ customerId: row.org.id, planId: PLAN.id, credits: order.data.credits, promotionCode: code.data });
     if (preview.discount <= 0) return { error: "That code doesn’t take anything off this purchase." };

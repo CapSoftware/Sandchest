@@ -70,7 +70,7 @@ describe("pricing matches the billing package", () => {
         return [next ? `${tier.from} to ${next.from - 1}` : `${tier.from} or more`, `$${tier.price.toFixed(2)}`, example(amount)];
       }),
     );
-    expect(pricing).toContain(`Testers can claim ${FREE_CREDITS.credits} free credits from [sandchest.com/claim](/claim), with no card.`);
+    expect(pricing).toContain(`Testers can claim ${FREE_CREDITS.credits} free credits from [sandchest.com/claim](/claim), or by typing a tester's code`);
     expect(pricing).toContain(`when fewer than ${TOP_UP_BELOW} are left`);
     expect(pricing).toContain(`run low (below ${TOP_UP_BELOW})`);
     expect(pricing).toContain(`${money(defaultAutoTopUpLimit(CREDIT_AMOUNTS[0]))}, or five top-ups if that is more`);
