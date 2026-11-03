@@ -21,3 +21,16 @@ export function configurationProblem(env: Env = process.env): string | undefined
     return error instanceof Error ? error.message : "Invalid configuration";
   }
 }
+
+/**
+ * At boot of the self-hosted server: exits on a bad setting, naming the
+ * setting but not its value. Lives here, not in `instrumentation.ts`, which
+ * Next also compiles for the Edge runtime, where `process.exit` doesn't exist.
+ */
+export function exitOnConfigurationProblem(): void {
+  const problem = configurationProblem();
+  if (!problem) return;
+  console.error(`Sandchest cannot start. ${problem}`);
+  process.exit(1);
+}
+
