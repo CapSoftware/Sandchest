@@ -33,7 +33,7 @@ Everything is first-party and lives in Postgres. Hosted Sandchest also runs Verc
 | `props` | JSON with opaque ids, counts and enums. Actions carry `outcome`: `"ok"`, or the reason it didn't go through. |
 | `created_at` | When, in UTC. |
 
-Browser events (`page_view`, `clicked`, `step_viewed`) come from the beacon at `/api/e`. Paths are routes with ids replaced by `:id` (`/dashboard/findings/:id`). `page_view` also carries `referrer` (a host, external sites only), `utm_*`, `device` and `country`. Every other event is recorded on the server where the action happened.
+Browser events (`page_view`, `page_left`, `clicked`, `step_viewed`) come from the beacon at `/api/e`. Paths are routes with ids replaced by `:id` (`/dashboard/findings/:id`). `page_view` also carries `referrer` (a host, external sites only), `utm_*`, `q_*` status and filter parameters (`q_error=1` on a failed sign-in, `q_plan=started`, `q_severity=critical`), `device` and `country`. `page_left` carries `visible_ms`, time the page was actually on screen. Links in emails and on GitHub (Checks, reviews) carry `utm_source=email|github` and a `utm_medium` naming which one. Every other event is recorded on the server where the action happened.
 
 `dashboard_visit` is recorded at most once per person per UTC day, for retention.
 
@@ -114,6 +114,27 @@ where anon_id = $1 or user_id = $2
 order by created_at;
 ```
 
+Time actually spent on each page (visible time, not tab-open time). `page_left` is sent as the page goes away, which a few browsers drop; the gap to the browser's next `page_view` is a fallback:
+
+```sql
+select props->>'path' as path, count(*) as leaves,
+  round(avg((props->>'visible_ms')::numeric) / 1000, 1) as avg_seconds
+from events
+where name = 'page_left' and created_at >= now() - interval '30 days'
+group by 1
+order by leaves desc;
+```
+
+Where visits from emails and GitHub land, and whether they come back:
+
+```sql
+select props->>'utm_source' as source, props->>'utm_medium' as medium, count(*) as visits, count(distinct user_id) as people
+from events
+where name = 'page_view' and props ? 'utm_source' and created_at >= now() - interval '30 days'
+group by 1, 2
+order by visits desc;
+```
+
 The most common next page after the landing page:
 
 ```sql
@@ -126,11 +147,12 @@ with views as (
 select next_path, count(*) from views where path = '/' and next_path is not null group by 1 order by 2 desc limit 10;
 ```
 
-The signed-up funnel (install, plan, recon, first Dig, coming back) is already computed by `adminFunnel` in `src/admin.ts`, and shown at `/admin/funnel`.
+The signed-up funnel (install, plan, recon, first deep scan, coming back) is already computed by `adminFunnel` in `src/admin.ts`, and shown at `/admin/funnel`.
 
 ## Adding an event
 
 1. Add its name to `EVENT_NAMES` in `src/schema.ts`, with a comment listing its props.
 2. On the server, call `track(name, { userId, orgId, props })` from `apps/web/src/server/analytics.ts`. It attaches the browser's `anon_id` and records after the response, so it never slows or breaks the action. Give actions an `outcome`.
-3. In the browser, give a control a `data-track="some-id"` attribute: clicks on it are recorded as `clicked` with that `target`. Links are recorded without one. For a new kind of browser event, add it to `BROWSER_EVENTS` in `apps/web/src/lib/analytics.ts` and to the beacon's schema in `apps/web/src/app/api/e/route.ts`.
-4. Props are opaque ids, counts and enums. Never free text, names, emails, repository names, codes people typed, or anything from code or findings.
+3. In the browser, give a control a `data-track="some-id"` attribute (`<Submit track="…">` for form buttons): clicks on it are recorded as `clicked` with that `target`. Links are recorded without one; buttons are not, because their text can name people or repositories. Every button in the app has an id; give new ones one too. For a new kind of browser event, add it to `BROWSER_EVENTS` in `apps/web/src/lib/analytics.ts` and to the beacon's schema in `apps/web/src/app/api/e/route.ts`.
+4. A page that reads a new status or filter query parameter: add its key to `QUERY_KEYS` in `apps/web/src/lib/analytics.ts`, or page views won't show it. A link Sandchest sends out (email, GitHub): wrap it in `withUtm`.
+5. Props are opaque ids, counts and enums. Never free text, names, emails, repository names, codes people typed, or anything from code or findings.

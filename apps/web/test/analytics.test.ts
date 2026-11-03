@@ -8,7 +8,7 @@ import postgres from "postgres";
 import { createDb, EVENT_NAMES, schema, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import { NextRequest } from "next/server";
-import { ANON_COOKIE, BOT_AGENT, BROWSER_EVENTS, clickTarget, deviceOf, referrerHost, routeOf, safeToken, utmOf } from "@/lib/analytics";
+import { ANON_COOKIE, BOT_AGENT, BROWSER_EVENTS, clickTarget, deviceOf, queryOf, referrerHost, routeOf, safeToken, utmOf, withUtm } from "@/lib/analytics";
 import { resetConfig } from "@/server/config";
 import { setDb } from "@/server/db";
 import { POST } from "@/app/api/e/route";
@@ -32,6 +32,22 @@ describe("what is recorded", () => {
     expect(referrerHost("https://sandchest.test/docs", "sandchest.test")).toBeUndefined();
     expect(referrerHost("", "sandchest.test")).toBeUndefined();
     expect(referrerHost("not a url", "sandchest.test")).toBeUndefined();
+  });
+
+  test("known status and filter parameters survive as q_ props; everything else is dropped", () => {
+    expect(queryOf("?error=1&plan=started&severity=critical&email=user@example.com&name=Octo%20Cat&next=/dashboard/repos/123")).toEqual({
+      q_error: "1",
+      q_plan: "started",
+      q_severity: "critical",
+      q_next: "/dashboard/repos/:id",
+    });
+    // A `next` that leaves the site, and values that aren't safe tokens, are dropped.
+    expect(queryOf("?next=//evil.example&error=a%20b")).toEqual({});
+  });
+
+  test("links sent out carry where they were sent, before any fragment", () => {
+    expect(withUtm("https://sandchest.test/dashboard/settings#billing", "email", "credits_low")).toBe("https://sandchest.test/dashboard/settings?utm_source=email&utm_medium=credits_low#billing");
+    expect(withUtm("https://sandchest.test/dashboard/scans/1", "github", "check")).toBe("https://sandchest.test/dashboard/scans/1?utm_source=github&utm_medium=check");
   });
 
   test("only campaign tags survive from the query string, as safe tokens", () => {
@@ -134,7 +150,7 @@ describe("the beacon", () => {
           hint: HINT,
           referrer: "news.example.com",
           device: "desktop",
-          utm: { utm_source: "newsletter", utm_campaign: "has spaces" },
+          search: "?utm_source=newsletter&utm_campaign=has%20spaces&email=user@example.com&error=1&next=/dashboard/findings/0b6f6c8e-6d0c-4f7e-9d0a-1f2e3d4c5b6a",
         },
         { "x-vercel-ip-country": "IE" },
       ),
@@ -146,7 +162,8 @@ describe("the beacon", () => {
     expect(cookie?.httpOnly).toBe(true);
     const [row] = await recorded(1);
     expect(row).toMatchObject({ name: "page_view", anonId: HINT, userId: null, orgId: null });
-    expect(row!.props).toEqual({ path: "/dashboard/findings/:id", referrer: "news.example.com", device: "desktop", utm_source: "newsletter", country: "IE" });
+    // Only the campaign tag and known status parameters survive; `next` is reduced to a route.
+    expect(row!.props).toEqual({ path: "/dashboard/findings/:id", referrer: "news.example.com", device: "desktop", utm_source: "newsletter", q_error: "1", q_next: "/dashboard/findings/:id", country: "IE" });
   });
 
   test("the cookie wins over the hint, and is not set again", async () => {
@@ -158,6 +175,14 @@ describe("the beacon", () => {
     expect(response.cookies.get(ANON_COOKIE)).toBeUndefined();
     const [row] = await recorded(1);
     expect(row).toMatchObject({ name: "clicked", anonId: anon, props: { path: "/", target: "hero-get-started" } });
+  });
+
+  test("records how long a page was on screen", async () => {
+    if (!available) return;
+    await database.delete(schema.events);
+    await POST(beacon({ name: "page_left", path: "/docs/pricing", visible_ms: 12_345, hint: HINT }));
+    const [row] = await recorded(1);
+    expect(row).toMatchObject({ name: "page_left", props: { path: "/docs/pricing", visible_ms: 12_345 } });
   });
 
   test("records flow steps", async () => {

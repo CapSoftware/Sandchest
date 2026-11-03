@@ -16,7 +16,7 @@ export const ANON_COOKIE_MAX_AGE_S = 365 * 24 * 60 * 60;
 export const BEACON_PATH = "/api/e";
 
 /** Events the browser may send. Everything else is recorded on the server, where it happened. */
-export const BROWSER_EVENTS = ["page_view", "clicked", "step_viewed"] as const;
+export const BROWSER_EVENTS = ["page_view", "page_left", "clicked", "step_viewed"] as const;
 export type BrowserEvent = (typeof BROWSER_EVENTS)[number];
 
 export const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"] as const;
@@ -80,6 +80,62 @@ export function utmOf(search: string): Utm {
     if (value) utm[key] = value;
   }
   return utm;
+}
+
+/**
+ * The status and filter parameters pages read (`?error=1`, `?plan=started`,
+ * `?severity=critical`), kept on page views as `q_<key>`. Everything else in
+ * a query string is dropped. Values must be short safe tokens; `next` (where
+ * sign-in returns to) is kept as a route.
+ */
+export const QUERY_KEYS = [
+  "error",
+  "expired",
+  "billing",
+  "later",
+  "plan",
+  "recruited",
+  "state",
+  "setup_action",
+  "installation_id",
+  "org",
+  "topup",
+  "credits",
+  "severity",
+  "status",
+  "repo",
+  "kind",
+  "confidence",
+  "low",
+  "range",
+  "next",
+] as const;
+
+export function queryOf(search: string): Record<string, string> {
+  const params = new URLSearchParams(search);
+  const kept: Record<string, string> = {};
+  for (const key of QUERY_KEYS) {
+    const raw = params.get(key);
+    if (raw === null) continue;
+    const value = key === "next" ? (raw.startsWith("/") && !raw.startsWith("//") ? routeOf(raw) : undefined) : safeToken(raw, 40);
+    if (value) kept[`q_${key}`] = value;
+  }
+  return kept;
+}
+
+/**
+ * A link Sandchest sends out (an email, a GitHub Check or review), tagged
+ * with where it was sent, so the visit it brings is attributed to it.
+ */
+export function withUtm(url: string, source: "email" | "github", medium: string): string {
+  try {
+    const tagged = new URL(url);
+    tagged.searchParams.set("utm_source", source);
+    tagged.searchParams.set("utm_medium", medium);
+    return tagged.toString();
+  } catch {
+    return url;
+  }
 }
 
 /**

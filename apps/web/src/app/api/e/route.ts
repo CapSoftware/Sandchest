@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { recordEvent, type EventProps } from "@sandchest/db";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { ANON_COOKIE, ANON_COOKIE_MAX_AGE_S, BOT_AGENT, DEVICES, isUuid, routeOf, safeToken, UTM_KEYS } from "@/lib/analytics";
+import { ANON_COOKIE, ANON_COOKIE_MAX_AGE_S, BOT_AGENT, DEVICES, isUuid, queryOf, routeOf, safeToken, utmOf } from "@/lib/analytics";
 import { currentUser } from "@/server/access";
 import { later } from "@/server/analytics";
 import { db } from "@/server/db";
@@ -31,8 +31,10 @@ const Beacon = z.discriminatedUnion("name", [
     ...Base,
     referrer: Token.optional(),
     device: z.enum(DEVICES).optional(),
-    utm: z.partialRecord(z.enum(UTM_KEYS), Token).optional(),
+    /** The page's query string; only campaign tags and known status parameters are kept. */
+    search: z.string().max(1_000).optional(),
   }),
+  z.object({ name: z.literal("page_left"), ...Base, visible_ms: z.number().int().min(0).max(86_400_000) }),
   z.object({ name: z.literal("clicked"), ...Base, target: Token }),
   z.object({ name: z.literal("step_viewed"), ...Base, flow: z.enum(["recruit"]), step: Token }),
 ]);
@@ -62,13 +64,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const referrer = safeToken(event.referrer, 100);
     if (referrer) props.referrer = referrer;
     if (event.device) props.device = event.device;
-    for (const key of UTM_KEYS) {
-      const value = safeToken(event.utm?.[key]);
-      if (value) props[key] = value;
-    }
+    Object.assign(props, utmOf(event.search ?? ""), queryOf(event.search ?? ""));
     // Set by Vercel's edge; elsewhere absent (and only ever a two-letter code).
     const country = request.headers.get("x-vercel-ip-country");
     if (country && /^[A-Z]{2}$/.test(country)) props.country = country;
+  } else if (event.name === "page_left") {
+    props.visible_ms = event.visible_ms;
   } else if (event.name === "clicked") {
     const target = safeToken(event.target, 100);
     if (!target) return empty();
