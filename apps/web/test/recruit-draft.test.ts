@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CREDITS } from "@sandchest/billing/plans";
 import { DEFAULT_HACKER } from "../src/lib/hacker";
-import { readDraft } from "../src/lib/recruit-draft";
+import { readDraft, type RecruitDraft } from "../src/lib/recruit-draft";
 
 const REPO = "6f1c1f43-6b8e-4a52-9a4f-0a0d3b0c8e21";
 
@@ -14,7 +14,7 @@ describe("recruiting drafts", () => {
   });
 
   test("a draft reads back as it was left", () => {
-    const left = {
+    const left: RecruitDraft = {
       step: "plan",
       hacker: { ...DEFAULT_HACKER, handle: "Dry Run", shell: "gunmetal" },
       company: { name: "Acme", email: "billing@example.com" },
