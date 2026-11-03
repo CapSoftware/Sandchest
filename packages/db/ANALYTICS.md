@@ -6,7 +6,7 @@ Everything is first-party and lives in Postgres. Hosted Sandchest also runs Verc
 
 ## Rules
 
-- **Read only, on the replica.** Run `select` statements and nothing else, against the read replica (`DATABASE_REPLICA_URL`; on PlanetScale, the same credentials with `|replica` appended to the username), never the primary. Analysis then costs the app nothing. The app's role stops any statement after 30 seconds; for a longer analysis, start the session with `set statement_timeout = '5min'` (only on the replica).
+- **Read only, on the replica.** Connect as the read-only analysis role (it inherits `pg_read_all_data`, its sessions are read-only, and its statements stop after 5 minutes), to the read replica: on PlanetScale, append `|replica` to its username. Never the primary, and never the app's own credentials. Analysis then costs the app nothing.
 - Events never hold code, finding text, repository or account names, emails or IP addresses. Don't join them to tables that do (`users.email`, `repos.full_name`, `findings.title`) in anything you save or share. Report counts and rates, not people.
 
 ## Where things live
