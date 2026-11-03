@@ -8,7 +8,7 @@ import { brandAsset, site } from "@/lib/site";
 
 const NAV = [
   { id: "docs", label: "Docs", href: site.links.docs },
-  { id: "github", label: "GitHub", href: site.githubUrl },
+  { id: "github", label: "Open source", href: site.githubUrl },
 ] as const;
 
 const FOOTER = [
@@ -28,7 +28,6 @@ const FOOTER = [
       { id: "github", label: "GitHub", href: site.githubUrl },
       { id: "self-hosting", label: "Self-hosting", href: site.links.selfHosting },
       { id: "security", label: "Privacy & security", href: site.links.security },
-      { id: "llms", label: "llms.txt", href: site.links.llms },
     ],
   },
   {
