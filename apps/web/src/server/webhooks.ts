@@ -6,7 +6,7 @@ import {
   claimDelivery,
   createScan,
   disableRepos,
-  openFindings,
+  hasOpenFindings,
   orgByInstallation,
   queuePendingRecons,
   recordEvent,
@@ -78,8 +78,7 @@ async function dispatch(deps: WebhookDeps, event: string, payload: unknown): Pro
 async function onInstallation(deps: WebhookDeps, payload: InstallationEvent): Promise<WebhookOutcome> {
   const { installation } = payload;
   if (payload.action === "deleted" || payload.action === "suspend") {
-    const org = await orgByInstallation(deps.db, installation.id);
-    await removeInstallation(deps.db, installation.id);
+    const org = await removeInstallation(deps.db, installation.id);
     if (org) await recordEvent(deps.db, { name: "app_uninstalled", orgId: org.id, props: { action: payload.action } }).catch(() => {});
     return { status: "handled", detail: "installation removed" };
   }
@@ -142,7 +141,8 @@ export async function startRecon(deps: WebhookDeps, org: { id: string; githubLog
   if (deps.canScan && !(await deps.canScan(org))) return { status: "handled", scans: [], detail: "recon waits for a plan and credits" };
   // "HEAD" is resolved to the default branch's commit when the scan clones.
   const scans = await queuePendingRecons(deps.db, org.id);
-  for (const id of scans) await deps.startScan(id);
+  // Started together: each start is idempotent (claimWorkflowStart), so a failure that brings a redelivery repeats nothing.
+  await Promise.all(scans.map((id) => deps.startScan(id)));
   return { status: "handled", scans };
 }
 
@@ -169,10 +169,11 @@ async function onPush(deps: WebhookDeps, payload: PushEvent): Promise<WebhookOut
   if (!repo?.enabled || !repo.org.installationId) return { status: "ignored", detail: "repo not enabled" };
 
   const scans: string[] = [];
-  if (!(await threatModel(deps.db, repo.id))) {
+  const [model, open] = await Promise.all([threatModel(deps.db, repo.id), hasOpenFindings(deps.db, repo.id)]);
+  if (!model) {
     scans.push(await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "recon", headSha: payload.after }));
   }
-  if ((await openFindings(deps.db, repo.id)).length > 0) {
+  if (open) {
     scans.push(await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "fix_check", headSha: payload.after, baseSha: payload.before }));
   }
   return { status: scans.length ? "handled" : "ignored", detail: scans.length ? undefined : "nothing to check", scans: scans.filter(Boolean) };

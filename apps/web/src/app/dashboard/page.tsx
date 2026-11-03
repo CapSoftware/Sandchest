@@ -44,6 +44,14 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     const org = Number.isSafeInteger(installed) ? (await adminOrgs(db(), user.id)).find((row) => row.installationId === installed) : undefined;
     redirect(org ? `/dashboard/recruit?org=${org.id}` : "/dashboard/recruit");
   }
+  // The page's three heavy reads start now, alongside the repositories and plans they don't depend on, so the page
+  // waits for the slowest of them rather than for each in turn. If a redirect below wins, they're dropped.
+  const reads = Promise.all([
+    dashboardOverview(db(), user.id, DAYS),
+    dashboardFindings(db(), user.id, { severities: ["critical", "high"] }, 5),
+    dashboardScans(db(), user.id, {}, 6),
+  ]);
+  reads.catch(() => {});
   const repos = await dashboardRepos(db(), user.id);
   // Not set up yet: go straight to recruiting, unless they chose to finish it later.
   const later = params.later === "1";
@@ -76,11 +84,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     );
   }
 
-  const [overview, attention, recent] = await Promise.all([
-    dashboardOverview(db(), user.id, DAYS),
-    dashboardFindings(db(), user.id, { severities: ["critical", "high"] }, 5),
-    dashboardScans(db(), user.id, {}, 6),
-  ]);
+  const [overview, attention, recent] = await reads;
   const { now, before, open, days } = overview;
   const openTotal = SEVERITIES.reduce((sum, s) => sum + open[s], 0);
   const paid = orgs.filter((repo) => plans.get(repo.orgId)?.planId);
