@@ -44,6 +44,17 @@ const nextConfig: NextConfig = {
   async redirects() {
     return appRedirects;
   },
+  // Approving an agent can't happen inside someone else's frame (clickjacking).
+  async headers() {
+    const noFrames = [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+    ];
+    return [
+      { source: "/device", headers: noFrames },
+      { source: "/oauth/:path*", headers: noFrames },
+    ];
+  },
   async rewrites() {
     // Every docs page as Markdown (/docs.md and /docs/<page>.md), and the signed-in landing page.
     return { beforeFiles: [...homeRewrites, ...markdownRewrites], afterFiles: [], fallback: [] };

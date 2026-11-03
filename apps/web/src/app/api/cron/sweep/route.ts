@@ -2,10 +2,10 @@
  * Safety net, run by Vercel Cron: starts scans whose workflow never started,
  * fails scans stuck far past their budget so no PR Check spins forever, and
  * settles credits a finished scan still holds (charging a completed scan whose
- * charge failed, releasing the rest).
+ * charge failed, releasing the rest). Also clears out expired agent codes and tokens.
  */
 import { timingSafeEqual } from "node:crypto";
-import { strandedScans, unsettledScans } from "@sandchest/db";
+import { deleteExpiredAgentGrants, strandedScans, unsettledScans } from "@sandchest/db";
 import { settleScan } from "@/server/billing";
 import { failScan } from "@/server/scans";
 import { db } from "@/server/services";
@@ -24,6 +24,8 @@ export async function GET(request: Request): Promise<Response> {
     ...unstarted.map((scan) => startScan(scan.id)),
     ...stuck.map((scan) => failScan(scan.id, "The scan stopped responding.")),
     ...unsettled.map((scan) => settleScan(scan, scan.status === "completed" ? "charge" : "release", scan.credits)),
+    // Device codes, OAuth codes and tokens no one can use any more.
+    deleteExpiredAgentGrants(db()),
   ]);
   const failed = results.filter((r) => r.status === "rejected").length;
   return Response.json({ started: unstarted.length, failed: stuck.length, settled: unsettled.length, errors: failed });

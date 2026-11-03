@@ -2787,3 +2787,65 @@ html:not([data-js]) .no-js-submit {
 .stat-text {
   font-size: 1.5rem;
 }
+
+/* ---- Connecting an agent (/device, /oauth/authorize) ---------------------- */
+
+.agent-code {
+  margin-top: 1.25rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 2rem;
+  letter-spacing: 0.15em;
+  color: var(--color-bright);
+}
+
+.agent-abilities {
+  margin-top: 1.5rem;
+}
+
+.agent-decide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2.25rem;
+}
+
+.sign-in .agent-decide form {
+  margin-top: 0;
+}
+
+.agent-list li {
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.agent-list li > span:first-child {
+  flex: 1 1 12rem;
+}
+
+.agent-list .field-help {
+  margin: 0;
+}
+
+.agent-list button.quiet {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-dust);
+  cursor: pointer;
+}
+
+.agent-list button.quiet:hover {
+  color: var(--color-sand);
+  text-decoration: underline;
+}
+
+.agent-new-key .setup-env {
+  margin-top: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-list .tag {
+  margin-left: 0.5rem;
+}
