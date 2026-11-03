@@ -171,7 +171,7 @@ export async function createScan(database: Db, input: NewScan): Promise<{ scan: 
  */
 export async function queuePushScan(database: Db, input: NewScan & { kind: "recon" | "fix_check" }): Promise<{ scan: Scan; created: boolean }> {
   return database.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.repoId}, 2))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.repoId}, 3))`);
     const same = and(eq(scans.repoId, input.repoId), eq(scans.kind, input.kind));
     const [existing] =
       input.kind === "fix_check"
