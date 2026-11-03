@@ -4,8 +4,10 @@ import { AppNav } from "@/components/app/nav";
 import type { Viewer } from "@/server/access";
 
 const SECTIONS = [
-  { href: "/dashboard", label: "Repos" },
+  { href: "/dashboard", label: "Overview" },
+  { href: "/dashboard/scans", label: "Scans" },
   { href: "/dashboard/findings", label: "Findings" },
+  { href: "/dashboard/repos", label: "Repos" },
   { href: "/dashboard/settings", label: "Settings" },
 ];
 

@@ -32,5 +32,3 @@ export function deepScanCredits(loc: number): number | undefined {
 /** Recon and fix checks are free. */
 export const FREE_SCANS = ["recon", "fix_check"] as const;
 
-/** Hours between manual deep scans of one repository. */
-export const DEEP_SCAN_COOLDOWN_HOURS = 24;

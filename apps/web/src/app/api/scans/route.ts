@@ -28,10 +28,5 @@ export async function POST(request: Request): Promise<Response> {
     case "no_plan":
     case "out_of_credits":
       return Response.json({ error: result.reason === "no_plan" ? "this account has no plan" : "out of credits", credits: result.credits }, { status: 402 });
-    case "cooling":
-      return Response.json(
-        { error: "cooling down", retryAt: result.retryAt!.toISOString() },
-        { status: 429, headers: { "retry-after": String(Math.ceil((result.retryAt!.getTime() - Date.now()) / 1000)) } },
-      );
   }
 }

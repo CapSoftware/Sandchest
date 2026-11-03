@@ -58,10 +58,18 @@
   image-rendering: pixelated;
 }
 
+/* Five sections (six for operators): on a phone the row scrolls sideways instead of wrapping. */
 .app-nav {
   display: flex;
   gap: 0.25rem;
   height: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.app-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .app-nav a {
@@ -117,6 +125,8 @@
   }
   .app-nav a {
     padding: 0 0.5rem;
+    font-size: 0.875rem;
+    white-space: nowrap;
   }
   .app-nav a[aria-current="page"]::after {
     left: 0.5rem;
@@ -395,39 +405,6 @@ a.quiet:hover {
 
 /* Repos */
 
-.repo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.75rem 2rem;
-  padding: 1.25rem 0;
-}
-
-@media (min-width: 52rem) {
-  .repo {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr) 11.5rem;
-  }
-}
-
-.repo-name {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem 0.75rem;
-  min-width: 0;
-}
-
-.repo-name a {
-  color: var(--color-bright);
-  font-weight: 600;
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
-
-.repo-name a:hover {
-  color: var(--color-gold-light);
-}
-
 .repo-owner {
   color: var(--color-dust);
   font-weight: 400;
@@ -445,19 +422,6 @@ a.quiet:hover {
   font-size: 0.875rem;
 }
 
-.tally a {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--color-sand);
-  text-decoration: none;
-  font-variant-numeric: tabular-nums;
-}
-
-.tally a:hover {
-  color: var(--color-bright);
-}
-
 .tally-clear {
   display: inline-flex;
   align-items: center;
@@ -465,31 +429,11 @@ a.quiet:hover {
   color: var(--color-dust);
 }
 
-.repo-scan {
-  font-size: 0.8125rem;
-  color: var(--color-dust);
-}
-
-.repo-scan a {
-  color: var(--color-dust);
-  text-decoration: none;
-}
-
-.repo-scan a:hover {
-  color: var(--color-sand);
-}
-
+/* A repo's deep scan key, in a page head: the key, and its price or why there is none. */
 .repo-dig {
   display: grid;
   justify-items: end;
   gap: 0.35rem;
-  grid-row: span 2;
-}
-
-@media (min-width: 52rem) {
-  .repo-dig {
-    grid-row: auto;
-  }
 }
 
 .repo-dig-note {
@@ -613,6 +557,11 @@ a.quiet:hover {
 .tabs {
   display: flex;
   gap: 0.25rem;
+  max-width: 100%;
+  /* Room for the current tab's bar, which hangs 2px below it. */
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .tab {
@@ -624,6 +573,7 @@ a.quiet:hover {
   font-size: 0.875rem;
   color: var(--color-dust);
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -1858,4 +1808,712 @@ html:not([data-js]) .no-js-submit {
 
 .confirm .stats {
   margin: 0;
+}
+
+/* ---- Overview ------------------------------------------------------------ */
+/* Numbers first: four figures on one seam, then the month as pixel columns. */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--color-seam);
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.kpi {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 0.5rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border-left: 1px solid var(--color-seam);
+}
+
+.kpi:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.kpi dt {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: clamp(2.75rem, 5vw, 3.5rem);
+  line-height: 0.85;
+  color: var(--color-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-spark {
+  display: flex;
+  align-items: flex-end;
+  min-height: 28px;
+}
+
+.kpi-foot {
+  grid-row: 4;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+@media (max-width: 52rem) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kpi {
+    padding: 1.25rem 1rem;
+  }
+  .kpi:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .kpi:nth-child(n + 3) {
+    border-top: 1px solid var(--color-seam);
+  }
+}
+
+/* A month of days as 4px columns, each a stack of 4px steps. */
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+  max-width: 11rem;
+  height: 28px;
+}
+
+/* 4px columns, narrower when the tile is. */
+.spark i {
+  flex: 1 1 0;
+  min-width: 1px;
+  max-width: 4px;
+  height: calc(var(--h) * 4px);
+  background: var(--color-gold);
+}
+
+.spark i[data-zero] {
+  height: 2px;
+  background: var(--color-seam);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 3rem 4rem;
+  margin-top: 3.5rem;
+}
+
+.overview-grid-even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 52rem) {
+  .overview-grid,
+  .overview-grid-even {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.overview-grid + .panel {
+  margin-top: 3.5rem;
+}
+
+.panel {
+  min-width: 0;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.panel-head .block-title {
+  margin-bottom: 0;
+}
+
+.panel-link {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.panel-link::after {
+  content: " →";
+}
+
+.panel-link:hover {
+  color: var(--color-gold-light);
+}
+
+.panel-empty {
+  padding: 1.25rem 0;
+  border-top: 1px solid var(--color-seam);
+  color: var(--color-dust);
+  font-size: 0.875rem;
+}
+
+.running-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding: 0.85rem 1rem;
+  box-shadow: inset 2px 0 0 var(--color-gold);
+  background: var(--color-soot);
+  color: var(--color-sand);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.running-strip strong {
+  color: var(--color-bright);
+  font-weight: 600;
+}
+
+.running-strip-go {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--color-gold);
+}
+
+.running-strip-go::after {
+  content: " →";
+}
+
+.running-strip:hover .running-strip-go {
+  color: var(--color-gold-light);
+}
+
+/* Activity */
+
+.activity {
+  margin: 0;
+}
+
+.activity-plot {
+  position: relative;
+  padding-top: 1.25rem;
+}
+
+.activity-max {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 0.6875rem;
+  color: var(--color-dust);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  grid-auto-flow: column;
+  align-items: end;
+  gap: 6px;
+  height: 128px;
+  border-top: 1px dashed var(--color-seam);
+  border-bottom: 1px solid var(--color-edge);
+  background: linear-gradient(var(--color-seam), var(--color-seam)) 0 50% / 100% 1px no-repeat;
+}
+
+@media (max-width: 44rem) {
+  .activity-cols {
+    gap: 3px;
+  }
+}
+
+.activity-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  cursor: default;
+}
+
+/* Each bar is a stack of 6px blocks with a 2px seam between them. */
+.activity-col i {
+  --step: var(--color-gold);
+  display: block;
+  height: calc(var(--h) * 8px);
+  background: repeating-linear-gradient(to top, var(--step) 0 6px, transparent 6px 8px);
+}
+
+.activity-col .activity-deep {
+  --step: var(--color-ember);
+}
+
+.activity-col:hover .activity-reviews {
+  --step: var(--color-gold-light);
+}
+
+.activity-col:hover {
+  background: linear-gradient(var(--color-soot), var(--color-soot));
+}
+
+.activity-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--color-dust);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.legend-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legend-key::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--color-gold);
+}
+
+.legend-key[data-series="deep"]::before {
+  background: var(--color-ember);
+}
+
+/* Open findings */
+
+.open-total {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  color: var(--color-dust);
+}
+
+.open-total-n {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  line-height: 0.85;
+  color: var(--color-bright);
+}
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(48, minmax(0, 1fr));
+  gap: 2px;
+  height: 12px;
+  margin-bottom: 1.25rem;
+}
+
+.strip i {
+  background: var(--color-seam);
+}
+
+.strip i[data-severity="critical"] {
+  background: var(--critical);
+}
+.strip i[data-severity="high"] {
+  background: var(--high);
+}
+.strip i[data-severity="medium"] {
+  background: var(--medium);
+}
+.strip i[data-severity="low"] {
+  background: var(--low);
+}
+
+.severity-list {
+  border-top: 1px solid var(--color-seam);
+}
+
+.severity-list a {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--color-seam);
+  color: var(--color-sand);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.severity-list a:hover {
+  color: var(--color-bright);
+}
+
+.severity-list-n {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small linked rows: a finding needing attention, an exposed repo. */
+
+.mini-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.9rem;
+  padding: 0.85rem 0.75rem;
+  margin: 0 -0.75rem;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 120ms;
+}
+
+.mini-row:hover {
+  background: var(--color-soot);
+}
+
+.mini-row-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.mini-row-title {
+  color: var(--color-bright);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-row-sub {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.mini-row-repo {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.tally-n {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-sand);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Scan history -------------------------------------------------------- */
+
+.scan-row {
+  display: grid;
+  grid-template-columns: 0.5rem minmax(0, 1.1fr) minmax(0, 1fr) 9rem 5.5rem 5.5rem 6.5rem;
+  grid-template-areas: "dot what repo result cost took when";
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  padding: 0.85rem 0.75rem;
+  margin: 0 -0.75rem;
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: background-color 120ms;
+}
+
+.scan-row:hover {
+  background: var(--color-soot);
+}
+
+.scan-rows:not([data-repo]) .scan-row {
+  grid-template-columns: 0.5rem minmax(0, 1fr) 9rem 5.5rem 5.5rem 6.5rem;
+  grid-template-areas: "dot what result cost took when";
+}
+
+.scan-rows[data-compact] .scan-row {
+  grid-template-columns: 0.5rem minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "dot what result when"
+    ". repo result when";
+  row-gap: 0.15rem;
+}
+
+.scan-rows[data-compact] .scan-row-cost,
+.scan-rows[data-compact] .scan-row-took {
+  display: none;
+}
+
+@media (max-width: 44rem) {
+  .scan-rows .scan-row,
+  .scan-rows:not([data-repo]) .scan-row {
+    grid-template-columns: 0.5rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "dot what when"
+      ". repo result";
+    row-gap: 0.15rem;
+  }
+  .scan-row-cost,
+  .scan-row-took {
+    display: none;
+  }
+}
+
+.scan-dot {
+  grid-area: dot;
+  align-self: center;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--color-gold);
+}
+
+.scan-dot[data-status="failed"] {
+  background: var(--critical);
+}
+
+.scan-dot[data-status="cancelled"],
+.scan-dot[data-status="refused"] {
+  background: var(--color-edge);
+}
+
+.scan-dot[data-status="queued"],
+.scan-dot[data-status="running"],
+.scan-dot[data-status="publishing"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--color-gold);
+}
+
+.scan-row-what {
+  grid-area: what;
+  min-width: 0;
+  color: var(--color-bright);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.scan-row-kind {
+  margin-left: 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--color-dust);
+}
+
+.scan-row-repo {
+  grid-area: repo;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+}
+
+.scan-row-result {
+  grid-area: result;
+  white-space: nowrap;
+}
+
+.scan-row-cost {
+  grid-area: cost;
+  text-align: right;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.scan-row-when {
+  grid-area: when;
+  text-align: right;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.scan-row-took {
+  grid-area: took;
+  text-align: right;
+  color: var(--color-dust);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.scan-result-found {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-sand);
+}
+
+.scan-result-quiet {
+  color: var(--color-dust);
+}
+
+.scan-result-off {
+  color: var(--color-dust);
+}
+
+.scan-result-off[data-status="failed"] {
+  color: var(--critical);
+}
+
+.scan-result-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-gold);
+}
+
+.pager {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* ---- Repos --------------------------------------------------------------- */
+/* A dense table: one line a repo, the whole line a link to the repo's page. */
+
+.list-filter {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.list-filter-input {
+  width: min(22rem, 100%);
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--color-seam);
+  background: var(--color-void);
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--color-bright);
+}
+
+.list-filter-input::placeholder {
+  color: var(--color-dust);
+}
+
+.list-filter-input:hover {
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+}
+
+.list-filter-input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-gold);
+}
+
+.list-filter-count {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.repo-table-head,
+.repo-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 7.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0 0.75rem;
+}
+
+/* Lines bleed past the column for their hover, but their seams stay on it. */
+.repo-table-head,
+.repo-line {
+  margin: 0 -0.75rem;
+  background: linear-gradient(var(--color-seam), var(--color-seam)) 0.75rem 100% / calc(100% - 1.5rem) 1px no-repeat;
+}
+
+.repo-table-head {
+  padding-bottom: 0.6rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.repo-line {
+  min-height: 3.25rem;
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: background-color 120ms;
+}
+
+.repo-line[hidden] {
+  display: none;
+}
+
+.repo-line:hover {
+  background-color: var(--color-soot);
+}
+
+.repo-line:hover .repo-line-repo {
+  color: var(--color-gold-light);
+}
+
+.repo-line-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.repo-line-repo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-bright);
+  font-weight: 600;
+}
+
+.repo-line-dim {
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+}
+
+.repo-table-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 44rem) {
+  .repo-table-head,
+  .repo-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .repo-table-head > :nth-child(n + 3),
+  .repo-line > :nth-child(n + 3) {
+    display: none;
+  }
+}
+
+/* The deep scan key, and its second step that names the price. */
+
+.dig-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dig-cancel {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  cursor: pointer;
+}
+
+.dig-cancel:hover {
+  color: var(--color-sand);
+}
+
+.stat-text {
+  font-size: 1.5rem;
 }

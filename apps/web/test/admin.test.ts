@@ -60,8 +60,8 @@ describe("admin access", () => {
   });
 
   test("only operators are given the Admin link, and the client nav names no section itself", () => {
-    expect(navLinks(false).map((link) => link.href)).toEqual(["/dashboard", "/dashboard/findings", "/dashboard/settings"]);
-    expect(navLinks(true).map((link) => link.href)).toEqual(["/dashboard", "/dashboard/findings", "/dashboard/settings", "/admin"]);
+    expect(navLinks(false).map((link) => link.href)).toEqual(["/dashboard", "/dashboard/scans", "/dashboard/findings", "/dashboard/repos", "/dashboard/settings"]);
+    expect(navLinks(true).map((link) => link.href)).toEqual(["/dashboard", "/dashboard/scans", "/dashboard/findings", "/dashboard/repos", "/dashboard/settings", "/admin"]);
     // The nav is a client component: anything written in it ships to every signed-in person.
     const clientNav = readFileSync(new URL("../src/components/app/nav.tsx", import.meta.url), "utf8");
     expect(clientNav).not.toMatch(/\/admin|\/ops/);

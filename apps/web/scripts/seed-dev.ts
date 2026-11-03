@@ -9,7 +9,7 @@
  * Refuses to run against anything but localhost. Every name here is made up.
  */
 import { createHmac, randomBytes } from "node:crypto";
-import { createDb, schema, upsertFindings, upsertInstallation, type FindingInput } from "@sandchest/db";
+import { createDb, schema, upsertFindings, upsertInstallation, upsertRepos, type FindingInput } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 
 const url = process.env.DATABASE_URL ?? "";
@@ -114,6 +114,78 @@ await db.insert(schema.scanEvents).values([
 ]).onConflictDoNothing();
 await scan(docs.id, "recon", "completed", 60 * 24 * 3);
 
+// A month of everyday activity across a few dozen more repos, so the overview,
+// the scan history and a long repo list have something to show. Seeded, so
+// every run draws the same month.
+let state = 7;
+const rand = () => ((state = (state * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648);
+const pick = <T,>(list: readonly T[]): T => list[Math.floor(rand() * list.length)]!;
+const NAMES = ["auth-service", "mobile", "admin", "infra", "payments", "search", "notifications", "analytics", "cli", "sdk-js", "sdk-python", "marketing-site", "design-system", "data-pipeline", "webhooks", "gateway", "scheduler", "importer", "exporter", "reports", "onboarding", "support-bot", "feature-flags", "media", "edge-cache"];
+const extra = await upsertRepos(
+  db,
+  org.id,
+  NAMES.map((name, i) => ({ githubRepoId: 900_200 + i, fullName: `acme/${name}`, private: i % 6 !== 5, defaultBranch: "main" })),
+);
+const TITLES: Array<[string, "critical" | "high" | "medium" | "low", string]> = [
+  ["Webhook signatures are compared with a non-constant-time check", "medium", "broken_authentication"],
+  ["Admin export reachable by any signed-in user", "high", "broken_access_control"],
+  ["Server fetches any URL passed as the avatar link", "high", "ssrf"],
+  ["Uploaded SVGs are served inline and run scripts", "medium", "xss"],
+  ["API keys are logged on failed requests", "low", "sensitive_data_exposure"],
+  ["Refunds can exceed the original charge", "critical", "business_logic"],
+  ["Invite links never expire and can be reused", "medium", "broken_authentication"],
+  ["Team members can change another team's billing email", "high", "broken_access_control"],
+  ["Open redirect after sign-in via the next parameter", "low", "open_redirect"],
+  ["Rate limit keyed on a header the client controls", "medium", "rate_limiting"],
+];
+let fingerprint = 100;
+for (const [i, repo] of extra.entries()) {
+  await sql`update repos set loc = ${Math.round(4_000 + rand() * 260_000)} where id = ${repo.id}`;
+  await scan(repo.id, "recon", "completed", 60 * 24 * 62);
+  // Busy repos get a pull request most days; quiet ones a few a month.
+  const busy = i % 4 === 0 ? 0.9 : i % 3 === 0 ? 0.45 : 0.15;
+  let pr = 40 + i * 7;
+  for (let day = 59; day >= 0; day--) {
+    if (rand() > busy) continue;
+    const ago = day * 24 * 60 + Math.round(rand() * 600);
+    const failed = rand() < 0.04;
+    const review = await scan(repo.id, "pr_review", failed ? "failed" : "completed", ago, {
+      prNumber: pr++,
+      credits: failed ? 0 : pick([1, 1, 1, 2, 3]),
+      billing: failed ? "released" : "charged",
+      error: failed ? "The model endpoint timed out three times." : null,
+    });
+    await db.insert(schema.scanMetrics).values({ scanId: review.id, inputTokens: 1, cachedTokens: 1, outputTokens: 1, requests: 1, durationMs: Math.round(25_000 + rand() * 90_000), candidates: 1, survivors: 0 }).onConflictDoNothing();
+    if (failed || rand() > 0.22) {
+      await sql`update scans set stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${review.id}`;
+      continue;
+    }
+    const [title, severity, category] = pick(TITLES);
+    const { ids } = await upsertFindings(db, repo.id, review, [finding({ fingerprint: `dev-${fingerprint++}`, title, severity, category, confidence: pick(["high", "high", "medium"]) })]);
+    await sql`update scans set stats = ${JSON.stringify({ findingIds: ids })}::jsonb where id = ${review.id}`;
+    await sql`update findings set first_seen_at = ${minutes(ago).toISOString()}::timestamptz, last_seen_at = ${minutes(ago).toISOString()}::timestamptz where id = any(${ids})`;
+    // About half get fixed a few days later.
+    if (rand() < 0.5 && day > 2) await sql`update findings set status = 'fixed', fixed_at = ${minutes(ago - 60 * 24 * 2).toISOString()}::timestamptz where id = any(${ids})`;
+  }
+  if (i % 5 === 1) {
+    const ago = 60 * 24 * Math.round(2 + rand() * 20);
+    const dug = await scan(repo.id, "deep", "completed", ago, { credits: pick([5, 10]), billing: "charged", trigger: "manual" });
+    await db.insert(schema.scanMetrics).values({ scanId: dug.id, inputTokens: 1, cachedTokens: 1, outputTokens: 1, requests: 1, durationMs: Math.round(90_000 + rand() * 240_000), candidates: 5, survivors: 2 }).onConflictDoNothing();
+    const list = [pick(TITLES), pick(TITLES)].map(([title, severity, category]) => finding({ fingerprint: `dev-${fingerprint++}`, title, severity, category }));
+    const { ids } = await upsertFindings(db, repo.id, dug, list);
+    await sql`update scans set stats = ${JSON.stringify({ findingIds: ids, loc: 60_000 })}::jsonb where id = ${dug.id}`;
+    await sql`update repos set last_deep_scan_at = ${minutes(ago).toISOString()}::timestamptz where id = ${repo.id}`;
+  }
+}
+const allRepos = [...repos, ...extra];
+
+// A plan with credits, stored as fresh so the dashboard never asks the billing service about this made-up org.
+await sql`update orgs set free_dig_scan_id = ${deep.id} where id = ${org.id}`;
+await db
+  .insert(schema.orgBilling)
+  .values({ orgId: org.id, planId: "standard", credits: 42, checkedAt: new Date(Date.now() + 365 * 86_400_000) })
+  .onConflictDoUpdate({ target: schema.orgBilling.orgId, set: { planId: "standard", credits: 42, checkedAt: new Date(Date.now() + 365 * 86_400_000) } });
+
 // The person.
 const [user] = await db
   .insert(schema.users)
@@ -121,7 +193,7 @@ const [user] = await db
   .onConflictDoUpdate({ target: schema.users.email, set: { accessCheckedAt: new Date(Date.now() + 365 * 86_400_000) } })
   .returning();
 await db.insert(schema.accounts).values({ userId: user!.id, providerId: "github", accountId: "900900" }).onConflictDoNothing();
-for (const repo of repos) await db.insert(schema.permissionCache).values({ userId: user!.id, repoId: repo.id, permission: "admin" }).onConflictDoNothing();
+for (const repo of allRepos) await db.insert(schema.permissionCache).values({ userId: user!.id, repoId: repo.id, permission: "admin" }).onConflictDoNothing();
 await db.insert(schema.orgAdmins).values({ userId: user!.id, orgId: org.id }).onConflictDoNothing();
 
 const token = randomBytes(24).toString("base64url");

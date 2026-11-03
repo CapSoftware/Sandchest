@@ -1,4 +1,4 @@
-/** Manual deep scans ("Dig"): one at a time per repo, then a 24-hour cooldown (SPEC §4). */
+/** Manual deep scans ("Dig"): one at a time per repo, as often as the org's credits allow (SPEC §4). */
 import { randomUUID } from "node:crypto";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { activeDeepScan, claimFreeDig, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
@@ -10,7 +10,7 @@ import { startScan } from "./start";
 
 export type DigResult =
   | { ok: true; scanId: string }
-  | { ok: false; reason: "not_installed" | "running" | "cooling" | "too_large" | "no_plan" | "out_of_credits"; scanId?: string; retryAt?: Date; credits?: number };
+  | { ok: false; reason: "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits"; scanId?: string; credits?: number };
 
 /**
  * Starts a deep scan of a repo the caller is allowed to scan. Its credits are
@@ -21,9 +21,8 @@ export type DigResult =
 export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" = "manual", options: { operator?: boolean } = {}): Promise<DigResult> {
   if (!repo.enabled || !repo.org.installationId) return { ok: false, reason: "not_installed" };
   const active = await activeDeepScan(db(), repo.id);
-  const state = digState({ loc: repo.loc, lastDeepScanAt: repo.lastDeepScanAt, activeDeepScanId: active?.id ?? null });
+  const state = digState({ loc: repo.loc, activeDeepScanId: active?.id ?? null });
   if (state.state === "running") return { ok: false, reason: "running", scanId: state.scanId };
-  if (state.state === "cooling") return { ok: false, reason: "cooling", retryAt: state.retryAt };
   if (state.state === "too_large") return { ok: false, reason: "too_large" };
 
   const headSha = await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);

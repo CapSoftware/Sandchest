@@ -103,6 +103,8 @@ export interface DashboardRepo {
   lastDeepScanAt: Date | null;
   open: Record<Severity, number>;
   lastScan: { id: string; kind: string; status: string; at: Date } | null;
+  /** Pull request reviews in the last 30 days. */
+  reviews30d: number;
   activeDeepScanId: string | null;
   /** Whether the org's next Dig is its free first one. */
   freeDig: boolean;
@@ -113,8 +115,11 @@ export const FREE_DIG_AVAILABLE = sql`(o.free_dig_scan_id is null or not exists 
   select 1 from scans fd where fd.id = o.free_dig_scan_id and fd.status in ('queued', 'running', 'publishing', 'completed')
 ))`;
 
-/** Enabled repos the user can see, with open findings by severity and their latest scan. One query. */
-export async function dashboardRepos(database: Db, userId: string): Promise<DashboardRepo[]> {
+/**
+ * Enabled repos the user can see, with open findings by severity, their latest
+ * scan and recent reviews, most exposed first. One query. `repoId` narrows it to one.
+ */
+export async function dashboardRepos(database: Db, userId: string, options: { repoId?: string } = {}): Promise<DashboardRepo[]> {
   const rows = await database.execute<{
     id: string;
     full_name: string;
@@ -137,6 +142,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     scan_at: string | null;
     active_deep_id: string | null;
     free_dig: boolean;
+    reviews_30d: number;
   }>(sql`
     select r.id, r.full_name, r.private, o.id as org_id, o.github_login as org_login,
       exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id) as org_admin,
@@ -144,7 +150,8 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
       coalesce(f.critical, 0)::int as critical, coalesce(f.high, 0)::int as high,
       coalesce(f.medium, 0)::int as medium, coalesce(f.low, 0)::int as low,
       s.id as scan_id, s.kind as scan_kind, s.status as scan_status, coalesce(s.finished_at, s.started_at, s.created_at) as scan_at,
-      d.id as active_deep_id, ${FREE_DIG_AVAILABLE} as free_dig
+      d.id as active_deep_id, ${FREE_DIG_AVAILABLE} as free_dig,
+      (select count(*) from ${scans} pr where pr.repo_id = r.id and pr.kind = 'pr_review' and pr.created_at > now() - interval '30 days')::int as reviews_30d
     from ${repos} r
     join ${orgs} o on o.id = r.org_id
     join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
@@ -163,7 +170,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     left join lateral (
       select id from ${scans} where repo_id = r.id and kind = 'deep' and status in ('queued', 'running', 'publishing') limit 1
     ) d on true
-    where r.enabled
+    where r.enabled ${options.repoId ? sql`and r.id = ${options.repoId}` : sql``}
     order by coalesce(f.critical, 0) desc, coalesce(f.high, 0) desc, coalesce(f.medium, 0) desc, r.full_name
   `);
   return rows.map((row) => ({
@@ -178,6 +185,7 @@ export async function dashboardRepos(database: Db, userId: string): Promise<Dash
     lastDeepScanAt: row.last_deep_scan_at ? new Date(row.last_deep_scan_at) : null,
     open: { critical: row.critical, high: row.high, medium: row.medium, low: row.low },
     lastScan: row.scan_id ? { id: row.scan_id, kind: row.scan_kind!, status: row.scan_status!, at: new Date(row.scan_at!) } : null,
+    reviews30d: row.reviews_30d,
     activeDeepScanId: row.active_deep_id,
     freeDig: row.free_dig,
   }));
@@ -396,14 +404,169 @@ export async function feedSince(
   return { status: row?.status ?? null, startedAt: row?.startedAt ? new Date(row.startedAt).toISOString() : null, events: row?.events ?? [] };
 }
 
-export async function recentScans(database: Db, userId: string, repoId: string, limit = 8) {
-  return database
-    .select({ id: scans.id, kind: scans.kind, status: scans.status, prNumber: scans.prNumber, createdAt: scans.createdAt, finishedAt: scans.finishedAt })
+// ---- Overview --------------------------------------------------------------
+
+export interface OverviewDay {
+  /** UTC date, YYYY-MM-DD. */
+  day: string;
+  reviews: number;
+  deep: number;
+  found: number;
+  fixed: number;
+}
+
+export interface Overview {
+  /** This window, and the window of the same length before it, for comparison. */
+  now: OverviewWindow;
+  before: OverviewWindow;
+  open: Record<Severity, number>;
+  days: OverviewDay[];
+}
+
+export interface OverviewWindow {
+  /** Distinct pull requests reviewed, and the review runs behind them. */
+  pullRequests: number;
+  reviews: number;
+  deepScans: number;
+  found: number;
+  fixed: number;
+  /** Credits charged. */
+  credits: number;
+}
+
+/**
+ * The overview's numbers across every repo the user can see, over the last
+ * `days` UTC days (today included), with one row per day. Two queries.
+ */
+export async function dashboardOverview(database: Db, userId: string, days = 30, now = new Date()): Promise<Overview> {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const since = new Date(today - (days - 1) * 86_400_000);
+  const before = new Date(since.getTime() - days * 86_400_000);
+  const visible = sql`select r.id from ${repos} r join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId} where r.enabled`;
+  const window = (from: Date, to: Date | null) => {
+    const inWindow = (column: SQL) => (to ? sql`${column} >= ${from.toISOString()}::timestamptz and ${column} < ${to.toISOString()}::timestamptz` : sql`${column} >= ${from.toISOString()}::timestamptz`);
+    return sql`json_build_object(
+      'pullRequests', (select count(distinct (repo_id, pr_number)) from s where kind = 'pr_review' and status = 'completed' and ${inWindow(sql`created_at`)}),
+      'reviews', (select count(*) from s where kind = 'pr_review' and status = 'completed' and ${inWindow(sql`created_at`)}),
+      'deepScans', (select count(*) from s where kind = 'deep' and status = 'completed' and ${inWindow(sql`created_at`)}),
+      'credits', (select coalesce(sum(credits), 0) from s where billing = 'charged' and ${inWindow(sql`created_at`)}),
+      'found', (select count(*) from f where ${inWindow(sql`first_seen_at`)}),
+      'fixed', (select count(*) from f where status = 'fixed' and ${inWindow(sql`fixed_at`)})
+    )`;
+  };
+  const [[totals], series] = await Promise.all([
+    database.execute<{ now: OverviewWindow; before: OverviewWindow; critical: number; high: number; medium: number; low: number }>(sql`
+      with s as (select repo_id, pr_number, kind, status, credits, billing, created_at from ${scans} where repo_id in (${visible}) and created_at >= ${before.toISOString()}::timestamptz),
+           f as (select severity, status, first_seen_at, fixed_at from ${findings} where repo_id in (${visible}) and confidence <> 'low')
+      select ${window(since, null)} as now, ${window(before, since)} as before,
+        (select count(*) from f where status = 'open' and severity = 'critical')::int as critical,
+        (select count(*) from f where status = 'open' and severity = 'high')::int as high,
+        (select count(*) from f where status = 'open' and severity = 'medium')::int as medium,
+        (select count(*) from f where status = 'open' and severity = 'low')::int as low
+    `),
+    // One pass over each source, grouped by UTC day, then laid over every day of the window.
+    database.execute<{ day: string; reviews: number; deep: number; found: number; fixed: number }>(sql`
+      select to_char(g.d, 'YYYY-MM-DD') as day,
+        coalesce(s.reviews, 0)::int as reviews, coalesce(s.deep, 0)::int as deep,
+        coalesce(f.found, 0)::int as found, coalesce(x.fixed, 0)::int as fixed
+      from generate_series(${utcDay(since)}::date, ${utcDay(now)}::date, interval '1 day') as g(d)
+      left join (
+        select (created_at at time zone 'UTC')::date as d,
+          count(*) filter (where kind = 'pr_review') as reviews, count(*) filter (where kind = 'deep') as deep
+        from ${scans} where repo_id in (${visible}) and status = 'completed' and kind in ('pr_review', 'deep') and created_at >= ${since.toISOString()}::timestamptz
+        group by 1
+      ) s on s.d = g.d
+      left join (
+        select (first_seen_at at time zone 'UTC')::date as d, count(*) as found
+        from ${findings} where repo_id in (${visible}) and confidence <> 'low' and first_seen_at >= ${since.toISOString()}::timestamptz
+        group by 1
+      ) f on f.d = g.d
+      left join (
+        select (fixed_at at time zone 'UTC')::date as d, count(*) as fixed
+        from ${findings} where repo_id in (${visible}) and confidence <> 'low' and status = 'fixed' and fixed_at >= ${since.toISOString()}::timestamptz
+        group by 1
+      ) x on x.d = g.d
+      order by g.d
+    `),
+  ]);
+  const count = (w: OverviewWindow): OverviewWindow => ({ pullRequests: Number(w.pullRequests), reviews: Number(w.reviews), deepScans: Number(w.deepScans), found: Number(w.found), fixed: Number(w.fixed), credits: Number(w.credits) });
+  return {
+    now: count(totals!.now),
+    before: count(totals!.before),
+    open: { critical: totals!.critical, high: totals!.high, medium: totals!.medium, low: totals!.low },
+    days: series.map((row) => ({ day: row.day, reviews: row.reviews, deep: row.deep, found: row.found, fixed: row.fixed })),
+  };
+}
+
+/** "2026-11-03": a moment's UTC date. */
+function utcDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+// ---- Scan history ----------------------------------------------------------
+
+export interface ScanFilters {
+  repoId?: string;
+  kind?: "recon" | "pr_review" | "deep" | "fix_check";
+  /** Only scans created before this, for the next page. */
+  before?: Date;
+}
+
+export interface ScanListItem {
+  id: string;
+  kind: string;
+  status: string;
+  prNumber: number | null;
+  repoId: string;
+  repoFullName: string;
+  createdAt: Date;
+  finishedAt: Date | null;
+  durationMs: number | null;
+  /** Credits charged; 0 for free scans and scans that weren't charged. */
+  credits: number;
+  /** What the scan reported, low confidence left out. */
+  found: Record<Severity, number>;
+}
+
+/** The runs the user can see, newest first, with what each found and cost. One query. */
+export async function dashboardScans(database: Db, userId: string, filters: ScanFilters = {}, limit = 50): Promise<ScanListItem[]> {
+  const where: SQL[] = [canSee(userId), eq(repos.enabled, true)];
+  if (filters.repoId) where.push(eq(scans.repoId, filters.repoId));
+  if (filters.kind) where.push(eq(scans.kind, filters.kind));
+  if (filters.before) where.push(sql`${scans.createdAt} < ${filters.before.toISOString()}::timestamptz`);
+  const reported = sql`${findings.id} in (select jsonb_array_elements_text(coalesce(${scans.stats} -> 'findingIds', '[]'::jsonb))::uuid) and ${findings.confidence} <> 'low'`;
+  const rows = await database
+    .select({
+      id: scans.id,
+      kind: scans.kind,
+      status: scans.status,
+      prNumber: scans.prNumber,
+      repoId: scans.repoId,
+      repoFullName: repos.fullName,
+      createdAt: scans.createdAt,
+      startedAt: scans.startedAt,
+      finishedAt: scans.finishedAt,
+      durationMs: scanMetrics.durationMs,
+      credits: sql<number>`case when ${scans.billing} = 'charged' then ${scans.credits} else 0 end`,
+      found: sql<Record<Severity, number>>`(select json_build_object(
+        'critical', count(*) filter (where ${findings.severity} = 'critical'),
+        'high', count(*) filter (where ${findings.severity} = 'high'),
+        'medium', count(*) filter (where ${findings.severity} = 'medium'),
+        'low', count(*) filter (where ${findings.severity} = 'low')
+      ) from ${findings} where ${reported})`,
+    })
     .from(scans)
     .innerJoin(repos, eq(repos.id, scans.repoId))
-    .where(and(eq(scans.repoId, repoId), canSee(userId)))
+    .leftJoin(scanMetrics, eq(scanMetrics.scanId, scans.id))
+    .where(and(...where))
     .orderBy(desc(scans.createdAt))
     .limit(limit);
+  return rows.map(({ startedAt, ...row }) => ({
+    ...row,
+    // Scans without metrics (failed, or still running) fall back to their own clock.
+    durationMs: row.durationMs ?? (startedAt && row.finishedAt ? row.finishedAt.getTime() - startedAt.getTime() : null),
+    credits: Number(row.credits),
+  }));
 }
 
 // ---- Settings --------------------------------------------------------------

@@ -34,7 +34,6 @@ export async function dig(repoId: string): Promise<DigOutcome> {
     const messages = {
       not_installed: "Sandchest is no longer installed on this repository.",
       running: "A deep scan is already running.",
-      cooling: "This repository was deep scanned in the last 24 hours.",
       too_large: "This repository is over a million lines. Get in touch to scan it.",
       no_plan: `${row.org.githubLogin} needs a plan before Sandchest can scan.`,
       out_of_credits: `Out of credits: this deep scan needs ${result.credits}.`,

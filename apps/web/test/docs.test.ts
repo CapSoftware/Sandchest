@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_COOLDOWN_HOURS, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
+import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
 import { site } from "@/lib/site";
 
 const root = join(import.meta.dir, "..");
@@ -75,15 +75,14 @@ describe("pricing matches the billing package", () => {
     expect(pricing).toContain(`${money(defaultAutoTopUpLimit(CREDIT_AMOUNTS[0]))}, or five top-ups if that is more`);
   });
 
-  test("the summary ranges and the cooldown", () => {
+  test("the summary ranges", () => {
     const pr = `${PR_REVIEW_TIERS[0]!.credits} to ${PR_REVIEW_TIERS.at(-1)!.credits}`;
-    expect(pricing).toContain(`the button says "Up to ${DEEP_SCAN_TIERS.at(-1)!.credits} credits"`);
+    expect(pricing).toContain(`you confirm "Scan for up to ${DEEP_SCAN_TIERS.at(-1)!.credits} credits"`);
     const deep = `${DEEP_SCAN_TIERS.slice(0, -1).map((t) => t.credits).join(", ")} or ${DEEP_SCAN_TIERS.at(-1)!.credits}`;
     for (const page of [pricing, doc("scans")]) {
       expect(page).toContain(pr);
       expect(page).toContain(deep);
     }
-    expect(doc("scans")).toContain(`${DEEP_SCAN_COOLDOWN_HOURS}-hour wait`);
   });
 });
 

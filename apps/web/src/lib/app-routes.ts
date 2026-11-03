@@ -20,7 +20,7 @@ export const homeRewrites = SESSION_COOKIES.map((key) => ({ source: "/", has: [{
  * /home is only ever served through the rewrite above.
  */
 export const appRedirects = [
-  { source: "/repos", destination: "/dashboard", permanent: true },
+  { source: "/repos", destination: "/dashboard/repos", permanent: true },
   { source: "/findings", destination: "/dashboard/findings", permanent: true },
   { source: "/findings/:id", destination: "/dashboard/findings/:id", permanent: true },
   { source: "/scans/:id", destination: "/dashboard/scans/:id", permanent: true },

@@ -9,7 +9,9 @@ import {
   applyFindingAction,
   createDb,
   dashboardFindings,
+  dashboardOverview,
   dashboardRepos,
+  dashboardScans,
   findingForUser,
   notificationRecipients,
   schema,
@@ -316,6 +318,54 @@ describe("free first dig", () => {
   });
 });
 
+describe("overview and scan history", () => {
+  test("count and list only the runs the user can see, with what each found and cost", async () => {
+    if (!available) return;
+    const day = 86_400_000;
+    const at = (ago: number) => new Date(Date.now() - ago);
+    const review = { orgId: ids.org, kind: "pr_review" as const, status: "completed" as const, trigger: "webhook" as const, prNumber: 7, credits: 2, billing: "charged" as const };
+    const added = await database
+      .insert(schema.scans)
+      .values([
+        // One pull request reviewed twice, and once more 40 days ago.
+        { ...review, repoId: ids.web, headSha: "r1", createdAt: at(2 * 3_600_000) },
+        { ...review, repoId: ids.web, headSha: "r2", createdAt: at(3_600_000) },
+        { ...review, repoId: ids.web, headSha: "r0", createdAt: at(40 * day) },
+        // acme/secret is read-only for Alice: its scans are never hers to see.
+        { ...review, repoId: ids.secret, headSha: "s1", credits: 3 },
+      ])
+      .returning({ id: schema.scans.id });
+    try {
+      const all = await dashboardScans(database, ids.alice);
+      expect(all.some((scan) => scan.repoFullName === "acme/secret")).toBe(false);
+      expect(all.map((scan) => scan.kind)).toEqual(["deep", "pr_review", "pr_review", "pr_review"]);
+      // A deep scan's findings, low confidence left out; it wasn't charged.
+      expect(all[0]).toMatchObject({ repoFullName: "acme/api", found: { critical: 1, high: 1, medium: 0, low: 0 }, credits: 0 });
+      expect(all[1]).toMatchObject({ prNumber: 7, credits: 2, found: { critical: 0, high: 0, medium: 0, low: 0 } });
+
+      expect((await dashboardScans(database, ids.alice, { kind: "deep" })).map((scan) => scan.id)).toEqual([ids.scan]);
+      expect((await dashboardScans(database, ids.alice, { repoId: ids.web })).length).toBe(3);
+      expect((await dashboardScans(database, ids.alice, { repoId: ids.secret })).length).toBe(0);
+      // The next page starts below the last row shown.
+      const page = await dashboardScans(database, ids.alice, {}, 2);
+      expect((await dashboardScans(database, ids.alice, { before: page.at(-1)!.createdAt })).map((scan) => scan.id)).toEqual(all.slice(2).map((scan) => scan.id));
+
+      const overview = await dashboardOverview(database, ids.alice, 30);
+      expect(overview.now).toEqual({ pullRequests: 1, reviews: 2, deepScans: 1, found: 2, fixed: 0, credits: 4 });
+      expect(overview.before).toMatchObject({ pullRequests: 1, reviews: 1, credits: 2 });
+      expect(overview.open).toEqual({ critical: 1, high: 1, medium: 0, low: 0 });
+      expect(overview.days.length).toBe(30);
+      expect(overview.days.at(-1)).toMatchObject({ deep: 1, found: 2 });
+      expect(overview.days.reduce((sum, d) => sum + d.reviews, 0)).toBe(2);
+      // Someone with no repos sees nothing at all.
+      const nobody = await dashboardOverview(database, "00000000-0000-0000-0000-000000000000", 30);
+      expect(nobody.now).toEqual({ pullRequests: 0, reviews: 0, deepScans: 0, found: 0, fixed: 0, credits: 0 });
+    } finally {
+      await database.$client`delete from scans where id = any(${added.map((row) => row.id)})`;
+    }
+  });
+});
+
 describe("findings", () => {
   test("lists only what the user can see, worst first, hiding low confidence unless asked", async () => {
     if (!available) return;
@@ -364,13 +414,11 @@ describe("notifications", () => {
 });
 
 describe("dig", () => {
-  const now = new Date("2026-11-01T12:00:00Z");
-  test("costs credits by size, waits out the cooldown, refuses huge repos", () => {
-    expect(digState({ loc: 48_000, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "ready", credits: 5 });
-    expect(digState({ loc: null, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "ready", credits: undefined });
-    expect(digState({ loc: 2_000_000, lastDeepScanAt: null, activeDeepScanId: null }, now)).toEqual({ state: "too_large" });
-    expect(digState({ loc: 10, lastDeepScanAt: new Date("2026-11-01T02:00:00Z"), activeDeepScanId: null }, now)).toEqual({ state: "cooling", retryAt: new Date("2026-11-02T02:00:00Z") });
-    expect(digState({ loc: 10, lastDeepScanAt: null, activeDeepScanId: "s1" }, now)).toEqual({ state: "running", scanId: "s1" });
+  test("costs credits by size, runs one at a time, refuses huge repos", () => {
+    expect(digState({ loc: 48_000, activeDeepScanId: null })).toEqual({ state: "ready", credits: 5 });
+    expect(digState({ loc: null, activeDeepScanId: null })).toEqual({ state: "ready", credits: undefined });
+    expect(digState({ loc: 2_000_000, activeDeepScanId: null })).toEqual({ state: "too_large" });
+    expect(digState({ loc: 10, activeDeepScanId: "s1" })).toEqual({ state: "running", scanId: "s1" });
   });
 });
 

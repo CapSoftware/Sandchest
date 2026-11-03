@@ -1,9 +1,10 @@
-import { orgForAdmin, scanForUser } from "@sandchest/db";
+import { dashboardRepos, orgForAdmin, scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { HoverLink } from "@/components/app/hover-link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
+import { Dig } from "@/components/app/dig";
 import { Heat } from "@/components/app/heat";
 import { ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
@@ -13,6 +14,7 @@ import "../../../rig.css";
 import { compactNumber, plural, SCAN_KIND_LABEL } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
+import { orgPlans } from "@/server/org-plans";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -37,8 +39,15 @@ export default async function ScanPage({ params }: Params) {
   const row = await load(id);
   if (!row) notFound();
   const { scan, repo, org, metrics, findings, events } = row;
-  const admin = !!(await orgForAdmin(db(), (await viewer()).id, scan.orgId));
+  const user = await viewer();
   const live = ACTIVE.has(scan.status);
+  // A finished deep scan can be run again from here: the repo's Dig key, priced for its org.
+  const [admin, again] = await Promise.all([
+    orgForAdmin(db(), user.id, scan.orgId).then((org) => !!org),
+    scan.kind === "deep" && !live
+      ? dashboardRepos(db(), user.id, { repoId: repo.id }).then(async ([row]) => (row ? { repo: row, plan: (await orgPlans([row])).get(row.orgId) } : undefined))
+      : undefined,
+  ]);
   const shown = findings.filter((finding) => finding.confidence !== "low");
   const stats = (scan.stats ?? {}) as { loc?: number; checked?: number; fixed?: number };
 
@@ -59,9 +68,9 @@ export default async function ScanPage({ params }: Params) {
           finished scan (its end time and measured duration) instead of keeping what it followed live. */}
       <ScanLive key={scan.status} scanId={scan.id} initial={initial}>
         <nav className="crumbs" aria-label="Breadcrumb">
-          <Link href="/dashboard">Repos</Link>
+          <Link href="/dashboard/scans">Scans</Link>
           <span aria-hidden="true">/</span>
-          <Link href={`/dashboard/findings?repo=${repo.id}`}>{repo.fullName}</Link>
+          <Link href={`/dashboard/repos/${repo.id}`}>{repo.fullName}</Link>
         </nav>
 
         <div className="page-head">
@@ -76,6 +85,7 @@ export default async function ScanPage({ params }: Params) {
               <span className="key-face">Open the pull request</span>
             </a>
           )}
+          {again && <Dig repo={again.repo} plan={again.plan} />}
         </div>
 
         {scan.error && <p className="scan-error">{scan.error}</p>}

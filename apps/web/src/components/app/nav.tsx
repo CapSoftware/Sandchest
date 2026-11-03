@@ -19,8 +19,8 @@ export function AppNav({ links }: { links: ReadonlyArray<{ href: string; label: 
 
 /**
  * The one section a path belongs to: the longest link it sits under, whole
- * segments only. Every section lives under /dashboard (Repos itself), and a
- * scan belongs to its repo, so it lights Repos.
+ * segments only. Every section lives under /dashboard (Overview itself), so
+ * pages without a section of their own (billing, recruiting) light Overview.
  */
 export function currentSection(path: string, links: ReadonlyArray<{ href: string }>): string | undefined {
   const under = (href: string) => path === href || path.startsWith(`${href}/`);

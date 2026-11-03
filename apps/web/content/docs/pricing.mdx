@@ -43,7 +43,7 @@ Above 5,000 changed lines the review covers the most security-relevant files fir
 
 Your account's first deep scan is free, whatever the repository's size: the **Deep scan** button says "Free: your first deep scan". If that scan fails, the next one is free instead.
 
-After that, a deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and from then on the **Deep scan** button shows the price before you start. Before recon has measured a repository (about a minute after you install or join), the button says "Up to 25 credits": it holds 25, and charges the tier the scan measures. With fewer than 25 credits, the button waits for recon to size the repository and says so.
+After that, a deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and from then on the **Deep scan** button shows the price and asks you to confirm it before the scan starts. You can scan a repository again as soon as its last deep scan has finished; each one costs its price again. Before recon has measured a repository (about a minute after you install or join), you confirm "Scan for up to 25 credits": it holds 25, and charges the tier the scan measures. With fewer than 25 credits, the button waits for recon to size the repository and says so.
 
 | Repository size | Credits |
 | --- | --- |
@@ -59,7 +59,7 @@ Repositories of a million lines or more aren't scanned at all, by recon, reviews
 - When a paid scan starts, its credits are held. When it finishes, it is charged what it cost, and never more than the price you were shown.
 - If a scan fails, is refused or never starts, nothing is charged and the held credits go back to your balance.
 - A pull request that arrives when the account is out of credits isn't reviewed. Its Check is **neutral** ("Out of credits"), so it never blocks a merge, and it links to where you can top up. The same happens, with "Not reviewed: no plan", before the account has a plan.
-- When credits run out, the **Deep scan** button shows "Out of credits" instead of starting a scan.
+- When there aren't enough credits for a deep scan, the repository shows how many it needs, with a link to top up, instead of the **Deep scan** button.
 - With auto top-up off, the account's admins get an email when credits run low (below 5) and when they run out. With it on, they get an email for each top-up, and one if a top-up fails.
 
 ## Buying credits
@@ -90,4 +90,4 @@ Payments are processed by Stripe, through the billing service Autumn. Sandchest 
 
 ## Self-hosted
 
-A self-hosted Sandchest has billing turned off: no plan, no credits and nothing to buy. You pay only for your own servers and model usage. The operational limits still apply: the 24-hour wait between deep scans of a repository, no scans of repositories with a million lines or more, and at most two scans at a time per account, with two more for recon. See [Self-hosting](/docs/self-hosting#limits-without-billing).
+A self-hosted Sandchest has billing turned off: no plan, no credits and nothing to buy. You pay only for your own servers and model usage. The operational limits still apply: one deep scan at a time per repository, no scans of repositories with a million lines or more, and at most two scans at a time per account, with two more for recon. See [Self-hosting](/docs/self-hosting#limits-without-billing).

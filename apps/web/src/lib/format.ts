@@ -121,3 +121,10 @@ export function shortDate(date: Date): string {
 export function usd(amount: number): string {
   return `$${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
 }
+
+const DAY_MONTH = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** "5 Oct", from a UTC date ("2026-10-05"). */
+export function dayMonth(day: string): string {
+  return DAY_MONTH.format(new Date(`${day}T00:00:00Z`));
+}

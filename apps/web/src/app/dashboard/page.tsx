@@ -1,35 +1,27 @@
-import { adminOrgs, dashboardRepos, type DashboardRepo } from "@sandchest/db";
+import { adminOrgs, dashboardFindings, dashboardOverview, dashboardRepos, dashboardScans, type DashboardRepo, type OverviewWindow } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { HoverLink } from "@/components/app/hover-link";
-import { DigButton } from "@/components/app/dig-button";
+import { ActivityChart, SeverityStrip, Spark } from "@/components/app/charts";
 import { Heat } from "@/components/app/heat";
-import { InstallKey } from "@/components/app/install-key";
+import { HoverLink } from "@/components/app/hover-link";
 import { PlanPicker } from "@/components/app/plan-picker";
-import { When } from "@/components/app/when";
+import { ScanRows } from "@/components/app/scan-rows";
+import { Tally } from "@/components/app/tally";
 import { PageShape } from "@/components/app/skeleton";
-import { plural, SCAN_KIND_LABEL, SEVERITIES, timeUntil } from "@/lib/format";
-import { ensureAccess, viewer } from "@/server/access";
-import { digState } from "@/lib/dig-state";
+import { compactNumber, plural, SEVERITIES, SEVERITY_LABEL } from "@/lib/format";
 import { PRICES } from "@/lib/pricing";
-import { billingEnabled, pageBilling } from "@/server/billing";
-import { DEEP_SCAN_TIERS } from "@sandchest/billing";
-
-/** What an unsized repo holds for a Dig: the top tier. */
-const MAX_DEEP_SCAN_CREDITS = DEEP_SCAN_TIERS.at(-1)!.credits;
+import { ensureAccess, viewer } from "@/server/access";
 import { db } from "@/server/db";
+import { orgPlans } from "@/server/org-plans";
 import "../rig.css";
 
-/** "Deep scan failed 2 hr. ago". Completed scans need no verb. */
-const LAST_SCAN_VERB: Record<string, string> = { queued: "queued", running: "started", publishing: "started", failed: "failed", refused: "refused", cancelled: "cancelled" };
+export const metadata: Metadata = { title: "Overview · Sandchest" };
 
-export const metadata: Metadata = { title: "Repos · Sandchest" };
+/** The overview's window, in days. */
+const DAYS = 30;
 
-/** What billing allows for an org on this page. Undefined when billing is off. */
-type OrgPlan = { planId: string | null; credits: number } | undefined;
-
-export default async function ReposPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; state?: string; plan?: string; recruited?: string; later?: string }> }) {
+export default async function OverviewPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; state?: string; plan?: string; recruited?: string; later?: string }> }) {
   const user = await viewer();
   const params = await searchParams;
   // Back from installing on GitHub: read access again so new repos show at once.
@@ -45,13 +37,8 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
   const later = params.later === "1";
   if (repos.length === 0 && !later) redirect("/dashboard/recruit");
 
-  // Each org's billing, read from Autumn only where the stored copy is missing or old.
+  const plans = await orgPlans(repos);
   const orgs = [...new Map(repos.map((repo) => [repo.orgId, repo])).values()];
-  const plans = new Map<string, OrgPlan>();
-  if (billingEnabled()) {
-    const rows = await Promise.all(orgs.map((repo) => pageBilling({ id: repo.orgId, githubLogin: repo.orgLogin }, repo.billing)));
-    orgs.forEach((repo, i) => plans.set(repo.orgId, { planId: rows[i]?.planId ?? null, credits: rows[i]?.credits ?? 0 }));
-  }
   const unpaid = orgs.filter((repo) => plans.get(repo.orgId) && !plans.get(repo.orgId)!.planId);
   // No account has joined yet: recruiting is unfinished, so pick it up there. Not
   // straight back from paying (the plan may not show yet) or when they left it for later.
@@ -61,13 +48,13 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
 
   if (repos.length === 0) {
     return (
-      <PageShape id="repos">
-        <h1 className="page-title">Repos</h1>
+      <PageShape id="overview">
+        <h1 className="page-title">Overview</h1>
         <div className="empty" style={{ marginTop: "2rem" }}>
           <h2 className="empty-title">Nothing to scan yet</h2>
           <p>
             Connect a GitHub account, choose the repositories Sandchest may read, and recruit the hacker who scans
-            them. You’ll see each repository here once you can push to it.
+            them. Reviews, findings and scans show up here once you can push to a repository.
           </p>
           <Link href="/dashboard/recruit" className="key key-primary key-large key-glow">
             <span className="key-face">Get started</span>
@@ -77,20 +64,29 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
     );
   }
 
-  const critical = repos.reduce((sum, repo) => sum + repo.open.critical, 0);
-  const open = repos.reduce((sum, repo) => sum + SEVERITIES.reduce((n, s) => n + repo.open[s], 0), 0);
+  const [overview, attention, recent] = await Promise.all([
+    dashboardOverview(db(), user.id, DAYS),
+    dashboardFindings(db(), user.id, { severities: ["critical", "high"] }, 5),
+    dashboardScans(db(), user.id, {}, 6),
+  ]);
+  const { now, before, open, days } = overview;
+  const openTotal = SEVERITIES.reduce((sum, s) => sum + open[s], 0);
+  const paid = orgs.filter((repo) => plans.get(repo.orgId)?.planId);
+  const credits = paid.reduce((sum, repo) => sum + plans.get(repo.orgId)!.credits, 0);
+  const running = repos.filter((repo) => repo.activeDeepScanId);
+  const exposed = repos.filter((repo) => SEVERITIES.some((s) => repo.open[s] > 0)).slice(0, 5);
+
   return (
-    <PageShape id="repos">
+    <PageShape id="overview">
       <div className="page-head">
         <div>
-          <h1 className="page-title">Repos</h1>
+          <h1 className="page-title">Overview</h1>
           <p className="page-sub">
-            {plural(repos.length, "repository", "repositories")}, {open === 0 ? "nothing open" : `${plural(open, "open finding")}`}
-            {critical > 0 && `, ${critical} critical`}.
+            {orgs.map((repo) => repo.orgLogin).join(", ")} · {plural(repos.length, "repository", "repositories")} · last {DAYS} days
           </p>
         </div>
-        <InstallKey secondary />
       </div>
+
       {params.recruited === "1" && (
         <p className="notice" role="status">
           Your hacker has joined. Open any scan to watch them work.
@@ -102,121 +98,197 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
         </p>
       )}
       {unpaid.map((repo) => (
-        <section key={repo.orgId} className="paywall" aria-labelledby={`plan-${repo.orgId}`}>
-          <h2 id={`plan-${repo.orgId}`} className="paywall-title">
-            Recruit a hacker for {repo.orgLogin}
-          </h2>
-          <p className="field-help">
-            Sandchest maps each repository and reviews every pull request once {repo.orgLogin} joins: {PRICES.plan} {PRICES.review} Your first deep scan
-            is free.
-            {!repo.orgAdmin && ` Only an admin of ${repo.orgLogin} can join.`}
-          </p>
-          {repo.orgAdmin && (
-            <Link href={`/dashboard/recruit?org=${repo.orgId}`} className="recruit-cta">
-              <span>
-                <span className="recruit-cta-title">Recruit {repo.orgLogin}’s hacker</span>
-                <span className="recruit-cta-note">Tell them about {repo.orgLogin} and where to look first, give them a name and a look, then load their credits. You’ll watch them work on every scan.</span>
-              </span>
-              <span className="recruit-cta-go">Start recruiting</span>
-            </Link>
-          )}
-          <details className="recruit-skip">
-            <summary>Join without recruiting</summary>
-            <PlanPicker orgId={repo.orgId} current={null} admin={repo.orgAdmin} />
-          </details>
-        </section>
+        <Paywall key={repo.orgId} repo={repo} />
       ))}
-      <ul className="rows">
-        {repos.map((repo) => (
-          <li key={repo.id} className="row">
-            <RepoRow repo={repo} plan={plans.get(repo.orgId)} />
-          </li>
-        ))}
-      </ul>
+      {running.map((repo) => (
+        <HoverLink key={repo.id} href={`/dashboard/scans/${repo.activeDeepScanId}`} className="running-strip">
+          <span className="blink" aria-hidden="true" />
+          <span>
+            Deep scan of <strong>{repo.fullName}</strong> is running
+          </span>
+          <span className="running-strip-go">Watch</span>
+        </HoverLink>
+      ))}
+
+      <dl className="kpis">
+        <Kpi label="Pull requests reviewed" value={now.pullRequests} spark={days.map((d) => d.reviews)} foot={versus(now, before, "pullRequests")} sparkLabel="Reviews per day" />
+        <Kpi label="Findings" value={now.found} spark={days.map((d) => d.found)} foot={versus(now, before, "found")} sparkLabel="Findings per day" />
+        <Kpi label="Fixed" value={now.fixed} spark={days.map((d) => d.fixed)} foot={versus(now, before, "fixed")} sparkLabel="Fixes per day" />
+        {paid.length > 0 ? (
+          <div className="kpi">
+            <dt>Credits left</dt>
+            <dd className="kpi-value">{compactNumber(credits)}</dd>
+            <dd className="kpi-foot">
+              {now.credits} used in {DAYS} days ·{" "}
+              <HoverLink href="/dashboard/settings#billing" className="quiet">
+                Top up
+              </HoverLink>
+            </dd>
+          </div>
+        ) : (
+          <Kpi label="Deep scans" value={now.deepScans} spark={days.map((d) => d.deep)} foot={versus(now, before, "deepScans")} sparkLabel="Deep scans per day" />
+        )}
+      </dl>
+
+      <div className="overview-grid">
+        <section className="panel" aria-labelledby="activity-title">
+          <div className="panel-head">
+            <h2 id="activity-title" className="block-title">
+              Activity
+            </h2>
+            <HoverLink href="/dashboard/scans" className="panel-link">
+              All scans
+            </HoverLink>
+          </div>
+          <ActivityChart days={days} />
+        </section>
+
+        <section className="panel" aria-labelledby="open-title">
+          <div className="panel-head">
+            <h2 id="open-title" className="block-title">
+              Open findings
+            </h2>
+            <HoverLink href="/dashboard/findings" className="panel-link">
+              All findings
+            </HoverLink>
+          </div>
+          <p className="open-total">
+            <span className="open-total-n">{openTotal}</span> open
+          </p>
+          <SeverityStrip open={open} />
+          <ul className="severity-list">
+            {SEVERITIES.map((severity) => (
+              <li key={severity}>
+                <HoverLink href={`/dashboard/findings?severity=${severity}`}>
+                  <span aria-hidden="true">
+                    <Heat severity={severity} />
+                  </span>
+                  <span className="severity-list-name">{SEVERITY_LABEL[severity]}</span>
+                  <span className="severity-list-n">{open[severity]}</span>
+                </HoverLink>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      <div className="overview-grid overview-grid-even">
+        <section className="panel" aria-labelledby="attention-title">
+          <div className="panel-head">
+            <h2 id="attention-title" className="block-title">
+              Needs attention
+            </h2>
+            {attention.length > 0 && (
+              <HoverLink href="/dashboard/findings?severity=critical,high" className="panel-link">
+                All critical and high
+              </HoverLink>
+            )}
+          </div>
+          {attention.length === 0 ? (
+            <p className="panel-empty">Nothing critical or high is open.</p>
+          ) : (
+            <ul className="rows">
+              {attention.map((finding) => (
+                <li key={finding.id} className="row">
+                  <HoverLink href={`/dashboard/findings/${finding.id}`} className="mini-row">
+                    <Heat severity={finding.severity} />
+                    <span className="mini-row-main">
+                      <span className="mini-row-title">{finding.title}</span>
+                      <span className="mini-row-sub">{finding.repoFullName}</span>
+                    </span>
+                  </HoverLink>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel" aria-labelledby="recent-title">
+          <div className="panel-head">
+            <h2 id="recent-title" className="block-title">
+              Recent scans
+            </h2>
+            <HoverLink href="/dashboard/scans" className="panel-link">
+              History
+            </HoverLink>
+          </div>
+          {recent.length === 0 ? <p className="panel-empty">No scans yet. Pull request reviews start with the next pull request.</p> : <ScanRows scans={recent} compact />}
+        </section>
+      </div>
+
+      <section className="panel" aria-labelledby="exposed-title">
+        <div className="panel-head">
+          <h2 id="exposed-title" className="block-title">
+            Most exposed
+          </h2>
+          <HoverLink href="/dashboard/repos" className="panel-link">
+            All {plural(repos.length, "repository", "repositories")}
+          </HoverLink>
+        </div>
+        {exposed.length === 0 ? (
+          <p className="panel-empty">No repository has anything open.</p>
+        ) : (
+          <ul className="rows">
+            {exposed.map((repo) => (
+              <li key={repo.id} className="row">
+                <HoverLink href={`/dashboard/repos/${repo.id}`} className="mini-row mini-row-repo">
+                  <span className="mini-row-title">
+                    <span className="repo-owner">{repo.fullName.split("/")[0]}/</span>
+                    {repo.fullName.split("/")[1]}
+                  </span>
+                  <Tally open={repo.open} />
+                </HoverLink>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </PageShape>
   );
 }
 
-function RepoRow({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
-  const [owner, name] = repo.fullName.split("/");
-  const counts = SEVERITIES.filter((severity) => repo.open[severity] > 0);
+function Kpi({ label, value, spark, foot, sparkLabel }: { label: string; value: number; spark: number[]; foot: string; sparkLabel: string }) {
   return (
-    <div className="repo">
-      <div className="repo-name">
-        <HoverLink href={`/dashboard/findings?repo=${repo.id}`}>
-          <span className="repo-owner">{owner}/</span>
-          {name}
-        </HoverLink>
-        {repo.private ? null : <span className="tag">public</span>}
-      </div>
-      <div className="tally">
-        {counts.length === 0 ? (
-          <span className="tally-clear">Nothing open</span>
-        ) : (
-          counts.map((severity) => (
-            <Link key={severity} href={`/dashboard/findings?repo=${repo.id}&severity=${severity}`} aria-label={`${repo.open[severity]} ${severity}`}>
-              <Heat severity={severity} />
-              {repo.open[severity]}
-            </Link>
-          ))
-        )}
-      </div>
-      <div className="repo-scan">
-        {repo.lastScan ? (
-          <HoverLink href={`/dashboard/scans/${repo.lastScan.id}`}>
-            {SCAN_KIND_LABEL[repo.lastScan.kind]} {LAST_SCAN_VERB[repo.lastScan.status] ?? ""} <When date={repo.lastScan.at} />
-          </HoverLink>
-        ) : (
-          "Not scanned yet"
-        )}
-      </div>
-      <Dig repo={repo} plan={plan} />
+    <div className="kpi">
+      <dt>{label}</dt>
+      <dd className="kpi-value">{compactNumber(value)}</dd>
+      <dd className="kpi-spark">
+        <Spark values={spark} label={sparkLabel} />
+      </dd>
+      <dd className="kpi-foot">{foot}</dd>
     </div>
   );
 }
 
-function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
-  const state = digState(repo);
-  switch (state.state) {
-    case "running":
-      return (
-        <div className="repo-dig">
-          <HoverLink href={`/dashboard/scans/${state.scanId}`} className="digging">
-            <span className="blink" aria-hidden="true" />
-            Scanning
-          </HoverLink>
-        </div>
-      );
-    case "cooling":
-      return (
-        <div className="repo-dig">
-          <span className="repo-dig-note">Scanned recently. Ready {timeUntil(state.retryAt)}.</span>
-        </div>
-      );
-    case "too_large":
-      return (
-        <div className="repo-dig">
-          <span className="repo-dig-note">Over a million lines: get in touch to scan it.</span>
-        </div>
-      );
-    case "ready":
-      if (plan && !plan.planId)
-        return (
-          <div className="repo-dig">
-            <span className="repo-dig-note">Needs a plan</span>
-          </div>
-        );
-      // An org's first deep scan is free. Otherwise an unsized repo holds the top tier and is charged what it measures.
-      if (!plan) return <DigButton repoId={repo.id} note="Whole repository" />; // billing off: nothing to price
-      if (repo.freeDig) return <DigButton repoId={repo.id} note="Free: your first deep scan" />;
-      if (plan.credits < (state.credits ?? MAX_DEEP_SCAN_CREDITS))
-        return (
-          <div className="repo-dig">
-            <HoverLink href="/dashboard/settings#billing" className="repo-dig-note">
-              {state.credits === undefined ? `Needs ${MAX_DEEP_SCAN_CREDITS} credits until sized` : "Out of credits: top up"}
-            </HoverLink>
-          </div>
-        );
-      return <DigButton repoId={repo.id} note={state.credits === undefined ? `Up to ${MAX_DEEP_SCAN_CREDITS} credits` : `${state.credits} credits`} />;
-  }
+/** "11 the 30 days before". */
+function versus(now: OverviewWindow, before: OverviewWindow, key: keyof OverviewWindow): string {
+  if (now[key] === 0 && before[key] === 0) return "None yet";
+  return `${compactNumber(before[key])} the ${DAYS} days before`;
+}
+
+function Paywall({ repo }: { repo: DashboardRepo }) {
+  return (
+    <section className="paywall" aria-labelledby={`plan-${repo.orgId}`}>
+      <h2 id={`plan-${repo.orgId}`} className="paywall-title">
+        Recruit a hacker for {repo.orgLogin}
+      </h2>
+      <p className="field-help">
+        Sandchest maps each repository and reviews every pull request once {repo.orgLogin} joins: {PRICES.plan} {PRICES.review} Your first deep scan is free.
+        {!repo.orgAdmin && ` Only an admin of ${repo.orgLogin} can join.`}
+      </p>
+      {repo.orgAdmin && (
+        <Link href={`/dashboard/recruit?org=${repo.orgId}`} className="recruit-cta">
+          <span>
+            <span className="recruit-cta-title">Recruit {repo.orgLogin}’s hacker</span>
+            <span className="recruit-cta-note">Tell them about {repo.orgLogin} and where to look first, give them a name and a look, then load their credits. You’ll watch them work on every scan.</span>
+          </span>
+          <span className="recruit-cta-go">Start recruiting</span>
+        </Link>
+      )}
+      <details className="recruit-skip">
+        <summary>Join without recruiting</summary>
+        <PlanPicker orgId={repo.orgId} current={null} admin={repo.orgAdmin} />
+      </details>
+    </section>
+  );
 }

@@ -56,7 +56,7 @@ describe("landing page", () => {
 describe("old dashboard links", () => {
   test("redirect for good to the same page under /dashboard", () => {
     const id = "0b5e9a6c-1f2d-4e3a-9b8c-7d6e5f4a3b2c";
-    expect(redirected("/repos")).toBe("/dashboard");
+    expect(redirected("/repos")).toBe("/dashboard/repos");
     expect(redirected("/findings")).toBe("/dashboard/findings");
     expect(redirected(`/findings/${id}`)).toBe(`/dashboard/findings/${id}`);
     expect(redirected(`/scans/${id}`)).toBe(`/dashboard/scans/${id}`);
@@ -80,7 +80,10 @@ describe("dashboard nav", () => {
     const links = navLinks(true);
     const cases: Array<[string, string | undefined]> = [
       ["/dashboard", "/dashboard"],
-      [`/dashboard/scans/${id}`, "/dashboard"],
+      ["/dashboard/scans", "/dashboard/scans"],
+      [`/dashboard/scans/${id}`, "/dashboard/scans"],
+      ["/dashboard/repos", "/dashboard/repos"],
+      [`/dashboard/repos/${id}`, "/dashboard/repos"],
       ["/dashboard/findings", "/dashboard/findings"],
       [`/dashboard/findings/${id}`, "/dashboard/findings"],
       ["/dashboard/settings", "/dashboard/settings"],

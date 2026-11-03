@@ -249,12 +249,6 @@ export async function strandedScans(database: Db, now = new Date()): Promise<{ u
   return { unstarted, stuck };
 }
 
-/** When the repo last had a completed deep scan, for the 24-hour cooldown. */
-export async function lastDeepScanAt(database: Db, repoId: string): Promise<Date | undefined> {
-  const repo = await database.query.repos.findFirst({ where: eq(repos.id, repoId), columns: { lastDeepScanAt: true } });
-  return repo?.lastDeepScanAt ?? undefined;
-}
-
 /** Whether a deep scan for the repo is queued or running right now. */
 export async function activeDeepScan(database: Db, repoId: string): Promise<Scan | undefined> {
   return database.query.scans.findFirst({ where: and(eq(scans.repoId, repoId), eq(scans.kind, "deep"), inArray(scans.status, ["queued", "running", "publishing"])) });
