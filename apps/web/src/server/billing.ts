@@ -5,7 +5,8 @@
  *   charged when it completes, never more than was reserved (the cost shown
  *   up front). A scan that fails, is refused or never starts gives them back;
  *   an unsettled reservation also returns on its own after six hours.
- * - Free scans (recon, fix checks) only need an active plan.
+ * - Free scans (recon, fix checks) need an active plan and credits left:
+ *   once an org's credits are gone, nothing runs until it buys more.
  * - Pages show a copy of each org's Autumn state kept in `org_billing`,
  *   refreshed in the background once it is a minute old, so no page waits on
  *   Autumn except the first one an org ever shows.
@@ -14,7 +15,7 @@
  * This module stays light: pages import it, and the workflow runtime is
  * loaded only when an org's first plan starts its recon.
  */
-import { autoTopUpControl, createAutumn, createStripe, DEFAULT_CREDITS, planById, type Autumn, type BillingState, type Stripe } from "@sandchest/billing";
+import { autoTopUpControl, createAutumn, createStripe, DEFAULT_CREDITS, isTrial, planById, type Autumn, type BillingState, type Stripe } from "@sandchest/billing";
 import {
   markScanReserved,
   orgBillingRow,
@@ -119,7 +120,10 @@ async function readAndStore(org: BillingOrg): Promise<OrgBillingRow> {
   const at = new Date();
   const row = toRow(state);
   const { firstActivation, previousPlanId } = await saveOrgBilling(db(), org.id, row, at);
-  if (state.planId && (firstActivation || !previousPlanId)) await startPendingRecon(org.id);
+  // Recon starts with the first plan, and again whenever credits come back after running out (recon refused
+  // for want of credits is queued again then).
+  const creditsBack = !!previous && previous.credits <= 0 && row.credits > 0;
+  if (state.planId && row.credits > 0 && (firstActivation || !previousPlanId || creditsBack)) await startPendingRecon(org.id);
   await noticeCredits(org, row, seen).catch(logFailure("credits email"));
   return { orgId: org.id, ...row, activatedAt: previous?.activatedAt ?? (state.planId ? at : null), checkedAt: at, creditLevel: previous?.creditLevel ?? 0, creditLevelAt: previous?.creditLevelAt ?? null, creditLevelRev: previous?.creditLevelRev ?? 0 };
 }
@@ -162,6 +166,18 @@ export async function hasPlan(org: BillingOrg): Promise<boolean> {
   return (await syncBilling(org)).planId !== null;
 }
 
+/**
+ * Whether the org may scan at all: an active plan and credits left, trusting
+ * a copy up to five minutes old. What recon on a new install or repository
+ * waits for.
+ */
+export async function canScan(org: BillingOrg): Promise<boolean> {
+  if (!billingEnabled()) return true;
+  const stored = await orgBillingRow(db(), org.id);
+  const state = stored && Date.now() - stored.checkedAt.getTime() < PLAN_TTL_MS ? stored : await syncBilling(org);
+  return state.planId !== null && state.credits > 0;
+}
+
 /** Queues and starts recon on repositories that have none, once an org has a plan. */
 export async function startPendingRecon(orgId: string): Promise<string[]> {
   const ids = await queuePendingRecons(db(), orgId);
@@ -175,9 +191,9 @@ export async function startPendingRecon(orgId: string): Promise<string[]> {
 
 // ---- Auto top-up -------------------------------------------------------------
 
-/** Pushes the org's auto top-up choice to Autumn, in whole packs of its current plan. */
+/** Pushes the org's auto top-up choice to Autumn, in whole packs of its current plan. Always off on the free plan: there's no card. */
 export async function applyAutoTopUp(orgId: string, planId: string | null, choice: OrgSettings["autoTopUp"]): Promise<BillingState["autoTopUp"]> {
-  const plan = planById(planId);
+  const plan = isTrial(planId) ? undefined : planById(planId);
   const control = plan && choice ? autoTopUpControl(plan, { ...choice, quantity: choice.quantity ?? DEFAULT_CREDITS }) : null;
   const off = { enabled: false, threshold: 0, quantity: 0, perMonth: 1 };
   await autumn()!.setAutoTopUp(orgId, control ?? off);
@@ -207,6 +223,8 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
   if (!client) return { ok: true };
   if (credits === 0) {
     if (!(await hasPlan(org))) return { ok: false, reason: "no_plan", credits };
+    // Free, but only while there are credits: an org that has run out gets nothing until it buys more.
+    if (!(await hasCredits(org))) return { ok: false, reason: "out_of_credits", credits };
   } else {
     const from = new Date();
     const result = await client.reserve({ customerId: org.id, credits, lockId: scanId, expiresAt: new Date(Date.now() + RESERVATION_MS) });
@@ -218,12 +236,39 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
       return { ok: false, reason: state?.planId ? "out_of_credits" : "no_plan", credits };
     }
     if (result.remaining !== null) {
-      const stored = await setOrgCredits(db(), org.id, result.remaining);
+      const stored = await storeCredits(org.id, result.remaining);
       if (stored) await noticeCredits(org, stored, seen).catch(logFailure("credits email"));
     }
   }
   if (record) await markScanReserved(db(), scanId, credits);
   return { ok: true };
+}
+
+/**
+ * Stores a balance Autumn just reported. If it brings credits back after
+ * running out (bought without a sync seeing it yet), recon that waited for
+ * them starts now: the next sync would no longer see the change.
+ */
+async function storeCredits(orgId: string, credits: number): Promise<OrgBillingRow | undefined> {
+  const before = await orgBillingRow(db(), orgId);
+  const stored = await setOrgCredits(db(), orgId, credits);
+  if (stored?.planId && before && before.credits <= 0 && credits > 0) await startPendingRecon(orgId).catch(logFailure("recon restart"));
+  return stored;
+}
+
+/**
+ * Whether the org has a credit left, asked of Autumn (holding nothing). If
+ * Autumn can't answer, the stored balance decides: an outage is not "out".
+ */
+async function hasCredits(org: BillingOrg): Promise<boolean> {
+  try {
+    const result = await autumn()!.check(org.id, 1);
+    if (result.remaining !== null) await storeCredits(org.id, result.remaining);
+    return result.allowed;
+  } catch (error) {
+    await logFailure("credit check")(error);
+    return ((await orgBillingRow(db(), org.id))?.credits ?? 0) > 0;
+  }
 }
 
 /**

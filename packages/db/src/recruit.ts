@@ -7,7 +7,7 @@ import { orgAdmins, orgBilling, orgs, repos, scans } from "./schema";
 /** The orgs a user may set up: installed accounts they administer, with their plan. */
 export async function adminOrgs(database: Db, userId: string) {
   return database
-    .select({ id: orgs.id, login: orgs.githubLogin, type: orgs.type, installationId: orgs.installationId, settings: orgs.settings, planId: orgBilling.planId })
+    .select({ id: orgs.id, login: orgs.githubLogin, type: orgs.type, githubAccountId: orgs.githubAccountId, installationId: orgs.installationId, settings: orgs.settings, planId: orgBilling.planId, activatedAt: orgBilling.activatedAt })
     .from(orgAdmins)
     .innerJoin(orgs, eq(orgs.id, orgAdmins.orgId))
     .leftJoin(orgBilling, eq(orgBilling.orgId, orgs.id))

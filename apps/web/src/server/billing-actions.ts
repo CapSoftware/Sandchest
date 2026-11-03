@@ -8,7 +8,7 @@
  * through Stripe Checkout. Once the org has one, every charge is shown on a
  * confirm page first, then charged at once.
  */
-import { DEFAULT_CREDITS, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, planById, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
+import { DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, MAX_PURCHASE_CREDITS, planById, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
 import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -66,7 +66,8 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
     return { error: FAILED };
   }
   if (input.data.kind === "plan" && planId === input.data.plan) return { error: "That’s already your plan." };
-  if (!planId) {
+  // No plan, or only the free one: no card on file, so the plan (with its credits) is bought on Stripe Checkout.
+  if (!planId || isTrial(planId)) {
     if (input.data.kind === "top_up") return { error: "Join the plan first: credits are bought with it." };
     return checkout(row.org, input.data);
   }
@@ -79,6 +80,8 @@ export async function confirmPurchase(orgId: string, _previous: BillingOutcome, 
   if (!input.success) return { error: "That isn’t something you can buy." };
   const row = await adminOrg(orgId);
   if (!row) return { error: NOT_ADMIN };
+  // Free credits don't sell credits on their own: joining the plan comes first, as from Settings.
+  if (input.data.kind === "top_up" && (!row.billing?.planId || isTrial(row.billing.planId))) return { error: "Join the plan first: credits are bought with it." };
   return checkout(row.org, input.data);
 }
 
@@ -129,8 +132,8 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
   if (!parsed.success) return { error: "The monthly limit must be at least $1." };
   const row = await adminOrg(orgId);
   if (!row) return { error: NOT_ADMIN };
-  const plan = planById(row.billing?.planId);
-  if (!plan) return { error: "Auto top-up needs a plan." };
+  const plan = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
+  if (!plan) return { error: "Auto top-up needs a plan with a card: join Standard first." };
   const quantity = parsed.data.quantity ?? row.org.settings.autoTopUp?.quantity ?? DEFAULT_CREDITS;
   const choice = { enabled: parsed.data.enabled === "on", quantity, monthlyLimitUsd: parsed.data.limit || defaultAutoTopUpLimit(quantity) };
   const user = await viewer();

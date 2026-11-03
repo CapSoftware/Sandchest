@@ -4,7 +4,7 @@
  * finalizing twice is harmless, a confirm can charge less than was held, and
  * auto top-up buys more once usage drops the balance below its threshold.
  */
-import { creditsPrice, planById, PLANS, TOP_UP, type Autumn, type BillingState, type PlanId } from "@sandchest/billing";
+import { AutumnError, creditsPrice, planById, PLANS, TOP_UP, type Autumn, type BillingState, type PlanId } from "@sandchest/billing";
 
 interface FakeCustomer {
   planId: PlanId | null;
@@ -15,6 +15,8 @@ interface FakeCustomer {
   autoTopUp: { enabled: boolean; threshold: number; quantity: number; perMonth: number } | null;
   topUpsThisMonth: number;
   charges: Array<{ what: string; usd: number }>;
+  /** Balance ids granted (free credits), so a second grant under one does nothing. */
+  grants: Set<string>;
 }
 
 export class FakeAutumn implements Autumn {
@@ -32,7 +34,7 @@ export class FakeAutumn implements Autumn {
     let customer = this.customers.get(customerId);
     if (!customer) {
       const plan = planById(this.defaultPlan);
-      customer = { planId: plan?.id ?? null, credits: plan?.credits ?? 0, card: !!plan, locks: new Map(), autoTopUp: null, topUpsThisMonth: 0, charges: [] };
+      customer = { planId: plan?.id ?? null, credits: plan?.credits ?? 0, card: !!plan && plan.price > 0, locks: new Map(), autoTopUp: null, topUpsThisMonth: 0, charges: [], grants: new Set() };
       this.customers.set(customerId, customer);
     }
     return customer;
@@ -88,6 +90,21 @@ export class FakeAutumn implements Autumn {
     return { allowed: true, remaining: customer.credits };
   }
 
+  async check(customerId: string, credits: number) {
+    this.enter("check");
+    const customer = this.customers.get(customerId);
+    if (!customer) return { allowed: false, remaining: null };
+    return { allowed: customer.credits >= credits, remaining: customer.credits };
+  }
+
+  async grant({ customerId, credits, balanceId }: { customerId: string; credits: number; balanceId: string }) {
+    this.enter("grant");
+    const customer = this.get(customerId);
+    if (customer.grants.has(balanceId)) return;
+    customer.grants.add(balanceId);
+    customer.credits += credits;
+  }
+
   async finalize({ customerId, lockId, action, credits }: { customerId: string; lockId: string; action: "confirm" | "release"; credits?: number }) {
     this.enter("finalize");
     const customer = this.get(customerId);
@@ -100,6 +117,12 @@ export class FakeAutumn implements Autumn {
   async attach({ customerId, planId, credits }: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; successUrl: string }) {
     this.enter("attach");
     const customer = this.get(customerId);
+    if (customer.planId === planId) throw new AutumnError("Cannot attach because the customer's current product is the same as the product being attached", 409, "plan_already_attached");
+    // A free plan never asks for a card.
+    if (planById(planId)?.price === 0) {
+      this.settle(customer, planId, credits);
+      return { paymentUrl: null };
+    }
     if (!customer.card) {
       customer.card = true;
       this.settle(customer, planId, credits);

@@ -6,7 +6,7 @@
  */
 import type { ListedInstallation } from "@sandchest/github";
 import { after } from "next/server";
-import { billingEnabled, hasPlan } from "./billing";
+import { billingEnabled, canScan } from "./billing";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 import { db, githubApp } from "./services";
@@ -22,7 +22,7 @@ import { recordInstallation, startRecon } from "./webhooks";
  * of its installations (and recording needs this App's own key besides).
  */
 export async function recordListedInstallations(installations: ListedInstallation[]): Promise<Array<{ id: string; installationId: number }>> {
-  const deps = { db: db(), github: githubApp(), startScan, hasPlan: billingEnabled() ? hasPlan : undefined };
+  const deps = { db: db(), github: githubApp(), startScan, canScan: billingEnabled() ? canScan : undefined };
   const recorded = await Promise.all(
     installations.map(async (installation) => {
       if (installation.account.type === "Bot") return undefined;

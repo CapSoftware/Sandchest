@@ -11,7 +11,7 @@ import { createDb, orgBillingRow, scanById, schema, upsertInstallation, type Db 
 import { migrate } from "@sandchest/db/migrate";
 import type { GitHubApp } from "@sandchest/github";
 import { GET as sweep } from "@/app/api/cron/sweep/route";
-import { applyAutoTopUp, hasPlan, reserveScan, setAutumn, settleScan, syncBilling } from "@/server/billing";
+import { applyAutoTopUp, canScan, hasPlan, reserveScan, setAutumn, settleScan, syncBilling } from "@/server/billing";
 import { requestDeepScan } from "@/server/dig";
 import { beginScan, failScan, publishScan } from "@/server/scans";
 import { resetConfig } from "@/server/config";
@@ -55,7 +55,7 @@ const fakeGithub = {
 
 const autumn = new FakeAutumn();
 const started: string[] = [];
-const deps = () => ({ db: database, github: fakeGithub, startScan: async (id: string) => void started.push(id), hasPlan });
+const deps = () => ({ db: database, github: fakeGithub, startScan: async (id: string) => void started.push(id), canScan });
 let acme: { id: string; githubLogin: string };
 let repoIds: string[];
 
@@ -104,7 +104,7 @@ async function openPr(number: number): Promise<string> {
 describe.skipIf(!available)("billing", () => {
   test("install without a plan: recon waits, and buying a plan starts it once per repo", async () => {
     const outcome = await handleWebhook(deps(), "installation", "install-1", { action: "created", installation: { id: 501, account: { id: 900, login: "acme", type: "Organization" } } });
-    expect(outcome).toMatchObject({ status: "handled", scans: [], detail: "recon waits for a plan" });
+    expect(outcome).toMatchObject({ status: "handled", scans: [], detail: "recon waits for a plan and credits" });
     const org = await database.query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.installationId, 501) });
     acme = { id: org!.id, githubLogin: "acme" };
     repoIds = (await database.query.repos.findMany({ where: (repos, { eq }) => eq(repos.orgId, acme.id) })).map((r) => r.id);
@@ -198,7 +198,20 @@ describe.skipIf(!available)("billing", () => {
     expect(autumn.failNext.size).toBe(0);
   });
 
+  test("with no credits at all, even the free first Dig doesn't run, and stays free for later", async () => {
+    expect(autumn.get(acme.id).credits).toBe(0);
+    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
+    const before = (await database.query.scans.findMany()).length;
+    expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 0 });
+    expect((await database.query.scans.findMany()).length).toBe(before);
+    // The free Dig it claimed points at no scan, which leaves it free (the next test uses it).
+    const org = await database.$client<Array<{ live: number }>>`select count(s.id)::int as live from orgs o join scans s on s.id = o.free_dig_scan_id where o.id = ${acme.id}`;
+    expect(org[0]!.live).toBe(0);
+  });
+
   test("an org's first Dig is free, once: a failed one hands it on, a finished one uses it up", async () => {
+    // One credit left: enough for free work, not for a paid Dig.
+    autumn.get(acme.id).credits = 1;
     const credits = autumn.get(acme.id).credits;
     const [first, second] = await Promise.all(
       [repoIds[0]!, repoIds[1]!].map((id) => database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, id), with: { org: true } })),
@@ -231,6 +244,7 @@ describe.skipIf(!available)("billing", () => {
     expect(await scanById(database, againId)).toMatchObject({ billing: "charged", credits: 0 });
     expect(await requestDeepScan(second!)).toMatchObject({ ok: false, reason: "out_of_credits" });
     expect(autumn.get(acme.id).credits).toBe(credits);
+    autumn.get(acme.id).credits = 0;
   });
 
   test("an operator's Dig never uses an org's free first Dig", async () => {

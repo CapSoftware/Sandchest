@@ -263,6 +263,96 @@
   color: var(--color-amber);
 }
 
+/* Free credits being claimed: one gold key holding the amount, in place of the four to choose from. */
+.onboard-gift {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  padding: 0.85rem 1rem;
+  background: linear-gradient(90deg, rgb(254 194 66 / 0.12), rgb(254 194 66 / 0.02));
+  box-shadow: inset 0 0 0 2px var(--color-gold);
+  clip-path: var(--notched);
+}
+
+.onboard-gift-n {
+  font-family: var(--font-display);
+  font-size: 3.25rem;
+  line-height: 0.8;
+  color: var(--color-gold);
+  text-shadow: 0 0 18px rgb(254 194 66 / 0.45);
+}
+
+.onboard-gift-what {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.onboard-gift-name {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.onboard-gift-price {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.onboard-gift-price s {
+  color: var(--color-dust);
+}
+
+.onboard-title + .onboard-gift {
+  margin-top: 1.25rem;
+}
+
+.onboard-gift-lead {
+  margin-bottom: 0;
+}
+
+/* The same promise, small, from the first step on. */
+.onboard-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0.9rem 0 0;
+  padding: 0.3rem 0.6rem 0.25rem;
+  background: rgb(254 194 66 / 0.1);
+  box-shadow: inset 0 0 0 1px rgb(254 194 66 / 0.55);
+  clip-path: var(--notched);
+  font-size: 0.75rem;
+  color: var(--color-gold-light);
+}
+
+.onboard-badge-n {
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--color-gold);
+}
+
+.onboard-badge + .onboard-lead {
+  margin-top: 0.75rem;
+}
+
+/* Free credits that turned out not to be on offer for this account. */
+.onboard-notice {
+  margin: 1.25rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: rgb(254 194 66 / 0.06);
+  box-shadow: inset 2px 0 0 var(--color-amber);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.onboard-notice + .onboard-lead {
+  margin-top: 0.9rem;
+}
+
 /* What the work costs, as a short price list rather than a paragraph. */
 .onboard-rates {
   margin: 1rem 0 0;

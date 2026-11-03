@@ -31,10 +31,11 @@ export interface WebhookDeps {
   /** Starts the scan workflow for a scan record. */
   startScan(scanId: string): Promise<void>;
   /**
-   * Whether the org may scan (has a plan). Recon waits until it does: buying a
-   * plan starts it. Omitted means billing is off.
+   * Whether the org may scan: a plan and credits left. Recon waits until it
+   * can: buying a plan, or credits after running out, starts it. Omitted
+   * means billing is off.
    */
-  hasPlan?(org: { id: string; githubLogin: string }): Promise<boolean>;
+  canScan?(org: { id: string; githubLogin: string }): Promise<boolean>;
 }
 
 export type WebhookOutcome = { status: "duplicate" | "ignored" | "handled"; detail?: string; scans?: string[] };
@@ -125,7 +126,7 @@ async function onInstallationRepositories(deps: WebhookDeps, payload: Installati
  * doubles up with the recon that buying a plan starts.
  */
 export async function startRecon(deps: WebhookDeps, org: { id: string; githubLogin: string }): Promise<WebhookOutcome> {
-  if (deps.hasPlan && !(await deps.hasPlan(org))) return { status: "handled", scans: [], detail: "recon waits for a plan" };
+  if (deps.canScan && !(await deps.canScan(org))) return { status: "handled", scans: [], detail: "recon waits for a plan and credits" };
   // "HEAD" is resolved to the default branch's commit when the scan clones.
   const scans = await queuePendingRecons(deps.db, org.id);
   for (const id of scans) await deps.startScan(id);

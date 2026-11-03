@@ -2,9 +2,9 @@
  * Billing's database side: a copy of each org's Autumn state for display,
  * the credits each scan holds, and starting recon once an org has a plan.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users } from "./schema";
+import { creditClaims, orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users } from "./schema";
 
 export type OrgBillingRow = typeof orgBilling.$inferSelect;
 export type OrgBillingInput = Omit<OrgBillingRow, "orgId" | "activatedAt" | "checkedAt" | "creditLevel" | "creditLevelAt" | "creditLevelRev">;
@@ -91,6 +91,63 @@ export async function queuePendingRecons(database: Db, orgId: string): Promise<s
       .returning({ id: scans.id });
     return created.map((scan) => scan.id);
   });
+}
+
+// ---- Free credits ------------------------------------------------------------
+
+export type CreditClaimRow = typeof creditClaims.$inferSelect;
+
+/**
+ * Why a claim can't go ahead: the account or the person has claimed already
+ * (`org_claimed`, `user_claimed`), or every claim is gone (`exhausted`).
+ * `resume` is this person's own claim for this account, not finished yet (or
+ * finished: every step after it is safe to repeat).
+ */
+export type CreditClaimStart = "new" | "resume" | "org_claimed" | "user_claimed" | "exhausted";
+
+/**
+ * Takes the account's one claim for this person, unless it or they have one
+ * already or `limit` claims have been made. Serialised, so two claims at once
+ * can neither both pass the limit nor both take the same account or person.
+ */
+export async function startCreditClaim(
+  database: Db,
+  claim: { githubAccountId: number; githubUserId: number; orgId: string; userId: string; credits: number },
+  limit: number,
+): Promise<CreditClaimStart> {
+  return database.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('credit_claims', 0))`);
+    const existing = await tx
+      .select()
+      .from(creditClaims)
+      .where(or(eq(creditClaims.githubAccountId, claim.githubAccountId), eq(creditClaims.githubUserId, claim.githubUserId)));
+    const own = existing.find((row) => row.githubAccountId === claim.githubAccountId && row.githubUserId === claim.githubUserId);
+    if (own) return "resume";
+    if (existing.some((row) => row.githubAccountId === claim.githubAccountId)) return "org_claimed";
+    if (existing.length > 0) return "user_claimed";
+    const [{ count } = { count: 0 }] = await tx.select({ count: sql<number>`count(*)::int` }).from(creditClaims);
+    if (count >= limit) return "exhausted";
+    await tx.insert(creditClaims).values(claim);
+    return "new";
+  });
+}
+
+/** Records that Autumn holds the claim's credits and the free plan. */
+export async function finishCreditClaim(database: Db, githubAccountId: number): Promise<void> {
+  await database.update(creditClaims).set({ grantedAt: new Date() }).where(and(eq(creditClaims.githubAccountId, githubAccountId), isNull(creditClaims.grantedAt)));
+}
+
+/** The claims touching this account or this person, and how many have been made in all. */
+export async function creditClaimState(database: Db, githubAccountIds: number[], githubUserId: number | null): Promise<{ claims: CreditClaimRow[]; total: number }> {
+  const where = or(
+    githubAccountIds.length ? inArray(creditClaims.githubAccountId, githubAccountIds) : undefined,
+    githubUserId !== null ? eq(creditClaims.githubUserId, githubUserId) : undefined,
+  );
+  const [claims, [{ total } = { total: 0 }]] = await Promise.all([
+    where ? database.select().from(creditClaims).where(where) : Promise.resolve([]),
+    database.select({ total: sql<number>`count(*)::int` }).from(creditClaims),
+  ]);
+  return { claims, total };
 }
 
 // ---- Billing emails ----------------------------------------------------------

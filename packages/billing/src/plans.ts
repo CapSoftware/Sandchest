@@ -24,7 +24,7 @@ export const CREDIT_TIERS: readonly { from: number; price: number }[] = [
   { from: 100, price: 0.8 },
 ];
 
-export type PlanId = "standard" | "lockbox" | "chest" | "vault";
+export type PlanId = "standard" | "trial" | "lockbox" | "chest" | "vault";
 
 export interface Plan {
   id: PlanId;
@@ -49,7 +49,30 @@ const RETIRED: readonly Plan[] = [
   { id: "vault", name: "Vault", price: 250, credits: 1_000, pack: { credits: 25, price: 10 }, offered: false },
 ];
 
-export const PLANS: readonly Plan[] = [PLAN, ...RETIRED];
+/**
+ * Free credits to try Sandchest with: claimed once per account from `/claim`,
+ * with no card. The plan itself is free and carries no credits; the credits
+ * are a one-off grant of their own, so they stay when the account joins
+ * Standard. Nothing is ever charged on it: no top-ups, no auto top-up. Once
+ * the credits are spent, every scan stops until the account joins Standard.
+ */
+export const TRIAL: Plan = { id: "trial", name: "Free credits", price: 0, credits: 0, pack: { credits: 1, price: CREDIT_PRICE }, offered: false };
+
+/** What a claim gives, and how many accounts may claim. */
+export const FREE_CREDITS = {
+  credits: 20,
+  /** The most accounts that can ever claim, so a shared link can't run up an unbounded bill. */
+  claims: 500,
+  /** Autumn's id for the grant: one per customer, so a retried claim can't grant twice. */
+  balanceId: "free_credits",
+} as const;
+
+/** Whether a plan is the free one: nothing on it can be charged. */
+export function isTrial(planId: string | null | undefined): boolean {
+  return planId === TRIAL.id;
+}
+
+export const PLANS: readonly Plan[] = [PLAN, TRIAL, ...RETIRED];
 
 /** Credits bought on their own, at the credit price, on any plan. */
 export const TOP_UP = { id: "top_up", name: "Credits" } as const;

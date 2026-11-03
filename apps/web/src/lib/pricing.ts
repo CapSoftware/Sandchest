@@ -21,7 +21,7 @@ export const PRICES = {
   credits: `Credits are ${usd(CREDIT_PRICE)} each${bulk.length ? `; ${and(bulk)}` : ""}.`,
   review: `A pull request review is usually ${PR_REVIEW_TIERS[0]!.credits} credit; very large ones are ${list(largerReviews)}.`,
   dig: `A deep scan of a whole repository is ${list(DEEP_SCAN_TIERS.map((tier) => tier.credits))} credits, by its size.`,
-  free: "Recon and fix checks are free.",
+  free: "Recon and fix checks are free while there are credits left.",
 };
 
 /** The whole price list as one paragraph. */

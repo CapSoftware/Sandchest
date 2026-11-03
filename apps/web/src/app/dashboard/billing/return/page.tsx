@@ -1,3 +1,4 @@
+import { isTrial } from "@sandchest/billing/plans";
 import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -21,8 +22,11 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
   if (!row) redirect("/dashboard/settings");
 
   const hadPlan = !!row.billing?.planId;
+  // Free credits are not a paid plan: joining from them is waited for like a first plan.
+  const paying = (planId: string | null | undefined) => !!planId && !isTrial(planId);
+  const hadPaid = paying(row.billing?.planId);
   let state = await syncBilling(row.org).catch(() => undefined);
-  for (let attempt = 0; !hadPlan && !state?.planId && attempt < 6; attempt++) {
+  for (let attempt = 0; !hadPaid && !paying(state?.planId) && attempt < 6; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     state = await syncBilling(row.org).catch(() => state);
   }

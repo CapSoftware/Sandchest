@@ -17,7 +17,7 @@
  *   other scan emails.
  * - Nothing here logs an address or an email's contents; only opaque ids.
  */
-import { CREDIT_LEVELS, creditLevel, planById } from "@sandchest/billing/plans";
+import { CREDIT_LEVELS, creditLevel, isTrial, PLAN, planById } from "@sandchest/billing/plans";
 import {
   claimNotification,
   claimOrgNotice,
@@ -29,7 +29,7 @@ import {
   type OrgSettings,
 } from "@sandchest/db";
 import { autoTopUpFailedEmail, autoTopUpSucceededEmail, creditsExhaustedEmail, creditsLowEmail, scanPausedEmail, type RenderedEmail } from "@sandchest/email";
-import { shortDate } from "@/lib/format";
+import { shortDate, usd } from "@/lib/format";
 import { config } from "./config";
 import { db } from "./db";
 import { githubApp } from "./github-app";
@@ -75,7 +75,14 @@ export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, se
     to = await recipients(org.id, `${level} credits email`, "billing");
   }
   if (!(await recordCreditLevel(db(), org.id, index, seen, !!to?.length)) || !to) return;
-  const input = { org: org.githubLogin, plan: plan.name, resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null, billingUrl: billingUrl() };
+  const input = {
+    org: org.githubLogin,
+    plan: plan.name,
+    resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null,
+    billingUrl: billingUrl(),
+    // Free credits: nothing to top up, so the email says to join.
+    ...(isTrial(plan.id) ? { free: { join: `${PLAN.name} for ${usd(PLAN.price)} a month` } } : {}),
+  };
   await send(org.id, to, level === "low" ? creditsLowEmail({ ...input, credits: billing.credits }) : creditsExhaustedEmail(input));
 }
 

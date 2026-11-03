@@ -6,6 +6,7 @@ import { currentUser } from "@/server/access";
 import { signIn } from "@/server/actions";
 import { authConfigured } from "@/server/auth";
 import { billingEnabled } from "@/server/billing";
+import { claimIntent } from "@/server/free-credits";
 import { setupNeeded } from "@/server/setup";
 import { liveStats } from "@/server/stats";
 import "../app.css";
@@ -26,7 +27,7 @@ export default async function GetStartedPage() {
   // A server without a GitHub App or sign-in yet: the sign-in page explains what's missing.
   if (setupNeeded() || !authConfigured()) redirect("/sign-in");
   if (await currentUser()) redirect("/dashboard/recruit");
-  const stats = await liveStats().catch(() => null);
+  const [stats, claim] = await Promise.all([liveStats().catch(() => null), claimIntent(null)]);
   return (
     <Recruit
       accounts={[]}
@@ -37,6 +38,7 @@ export default async function GetStartedPage() {
       billing={billingEnabled()}
       publishableKey={null}
       stats={stats}
+      claim={claim}
       signIn={signIn.bind(null, "/dashboard/recruit")}
     />
   );

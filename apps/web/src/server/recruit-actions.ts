@@ -13,6 +13,7 @@
 import { AutumnError, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, StripeError, taxIdTypeFor } from "@sandchest/billing";
 import { orgForAdmin, orgRepos, updateOrgSettings, userById } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { Briefing } from "@/lib/briefing";
@@ -22,11 +23,14 @@ import { purchase } from "./billing-actions";
 import { briefing } from "./briefing";
 import { config } from "./config";
 import { db } from "./db";
+import { CLAIM_COOKIE, closedMessage } from "@/lib/free-credits";
+import { claimFreeCredits } from "./free-credits";
 import { HackerSchema } from "./hacker-schema";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 
-export type RecruitOutcome = { error?: string };
+/** `claimClosed`: free credits turned out not to be available for this account, so joining is paid after all. */
+export type RecruitOutcome = { error?: string; claimClosed?: boolean };
 
 const Company = z.object({
   name: z.string().trim().min(1).max(120),
@@ -93,6 +97,28 @@ export async function recruit(orgId: string, _previous: RecruitOutcome, form: Fo
   const user = await viewer();
   const saved = await save(user.id, orgId, json(form.get("recruitment")));
   if (saved.error) return saved;
+
+  // Free credits instead of paying: no card, nothing charged.
+  if (billingEnabled() && form.get("claim") === "1") {
+    const result = await claimFreeCredits(user, orgId);
+    if (!result.ok) {
+      const row = await orgForAdmin(db(), user.id, orgId);
+      const org = row?.org.githubLogin ?? "This account";
+      switch (result.reason) {
+        case "not_admin":
+          return { error: NOT_ADMIN };
+        case "failed":
+        case "no_github_id":
+          return { error: "The free credits couldn’t be added just now, and nothing was charged. Try again in a minute." };
+        default:
+          return { error: `${closedMessage(result, org)} You can still join below.`, claimClosed: true };
+      }
+    }
+    (await cookies()).delete(CLAIM_COOKIE);
+    const row = await orgForAdmin(db(), user.id, orgId);
+    const { startFirstTarget } = await import("./first-target");
+    redirect(row ? await startFirstTarget(user.id, row.org) : "/dashboard?plan=started");
+  }
 
   const order = Order.safeParse(json(form.get("order")));
   if (billingEnabled() && order.success) {

@@ -3,7 +3,7 @@
  * so it can be tested on its own. Rates are null when there is nothing to
  * divide by, so the page can say so instead of showing 0%.
  */
-import { CREDIT_PRICE, PLANS, type Plan } from "@sandchest/billing/plans";
+import { CREDIT_PRICE, isTrial, PLANS, type Plan } from "@sandchest/billing/plans";
 import type { AdminRange, DailyScans, FindingTally, Funnel, KindCost, PlanCost, ScanTally } from "@sandchest/db";
 
 /** The ranges offered, in days (the same as the queries accept). */
@@ -164,7 +164,8 @@ export interface PlanMargin {
 export function planMargins(costs: PlanCost[], plans: readonly Plan[] = PLANS): PlanMargin[] {
   return plans.map((plan) => {
     const row = costs.find((cost) => cost.planId === plan.id);
-    const revenuePerCredit = plan.credits > 0 ? plan.price / plan.credits : CREDIT_PRICE;
+    // Free credits bring in nothing: their margin is not a number worth showing.
+    const revenuePerCredit = isTrial(plan.id) ? 0 : plan.credits > 0 ? plan.price / plan.credits : CREDIT_PRICE;
     const cost = row ? ratio(row.modelCostUsd + row.computeCostUsd, row.creditsCharged) : null;
     return {
       plan,
@@ -172,7 +173,7 @@ export function planMargins(costs: PlanCost[], plans: readonly Plan[] = PLANS): 
       creditsCharged: row?.creditsCharged ?? 0,
       revenuePerCredit,
       costPerCredit: cost,
-      margin: cost === null ? null : 1 - cost / revenuePerCredit,
+      margin: cost === null || revenuePerCredit === 0 ? null : 1 - cost / revenuePerCredit,
     };
   });
 }

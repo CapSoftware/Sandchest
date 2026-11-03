@@ -414,6 +414,23 @@ export const orgBilling = pgTable("org_billing", {
 });
 
 /**
+ * Free credits claimed from `/claim`: one claim per GitHub account (the org)
+ * and one per GitHub user, ever. Keyed by GitHub's own ids rather than ours,
+ * with no foreign keys, so deleting and recreating a row can't claim again.
+ * `granted_at` is set once Autumn holds the credits and the free plan; until
+ * then the same person can finish their own claim, and nobody else can.
+ */
+export const creditClaims = pgTable("credit_claims", {
+  githubAccountId: bigint("github_account_id", { mode: "number" }).primaryKey(),
+  githubUserId: bigint("github_user_id", { mode: "number" }).notNull().unique(),
+  orgId: uuid("org_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  credits: integer("credits").notNull(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
+  grantedAt: timestamp("granted_at", { withTimezone: true }),
+});
+
+/**
  * Org-wide emails already sent, by a stable key (an auto top-up's invoice, a
  * day's failed top-ups), so a retried webhook or step never sends one twice.
  */

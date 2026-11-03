@@ -9,7 +9,7 @@
  * app reads it as AUTUMN_WEBHOOK_SECRET.
  */
 import { atmn, feature, plan, webhook } from "atmn";
-import { CREDIT_TIERS, CREDITS, PLAN, PLANS, TOP_UP, type Plan } from "../src/plans";
+import { CREDIT_TIERS, CREDITS, PLAN, PLANS, TOP_UP, TRIAL, type Plan } from "../src/plans";
 
 export const credits = feature({ featureId: CREDITS, name: "Credits", type: "metered", consumable: true });
 
@@ -37,7 +37,14 @@ const creditItem = () =>
     },
   }) as const;
 
-export const plans = PLANS.map((p) =>
+/**
+ * The free plan behind claimed credits: no price and no items, so attaching
+ * it never asks for a card. The credits are granted on their own (see
+ * FREE_CREDITS), and joining Standard replaces the plan but keeps them.
+ */
+const trial = plan({ planId: TRIAL.id, versionSlug: "v1", active: true, name: TRIAL.name, group: "sandchest", items: [] });
+
+export const plans = PLANS.filter((p) => p.id !== TRIAL.id).map((p) =>
   plan({
     planId: p.id,
     // v2 of the current plan: credits with the volume discount.
@@ -79,4 +86,4 @@ export function webhooksFor(env: Record<string, string | undefined>) {
   });
 }
 
-export default atmn({ features: [credits], plans: [...plans, topUp], webhooks: webhooksFor(process.env) });
+export default atmn({ features: [credits], plans: [...plans, trial, topUp], webhooks: webhooksFor(process.env) });

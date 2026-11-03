@@ -53,11 +53,12 @@ const BRIEFING = {
   currentPlan: null,
 };
 
-export function RigPreview({ view, room, shot, hoodie, phosphor, step }: { view: "recruit" | "watch" | "poster"; room?: string; shot?: string; hoodie?: string; phosphor?: string; step?: string }) {
+export function RigPreview({ view, room, shot, hoodie, phosphor, step, claim }: { view: "recruit" | "watch" | "poster"; room?: string; shot?: string; hoodie?: string; phosphor?: string; step?: string; claim?: string }) {
   // The still shown while the scene loads: the resting shot, for one room. Screenshot it at 2:1.
   if (view === "poster") return <Poster room={room ?? "bunker"} shot={shot && shot in SHOTS ? (shot as ShotName) : "preview"} hoodie={hoodie} phosphor={phosphor} />;
   // Submitting goes to the real action, which sends a signed-out visitor to sign in: nothing is saved.
   // `step=new`: nothing connected yet. `step=company`: start on the company, as after installing.
+  // `claim=1`: came for free credits; `claim=closed`: came for them, but this account has claimed already.
   if (view === "recruit") {
     const fresh = step === "new";
     return (
@@ -71,6 +72,11 @@ export function RigPreview({ view, room, shot, hoodie, phosphor, step }: { view:
         publishableKey="pk_preview"
         stats={{ lines: 48_213_907, running: 3 }}
         demo
+        claim={
+          claim === "1" || claim === "closed"
+            ? { credits: 20, offers: Object.fromEntries(ACCOUNTS.map((a) => [a.id, claim === "1" ? { open: true, credits: 20 } : { open: false, reason: "org_claimed" }])) }
+            : null
+        }
       />
     );
   }

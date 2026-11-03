@@ -58,3 +58,12 @@ test("names and links are escaped everywhere they appear in the HTML", () => {
     expect(email.html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#39;");
   }
 });
+
+test("free credits running low or out say to join, never to top up or turn on auto top-up", () => {
+  const base = { org: "acme", plan: "Free credits", resetsOn: null, billingUrl: "https://sandchest.test/dashboard/settings", free: { join: "Standard for $1.00 a month" } };
+  for (const email of [creditsLowEmail({ ...base, credits: 3 }), creditsExhaustedEmail(base)]) {
+    expect(email.text).toContain("Join Standard for $1.00 a month to keep going");
+    expect(email.text).toContain("no scans run");
+    expect(email.text).not.toMatch(/top up|auto top-up/i);
+  }
+});

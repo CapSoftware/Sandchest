@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
+import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, FREE_CREDITS, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
 import { site } from "@/lib/site";
 
 const root = join(import.meta.dir, "..");
@@ -70,6 +70,7 @@ describe("pricing matches the billing package", () => {
         return [next ? `${tier.from} to ${next.from - 1}` : `${tier.from} or more`, `$${tier.price.toFixed(2)}`, example(amount)];
       }),
     );
+    expect(pricing).toContain(`Testers can claim ${FREE_CREDITS.credits} free credits from [sandchest.com/claim](/claim), with no card.`);
     expect(pricing).toContain(`when fewer than ${TOP_UP_BELOW} are left`);
     expect(pricing).toContain(`run low (below ${TOP_UP_BELOW})`);
     expect(pricing).toContain(`${money(defaultAutoTopUpLimit(CREDIT_AMOUNTS[0]))}, or five top-ups if that is more`);

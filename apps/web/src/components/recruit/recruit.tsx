@@ -4,8 +4,9 @@ import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
-import { CREDIT_AMOUNTS, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { linesLabel, restCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
+import { closedMessage, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
 import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
 import {
   aside,
@@ -84,6 +85,8 @@ interface Props {
    * comes back to that step. Nothing after it opens before then.
    */
   signIn?: () => Promise<void>;
+  /** Set when the person came to claim free credits: joining is then free, with no card, where the account can claim. */
+  claim?: ClaimIntent | null;
 }
 
 type Opened = { clientSecret: string; publishableKey: string };
@@ -101,7 +104,7 @@ const usd = (amount: number) => `$${amount.toFixed(2)}`;
  * credits to start with, pay. Enter goes on, Esc goes back, and the camera
  * follows along.
  */
-export function Recruit({ accounts, initial, startAt, viewer, installUrl, billing, publishableKey, stats, demo = false, signIn }: Props) {
+export function Recruit({ accounts, initial, startAt, viewer, installUrl, billing, publishableKey, stats, demo = false, signIn, claim = null }: Props) {
   const router = useRouter();
   const [brief, setBrief] = useState<Briefing | null>(initial);
   const [switching, startSwitch] = useTransition();
@@ -149,7 +152,11 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   const signals = useRef(newSignals());
   const wide = useWide();
 
-  const payOnPage = billing && !!publishableKey && !brief?.currentPlan && payment.state !== "failed";
+  // Free credits: what this account would get from claiming, unless the server found it can't after all.
+  const offer: ClaimOffer | null = claim && brief ? (claim.offers[brief.orgId] ?? null) : null;
+  const claimClosedHere = !!state.claimClosed;
+  const claiming = billing && !!claim && !brief?.currentPlan && !claimClosedHere && (!brief || offer?.open === true);
+  const payOnPage = billing && !claiming && !!publishableKey && !brief?.currentPlan && payment.state !== "failed";
   // Paying on this page is a step of its own, in the same panel as every other, so nothing moves when it opens.
   const steps: StepId[] = payOnPage ? ["connect", "company", "hacker", "plan", "pay"] : ["connect", "company", "hacker", "plan"];
   const [step, setStep] = useState(() => (startAt === "company" && initial ? 1 : 0));
@@ -190,6 +197,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     autoTopUp,
     currentPlan: brief?.currentPlan ?? null,
     billing,
+    claim: claiming ? (claim?.credits ?? null) : null,
   };
   const model = useRef<RecruitModel>(now);
   useEffect(() => {
@@ -352,7 +360,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   // takes the card instead.
   const opening = useRef(false);
   useEffect(() => {
-    if ((current !== "plan" && current !== "pay") || !brief || !billing || !publishableKey || brief.currentPlan || payment.state !== "idle" || opening.current) return;
+    if ((current !== "plan" && current !== "pay") || !brief || !billing || claiming || !publishableKey || brief.currentPlan || payment.state !== "idle" || opening.current) return;
     if (demo) return setPayment({ state: "ready", clientSecret: "", publishableKey: "" });
     opening.current = true;
     setPayment({ state: "opening" });
@@ -427,6 +435,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (current === "plan") {
       if (!billing) return `Add ${name} to ${org}`;
       if (brief?.currentPlan) return "Save";
+      if (claiming) return `Claim ${claim!.credits} free credits`;
       if (!payOnPage) return `Pay ${usd(total)} on Stripe`;
       return "Continue to payment";
     }
@@ -470,12 +479,25 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       <form ref={form} action={action} className="onboard-hud" onKeyDown={onKeyDown} onSubmit={onSubmit}>
         <input type="hidden" name="recruitment" value={JSON.stringify(recruitment())} />
         {billing && <input type="hidden" name="order" value={JSON.stringify(order)} />}
+        {claiming && <input type="hidden" name="claim" value="1" />}
 
         <section className="onboard-panel" data-aside={placed || undefined} data-moving={moving || undefined} aria-labelledby="onboard-title">
           <div className="onboard-body" key={current}>
-            {current === "connect" && <Connect heading={heading} accounts={accounts} chosen={brief?.orgId ?? null} switching={switching} choose={choose} installUrl={installUrl} signedOut={!!signIn} viewer={viewer} />}
+            {current === "connect" && (
+              <Connect
+                heading={heading}
+                accounts={accounts}
+                chosen={brief?.orgId ?? null}
+                switching={switching}
+                choose={choose}
+                installUrl={installUrl}
+                signedOut={!!signIn}
+                viewer={viewer}
+                claim={billing ? claim : null}
+              />
+            )}
             {current === "company" && brief && (
-              <Company heading={heading} brief={brief} company={company} setCompany={setCompany} target={target} setTarget={setTarget} billing={billing} nudge={nudge} />
+              <Company heading={heading} brief={brief} company={company} setCompany={setCompany} target={target} setTarget={setTarget} billing={billing} claiming={claiming} nudge={nudge} />
             )}
             {current === "hacker" && <Hacker heading={heading} profile={profile} update={update} look={look} setLook={setLook} />}
             {current === "plan" && (
@@ -490,6 +512,8 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
                 setCredits={setCredits}
                 autoTopUp={autoTopUp}
                 setAutoTopUp={setAutoTopUp}
+                claim={claiming ? claim!.credits : null}
+                closed={billing && claim && brief && !brief.currentPlan && !claiming ? (offer && !offer.open ? closedMessage(offer, org) : null) : null}
               />
             )}
             {current === "pay" && (
@@ -546,7 +570,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       {/* The running count fills the empty side of the room while the panel is centred, and steps away when it moves aside. */}
       {stats && <LiveLines initial={stats} hidden={!wide || placed || moving} />}
       {/* With no account to pick yet, the GitHub step has nothing to choose with the arrows. */}
-      <Hints current={current} choices={current !== "connect" || accounts.length > 0} />
+      <Hints current={current} choices={current === "plan" ? billing && !claiming && !brief?.currentPlan : current !== "connect" || accounts.length > 0} />
     </div>
   );
 }
@@ -628,6 +652,15 @@ function Title({ heading, children }: { heading: RefObject<HTMLHeadingElement | 
   );
 }
 
+/** The free credits waiting at the end, shown from the first step for someone who came to claim them. */
+function FreeCreditsBadge({ credits }: { credits: number }) {
+  return (
+    <p className="onboard-badge">
+      <span className="onboard-badge-n">{credits}</span> free credits, no card
+    </p>
+  );
+}
+
 // ---- Steps ---------------------------------------------------------------------
 
 function Connect({
@@ -639,6 +672,7 @@ function Connect({
   installUrl,
   signedOut,
   viewer,
+  claim,
 }: {
   heading: RefObject<HTMLHeadingElement | null>;
   accounts: RecruitAccount[];
@@ -648,7 +682,9 @@ function Connect({
   installUrl: string | null;
   signedOut: boolean;
   viewer: string;
+  claim: ClaimIntent | null;
 }) {
+  const gift = claim && <FreeCreditsBadge credits={claim.credits} />;
   // Nothing connected yet: the way there in three short lines, ticked off as they're done.
   if (accounts.length === 0) {
     const path: Array<{ label: string; state: "done" | "now" | "next" }> = [
@@ -659,7 +695,8 @@ function Connect({
     return (
       <div className="onboard-connect">
         <Title heading={heading}>Connect GitHub</Title>
-        <p className="onboard-lead">Your hacker works from your repositories.</p>
+        {gift}
+        <p className="onboard-lead">{claim ? `Your hacker works from your repositories. Connect them to claim ${claim.credits} free credits, no card needed.` : "Your hacker works from your repositories."}</p>
         <ol className="onboard-path">
           {path.map((item) => (
             <li key={item.label} data-state={item.state}>
@@ -676,7 +713,8 @@ function Connect({
   return (
     <>
       <Title heading={heading}>Connect GitHub</Title>
-      <p className="onboard-lead">Pick the account your hacker works for.</p>
+      {gift}
+      <p className="onboard-lead">{claim ? "Pick the account your hacker works for. Its free credits come with it." : "Pick the account your hacker works for."}</p>
       <fieldset className="onboard-set" aria-busy={switching || undefined}>
         <legend className="onboard-label">Account</legend>
         <ul className="onboard-menu">
@@ -712,6 +750,7 @@ function Company({
   target,
   setTarget,
   billing,
+  claiming,
   nudge,
 }: {
   heading: RefObject<HTMLHeadingElement | null>;
@@ -721,6 +760,7 @@ function Company({
   target: string | null;
   setTarget: (id: string) => void;
   billing: boolean;
+  claiming: boolean;
   nudge: (seconds: number) => void;
 }) {
   const [all, setAll] = useState(false);
@@ -799,7 +839,13 @@ function Company({
                 Show all {brief.repos.length}
               </button>
             )}
-            <p className="onboard-help">{billing ? "Your hacker scans this one as soon as you’ve paid. The first deep scan is free." : "Your hacker scans this one first."}</p>
+            <p className="onboard-help">
+              {!billing
+                ? "Your hacker scans this one first."
+                : claiming
+                  ? "Your hacker scans this one as soon as you’ve claimed your credits. The first deep scan is free."
+                  : "Your hacker scans this one as soon as you’ve paid. The first deep scan is free."}
+            </p>
           </>
         )}
       </fieldset>
@@ -854,6 +900,8 @@ function Credits({
   setCredits,
   autoTopUp,
   setAutoTopUp,
+  claim,
+  closed,
 }: {
   heading: RefObject<HTMLHeadingElement | null>;
   brief: Briefing | null;
@@ -865,6 +913,10 @@ function Credits({
   setCredits: (credits: number) => void;
   autoTopUp: boolean;
   setAutoTopUp: (on: boolean) => void;
+  /** Free credits to claim instead of paying. */
+  claim: number | null;
+  /** Why free credits aren't on offer for this account, when the person came for them. */
+  closed: string | null;
 }) {
   if (!billing) {
     return (
@@ -890,27 +942,56 @@ function Credits({
   const repos = brief?.repos ?? [];
   const rest = restCredits(repos, target);
   const scans = DEEP_SCAN_TIERS.map((tier) => tier.credits);
+  const rates = (
+    <dl className="onboard-rates">
+      <div>
+        <dt>Pull request review</dt>
+        <dd>{PR_REVIEW_TIERS[0]!.credits} credit</dd>
+      </div>
+      <div>
+        <dt>Deep scan</dt>
+        <dd>
+          {scans[0]}–{scans.at(-1)} credits
+        </dd>
+      </div>
+      <div>
+        <dt>First deep scan</dt>
+        <dd>Free</dd>
+      </div>
+    </dl>
+  );
+
+  if (claim !== null) {
+    return (
+      <>
+        <Title heading={heading}>Claim your credits</Title>
+        <div className="onboard-gift">
+          <span className="onboard-gift-n">{claim}</span>
+          <span className="onboard-gift-what">
+            <span className="onboard-gift-name">free credits</span>
+            <span className="onboard-gift-price">
+              <s>{usd(claim * PLAN_CREDIT_PRICE)}</s> $0.00 · no card
+            </span>
+          </span>
+        </div>
+        <p className="onboard-lead onboard-gift-lead">
+          On us, to test {name} on {org}’s code. They work like any credits, and the first deep scan doesn’t touch them.
+        </p>
+        {rates}
+        <p className="onboard-help">
+          When they’re spent, {name} stops until {org} joins: ${PLAN.price} a month, and credits from ${PLAN_CREDIT_PRICE} each. Anything left over carries across.
+        </p>
+      </>
+    );
+  }
+
   const picker = (
     <>
+      {closed && <p className="onboard-notice">{closed} You can still join below.</p>}
       <p className="onboard-lead">
         ${PLAN.price} a month, plus credits for the work. Credits never expire.
       </p>
-      <dl className="onboard-rates">
-        <div>
-          <dt>Pull request review</dt>
-          <dd>{PR_REVIEW_TIERS[0]!.credits} credit</dd>
-        </div>
-        <div>
-          <dt>Deep scan</dt>
-          <dd>
-            {scans[0]}–{scans.at(-1)} credits
-          </dd>
-        </div>
-        <div>
-          <dt>First deep scan</dt>
-          <dd>Free</dd>
-        </div>
-      </dl>
+      {rates}
       <fieldset className="onboard-set">
         <legend className="onboard-label">Start with</legend>
         <div className="onboard-amounts">

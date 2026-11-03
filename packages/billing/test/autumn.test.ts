@@ -97,3 +97,42 @@ test("with a plan, credits are bought only when asked for", async () => {
   await autumn.attach({ customerId: "o", planId: "standard", successUrl: "https://x" });
   expect(calls.map((c) => (c.body as { feature_quantities?: unknown }).feature_quantities)).toEqual([[{ feature_id: "credits", quantity: 25 }], undefined]);
 });
+
+// Answers measured against Autumn's sandbox (2026-11-03).
+test("a grant is one balance under its own id; granting again is harmless, other errors are not", async () => {
+  const { calls, autumn } = fake({
+    "balances.create": [
+      { status: 200, body: { success: true } },
+      { status: 409, body: { code: "invalid_request", message: "balance_id 'free_credits' is already in use for this customer" } },
+      { status: 400, body: { code: "invalid_request", message: "Feature not found" } },
+    ],
+  });
+  await autumn.grant({ customerId: "org-1", credits: 20, balanceId: "free_credits" });
+  expect(calls[0]!.body).toEqual({ customer_id: "org-1", feature_id: "credits", included_grant: 20, balance_id: "free_credits" });
+  await autumn.grant({ customerId: "org-1", credits: 20, balanceId: "free_credits" });
+  await expect(autumn.grant({ customerId: "org-1", credits: 20, balanceId: "free_credits" })).rejects.toBeInstanceOf(AutumnError);
+});
+
+test("check asks for a balance without holding or spending any", async () => {
+  const { calls, autumn } = fake({
+    check: [
+      { status: 200, body: { allowed: true, balance: { remaining: 20 } } },
+      { status: 200, body: { allowed: false, balance: { remaining: 0 } } },
+      { status: 404, body: { code: "customer_not_found", message: "Customer does not exist" } },
+    ],
+  });
+  expect(await autumn.check("org-1", 1)).toEqual({ allowed: true, remaining: 20 });
+  expect(calls[0]!.body).toEqual({ customer_id: "org-1", feature_id: "credits", required_balance: 1 });
+  expect(await autumn.check("org-1", 1)).toEqual({ allowed: false, remaining: 0 });
+  expect(await autumn.check("new", 1)).toEqual({ allowed: false, remaining: null });
+});
+
+test("the free plan reads as a plan, and the granted credits count toward the balance", () => {
+  const state = billingState({
+    subscriptions: [{ plan_id: "trial", status: "active", canceled_at: null, expires_at: null, current_period_end: null, started_at: 1 }],
+    balances: { credits: { remaining: 20, next_reset_at: null } },
+  });
+  expect(state.planId).toBe("trial");
+  expect(state.credits).toEqual({ remaining: 20, resetsAt: null });
+  expect(state.renewsAt).toBeNull();
+});

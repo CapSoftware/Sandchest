@@ -42,8 +42,8 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
         );
       // Billing off: nothing to price.
       if (!plan) return <DigButton repoId={repo.id} label={label} note="Whole repository" />;
-      // An org's first deep scan is free.
-      if (repo.freeDig) return <DigButton repoId={repo.id} label={label} note="Free: your first deep scan" />;
+      // An org's first deep scan is free, while it has credits: with none left, nothing runs.
+      if (repo.freeDig && plan.credits > 0) return <DigButton repoId={repo.id} label={label} note="Free: your first deep scan" />;
       // An unsized repo holds the top tier and is charged what it measures.
       const cost = state.credits ?? MAX_DEEP_SCAN_CREDITS;
       if (plan.credits < cost)

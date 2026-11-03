@@ -131,10 +131,29 @@ export interface CreditsInput {
   /** When the plan's monthly credits come back, already formatted, if known. */
   resetsOn: string | null;
   billingUrl: string;
+  /**
+   * The credits are free ones, on no paid plan: there's nothing to top up and
+   * no auto top-up, so the way on is joining the plan (`join`, e.g. "Standard
+   * for $1 a month").
+   */
+  free?: { join: string };
 }
 
 /** Credits fell below the plan's low line. Sent only while auto top-up is off. */
 export function creditsLowEmail(input: CreditsInput): RenderedEmail {
+  if (input.free) {
+    return render({
+      subject: `${credits(input.credits)} left on ${input.org}`,
+      title: "The free credits are running low.",
+      paragraphs: [
+        `${input.org} is down to ${credits(input.credits)} of its free credits. When they run out, Sandchest stops: pull requests get a neutral Check instead of a review, and no scans run.`,
+        `Join ${input.free.join} to keep going. Any free credits left over carry across.`,
+      ],
+      stat: { value: input.credits, label: `${input.credits === 1 ? "credit" : "credits"} left` },
+      button: { url: input.billingUrl, label: "Join" },
+      footer: adminFooter(input.org, false),
+    });
+  }
   return render({
     subject: `${credits(input.credits)} left on ${input.org}`,
     title: "The chest is running low.",
@@ -150,6 +169,18 @@ export function creditsLowEmail(input: CreditsInput): RenderedEmail {
 
 /** Nothing left: every paid scan is refused until credits come back. Sent only while auto top-up is off. */
 export function creditsExhaustedEmail(input: Omit<CreditsInput, "credits">): RenderedEmail {
+  if (input.free) {
+    return render({
+      subject: `Free credits used up on ${input.org}`,
+      title: "The free credits are spent.",
+      paragraphs: [
+        `${input.org} has used all of its free credits, so Sandchest has stopped: pull requests get a neutral Check instead of a review, and no scans run.`,
+        `Join ${input.free.join} to keep going.`,
+      ],
+      button: { url: input.billingUrl, label: "Join" },
+      footer: adminFooter(input.org, false),
+    });
+  }
   return render({
     subject: `Out of credits on ${input.org}`,
     title: "The chest is empty.",

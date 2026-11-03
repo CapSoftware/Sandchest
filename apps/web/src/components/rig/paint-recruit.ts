@@ -32,6 +32,8 @@ export interface RecruitModel {
   autoTopUp: boolean;
   currentPlan: string | null;
   billing: boolean;
+  /** Free credits being claimed instead of paying, if any. */
+  claim?: number | null;
 }
 
 /** Seconds from the scene appearing to the first screen starting to type. */
@@ -227,6 +229,15 @@ function contract(kit: Kit, t: number, since: number, m: RecruitModel) {
   }
   if (!m.billing) {
     section("TERMS", ["Self-hosted. No plan, no credits, no limit but your own servers."]);
+  } else if (!m.currentPlan && m.claim) {
+    const first = m.repos.find((repo) => repo.id === m.target);
+    section("SYNOPSIS", [`${m.claim} credits on the house. No card, nothing to pay.`]);
+    section("DESCRIPTION", [
+      `A pull request review: ${PR_REVIEW_TIERS[0]!.credits} credit, most of the time.`,
+      `A deep scan of a whole repository: ${DEEP_SCAN_TIERS[0]!.credits} to ${DEEP_SCAN_TIERS.at(-1)!.credits} by size.`,
+      first ? `First deep scan, ${first.fullName.split("/")[1] ?? first.fullName}: free.` : "The first deep scan: free.",
+    ]);
+    section("AFTER", [`Work stops when they run out. $${PLAN.price} a month keeps it going.`]);
   } else if (!m.currentPlan) {
     const first = m.repos.find((repo) => repo.id === m.target);
     section("SYNOPSIS", [`$${PLAN.price} a month. Credits $${CREDIT_PRICE} each, ${m.credits} to start.`]);

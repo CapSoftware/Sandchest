@@ -1,4 +1,4 @@
-import { autoTopUpSize, DEFAULT_CREDITS, defaultAutoTopUpLimit, planById } from "@sandchest/billing/plans";
+import { autoTopUpSize, DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, PLAN, planById } from "@sandchest/billing/plans";
 import type { OrgBillingRow, OrgSettings } from "@sandchest/db";
 import Link from "next/link";
 import { plural, shortDate, usd } from "@/lib/format";
@@ -27,6 +27,40 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
           </Link>
         )}
       </div>
+    );
+  }
+
+  // Free credits: nothing to charge, so no top-ups or auto top-up. Joining Standard keeps what's left.
+  if (isTrial(plan.id)) {
+    const out = billing.credits <= 0;
+    return (
+      <>
+        <div>
+          <p className="field-legend">Plan</p>
+          <p className="plan-line">
+            <span className="plan-line-name">{plan.name}</span> no card, nothing to pay
+          </p>
+        </div>
+        <div>
+          <p className="field-legend">Credits</p>
+          <p className="credits">
+            <span className="credits-left">{billing.credits.toLocaleString("en-US")}</span> free {billing.credits === 1 ? "credit" : "credits"} left
+          </p>
+          <p className={out ? "form-error" : "field-help"} role={out ? "alert" : undefined}>
+            {out
+              ? `The free credits are spent, so Sandchest has stopped scanning ${org.login}. Join ${PLAN.name} to keep going.`
+              : `When they run out, Sandchest stops scanning until ${org.login} joins ${PLAN.name}. Credits left over carry across.`}
+          </p>
+        </div>
+        <div>
+          <p className="field-legend">Keep going</p>
+          <p className="field-help">
+            {PRICES.plan} {PRICE_NOTE}
+            {!org.admin && " Only an admin of this account can join."}
+          </p>
+          <PlanPicker orgId={org.id} current={null} admin={org.admin} />
+        </div>
+      </>
     );
   }
 

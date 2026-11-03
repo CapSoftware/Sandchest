@@ -69,6 +69,14 @@ export interface Autumn {
   stripeCustomer(customerId: string, name?: string): Promise<string>;
   /** Holds `credits` until `finalize`, or until `expiresAt`, when they return on their own. */
   reserve(input: { customerId: string; credits: number; lockId: string; expiresAt: Date }): Promise<Reservation>;
+  /** Whether the customer has `credits` to spend, holding none of them. */
+  check(customerId: string, credits: number): Promise<Reservation>;
+  /**
+   * Gives the customer `credits` for free, once: a balance of its own under
+   * `balanceId` that never resets or expires, and outlives any plan change.
+   * Granting under the same id again does nothing.
+   */
+  grant(input: { customerId: string; credits: number; balanceId: string }): Promise<void>;
   /** Charges a reservation (optionally fewer credits), or gives it back. Finalizing twice is harmless. */
   finalize(input: { customerId: string; lockId: string; action: "confirm" | "release"; credits?: number }): Promise<void>;
   /**
@@ -152,6 +160,30 @@ export function createAutumn(config: AutumnConfig): Autumn {
         if (error instanceof AutumnError && error.code === "lock_already_exists") return { allowed: true, remaining: null };
         // An org that has never been a customer has no plan and no credits.
         if (error instanceof AutumnError && error.code === "customer_not_found") return { allowed: false, remaining: null };
+        throw error;
+      }
+    },
+
+    async check(customerId, credits) {
+      try {
+        const raw = await call<{ allowed: boolean; balance: { remaining: number } | null }>(
+          "check",
+          { customer_id: customerId, feature_id: CREDITS, required_balance: credits },
+          { retry: true },
+        );
+        return { allowed: raw.allowed, remaining: raw.balance?.remaining ?? null };
+      } catch (error) {
+        if (error instanceof AutumnError && error.code === "customer_not_found") return { allowed: false, remaining: null };
+        throw error;
+      }
+    },
+
+    async grant({ customerId, credits, balanceId }) {
+      try {
+        await call("balances.create", { customer_id: customerId, feature_id: CREDITS, included_grant: credits, balance_id: balanceId }, { retry: true });
+      } catch (error) {
+        // Granted already: by an earlier claim, or by this one's retry after a lost answer.
+        if (error instanceof AutumnError && error.status === 409 && /already in use/i.test(error.message)) return;
         throw error;
       }
     },

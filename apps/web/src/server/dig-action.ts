@@ -36,7 +36,7 @@ export async function dig(repoId: string): Promise<DigOutcome> {
       running: "A deep scan is already running.",
       too_large: "This repository is over a million lines. Get in touch to scan it.",
       no_plan: `${row.org.githubLogin} needs a plan before Sandchest can scan.`,
-      out_of_credits: `Out of credits: this deep scan needs ${result.credits}.`,
+      out_of_credits: result.credits ? `Out of credits: this deep scan needs ${result.credits}.` : `${row.org.githubLogin} is out of credits. Top up to keep scanning.`,
     };
     return { error: messages[result.reason], topUp: result.reason === "no_plan" || result.reason === "out_of_credits" };
   }
