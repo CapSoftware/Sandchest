@@ -545,7 +545,7 @@ export const EVENT_NAMES = [
   "hacker_saved",
   /** An account's settings were saved. props: check_threshold, email_notifications, outcome ("ok" | "not_admin"). */
   "org_settings_saved",
-  /** The findings list was copied out. props: format ("prompt" | "claude" | "codex" | "markdown" | "json"), status, findings (how many), repos (how many), filtered (a severity or repository filter was on), low_confidence. */
+  /** The findings list was copied out or opened in a coding agent. props: format ("prompt" | "claude" | "codex" copied for an agent; "open_t3" | "open_claude" | "open_codex" | "open_cursor" opened in one; "markdown" | "json"), status, findings (how many), repos (how many; documents only), filtered (a severity or repository filter was on), low_confidence. */
   "findings_copied",
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];

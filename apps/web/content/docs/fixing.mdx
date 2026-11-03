@@ -24,7 +24,34 @@ Open a finding from [Findings](/dashboard/findings). The fix prompt is shown on 
 
 - **Copy fix prompt**, in the side column next to **Mark fixed** and **Dismiss**, copies the prompt in one click.
 - The **Fix it with your agent** panel shows the prompt in three formats: **Prompt**, **Claude Code** and **Codex**. **Copy prompt** or **Copy command** copies whichever is showing.
-- **Open in Cursor** opens the prompt in Cursor directly. Long prompts can't be opened by link, so the button doesn't appear for them; copy them instead.
+- **Open in T3 Code**, **Claude Code**, **Codex** or **Cursor** opens the agent with the prompt filled in. See [Open in your agent](#open-in-your-agent).
+
+## Open in your agent
+
+The **Open in** buttons start a new session in your agent, in your own clone of the repository, with the fix prompt in its input. Nothing is sent until you read it and press send.
+
+| Agent | Opens | Longest prompt |
+| --- | --- | --- |
+| T3 Code | a new thread in the project you last used for the repository | 8,000 characters |
+| Claude Code | a terminal in the clone where you last ran `claude` | 5,000 characters |
+| Codex | a new chat in the workspace whose Git remote is the repository | no documented limit |
+| Cursor | the chat in the window you have open | about 10,000 characters, once encoded for a link |
+
+A prompt too long for an agent's links has no button for it; copy it instead.
+
+The agent has to be installed on the computer you click from. Claude Code needs version 2.1.91 or later, and opens links only after you've sent it a message once on that computer. If nothing happens when you click, that's usually why.
+
+The buttons open each app directly, so the prompt, which quotes your code, goes straight to the app on your computer and never through a website.
+
+## Many findings at once
+
+**Copy N findings**, at the top of [Findings](/dashboard/findings), takes every finding the list shows, with your status, severity, repository and confidence filters.
+
+- **Open in** opens one prompt covering all of them in T3 Code, Claude Code, Codex or Cursor. The findings have to be in one repository, and the prompt short enough for that agent's links, so filter first if needed.
+- **Copy** gives the same prompt to paste into any agent, or as a Claude Code or Codex command. On open findings only: fixed and dismissed ones have nothing left to fix.
+- **Markdown** copies a report, with a summary table and each finding in full, for an issue, a doc or a chat. **JSON** copies the findings as data. Neither includes code excerpts.
+
+The prompt for many findings has the agent take them one at a time: confirm each against the current code with a failing regression test before changing anything, leave alone any that no longer hold, keep each fix separate, and finish with a report on every finding: fixed, with the test that proves it, or not, and why. Findings across several repositories are listed so the agent fixes only the ones in its own.
 
 ### Claude Code and Codex one-liners
 

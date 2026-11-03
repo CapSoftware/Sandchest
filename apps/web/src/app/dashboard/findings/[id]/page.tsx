@@ -144,7 +144,7 @@ export default async function FindingPage({ params }: Params) {
 
           {prompt && (
             <div className="block">
-              <FixPrompt findingId={finding.id} prompt={prompt} />
+              <FixPrompt findingId={finding.id} prompt={prompt} repo={repo.fullName} />
             </div>
           )}
         </div>

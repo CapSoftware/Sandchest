@@ -3,14 +3,14 @@
  * Everything a person can change from the dashboard. Each action checks
  * access itself: the database writes are scoped to what the viewer may see.
  */
-import { applyFindingAction, findingsForExport, recordPromptCopied, recordPromptsCopied, updateOrgSettings, type FindingAction } from "@sandchest/db";
+import { applyFindingAction, FINDING_LIST_LIMIT, findingsForExport, recordPromptCopied, recordPromptsCopied, updateOrgSettings, type FindingAction } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser, viewer } from "./access";
 import { routeOf } from "@/lib/analytics";
-import { AGENT_FORMATS, EXPORT_FORMATS, exportFindings, type ExportFormat } from "@/lib/findings-export";
+import { agentPrompt, exportFindings } from "@/lib/findings-export";
 import { SEVERITIES } from "@/lib/format";
 import { site } from "@/lib/site";
 import { track } from "./analytics";
@@ -66,31 +66,60 @@ const ExportFilters = z.object({
 
 export type ExportFiltersInput = z.infer<typeof ExportFilters>;
 
-/**
- * The findings list as the viewer filtered it, in one of the copy formats.
- * The same query as the page, so what is copied is what was on screen.
- */
-/** Linux refuses a single command-line argument over 128 KiB (MAX_ARG_STRLEN); leave room for the command around it. */
-const COMMAND_ARGUMENT_LIMIT = 120_000;
+/** How a prepared agent prompt left the page: copied as the prompt or a command, or opened in an app. */
+const HandOff = z.enum(["prompt", "claude", "codex", "open_t3", "open_claude", "open_codex", "open_cursor"]);
+export type HandOff = z.infer<typeof HandOff>;
 
-export async function copyFindings(input: ExportFiltersInput, format: ExportFormat): Promise<{ text: string; count: number; note?: string } | { error: string }> {
-  const user = await viewer();
+function listFilters(input: ExportFiltersInput) {
   const filters = ExportFilters.safeParse(input);
-  if (!filters.success || !EXPORT_FORMATS.includes(format)) return { error: "Those filters aren’t valid." };
+  if (!filters.success) return undefined;
   const { status, severities, repo, low } = filters.data;
+  return { status, severities, repoId: repo, includeLowConfidence: low };
+}
+
+/**
+ * The agent prompt for the open findings as the viewer filtered them: the
+ * same query as the page, so it covers what was on screen. Prepared when the
+ * copy menu opens, so opening it in an app needs no wait after the click.
+ * Records nothing; `findingsTaken` does once it's used.
+ */
+export async function findingsPrompt(input: ExportFiltersInput): Promise<{ text: string; ids: string[]; repos: string[] } | { error: string }> {
+  const user = await viewer();
+  const filters = listFilters(input);
+  if (!filters) return { error: "Those filters aren’t valid." };
   // Fixed and dismissed findings have nothing left for an agent to do.
-  if (AGENT_FORMATS.includes(format) && status !== "open") return { error: "Only open findings can be handed to an agent." };
-  const rows = await findingsForExport(db(), user.id, { status, severities, repoId: repo, includeLowConfidence: low });
-  const text = exportFindings(rows, format, { baseUrl: site.url, filters: { status, severities, repo, includeLowConfidence: low } });
+  if (filters.status !== "open") return { error: "Only open findings can be handed to an agent." };
+  const rows = await findingsForExport(db(), user.id, filters);
+  return { text: agentPrompt(rows), ids: rows.map((row) => row.id), repos: [...new Set(rows.map((row) => row.repoFullName))] };
+}
+
+/** A prepared prompt was copied or opened in an app: counts as taking each finding's fix prompt. */
+export async function findingsTaken(input: ExportFiltersInput, findingIds: string[], via: HandOff): Promise<void> {
+  const user = await viewer();
+  const filters = listFilters(input);
+  const ids = z.array(Id).max(FINDING_LIST_LIMIT).safeParse(findingIds);
+  if (!filters || !ids.success || !HandOff.safeParse(via).success) return;
   await Promise.all([
-    AGENT_FORMATS.includes(format) ? recordPromptsCopied(db(), user.id, rows.map((row) => row.id)) : undefined,
+    recordPromptsCopied(db(), user.id, ids.data),
     track("findings_copied", {
       userId: user.id,
-      props: { format, status, findings: rows.length, repos: new Set(rows.map((row) => row.repoFullName)).size, filtered: severities.length > 0 || repo !== undefined, low_confidence: low },
+      props: { format: via, status: filters.status, findings: ids.data.length, filtered: filters.severities.length > 0 || filters.repoId !== undefined, low_confidence: filters.includeLowConfidence },
     }),
   ]);
-  const tooLong = (format === "claude" || format === "codex") && text.length > COMMAND_ARGUMENT_LIMIT;
-  return { text, count: rows.length, note: tooLong ? "That command may be too long for a Linux shell. Filter by repository, or copy the Prompt and paste it in." : undefined };
+}
+
+/** The findings list as the viewer filtered it, as a Markdown report or JSON. */
+export async function copyFindings(input: ExportFiltersInput, format: "markdown" | "json"): Promise<{ text: string; count: number } | { error: string }> {
+  const user = await viewer();
+  const filters = listFilters(input);
+  if (!filters || (format !== "markdown" && format !== "json")) return { error: "Those filters aren’t valid." };
+  const rows = await findingsForExport(db(), user.id, filters);
+  const text = exportFindings(rows, format, { baseUrl: site.url, filters: { status: filters.status, severities: filters.severities, repo: filters.repoId, includeLowConfidence: filters.includeLowConfidence } });
+  await track("findings_copied", {
+    userId: user.id,
+    props: { format, status: filters.status, findings: rows.length, repos: new Set(rows.map((row) => row.repoFullName)).size, filtered: filters.severities.length > 0 || filters.repoId !== undefined, low_confidence: filters.includeLowConfidence },
+  });
+  return { text, count: rows.length };
 }
 
 const SettingsForm = z.object({

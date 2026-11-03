@@ -8,13 +8,11 @@
  */
 import type { ExportedFinding } from "@sandchest/db";
 import { findingSections, type PromptFinding } from "@sandchest/engine/fix-prompt";
+import { agentCommand } from "./agent-links";
 import { categoryLabel, DISMISS_REASON_LABEL, githubLine, plural, SEVERITY_LABEL, shortDate, type Severity } from "./format";
 
 export const EXPORT_FORMATS = ["prompt", "claude", "codex", "markdown", "json"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
-
-/** The formats that hand findings to an agent to fix, so only open findings offer them. */
-export const AGENT_FORMATS: ExportFormat[] = ["prompt", "claude", "codex"];
 
 export interface ExportContext {
   /** The dashboard's address, for links back to each finding. */
@@ -36,11 +34,6 @@ export function exportFindings(rows: ExportedFinding[], format: ExportFormat, co
     case "json":
       return jsonExport(rows, context);
   }
-}
-
-/** A quoted heredoc passes the prompt to the agent's CLI byte for byte, whatever it contains. */
-export function agentCommand(command: string, prompt: string): string {
-  return `${command} "$(cat <<'SANDCHEST'\n${prompt}\nSANDCHEST\n)"`;
 }
 
 /**

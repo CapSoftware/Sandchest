@@ -1206,12 +1206,61 @@ html:not([data-js]) .no-js-submit {
 
 .copy-findings-item {
   display: grid;
-  gap: 0.1rem;
+  grid-template-columns: 1rem 1fr;
+  column-gap: 0.625rem;
+  row-gap: 0.1rem;
+  align-items: center;
+}
+
+.copy-findings-icon {
+  display: inline-flex;
+  color: var(--color-muted);
 }
 
 .copy-findings-hint {
+  grid-column: 2;
   font-size: 0.75rem;
   color: var(--color-dust);
+}
+
+/* "Open in": the agents as a two-by-two grid of marks. */
+.open-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.125rem;
+}
+
+.open-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+
+.open-item .agent-logo {
+  color: var(--color-muted);
+}
+
+.open-item:hover .agent-logo,
+.open-item:focus-visible .agent-logo {
+  color: var(--color-bright);
+}
+
+.open-item[aria-disabled="true"],
+.open-item[aria-disabled="true"] .agent-logo {
+  color: var(--color-edge);
+  cursor: default;
+}
+
+.open-item[aria-disabled="true"]:hover {
+  background: none;
+}
+
+.copy-findings-menu .copy-findings-reason {
+  padding-top: 0.25rem;
+  border-top: 0;
+  margin-top: 0;
+  line-height: 1.4;
 }
 
 .copy-findings-menu .copy-findings-error {
@@ -1290,6 +1339,25 @@ html:not([data-js]) .no-js-submit {
   gap: 0.75rem;
   padding: 1rem 1.25rem;
   border-top: 1px solid var(--color-seam);
+}
+
+.prompt-note {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+/* A coding agent's mark, in the text's colour. */
+.agent-logo {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+.tab-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 /* ---- Scan ---------------------------------------------------------------- */
