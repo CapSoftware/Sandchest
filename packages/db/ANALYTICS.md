@@ -1,0 +1,136 @@
+# Analytics
+
+How to answer product questions (conversion, flows, what works and what doesn't) from Sandchest's own database. Written for people and for agents running SQL.
+
+Everything is first-party and lives in Postgres. Hosted Sandchest also runs Vercel Web Analytics and Speed Insights for traffic and Core Web Vitals charts. Those are cookieless, sit in Vercel's dashboard, and aren't covered here.
+
+## Rules
+
+- **Read only.** Run `select` statements and nothing else. Prefer a read replica or a read-only role when you have one.
+- Events never hold code, finding text, repository or account names, emails or IP addresses. Don't join them to tables that do (`users.email`, `repos.full_name`, `findings.title`) in anything you save or share. Report counts and rates, not people.
+
+## Where things live
+
+| Question | Table |
+| --- | --- |
+| What people did: page views, clicks, steps, actions and their outcomes | `events` |
+| Who signed up, and when | `users` (`created_at`) |
+| Accounts with the App installed | `orgs` (`installation_id` not null), `org_admins`, `permission_cache` |
+| Plans and credits | `org_billing` (`plan_id`, `activated_at`), `credit_claims` |
+| Scans run, by kind, trigger and status | `scans`, with cost and size in `scan_metrics` |
+| What happened to findings: fixed, dismissed, prompt copied | `finding_events` |
+
+`events` records intent and outcomes the state tables can't: what someone tried, and why it didn't go through. State that a table already holds (a scan finishing, a finding being fixed) is read from that table, not duplicated as an event.
+
+## `events`
+
+| Column | Meaning |
+| --- | --- |
+| `name` | What happened. The catalog, with each event's props, is `EVENT_NAMES` in `src/schema.ts`. |
+| `user_id` | The signed-in person, when there is one. |
+| `anon_id` | The browser: a random UUID in the `sc_aid` cookie (one year). Set on everything a browser causes, before and after sign-in. |
+| `org_id` | The GitHub account (org or personal) the action was about. |
+| `props` | JSON with opaque ids, counts and enums. Actions carry `outcome`: `"ok"`, or the reason it didn't go through. |
+| `created_at` | When, in UTC. |
+
+Browser events (`page_view`, `clicked`, `step_viewed`) come from the beacon at `/api/e`. Paths are routes with ids replaced by `:id` (`/dashboard/findings/:id`). `page_view` also carries `referrer` (a host, external sites only), `utm_*`, `device` and `country`. Every other event is recorded on the server where the action happened.
+
+`dashboard_visit` is recorded at most once per person per UTC day, for retention.
+
+### Tying browsers to people
+
+`signed_up` and `signed_in` carry both `anon_id` and `user_id`. That is the link: every earlier event from that browser belongs to that person. Resolve the person for every event like this:
+
+```sql
+with identity as (
+  -- The first person each browser signed in as.
+  select distinct on (anon_id) anon_id, user_id
+  from events
+  where anon_id is not null and user_id is not null
+  order by anon_id, created_at
+),
+stream as (
+  select e.*,
+    coalesce(e.user_id, i.user_id) as person_id,
+    -- One actor per person, or per browser for visitors who never signed in.
+    coalesce(coalesce(e.user_id, i.user_id)::text, e.anon_id::text) as actor
+  from events e
+  left join identity i on i.anon_id = e.anon_id
+)
+select * from stream;
+```
+
+Limits: a person on two browsers is two browsers until they sign in on each, and cleared cookies start a new browser. Visitors with JavaScript off, and bots, record no browser events.
+
+## Example questions
+
+Visitors to sign-ups in the last 30 days, by where they came from:
+
+```sql
+with first_touch as (
+  select distinct on (anon_id) anon_id, created_at,
+    coalesce(props->>'utm_source', props->>'referrer', 'direct') as source
+  from events
+  where name = 'page_view' and created_at >= now() - interval '30 days'
+  order by anon_id, created_at
+),
+signed_up as (
+  select distinct anon_id from events where name = 'signed_up' and anon_id is not null
+)
+select f.source, count(*) as visitors, count(s.anon_id) as signed_up,
+  round(100.0 * count(s.anon_id) / count(*), 1) as conversion_pct
+from first_touch f
+left join signed_up s using (anon_id)
+group by 1
+order by visitors desc;
+```
+
+Where people stop while recruiting:
+
+```sql
+select props->>'step' as step, count(distinct anon_id) as browsers
+from events
+where name = 'step_viewed' and props->>'flow' = 'recruit' and created_at >= now() - interval '30 days'
+group by 1
+order by browsers desc;
+```
+
+Why actions fail:
+
+```sql
+select name, props->>'outcome' as outcome, count(*)
+from events
+where props ? 'outcome' and created_at >= now() - interval '30 days'
+group by 1, 2
+order by 1, 3 desc;
+```
+
+One person's or browser's path through the site, in order (use an id from a query above, never look someone up by name):
+
+```sql
+select created_at, name, props
+from events
+where anon_id = $1 or user_id = $2
+order by created_at;
+```
+
+The most common next page after the landing page:
+
+```sql
+with views as (
+  select anon_id, props->>'path' as path,
+    lead(props->>'path') over (partition by anon_id order by created_at) as next_path
+  from events
+  where name = 'page_view' and created_at >= now() - interval '30 days'
+)
+select next_path, count(*) from views where path = '/' and next_path is not null group by 1 order by 2 desc limit 10;
+```
+
+The signed-up funnel (install, plan, recon, first Dig, coming back) is already computed by `adminFunnel` in `src/admin.ts`, and shown at `/admin/funnel`.
+
+## Adding an event
+
+1. Add its name to `EVENT_NAMES` in `src/schema.ts`, with a comment listing its props.
+2. On the server, call `track(name, { userId, orgId, props })` from `apps/web/src/server/analytics.ts`. It attaches the browser's `anon_id` and records after the response, so it never slows or breaks the action. Give actions an `outcome`.
+3. In the browser, give a control a `data-track="some-id"` attribute: clicks on it are recorded as `clicked` with that `target`. Links are recorded without one. For a new kind of browser event, add it to `BROWSER_EVENTS` in `apps/web/src/lib/analytics.ts` and to the beacon's schema in `apps/web/src/app/api/e/route.ts`.
+4. Props are opaque ids, counts and enums. Never free text, names, emails, repository names, codes people typed, or anything from code or findings.

@@ -25,9 +25,18 @@ const utcDay = (column: unknown) => sql`to_char((${column} at time zone 'UTC')::
 
 // ---- Recording ---------------------------------------------------------------
 
+export interface AnalyticsEvent {
+  name: EventName;
+  userId?: string | null;
+  orgId?: string | null;
+  /** The browser's anonymous id, when the event came from one. */
+  anonId?: string | null;
+  props?: EventProps;
+}
+
 /** Records an analytics event. `props` must hold only opaque ids, counts and enums. */
-export async function recordEvent(database: Db, event: { name: EventName; userId?: string | null; orgId?: string | null; props?: EventProps }): Promise<void> {
-  await database.insert(events).values({ name: event.name, userId: event.userId ?? null, orgId: event.orgId ?? null, props: event.props ?? {} });
+export async function recordEvent(database: Db, event: AnalyticsEvent): Promise<void> {
+  await database.insert(events).values({ name: event.name, userId: event.userId ?? null, orgId: event.orgId ?? null, anonId: event.anonId ?? null, props: event.props ?? {} });
 }
 
 /** Records that someone opened the dashboard today (UTC). A second call the same day changes nothing. */

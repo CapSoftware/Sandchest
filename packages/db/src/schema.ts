@@ -449,15 +449,78 @@ export const orgNotices = pgTable(
 // ---- Analytics -------------------------------------------------------------
 
 /**
- * First-party analytics events, only for what other tables cannot tell us.
+ * First-party analytics: one stream of what people did, for funnels, flows
+ * and conversion. State lives in its own tables (scans, findings and their
+ * events, billing); this stream records intent and outcomes those tables
+ * cannot tell us: page views, clicks, steps, actions that failed or were
+ * refused. See ANALYTICS.md for how to query it.
+ *
  * `props` hold opaque ids, counts and enums: never source code, finding
- * contents, emails or names.
+ * contents, repository or account names, emails or free text. Every action
+ * event carries `outcome`: "ok", or the reason it did not go through.
  */
 export const EVENT_NAMES = [
-  /** Someone signed in (a new session). */
+  // ---- Browser (recorded by the beacon at /api/e) ----
+  /** A page was shown. props: path (ids replaced by :id), referrer (host, external only), utm_source/medium/campaign/term/content, device, country. */
+  "page_view",
+  /** A link or tracked control was clicked. props: path, target (a `data-track` id, an internal path, or an external host). */
+  "clicked",
+  /** A step of a multi-step flow was shown. props: path, flow ("recruit"), step. */
+  "step_viewed",
+
+  // ---- Accounts ----
+  /** A new person signed up (their user row was created). */
+  "signed_up",
+  /** Someone signed in (a new session). Carries the anonymous id that tied their visits to them. */
   "signed_in",
+  /** Someone pressed sign in. props: next (the route they were headed to). */
+  "sign_in_started",
+  /** Someone signed out. */
+  "signed_out",
   /** Someone opened the dashboard: recorded at most once per person per UTC day. */
   "dashboard_visit",
+
+  // ---- GitHub App ----
+  /** The App was installed (or unsuspended) on an account. org_id set. props: action, account_type ("User" | "Organization"), repos. */
+  "app_installed",
+  /** The App was uninstalled or suspended. org_id set. props: action ("deleted" | "suspend"). */
+  "app_uninstalled",
+  /** Repositories were added to or removed from an installation. org_id set. props: added, removed. */
+  "repos_changed",
+
+  // ---- Onboarding (recruit) ----
+  /** Someone opened "claim free credits" (anonymous until they sign in). */
+  "claim_started",
+  /** The recruit form was submitted. props: path ("claim" | "checkout" | "none"), outcome ("ok" | "not_admin" | "invalid"). */
+  "recruit_submitted",
+  /** Free credits were claimed while recruiting. props: outcome ("ok", or why not: "org_claimed" | "claimed_elsewhere" | "has_plan" | "exhausted" | "not_admin" | "failed" | …). */
+  "free_credits_claimed",
+  /** The on-page card form was asked for. props: outcome ("ok" | "has_plan" | "error"). */
+  "payment_form_opened",
+  /** Business details for invoices were saved. props: has_tax_id, country, outcome ("ok" | "tax_id_invalid" | "error"). */
+  "invoice_details_saved",
+  /** A promotion code was checked (never the code itself). props: credits, outcome ("ok" | "no_discount" | "invalid" | "error" | "free_credits" | "free_credits_closed"). */
+  "discount_checked",
+  /** A saved card was charged for the first plan. props: credits, auto_top_up, discount, outcome ("ok" | "card_step" | "pending" | "has_plan" | "card_not_saved" | "invalid" | "not_admin" | "failed" | "unknown"). */
+  "payment_completed",
+
+  // ---- Billing ----
+  /** A plan or credits were chosen. props: kind ("plan" | "top_up"), plan, credits, route ("confirm" | "stripe" | "charged"), outcome ("ok" | "invalid" | "not_admin" | "same_plan" | "needs_plan" | "checkout_failed" | "error"). */
+  "purchase_started",
+  /** A purchase was confirmed on the confirm page. props: kind, plan, credits, route ("stripe" | "charged"), outcome (as purchase_started). */
+  "purchase_confirmed",
+  /** Stripe's billing portal was opened. props: outcome ("ok" | "error"). */
+  "billing_portal_opened",
+  /** Auto top-up was changed. props: enabled, quantity, monthly_limit_usd, outcome ("ok" | "error"). */
+  "auto_top_up_saved",
+
+  // ---- Product ----
+  /** Dig was pressed. props: repo_id, scan_id, credits, outcome ("ok" | "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "error" | "no_access"). */
+  "dig_requested",
+  /** The hacker's look was saved. props: outcome. */
+  "hacker_saved",
+  /** An account's settings were saved. props: check_threshold, email_notifications, outcome ("ok" | "not_admin"). */
+  "org_settings_saved",
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];
 export type EventProps = Record<string, string | number | boolean | null>;
@@ -468,12 +531,21 @@ export const events = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     orgId: uuid("org_id").references(() => orgs.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * The browser's anonymous id (the `sc_aid` cookie), when the event came
+     * from one. Ties visits before sign-in to the person: `signed_in` carries
+     * both ids.
+     */
+    anonId: uuid("anon_id"),
     name: text("name", { enum: EVENT_NAMES }).notNull(),
     props: jsonb("props").$type<EventProps>().notNull().default({}),
     createdAt: createdAt(),
   },
   (table) => [
     index("events_name_created_idx").on(table.name, table.createdAt),
+    index("events_user_created_idx").on(table.userId, table.createdAt),
+    index("events_anon_created_idx").on(table.anonId, table.createdAt),
+    index("events_org_created_idx").on(table.orgId, table.createdAt),
     // One visit per person per day, however many pages or server instances record it.
     uniqueIndex("events_daily_visit_unique")
       .on(table.userId, sql`((${table.createdAt} at time zone 'UTC')::date)`)
