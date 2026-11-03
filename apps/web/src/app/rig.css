@@ -2016,7 +2016,8 @@ a.watch-name:focus-visible {
 /* Holds the watch view's space until the browser says whether it's hidden, so the page doesn't jump. */
 .watch-placeholder {
   aspect-ratio: 16 / 8.2;
-  margin: 0 0 1.5rem;
+  /* Block margins only: the inline ones are the phone's full bleed, set above, as for the view itself. */
+  margin-block: 0 1.5rem;
   background: #000;
 }
 
