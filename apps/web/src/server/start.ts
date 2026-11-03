@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { claimWorkflowStart, releaseWorkflowStart, updateScan } from "@sandchest/db";
-import { start } from "workflow/api";
+import { getRun, start } from "workflow/api";
+import { WorkflowRunNotFoundError } from "workflow/errors";
 import { scanWorkflow } from "@/workflows/scan";
 import { db } from "./services";
 
@@ -26,4 +27,28 @@ export async function startScan(scanId: string): Promise<void> {
     await releaseWorkflowStart(db(), scanId, claim);
     throw error;
   }
+}
+
+let runStatus: ((runId: string) => Promise<string | undefined>) | undefined;
+
+/** For tests: report workflow run statuses with this instead of the workflow runtime. */
+export function setRunStatus(status: ((runId: string) => Promise<string | undefined>) | undefined): void {
+  runStatus = status;
+}
+
+/**
+ * Whether a scan's workflow may still be running: true unless the runtime
+ * says its run has ended or does not exist. A start that never recorded its
+ * run can't be asked about, so it counts as running.
+ */
+export async function workflowRunning(runId: string | null): Promise<boolean> {
+  if (!runId) return false;
+  if (runId.startsWith("starting:")) return true;
+  const status = runStatus
+    ? await runStatus(runId)
+    : await getRun(runId).status.catch((error: unknown) => {
+        if (WorkflowRunNotFoundError.is(error)) return undefined;
+        throw error;
+      });
+  return status === "pending" || status === "running";
 }

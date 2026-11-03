@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
 
@@ -234,13 +234,22 @@ export async function releaseWorkflowStart(database: Db, scanId: string, claim: 
   await database.update(scans).set({ workflowRunId: null }).where(and(eq(scans.id, scanId), eq(scans.workflowRunId, claim)));
 }
 
-/** Scans that never got a workflow (a lost start) or have been running far past any budget. */
-export async function strandedScans(database: Db, now = new Date()): Promise<{ unstarted: Scan[]; stuck: Scan[] }> {
+/**
+ * Scans that never got a workflow (a lost start), whose start was claimed but
+ * never recorded a run (the instance died in between), or that have been
+ * running past their budget (the caller checks whether the workflow still is).
+ */
+export async function strandedScans(database: Db, now = new Date()): Promise<{ unstarted: Scan[]; unfinishedStarts: Scan[]; stuck: Scan[] }> {
   const fiveMinutesAgo = new Date(now.getTime() - 5 * 60_000);
   const halfHourAgo = new Date(now.getTime() - 30 * 60_000);
-  const [unstarted, stuck] = await Promise.all([
+  const [unstarted, unfinishedStarts, stuck] = await Promise.all([
     database.query.scans.findMany({
       where: and(eq(scans.status, "queued"), isNull(scans.workflowRunId), lt(scans.createdAt, fiveMinutesAgo)),
+      limit: 50,
+    }),
+    // A start takes seconds, and the sweep only restarts scans five minutes old: a claim that still names no run half an hour in died with its instance.
+    database.query.scans.findMany({
+      where: and(eq(scans.status, "queued"), like(scans.workflowRunId, "starting:%"), lt(scans.createdAt, halfHourAgo)),
       limit: 50,
     }),
     database.query.scans.findMany({
@@ -248,7 +257,7 @@ export async function strandedScans(database: Db, now = new Date()): Promise<{ u
       limit: 50,
     }),
   ]);
-  return { unstarted, stuck };
+  return { unstarted, unfinishedStarts, stuck };
 }
 
 /** Whether a deep scan for the repo is queued or running right now. */

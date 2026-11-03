@@ -226,7 +226,8 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
 /** Completes the PR Check and posts the review. Other scans have nothing to publish. */
 export async function publishScan(scanId: string): Promise<void> {
   const scan = await requireScan(scanId);
-  if (scan.status === "completed") return;
+  // Published already, or failed by the sweep while this ran: its credits are back and its Check closed, so it stays that way.
+  if (scan.status !== "running" && scan.status !== "publishing") return;
   const installationId = scan.repo.org.installationId;
   if (scan.kind === "pr_review" && scan.checkRunId && scan.prNumber && installationId) {
     const installation = githubApp().installation(installationId);

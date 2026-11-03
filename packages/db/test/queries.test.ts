@@ -234,6 +234,25 @@ describe("scans", () => {
     expect(stuckScans.map((s) => s.id)).toEqual([stuck.id]);
   });
 
+  it("finds starts that were claimed but never got a workflow, once they are well past the start", async () => {
+    const { org, repos } = await upsertInstallation(database, 9040, { ...account, githubAccountId: 140 }, [repo(140)]);
+    const make = (sha: string) => createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "recon", trigger: "webhook", headSha: sha });
+    const { scan: wedged } = await make("wedged");
+    const { scan: starting } = await make("starting");
+    const { scan: waiting } = await make("waiting");
+    // The instance died between claiming the start and recording the run.
+    await updateScan(database, wedged.id, { workflowRunId: "starting:old" });
+    await database.$client`update scans set created_at = now() - interval '40 minutes' where id = ${wedged.id}`;
+    // A start in flight right now, and a started scan queued behind the org's others.
+    await updateScan(database, starting.id, { workflowRunId: "starting:new" });
+    await updateScan(database, waiting.id, { workflowRunId: "run-waiting" });
+    await database.$client`update scans set created_at = now() - interval '40 minutes' where id = ${waiting.id}`;
+
+    const { unstarted, unfinishedStarts } = await strandedScans(database);
+    expect(unfinishedStarts.map((s) => s.id)).toEqual([wedged.id]);
+    expect(unstarted.map((s) => s.id)).not.toContain(wedged.id);
+  });
+
   it("lets at most `limit` scans per org run, even when claimed concurrently", async () => {
     const { org, repos } = await upsertInstallation(database, 9003, { ...account, githubAccountId: 103 }, [repo(20)]);
     const created = await Promise.all(

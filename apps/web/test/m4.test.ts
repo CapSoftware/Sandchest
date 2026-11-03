@@ -16,7 +16,7 @@ import { requestDeepScan } from "@/server/dig";
 import { beginScan, failScan, publishScan } from "@/server/scans";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
-import { setScanStarter } from "@/server/start";
+import { setRunStatus, setScanStarter } from "@/server/start";
 import { handleWebhook } from "@/server/webhooks";
 import { FakeAutumn } from "./fake-autumn";
 
@@ -55,6 +55,8 @@ const fakeGithub = {
 
 const autumn = new FakeAutumn();
 const started: string[] = [];
+// The workflow runs the sweep can see, by run id. Any other id is a run that does not exist.
+const runs = new Map<string, string>();
 const deps = () => ({ db: database, github: fakeGithub, startScan: async (id: string) => void started.push(id), canScan });
 let acme: { id: string; githubLogin: string };
 let repoIds: string[];
@@ -76,11 +78,13 @@ beforeAll(async () => {
   setServices({ db: database, github: fakeGithub });
   setAutumn(autumn);
   setScanStarter(async (id) => void started.push(id));
+  setRunStatus(async (runId) => runs.get(runId));
 });
 
 afterAll(async () => {
   setAutumn(undefined);
   setScanStarter(undefined);
+  setRunStatus(undefined);
   if (!available) return;
   await database.$client.end();
   await admin!.unsafe(`drop database if exists ${NAME} with (force)`);
@@ -400,5 +404,94 @@ describe.skipIf(!available)("billing", () => {
     } finally {
       setAutumn(autumn);
     }
+  });
+
+  /** A PR review running since `minutesAgo`, holding 15 credits, with its Check in progress. */
+  async function runningReview(head: string, minutesAgo: number, runId: string): Promise<{ id: string; check: number }> {
+    checks.push({ repo: "acme/api", title: "Scanning…" });
+    const check = checks.length;
+    const [scan] = await database
+      .insert(schema.scans)
+      .values({ repoId: repoIds[0]!, orgId: acme.id, kind: "pr_review", trigger: "webhook", headSha: head, prNumber: 90, status: "running", checkRunId: check, workflowRunId: runId, startedAt: new Date(Date.now() - minutesAgo * 60_000) })
+      .returning();
+    expect(await reserveScan(scan!.id, acme, 15)).toEqual({ ok: true });
+    return { id: scan!.id, check };
+  }
+  const cron = () => sweep(new Request("https://sandchest.test/api/cron/sweep", { headers: { authorization: "Bearer cron-secret" } }));
+
+  test("the sweep leaves a slow scan whose workflow is still running, and it is charged when it finishes", async () => {
+    // Settle what earlier tests left behind, so the balance below counts only this test's scans.
+    await cron();
+    autumn.get(acme.id).credits = 40;
+    // Past the half-hour mark (a retried execute step can take it there), but its workflow is alive.
+    const slow = await runningReview("slow", 31, "run-slow");
+    runs.set("run-slow", "running");
+    const response = await cron();
+    expect(await response.json()).toMatchObject({ failed: 0, errors: 0 });
+    expect(await scanById(database, slow.id)).toMatchObject({ status: "running", billing: "reserved" });
+    expect(autumn.get(acme.id).credits).toBe(25);
+
+    // The workflow finishes: the scan is charged what it measured, once.
+    await database.$client`update scans set credits = 12, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${slow.id}`;
+    await publishScan(slow.id);
+    expect(await scanById(database, slow.id)).toMatchObject({ status: "completed", billing: "charged", credits: 12 });
+    expect(autumn.get(acme.id).credits).toBe(28);
+    await publishScan(slow.id);
+    await cron();
+    expect(await scanById(database, slow.id)).toMatchObject({ status: "completed", billing: "charged", credits: 12 });
+    expect(autumn.get(acme.id).credits).toBe(28);
+    runs.delete("run-slow");
+  });
+
+  test("the sweep fails a scan whose workflow has ended, or that is running far past any budget", async () => {
+    autumn.get(acme.id).credits = 40;
+    const dead = await runningReview("dead", 31, "run-dead");
+    runs.set("run-dead", "failed");
+    const wedged = await runningReview("wedged", 3 * 60, "run-wedged");
+    runs.set("run-wedged", "running");
+    expect(autumn.get(acme.id).credits).toBe(10);
+    const response = await cron();
+    expect(await response.json()).toMatchObject({ failed: 2, errors: 0 });
+    for (const scan of [dead, wedged]) {
+      expect(await scanById(database, scan.id)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+      expect(checks[scan.check - 1]).toMatchObject({ conclusion: "neutral", title: "Review could not finish" });
+    }
+    expect(autumn.get(acme.id).credits).toBe(40);
+
+    // The wedged workflow turns up after all: the scan stays failed and released, with the Check that says so.
+    await database.$client`update scans set credits = 12, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${wedged.id}`;
+    await publishScan(wedged.id);
+    expect(await scanById(database, wedged.id)).toMatchObject({ status: "failed", billing: "released" });
+    expect(checks[wedged.check - 1]).toMatchObject({ conclusion: "neutral", title: "Review could not finish" });
+    expect(autumn.get(acme.id).credits).toBe(40);
+    runs.delete("run-dead");
+    runs.delete("run-wedged");
+  });
+
+  test("the sweep gives up on a start that never got its workflow, freeing the repo's Dig, its credits and the free Dig", async () => {
+    await database.$client`update scans set status = 'completed' where repo_id = ${repoIds[0]!} and kind = 'deep' and status in ('queued', 'running', 'publishing')`;
+    await cron();
+    autumn.get(acme.id).credits = 40;
+    const before = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
+    const [scan] = await database
+      .insert(schema.scans)
+      .values({ repoId: repoIds[0]!, orgId: acme.id, kind: "deep", trigger: "manual", headSha: "wedged", createdAt: new Date(Date.now() - 40 * 60_000) })
+      .returning();
+    expect(await reserveScan(scan!.id, acme, 15)).toEqual({ ok: true });
+    // The start was claimed, then the instance died before the workflow's run was recorded. It was the org's free Dig.
+    await database.$client`update scans set workflow_run_id = ${"starting:lost"} where id = ${scan!.id}`;
+    await database.$client`update orgs set free_dig_scan_id = ${scan!.id} where id = ${acme.id}`;
+    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
+    expect(await requestDeepScan({ ...repo!, loc: 50_000 })).toMatchObject({ ok: false, reason: "running", scanId: scan!.id });
+
+    const response = await cron();
+    expect(await response.json()).toMatchObject({ errors: 0 });
+    expect(await scanById(database, scan!.id)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+    expect(autumn.get(acme.id).credits).toBe(40);
+    // The repo can be dug again, and the free Dig is free again.
+    const again = await requestDeepScan({ ...repo!, loc: 50_000 });
+    expect(again.ok).toBe(true);
+    expect(await scanById(database, (again as { scanId: string }).scanId)).toMatchObject({ creditsReserved: 0 });
+    await database.$client`update orgs set free_dig_scan_id = ${before[0]!.free} where id = ${acme.id}`;
   });
 });
