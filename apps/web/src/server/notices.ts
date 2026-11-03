@@ -17,6 +17,7 @@
  *   other scan emails.
  * - Nothing here logs an address or an email's contents; only opaque ids.
  */
+import { withUtm } from "@/lib/analytics";
 import { CREDIT_LEVELS, creditLevel, isTrial, PLAN, planById } from "@sandchest/billing/plans";
 import {
   claimNotification,
@@ -79,7 +80,7 @@ export async function noticeCredits(org: NoticeOrg, billing: CreditsSnapshot, se
     org: org.githubLogin,
     plan: plan.name,
     resetsOn: billing.creditsResetAt ? shortDate(billing.creditsResetAt) : null,
-    billingUrl: billingUrl(),
+    billingUrl: billingUrl(`credits_${level}`),
     // Free credits: nothing to top up, so the email says to join.
     ...(isTrial(plan.id) ? { free: { join: `${PLAN.name} for ${usd(PLAN.price)} a month` } } : {}),
   };
@@ -92,7 +93,7 @@ export type NoticeOutcome = "sent" | "duplicate" | "skipped";
 /** An auto top-up bought credits. Sent once per invoice. */
 export async function noticeAutoTopUp(org: NoticeOrg, topUp: { invoiceId: string; added: number; charged: string; credits: number }): Promise<NoticeOutcome> {
   return claimAndSend(org.id, `auto_top_up:${topUp.invoiceId}`, "auto top-up email", () =>
-    autoTopUpSucceededEmail({ org: org.githubLogin, added: topUp.added, charged: topUp.charged, credits: topUp.credits, billingUrl: billingUrl() }),
+    autoTopUpSucceededEmail({ org: org.githubLogin, added: topUp.added, charged: topUp.charged, credits: topUp.credits, billingUrl: billingUrl("auto_top_up_succeeded") }),
   );
 }
 
@@ -102,7 +103,7 @@ export async function noticeAutoTopUp(org: NoticeOrg, topUp: { invoiceId: string
  */
 export async function noticeAutoTopUpFailed(org: NoticeOrg, failure: { reason: "card" | "limit"; credits: number | null }, at = new Date()): Promise<NoticeOutcome> {
   return claimAndSend(org.id, `auto_top_up_failed:${failure.reason}:${at.toISOString().slice(0, 10)}`, "auto top-up failed email", () =>
-    autoTopUpFailedEmail({ org: org.githubLogin, reason: failure.reason, credits: failure.credits, billingUrl: billingUrl() }),
+    autoTopUpFailedEmail({ org: org.githubLogin, reason: failure.reason, credits: failure.credits, billingUrl: billingUrl("auto_top_up_failed") }),
   );
 }
 
@@ -126,7 +127,7 @@ export async function noticeScanPaused(scan: PausedScan, at = new Date()): Promi
   if (!to) return false;
   if (!(await claimNotification(db(), scan.id))) return false;
   if (!(await claimOrgNotice(db(), org.id, `scan_paused:${at.toISOString().slice(0, 13)}`))) return false;
-  await send(org.id, to, scanPausedEmail({ org: org.githubLogin, repo: scan.repo.fullName, kind: scan.kind, prNumber: scan.prNumber, scanUrl: `${appUrl()}/dashboard/scans/${scan.id}` }));
+  await send(org.id, to, scanPausedEmail({ org: org.githubLogin, repo: scan.repo.fullName, kind: scan.kind, prNumber: scan.prNumber, scanUrl: withUtm(`${appUrl()}/dashboard/scans/${scan.id}`, "email", "scan_paused") }));
   return true;
 }
 
@@ -255,6 +256,7 @@ function appUrl(): string {
   return config().SANDCHEST_APP_URL.replace(/\/$/, "");
 }
 
-function billingUrl(): string {
-  return `${appUrl()}/dashboard/settings#billing`;
+/** Settings' billing section, tagged with which email the link was in. */
+function billingUrl(medium: string): string {
+  return withUtm(`${appUrl()}/dashboard/settings#billing`, "email", medium);
 }

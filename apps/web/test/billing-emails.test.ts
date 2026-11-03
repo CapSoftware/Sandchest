@@ -220,7 +220,7 @@ describe.skipIf(!available)("billing emails", () => {
     await reserve(1); // 4
     expect(subjects()).toEqual(["4 credits left on acme"]);
     expect([...sent[0]!.to].sort()).toEqual(ADMINS);
-    expect(sent[0]!.html).toContain("https://sandchest.test/dashboard/settings#billing");
+    expect(sent[0]!.html).toContain("https://sandchest.test/dashboard/settings?utm_source=email&amp;utm_medium=credits_low#billing");
     expect(sent[0]!.text).toContain("come back on 1 Jan 2030");
     await reserve(1);
     await sync();

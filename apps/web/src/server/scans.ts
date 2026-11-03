@@ -3,6 +3,7 @@
  * finding text ever goes into workflow storage. Every write is idempotent,
  * because a step that dies is retried from the start.
  */
+import { withUtm } from "@/lib/analytics";
 import { DEEP_SCAN_TIERS, deepScanCredits, prReviewCredits } from "@sandchest/billing";
 import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
 import {
@@ -91,7 +92,7 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
         name: CHECK_NAME,
         headSha: scan.headSha,
         externalId: scan.id,
-        detailsUrl: detailsUrl(scan.id),
+        detailsUrl: detailsUrl(scan.id, "github", "check"),
         output: { title: "Scanning…", summary: "Reviewing this change for exploitable vulnerabilities." },
       });
     await updateScan(db(), scan.id, { checkRunId });
@@ -116,7 +117,7 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
   let checkRunId = scan.checkRunId;
   if (scan.kind === "pr_review" && scan.repo.org.installationId) {
     const installation = githubApp().installation(scan.repo.org.installationId);
-    const { conclusion, output } = notReviewed(gate.reason, `${appUrl()}/dashboard/settings`, gate.credits);
+    const { conclusion, output } = notReviewed(gate.reason, withUtm(`${appUrl()}/dashboard/settings`, "github", "check"), gate.credits);
     checkRunId ??= await installation.createCheckRun(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
     await installation.completeCheckRun(scan.repo.fullName, checkRunId, conclusion, output);
   }
@@ -246,10 +247,10 @@ export async function publishScan(scanId: string): Promise<void> {
         else unplaced.push(finding);
       }
       inline = comments.length;
-      await installation.createReview(scan.repo.fullName, scan.prNumber, { commitId: scan.headSha, body: reviewBody(visible, unplaced, detailsUrl(scan.id)), comments });
+      await installation.createReview(scan.repo.fullName, scan.prNumber, { commitId: scan.headSha, body: reviewBody(visible, unplaced, detailsUrl(scan.id, "github", "review")), comments });
     }
     const threshold = scan.repo.org.settings.checkThreshold;
-    const { conclusion, output } = checkResult({ findings, threshold, isPublic: !scan.repo.private, detailsUrl: detailsUrl(scan.id), credits: scan.credits, inline });
+    const { conclusion, output } = checkResult({ findings, threshold, isPublic: !scan.repo.private, detailsUrl: detailsUrl(scan.id, "github", "check"), credits: scan.credits, inline });
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);
   }
   await updateScan(db(), scan.id, { status: "completed", finishedAt: new Date() });
@@ -279,10 +280,11 @@ async function notifyScan(scan: NonNullable<Awaited<ReturnType<typeof scanById>>
   const recipients = await notificationRecipients(db(), scan.repo.id);
   if (recipients.length === 0 || !(await claimNotification(db(), scan.id))) return;
   const base = config().SANDCHEST_APP_URL.replace(/\/$/, "");
-  const summary = (row: FindingRow) => ({ title: row.title, severity: row.severity, url: `${base}/dashboard/findings/${row.id}` });
+  const medium = scan.kind === "deep" ? "deep_scan" : "critical_finding";
+  const summary = (row: FindingRow) => ({ title: row.title, severity: row.severity, url: withUtm(`${base}/dashboard/findings/${row.id}`, "email", medium) });
   const order = ["critical", "high", "medium", "low"];
   const sorted = rows.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
-  const email = scan.kind === "deep" ? deepScanEmail({ repo: scan.repo.fullName, scanUrl: detailsUrl(scan.id), findings: sorted.map(summary) }) : criticalFindingEmail({ repo: scan.repo.fullName, findings: critical.map(summary) });
+  const email = scan.kind === "deep" ? deepScanEmail({ repo: scan.repo.fullName, scanUrl: detailsUrl(scan.id, "email", medium), findings: sorted.map(summary) }) : criticalFindingEmail({ repo: scan.repo.fullName, findings: critical.map(summary) });
   await mailer().send({ to: recipients, ...email });
 }
 
@@ -331,8 +333,9 @@ function appUrl(): string {
   return config().SANDCHEST_APP_URL.replace(/\/$/, "");
 }
 
-function detailsUrl(scanId: string): string {
-  return `${appUrl()}/dashboard/scans/${scanId}`;
+/** A scan's page, tagged with where the link was put (a Check, a review, an email) so the visit is attributed to it. */
+function detailsUrl(scanId: string, source: "email" | "github", medium: string): string {
+  return withUtm(`${appUrl()}/dashboard/scans/${scanId}`, source, medium);
 }
 
 function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {
