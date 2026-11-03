@@ -205,7 +205,7 @@ export function planPrAssignments(files: ChangedFile[], routes: RouteInfo[], lea
     return {
       name: count > 1 ? `change ${i + 1}/${count}` : "change",
       brief: [
-        "Your scope: this pull request's change. Attack what it introduces or alters: new or modified entry points, changed authorisation, new queries, commands, file access, outbound requests, markup and business rules, and anything that now reaches existing dangerous code. Read each diff with diff(path), read the surrounding code, and follow the data into the rest of the codebase. Report only issues the change introduces or touches.",
+        "Your scope: this pull request's change. Attack what it introduces or alters: new or modified entry points, changed authorisation, new queries, commands, file access, outbound requests, markup and business rules, and anything that now reaches existing dangerous code. Read each diff with diff(path), read the surrounding code, and follow the data into the rest of the codebase. Report only issues the change introduces or touches. Many changes have no attack surface: internal refactors, rendering, media encoding, build and CI plumbing, UI. When nothing an attacker controls reaches the changed code, report nothing: an empty review is the right answer, not a failure.",
         section("Changed files", group.map((f) => `- ${f.path} (${f.status}, +${f.additions} −${f.deletions})`), ""),
         section("Entry points in these files", routes.filter((r) => inGroup(r.at)).map(formatRoute), "None found by the index."),
         section("Leads in these files", leads.filter((lead) => inGroup(lead.at)).map(formatLead), "None from the sweep."),

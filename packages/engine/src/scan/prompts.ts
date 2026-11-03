@@ -31,6 +31,9 @@ ${MANDATE}
 
 ${untrustedRules(tag)}
 
+## What you are attacking
+The code may be a web service, an API, a desktop or mobile app, a CLI, a library or infrastructure. Its attack surface is wherever input it does not control comes in: requests, webhooks, uploads, redirects and tokens; and for client and desktop software, the files and media it opens, links and deep links, messages from other processes, responses from servers and update channels, and content other people share with its users. Code with none of that in reach has nothing to attack.
+
 ## Think like every kind of attacker
 - The outsider: no account, probing every public endpoint, webhook, upload and redirect.
 - The customer who signs up for free and wants everything: other tenants' data, admin rights, paid features, unlimited credits.
@@ -50,11 +53,13 @@ ${untrustedRules(tag)}
 
 ## What to report
 Call report_finding once per distinct vulnerability or abuse, as soon as you have the evidence:
-- the exact entry point,
+- the exact entry point, and what the attacker sends to it (the trigger),
 - the path from input to the sink or broken decision as file:line hops you have actually read,
 - who can exploit it,
 - a concrete proof of concept (requests, payloads, the sequence of steps, or the race),
 - what the attacker gets, in one plain sentence.
+
+A bug is a vulnerability only when an attacker can set it off on purpose, with input or actions they choose, and it harms someone other than them. It is not one when it needs a hardware, driver or OS fault, a crash, a timeout or a flaky network that nobody controls, a race between the program's own threads that no attacker can drive, or a user's own mistake. Dropped frames, corrupted output, lost data, leaks and slowdowns from such faults are reliability bugs, however real: they are for the code's own tests and reviewers. Never report them. If you cannot fill in what the attacker sends (trigger), there is no finding.
 
 Report what an attacker can actually do to someone else: another user, the owner, or the owner's revenue and costs. Something that only harms the attacker (overcharging their own account, breaking their own data) is not a vulnerability. Missing rate limits, lockouts or quotas count when they enable a concrete attack: brute-forcing an OTP, password, share code or token; enumerating users; or running up the owner's costs. Hardcoded secrets count when the application uses them (signing keys, passwords, API keys); cite where. A vulnerable dependency counts when attacker input reaches the vulnerable functionality. Skip pure style or hygiene notes with no attack behind them.
 
@@ -71,6 +76,9 @@ ${MANDATE}
 
 ${untrustedRules(tag)}
 
+## First: is this a vulnerability at all?
+Name the attacker and what they deliberately send or do to set it off. If nobody can trigger it on purpose (it needs a hardware, driver or OS fault, a crash, a timeout, a flaky network, a race between the program's own threads, or a user's own mistake), or nobody but the attacker is harmed, it is a reliability or correctness bug, not a vulnerability, however real: rule "not_a_vulnerability" and say why. This needs no citations. Do not use it to dismiss real attacks that are merely unlikely, need an account, or need a race the attacker can drive with requests.
+
 ## How to review
 - Read every cited line, then everything that could stop the attack: middleware and guards on the route, validation and type coercion, sanitisation and encoding, ORM and framework defaults, configuration, and whether the code is reachable at all.
 - Check that the proof of concept would actually work against this code.
@@ -80,6 +88,7 @@ ${untrustedRules(tag)}
 - Ask who is harmed. If the only victim is the attacker (they overcharge or break their own account), rule it disproved, citing the code that limits the effect to the caller's own data.
 
 ## How to rule
+- "not_a_vulnerability" when no attacker can set it off on purpose, or the attacker is its only victim (see above).
 - "disproved" only when you can cite the exact lines (file:line) that block the attack and you have read them. Name the protection and explain why it holds.
 - Otherwise "confirmed", with a confidence:
   - high: you read every hop and the attack clearly works

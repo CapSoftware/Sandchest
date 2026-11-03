@@ -1,7 +1,8 @@
 /**
  * Skeptic: a separate reviewer tries to disprove each candidate. It may drop
- * one only by citing the code that blocks the attack; anything else survives
- * with a confidence.
+ * one by citing the code that blocks the attack, or by ruling that it is no
+ * vulnerability at all (nobody can set it off on purpose, or only the
+ * attacker is harmed); anything else survives with a confidence.
  */
 import type { Message } from "../llm";
 import { defineTool } from "../llm";
@@ -87,7 +88,8 @@ export function renderCandidate(gated: GatedCandidate): string {
   return `# Candidate ${gated.id}: ${c.title}
 Category: ${c.category}. Claimed severity: ${c.severity}.
 Entry point: ${c.entryPoint.description} (${c.entryPoint.file}:${c.entryPoint.line})
-Attacker: ${c.preconditions.attacker}. Preconditions: ${c.preconditions.details}
+Attacker: ${c.preconditions.attacker}. Trigger: ${c.preconditions.trigger}
+Preconditions: ${c.preconditions.details}
 Impact: ${c.impact}
 
 ## Attack path

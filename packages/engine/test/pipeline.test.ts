@@ -68,7 +68,7 @@ const candidate = {
     { file: "src/login.ts", line: 2, note: "email read from the body" },
     { file: "src/login.ts", line: 3, note: "concatenated into the query" },
   ],
-  preconditions: { attacker: "unauthenticated", details: "none" },
+  preconditions: { attacker: "unauthenticated", trigger: "POSTs a crafted email to the login form", details: "none" },
   proofOfConcept: "POST /login email=' OR '1'='1",
   impact: "Logs in as any user.",
 };
@@ -106,7 +106,7 @@ function toolCall(name: string, args: unknown): ToolCall {
 }
 
 /** A model that behaves sensibly for every role. `hunter` overrides what hunters do. */
-function fakeClient(hunter?: Script, overrides: { reconObject?: Script } = {}): LlmClient {
+function fakeClient(hunter?: Script, overrides: { reconObject?: Script; verdict?: Record<string, unknown> } = {}): LlmClient {
   const answered = (request: ChatRequest) => request.messages.some((m) => m.role === "tool");
   return {
     config: { baseUrl: "http://fake", apiKey: "k", model: "m" },
@@ -126,7 +126,7 @@ function fakeClient(hunter?: Script, overrides: { reconObject?: Script } = {}): 
         case "skeptic":
           // The review skeptic has the verdict tool; the auth-model investigation does not.
           return hasVerdictTool
-            ? reply("", [toolCall("submit_verdict", { verdict: "confirmed", confidence: "high", disproof: [], severity: "critical", reasoning: "Read every hop; the email is concatenated." })])
+            ? reply("", [toolCall("submit_verdict", overrides.verdict ?? { verdict: "confirmed", confidence: "high", disproof: [], severity: "critical", reasoning: "Read every hop; the email is concatenated." })])
             : reply("Auth notes: requireAuth guards routes at src/login.ts:1.");
         default:
           throw new Error(`unexpected role ${request.role}`);
@@ -155,6 +155,15 @@ describe("runScan", () => {
     expect(report.leads.map((lead) => lead.kind)).toEqual(["secret"]);
     expect(events.some((event) => event.type === "finding")).toBe(true);
     expect(report.warnings).toEqual([]);
+  });
+
+  test("a bug nobody can set off on purpose is dropped without citations, as no vulnerability", async () => {
+    const events: ScanEvent[] = [];
+    const verdict = { verdict: "not_a_vulnerability", confidence: "high", disproof: [], severity: "medium", reasoning: "Only a GPU driver reset sets it off; no attacker controls that." };
+    const report = await scan(fakeClient(undefined, { verdict }), fakeIndexer(), events);
+    expect(report.findings).toEqual([]);
+    expect(report.dismissed.map((d) => [d.title, d.disproof])).toEqual([[candidate.title, []]]);
+    expect(events.some((e) => e.type === "progress" && e.message.includes("(no attacker can use it)"))).toBe(true);
   });
 
   test("rejects citations that do not exist and tells the hunter", async () => {

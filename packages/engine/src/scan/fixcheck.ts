@@ -61,6 +61,8 @@ export async function checkFixes(options: FixCheckOptions): Promise<{ results: F
   });
   verified.results.forEach((result, i) => {
     const id = located[i]!.finding.id;
+    // Only code that now blocks the attack closes it. A ruling that it was never a vulnerability is a judgement
+    // on the original report, not evidence of a fix, so it stays open for the team to dismiss.
     if (result.review?.verdict.verdict === "disproved") {
       results.push({ id, outcome: "fixed", reason: result.review.verdict.reasoning });
     } else {

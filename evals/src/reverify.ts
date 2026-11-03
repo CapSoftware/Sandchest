@@ -127,7 +127,7 @@ function outcomeOf(result: Verification): Outcome {
   if (result.error) return "error";
   if (result.rejected) return "rejected";
   const verdict = result.review!.verdict;
-  if (verdict.verdict === "disproved") return "dropped";
+  if (verdict.verdict !== "confirmed") return "dropped";
   return verdict.confidence === "low" ? "hidden" : "shown";
 }
 

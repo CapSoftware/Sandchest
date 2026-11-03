@@ -77,6 +77,13 @@ export const CandidateSchema = z.object({
     .describe("Source → sink, in order. Each hop is a real file:line you have read. The last hop is the sink or the missing check."),
   preconditions: z.object({
     attacker: z.enum(ATTACKERS),
+    trigger: z
+      .string()
+      .min(10)
+      .max(300)
+      .describe(
+        "What the attacker deliberately sends or does to set it off, and how it reaches this code: a request, payload, file, link, message or account action they choose. Never a hardware, driver or OS fault, a crash, a flaky network or a user's own mistake: if nobody can trigger it on purpose, it is not a vulnerability and must not be reported.",
+      ),
     details: z.string().max(400).describe("Anything else that must hold, or 'none'"),
   }),
   proofOfConcept: z.string().min(20).max(2_000).describe("A concrete request, payload or input that triggers it"),
@@ -90,8 +97,10 @@ const Citation = z.object({ ...Location, explanation: z.string().min(3).max(400)
 /** The skeptic's ruling on one candidate. */
 export const VerdictSchema = z.object({
   verdict: z
-    .enum(["confirmed", "disproved"])
-    .describe("'disproved' only if you can cite the code that stops the attack; otherwise 'confirmed'"),
+    .enum(["confirmed", "disproved", "not_a_vulnerability"])
+    .describe(
+      "'not_a_vulnerability' when no attacker can set it off on purpose, or nobody but the attacker is harmed (a reliability, correctness or performance bug); 'disproved' only if you can cite the code that stops the attack; otherwise 'confirmed'",
+    ),
   confidence: z.enum(CONFIDENCES).describe("How sure you are the attack works as described"),
   disproof: z.array(Citation).max(6).describe("Required when disproved: the exact lines that block the attack. Empty otherwise."),
   severity: z.enum(SEVERITIES).describe("Severity after your review, per the rubric"),

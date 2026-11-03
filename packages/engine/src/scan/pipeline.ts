@@ -300,7 +300,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
         if (fatal) return;
       }
     }
-    if (ruling.verdict.verdict === "disproved") {
+    if (ruling.verdict.verdict !== "confirmed") {
       dismissed.push({
         id: gated.id,
         title: gated.candidate.title,
@@ -309,7 +309,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
         reasoning: ruling.verdict.reasoning,
         disproof: ruling.verdict.disproof.map((d) => `${d.file}:${d.line} — ${d.explanation}`),
       });
-      emit({ type: "progress", message: `Ruled out ${gated.id}: ${gated.candidate.title}.` });
+      emit({ type: "progress", message: `Ruled out ${gated.id}${ruling.verdict.verdict === "not_a_vulnerability" ? " (no attacker can use it)" : ""}: ${gated.candidate.title}.` });
       return;
     }
     const finding = await structure(ctx, gated, ruling);
@@ -623,7 +623,8 @@ function toCandidate(input: Finding | Candidate): Candidate {
     severity: input.severity,
     entryPoint: input.entryPoint,
     path: input.attackPath.map(({ file, line, note }) => ({ file, line, note })),
-    preconditions: { attacker: input.attacker, details: input.preconditions },
+    // Findings stored before the trigger was asked for: the reviewer judges it from the proof of concept.
+    preconditions: { attacker: input.attacker, trigger: "Not recorded; judge it from the proof of concept.", details: input.preconditions },
     proofOfConcept: input.proofOfConcept,
     impact: input.impact,
     leads: input.leads,

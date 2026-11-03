@@ -22,7 +22,7 @@ const candidate: Candidate = {
     { file: "routes/login.ts", line: 12, note: "email read from body" },
     { file: "routes/login.ts", line: 14, note: "concatenated into the query" },
   ],
-  preconditions: { attacker: "unauthenticated", details: "none" },
+  preconditions: { attacker: "unauthenticated", trigger: "POSTs a crafted email to the login form", details: "none" },
   proofOfConcept: "POST /login email=' OR 1=1--",
   impact: "Logs in as any user.",
 };
