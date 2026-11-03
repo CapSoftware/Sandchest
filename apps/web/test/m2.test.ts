@@ -124,7 +124,7 @@ const candidate = {
   severity: "high",
   entryPoint: { file: "app.js", line: 3, description: "POST /login, body.email" },
   path: [{ file: "app.js", line: 4, note: "email concatenated into the query" }],
-  preconditions: { attacker: "unauthenticated", details: "none" },
+  preconditions: { attacker: "unauthenticated", trigger: "POSTs a crafted email to the login form", details: "none" },
   proofOfConcept: "POST /login email=' OR '1'='1",
   impact: "Reads every user row.",
 };
