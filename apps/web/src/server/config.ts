@@ -8,9 +8,10 @@ const Schema = z.object({
   DATABASE_URL: z.string().min(1),
   /**
    * A connection pooler in front of the same database (PgBouncer, transaction
-   * mode), for analytics writes: they hold a database connection only for the
-   * milliseconds each write takes, so they never crowd out the app. Default
-   * DATABASE_URL.
+   * mode). When set, the app's queries go through it, so the database's
+   * connection count is fixed by the pooler whatever the traffic. Migrations
+   * (DATABASE_MIGRATION_URL) and the self-hosted workflow World need a direct
+   * connection and never use it. Default DATABASE_URL.
    */
   DATABASE_POOLER_URL: z.string().min(1).optional(),
   /** A read replica, for the operator dashboards and analysis, so heavy reads never touch the primary. Default DATABASE_URL. */

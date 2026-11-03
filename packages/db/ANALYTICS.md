@@ -6,7 +6,7 @@ Everything is first-party and lives in Postgres. Hosted Sandchest also runs Verc
 
 ## Rules
 
-- **Read only, on the replica.** Run `select` statements and nothing else, against the read replica (`DATABASE_REPLICA_URL`; on PlanetScale, the same credentials with `|replica` appended to the username), never the primary. Analysis then costs the app nothing.
+- **Read only, on the replica.** Run `select` statements and nothing else, against the read replica (`DATABASE_REPLICA_URL`; on PlanetScale, the same credentials with `|replica` appended to the username), never the primary. Analysis then costs the app nothing. The app's role stops any statement after 30 seconds; for a longer analysis, start the session with `set statement_timeout = '5min'` (only on the replica).
 - Events never hold code, finding text, repository or account names, emails or IP addresses. Don't join them to tables that do (`users.email`, `repos.full_name`, `findings.title`) in anything you save or share. Report counts and rates, not people.
 
 ## Where things live
@@ -154,6 +154,7 @@ The signed-up funnel (install, plan, recon, first deep scan, coming back) is alr
 - The beacon at `/api/e` never reads the database, and the browser batches a page's clicks and steps into the page's own requests, so a page view costs about one request and one insert.
 - Every analytics write runs after the response, through the pooler (`DATABASE_POOLER_URL`), on one connection per server instance that closes after 5 idle seconds. Each write is one insert in a transaction that gives up after 200 ms waiting on a lock or 1 s running, so a write can be lost but never hold anything up.
 - The operator dashboards (`/admin`) and analysis read the replica.
+- The app's own queries go through the same pooler, so the database's connection count is set by the pooler, not by traffic. The app's role stops statements after 30 s and transactions left idle after 60 s.
 
 ## Adding an event
 

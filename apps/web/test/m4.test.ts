@@ -226,14 +226,16 @@ describe.skipIf(!available)("billing", () => {
     expect(autumn.get(acme.id).credits).toBe(credits);
     const loser = results.find((r) => !r.ok);
     expect(loser).toMatchObject({ ok: false, reason: "out_of_credits", credits: 25 }); // unsized: holds the top tier
+    // Either may win the race; the rest follows whichever did.
+    const [winner, other] = results[0]!.ok ? [first!, second!] : [second!, first!];
 
     // An operator's Dig (admin token) is never the org's free one, and is held like any paid Dig.
-    expect(await requestDeepScan({ ...first!, loc: 50_000 }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "running" });
+    expect(await requestDeepScan({ ...winner, loc: 50_000 }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "running" });
 
     // It fails: the next Dig is free again.
     await database.$client`update scans set status = 'failed' where id = ${freeId}`;
     await settleScan((await scanById(database, freeId))!, "release");
-    const again = await requestDeepScan(first!);
+    const again = await requestDeepScan(winner);
     expect(again.ok).toBe(true);
     const againId = (again as { scanId: string }).scanId;
     expect(await scanById(database, againId)).toMatchObject({ creditsReserved: 0 });
@@ -242,7 +244,7 @@ describe.skipIf(!available)("billing", () => {
     await database.$client`update scans set status = 'completed', credits = 25 where id = ${againId}`;
     await settleScan((await scanById(database, againId))!, "charge", 25);
     expect(await scanById(database, againId)).toMatchObject({ billing: "charged", credits: 0 });
-    expect(await requestDeepScan(second!)).toMatchObject({ ok: false, reason: "out_of_credits" });
+    expect(await requestDeepScan(other)).toMatchObject({ ok: false, reason: "out_of_credits" });
     expect(autumn.get(acme.id).credits).toBe(credits);
     autumn.get(acme.id).credits = 0;
   });

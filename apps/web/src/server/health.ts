@@ -36,7 +36,8 @@ export function resetHealth(): void {
 
 async function check(env: Env): Promise<boolean> {
   if (configurationProblem(env)) return false;
-  const url = env.DATABASE_URL?.trim();
+  // The path the app's queries take: the pooler when there is one.
+  const url = env.DATABASE_POOLER_URL?.trim() || env.DATABASE_URL?.trim();
   if (!url) return false;
   if (probe?.url !== url) {
     void probe?.db.$client.end({ timeout: 1 }).catch(() => {});
