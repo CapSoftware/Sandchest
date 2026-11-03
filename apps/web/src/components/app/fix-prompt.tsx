@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { AGENT_APPS, AGENT_NAME, agentCommand, agentLink } from "@/lib/agent-links";
+import { AGENT_APPS, AGENT_NAME, agentCommand, agentOpening, openAgent, pasteNote } from "@/lib/agent-links";
 import { promptTaken } from "@/server/actions";
 import { AgentLogo } from "./agent-logo";
 
@@ -17,8 +17,8 @@ export function FixPrompt({ findingId, prompt, repo }: { findingId: string; prom
   const [target, setTarget] = useState<Target>("prompt");
   const [copied, setCopied] = useState<Target | undefined>();
   const text = target === "prompt" ? prompt : agentCommand(target, prompt);
-  const links = AGENT_APPS.map((app) => ({ app, href: agentLink(app, prompt, repo) }));
-  const tooLong = links.filter((link) => !link.href).map((link) => AGENT_NAME[link.app]);
+  const [note, setNote] = useState<string | undefined>();
+  const openings = AGENT_APPS.map((app) => ({ app, opening: agentOpening(app, prompt, repo) }));
 
   async function copy() {
     await navigator.clipboard.writeText(text);
@@ -49,24 +49,34 @@ export function FixPrompt({ findingId, prompt, repo }: { findingId: string; prom
         <button type="button" className="key key-primary" onClick={copy} data-track={`fix-prompt-copy-${target}`}>
           <span className="key-face">{copied === target ? "Copied" : target === "prompt" ? "Copy prompt" : "Copy command"}</span>
         </button>
-        {links.map(
-          ({ app, href }) =>
-            href && (
-              <a key={app} className="key key-secondary" href={href} onClick={() => void promptTaken(findingId)} data-track={`fix-prompt-open-${app}`}>
-                <span className="key-face">
-                  <AgentLogo app={app} />
-                  Open in {AGENT_NAME[app]}
-                </span>
-              </a>
-            ),
+        {openings.map(({ app, opening }) => (
+          <a
+            key={app}
+            className="key key-secondary"
+            href={opening.href}
+            title={opening.paste ? `Too long for a link: copies the prompt, then opens ${AGENT_NAME[app]} to paste it in` : undefined}
+            onClick={(event) => {
+              void promptTaken(findingId);
+              setNote(undefined);
+              // A prompt that fits goes in the link; one that doesn't goes on the clipboard first.
+              if (!opening.paste) return;
+              event.preventDefault();
+              void openAgent(opening).then((ok) => setNote(pasteNote(app, ok)));
+            }}
+            data-track={`fix-prompt-open-${app}`}
+          >
+            <span className="key-face">
+              <AgentLogo app={app} />
+              Open in {AGENT_NAME[app]}
+            </span>
+          </a>
+        ))}
+        {note && (
+          <p className="prompt-note" role="status">
+            {note}
+          </p>
         )}
-        {tooLong.length > 0 && <p className="prompt-note">Too long to open in {list(tooLong)} by link. Copy it instead.</p>}
       </div>
     </section>
   );
-}
-
-/** "A", "A or B", "A, B or C". */
-function list(names: string[]): string {
-  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
 }

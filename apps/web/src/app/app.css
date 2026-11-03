@@ -1268,6 +1268,10 @@ html:not([data-js]) .no-js-submit {
   color: var(--color-ember);
 }
 
+.copy-findings-menu .copy-findings-note {
+  color: var(--color-sand);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .copy-findings-caret {
     transition: none;

@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { AGENT_APPS, AGENT_NAME, agentCommand, agentLink, COMMAND_ARGUMENT_LIMIT, type AgentApp } from "@/lib/agent-links";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { AGENT_APPS, AGENT_NAME, agentCommand, agentOpening, COMMAND_ARGUMENT_LIMIT, openAgent, pasteNote, type AgentApp, type AgentOpening } from "@/lib/agent-links";
 import { copyFindings, findingsPrompt, findingsTaken, type ExportFiltersInput } from "@/server/actions";
 import { AgentLogo } from "./agent-logo";
 
@@ -89,7 +89,7 @@ export function CopyFindings({ filters, count }: { filters: ExportFiltersInput; 
       await write(result.then((outcome) => outcome.text));
       const outcome = await result;
       if (outcome.ids) void findingsTaken(filters, outcome.ids, format as "prompt" | "claude" | "codex");
-      const note = format !== "prompt" && agent && outcome.text.length > COMMAND_ARGUMENT_LIMIT ? "That command may be too long for a Linux shell. Filter by repository, or copy the Prompt and paste it in." : undefined;
+      const note = format !== "prompt" && agent && outcome.text.length > COMMAND_ARGUMENT_LIMIT ? "Copied. That command may be too long for a Linux shell. Filter by repository, or copy the Prompt and paste it in." : undefined;
       // A note stays up in the open menu until it closes; otherwise the menu gets out of the way.
       if (!note) menu.current?.removeAttribute("open");
       setState({ phase: "copied", count: outcome.count, note });
@@ -104,15 +104,21 @@ export function CopyFindings({ filters, count }: { filters: ExportFiltersInput; 
     }
   }
 
-  function opened(app: AgentApp) {
-    if (prepared && prepared !== "failed") void findingsTaken(filters, prepared.ids, `open_${app}`);
-    menu.current?.removeAttribute("open");
+  function opened(event: MouseEvent, app: AgentApp, opening: AgentOpening) {
+    if (!ready) return;
+    void findingsTaken(filters, ready.ids, `open_${app}`);
+    // A prompt that fits goes in the link; one that doesn't goes on the clipboard first, and the menu says to paste it.
+    if (!opening.paste) {
+      menu.current?.removeAttribute("open");
+      return;
+    }
+    event.preventDefault();
+    void openAgent(opening).then((ok) => setState({ phase: "copied", count: ready.ids.length, note: pasteNote(app, ok) }));
   }
 
   const ready = prepared && prepared !== "failed" ? prepared : undefined;
   const repo = ready?.repos.length === 1 ? ready.repos[0] : undefined;
-  const links = AGENT_APPS.map((app) => ({ app, href: ready && repo ? agentLink(app, ready.text, repo) : undefined }));
-  const tooLong = repo ? links.filter((link) => !link.href).map((link) => AGENT_NAME[link.app]) : [];
+  const links = AGENT_APPS.map((app) => ({ app, opening: ready && repo ? agentOpening(app, ready.text, repo) : undefined }));
   const reason = !forOpen
     ? undefined
     : prepared === undefined
@@ -121,9 +127,7 @@ export function CopyFindings({ filters, count }: { filters: ExportFiltersInput; 
         ? "Couldn’t prepare the prompt. Close the menu and try again."
         : !repo
           ? "These span more than one repository. Filter to one to open them in an app."
-          : tooLong.length > 0
-            ? `Too long to open in ${list(tooLong)} by link. Filter to fewer findings, or copy the prompt.`
-            : undefined;
+          : undefined;
   const label = state.phase === "copied" ? `Copied ${state.count === 1 ? "1 finding" : `${state.count} findings`}` : `Copy ${count === 1 ? "finding" : `${count} findings`}`;
 
   return (
@@ -157,9 +161,16 @@ export function CopyFindings({ filters, count }: { filters: ExportFiltersInput; 
           <>
             <p>Open in</p>
             <div className="open-grid">
-              {links.map(({ app, href }) =>
-                href ? (
-                  <a key={app} className="menu-item open-item" href={href} onClick={() => opened(app)} data-track={`findings-open-${app}`}>
+              {links.map(({ app, opening }) =>
+                opening ? (
+                  <a
+                    key={app}
+                    className="menu-item open-item"
+                    href={opening.href}
+                    title={opening.paste ? `Too long for a link: copies the prompt, then opens ${AGENT_NAME[app]} to paste it in` : undefined}
+                    onClick={(event) => opened(event, app, opening)}
+                    data-track={`findings-open-${app}`}
+                  >
                     <AgentLogo app={app} />
                     {AGENT_NAME[app]}
                   </a>
@@ -180,8 +191,8 @@ export function CopyFindings({ filters, count }: { filters: ExportFiltersInput; 
           <Item key={format.id} format={format} state={state} onCopy={copy} />
         ))}
         {state.phase === "copied" && state.note && (
-          <p className="copy-findings-error" role="status">
-            Copied. {state.note}
+          <p className="copy-findings-error copy-findings-note" role="status">
+            {state.note}
           </p>
         )}
         {state.phase === "failed" && (
@@ -203,11 +214,6 @@ function Item({ format, state, onCopy, logo }: { format: { id: CopyFormat; label
       <span className="copy-findings-hint">{format.hint}</span>
     </button>
   );
-}
-
-/** "A", "A or B", "A, B or C". */
-function list(names: string[]): string {
-  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
 }
 
 /**
