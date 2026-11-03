@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "fumadocs-mdx && tsc --noEmit",
     "chest:fallback": "bun scripts/render-chest-fallback.ts",
+    "icons": "bun scripts/render-icons.ts",
     "og": "bun scripts/render-og.ts",
     "readme": "bun scripts/render-readme.ts",
     "test": "bun test"
