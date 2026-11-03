@@ -14,6 +14,7 @@ import {
   dashboardScans,
   findingForUser,
   findingsForExport,
+  recordPromptCopied,
   recordPromptsCopied,
   hackerRecord,
   userHackers,
@@ -433,6 +434,34 @@ describe("findings", () => {
     const copied = await database.$client<Array<{ finding_id: string }>>`select finding_id from finding_events where type = 'prompt_copied' and user_id = ${ids.alice}`;
     expect(copied.map((row) => row.finding_id).sort()).toEqual(rows.map((f) => f.id).sort());
     await database.$client`delete from finding_events where type = 'prompt_copied'`;
+  });
+
+  test("taking a fix prompt again, however often or however fast, records it once per person", async () => {
+    if (!available) return;
+    const [id, other] = [ids.findings[0]!, ids.findings[1]!];
+    const [secret] = await database.$client<Array<{ id: string }>>`select id from findings where repo_id = ${ids.secret}`;
+    const count = async (userId: string, findingId: string) =>
+      (await database.$client<Array<{ n: number }>>`select count(*)::int as n from finding_events where type = 'prompt_copied' and user_id = ${userId} and finding_id = ${findingId}`)[0]!.n;
+    try {
+      await recordPromptCopied(database, ids.alice, id);
+      for (let i = 0; i < 5; i++) await recordPromptCopied(database, ids.alice, id);
+      await Promise.all(Array.from({ length: 20 }, () => recordPromptCopied(database, ids.alice, id)));
+      expect(await count(ids.alice, id)).toBe(1);
+      // The many-at-once path dedupes the same way, against single copies and itself.
+      await Promise.all(Array.from({ length: 10 }, () => recordPromptsCopied(database, ids.alice, [id, other, secret!.id])));
+      expect([await count(ids.alice, id), await count(ids.alice, other)]).toEqual([1, 1]);
+      // A finding Alice cannot see is never recorded.
+      await recordPromptCopied(database, ids.alice, secret!.id);
+      expect(await count(ids.alice, secret!.id)).toBe(0);
+      // Someone else taking the same prompt still gets a row of their own.
+      await storeAccess(ids.bob, "token-b", { fetch: fakeGithub({ id: 502, login: "bob" }, [{ id: 11, account: { id: 100, login: "acme", type: "Organization" }, repos: [{ id: 1, push: true }] }]) });
+      await recordPromptCopied(database, ids.bob, id);
+      await recordPromptCopied(database, ids.bob, id);
+      expect([await count(ids.bob, id), await count(ids.alice, id)]).toEqual([1, 1]);
+    } finally {
+      await storeAccess(ids.bob, "token-b", { fetch: fakeGithub({ id: 502, login: "bob" }, [{ id: 11, account: { id: 100, login: "acme", type: "Organization" }, repos: [{ id: 1 }] }]) });
+      await database.$client`delete from finding_events where type = 'prompt_copied'`;
+    }
   });
 
   test("dismissing records who and why, and deletes the code excerpts and prompt", async () => {

@@ -387,25 +387,30 @@ export async function applyFindingAction(database: Db, userId: string, findingId
 
 /** Records that someone took the fix prompt (copy, deeplink or one-liner). */
 export async function recordPromptCopied(database: Db, userId: string, findingId: string): Promise<void> {
-  await database.execute(sql`
-    insert into ${findingEvents} (finding_id, user_id, type)
-    select ${findingId}, ${userId}, 'prompt_copied'
-    where exists (select 1 from ${findings} f join ${permissionCache} pc on pc.repo_id = f.repo_id and pc.user_id = ${userId} where f.id = ${findingId})
-  `);
+  await recordPromptsCopied(database, userId, [findingId]);
 }
 
-/** `recordPromptCopied` for many findings at once, in one statement. */
+/**
+ * `recordPromptCopied` for many findings at once. Once per person and
+ * finding: copying again adds nothing, so replaying the action cannot grow
+ * the table. Serialised per user, so copies racing each other see the row
+ * the first one wrote.
+ */
 export async function recordPromptsCopied(database: Db, userId: string, findingIds: string[]): Promise<void> {
   if (findingIds.length === 0) return;
-  await database.execute(sql`
-    insert into ${findingEvents} (finding_id, user_id, type)
-    select f.id, ${userId}, 'prompt_copied'
-    from ${findings} f join ${permissionCache} pc on pc.repo_id = f.repo_id and pc.user_id = ${userId}
-    where f.id in (${sql.join(
-      findingIds.map((id) => sql`${id}`),
-      sql`, `,
-    )})
-  `);
+  await database.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 2))`);
+    await tx.execute(sql`
+      insert into ${findingEvents} (finding_id, user_id, type)
+      select f.id, ${userId}, 'prompt_copied'
+      from ${findings} f join ${permissionCache} pc on pc.repo_id = f.repo_id and pc.user_id = ${userId}
+      where f.id in (${sql.join(
+        findingIds.map((id) => sql`${id}`),
+        sql`, `,
+      )})
+        and not exists (select 1 from ${findingEvents} e where e.finding_id = f.id and e.user_id = ${userId} and e.type = 'prompt_copied')
+    `);
+  });
 }
 
 // ---- Scan screen -----------------------------------------------------------
