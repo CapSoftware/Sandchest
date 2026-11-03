@@ -80,6 +80,20 @@ export async function ensureAccess(userId: string, options: { force?: boolean; c
   await refreshAccess(userId);
 }
 
+/** Access read this recently is not read again on the way back from GitHub: nobody installs the App that fast. */
+const INSTALL_REREAD_MS = 10_000;
+
+/**
+ * Whether to read access again now, on the way back from installing the
+ * GitHub App (`installation_id` in the URL), so new repositories show at
+ * once. Anyone can add it to the URL and reload, so only a real id counts,
+ * and not when access was read moments ago.
+ */
+export function readAgainOnInstall(installationId: string | undefined, checkedAt: Date | null, now = Date.now()): boolean {
+  if (!installationId || !/^[1-9]\d*$/.test(installationId) || !Number.isSafeInteger(Number(installationId))) return false;
+  return !checkedAt || now - checkedAt.getTime() >= INSTALL_REREAD_MS;
+}
+
 /** Reads the user's access from GitHub and replaces the cache. Concurrent calls share one read. */
 export function refreshAccess(userId: string, http?: HttpOptions): Promise<void> {
   let pending = inFlight.get(userId);

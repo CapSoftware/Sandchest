@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { Link } from "@/components/app/hover-link";
 import { PageShape } from "@/components/app/skeleton";
 import { safeToken } from "@/lib/analytics";
-import { ensureAccess, viewer } from "@/server/access";
+import { ensureAccess, readAgainOnInstall, viewer } from "@/server/access";
 import { track } from "@/server/analytics";
 import { db } from "@/server/db";
 import { orgPlans } from "@/server/org-plans";
@@ -17,7 +17,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   // Back from installing on GitHub: read access again so new repos show at once.
   if (params.installation_id) {
-    await ensureAccess(user.id, { force: true });
+    if (readAgainOnInstall(params.installation_id, user.accessCheckedAt)) await ensureAccess(user.id, { force: true });
     // The install happened on GitHub; this is where the person and their browser rejoin it.
     const id = Number(params.installation_id);
     const installed = Number.isSafeInteger(id) ? await orgByInstallation(db(), id).catch(() => undefined) : undefined;
