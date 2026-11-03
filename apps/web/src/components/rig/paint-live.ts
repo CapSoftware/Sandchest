@@ -7,7 +7,7 @@ import { aside, momentOf, shellUser, type HackerProfile } from "@/lib/hacker";
 import type { StepState } from "@/lib/scan-progress";
 import type { Kit, Painter } from "./screen";
 import { typed } from "./text";
-import type { Signals } from "./signals";
+import { JOLT_S, type Signals } from "./signals";
 
 export interface LiveLine {
   seq: number;
@@ -89,7 +89,7 @@ export function livePainter(model: { current: LiveModel }, signals: { current: S
         activity[activity.length - 1] = (activity[activity.length - 1] ?? 0) + 1;
         if (kind === "finding") {
           alert = { title: line.message, from: queueAt };
-          signals.current.joltUntil = queueAt + 1.4;
+          signals.current.joltUntil = queueAt + JOLT_S;
         }
       }
     }

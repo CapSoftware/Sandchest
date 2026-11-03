@@ -10,7 +10,7 @@ import type { HackerProfile } from "@/lib/hacker";
 import { TRACKS, trackStates } from "@/lib/scan-progress";
 import { livePainter, type LiveModel } from "./paint-live";
 import type { Kit, Painter } from "./screen";
-import type { Signals } from "./signals";
+import { JOLT_S, type Signals } from "./signals";
 import { typed } from "./text";
 
 /** The script: seconds into the loop, the line's type, and what it says. Placeholders only. */
@@ -113,7 +113,7 @@ export function demoPainter(profile: HackerProfile, signals: { current: Signals 
     // A finding jolts the camera: that's the chest's cue, at the moment the finding is typed.
     if (signals.current.joltUntil !== jolt) {
       jolt = signals.current.joltUntil;
-      chestFrom = jolt - 1.4;
+      chestFrom = jolt - JOLT_S;
     }
     const since = t - chestFrom;
     const on = since >= 0 && since < CHEST_S;

@@ -2,7 +2,7 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, type RefObject } from "react";
 import { CanvasTexture, Color, Matrix4, MeshPhysicalMaterial, NearestFilter, PlaneGeometry, Quaternion, SRGBColorSpace, Vector3 } from "three";
-import type { Signals } from "./signals";
+import { joltAt, type Signals } from "./signals";
 
 /**
  * Where the face is, from the posed rig (FACE in scripts/rig/hacker.py): the
@@ -74,7 +74,7 @@ function noise(n: number): number {
 
 /** What the eyes are doing at time t. */
 function lookAt(t: number, s: Signals | null): Look {
-  const found = (s?.joltUntil ?? 0) > t;
+  const found = joltAt(s, t) > 0;
   const typing = (s?.typingUntil ?? 0) > t;
   // A blink every three to six seconds, a tenth of a second long.
   const beat = Math.floor(t / 4.5);

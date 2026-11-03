@@ -14,7 +14,7 @@ import { keepOut, orbit, orbitPosition } from "./camera-bounds";
 import { Room } from "./room";
 import { Kit, type Painter } from "./screen";
 import { SHOTS, type Shot, type ShotName } from "./shots";
-import type { Signals } from "./signals";
+import { advance, joltAt, type Signals } from "./signals";
 import { STILL_TIME, VIGNETTE } from "./still";
 import { loadSurfaces } from "./textures";
 
@@ -382,7 +382,7 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, fram
   const lastPaint = useRef(-1);
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    if (signals.current) signals.current.now = t;
+    if (signals.current) advance(signals.current, t);
     // Nothing is shown before the clock starts, and the screen's first paint should be at its start.
     if (!started.current || !fontsReady || !due(t, lastPaint.current, budget.screenFps)) return;
     lastPaint.current = t;
@@ -637,7 +637,7 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
         offset.x += look.current.x * 0.02;
         offset.y += look.current.y * 0.012;
       }
-      const jolt = Math.max(0, (signals.current?.joltUntil ?? 0) - t);
+      const jolt = joltAt(signals.current, t);
       if (jolt > 0) offset.addScalar((Math.random() - 0.5) * 0.005 * jolt);
       const moving =
         jolt > 0 ||

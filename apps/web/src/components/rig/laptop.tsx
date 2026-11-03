@@ -8,7 +8,7 @@ import type { HackerProfile } from "@/lib/hacker";
 import { PHOSPHORS, SHELLS, swatch } from "@/lib/hacker";
 import { hash, wearTexture } from "./art";
 import { crtMaterial, type Kit } from "./screen";
-import type { Signals } from "./signals";
+import { joltAt, type Signals } from "./signals";
 import { useStickerTexture } from "./use-art";
 
 /** A 13-inch laptop, in metres. */
@@ -84,7 +84,7 @@ export function Laptop({ profile, org, kit, signals }: { profile: HackerProfile;
     const s = signals.current;
     crt.uniforms.time!.value = t;
     crt.uniforms.power!.value = s?.dim ? 0.55 : 1;
-    crt.uniforms.jolt!.value = Math.max(0, (s?.joltUntil ?? 0) - t) * 0.9;
+    crt.uniforms.jolt!.value = joltAt(s, t) * 0.9;
     if (light.current) light.current.intensity = 4.6 * (0.93 + 0.07 * Math.sin(t * 7.3)) + crt.uniforms.jolt!.value * 6;
   });
 
