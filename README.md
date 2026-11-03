@@ -128,6 +128,8 @@ bunx turbo run typecheck
 bun test
 ```
 
+To sign in locally, give `next dev` a GitHub App of its own: `bun scripts/dev-app.ts` in `apps/web` creates a private one on GitHub in one click and writes `.env.development.local`. That file points the dev server at the local Postgres and switches billing and email off. Webhooks stay off unless you pass `--webhooks <public URL>`, so pull request reviews only start on their own with a tunnel.
+
 ## Licence
 
 AGPL-3.0. The Sandchest name and logo are trademarks and aren't covered by the licence. [TRADEMARKS.md](TRADEMARKS.md) has the details.
