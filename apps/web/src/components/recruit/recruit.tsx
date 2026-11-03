@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { trackStep } from "@/components/analytics";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
@@ -195,6 +196,11 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     return () => clearTimeout(swap);
   }, [panelAside, placed]);
   const moving = placed !== panelAside;
+
+  // Each step shown, for where people stop on the way to recruiting.
+  useEffect(() => {
+    if (!demo) trackStep("recruit", current);
+  }, [demo, current]);
 
   /** Whether a step is finished, so the ones after it can be entered. */
   const done = (id: StepId) => (id === "connect" ? !!brief : id === "company" ? companyOk : id === "hacker" ? handleOk : true);

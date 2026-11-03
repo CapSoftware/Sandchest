@@ -47,7 +47,7 @@ export default function ClaimPage() {
             deep scans one end to end, and reviews your pull requests the way an attacker would.
           </p>
           <div className="hero-actions">
-            <HeroKey href={CLAIM}>Claim {CREDITS} free credits</HeroKey>
+            <HeroKey href={CLAIM} track="claim-hero">Claim {CREDITS} free credits</HeroKey>
             <p className="claim-fine">No card needed. One claim per GitHub account.</p>
           </div>
         </section>
@@ -110,7 +110,7 @@ export default function ClaimPage() {
       </main>
 
       <HackerAtWork>
-        <HeroKey href={CLAIM}>Claim {CREDITS} free credits</HeroKey>
+        <HeroKey href={CLAIM} track="claim-footer">Claim {CREDITS} free credits</HeroKey>
       </HackerAtWork>
       <SiteFooter />
     </div>

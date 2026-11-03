@@ -12,7 +12,8 @@ const PAD = { x: 24, top: 72, bottom: 16 };
  * The hero's gold key. On hover or focus it catches fire on the chest's
  * dithered grid. Without JavaScript, or with reduced motion, it is the plain key.
  */
-export function HeroKey({ href, children }: { href: string; children: React.ReactNode }) {
+/** `track` names the key in analytics (`data-track`), so two keys to the same page can be told apart. */
+export function HeroKey({ href, children, track }: { href: string; children: React.ReactNode; track?: string }) {
   const linkRef = useRef<HTMLAnchorElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -83,7 +84,7 @@ export function HeroKey({ href, children }: { href: string; children: React.Reac
   }, []);
 
   return (
-    <a ref={linkRef} href={href} className="button button-primary button-hero">
+    <a ref={linkRef} href={href} className="button button-primary button-hero" data-track={track}>
       <canvas ref={canvasRef} className="key-fire" width={0} height={0} aria-hidden="true" style={{ left: -PAD.x, top: -PAD.top }} />
       <span className="button-face">{children}</span>
     </a>

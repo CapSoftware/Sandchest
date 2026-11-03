@@ -37,8 +37,8 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
             unrestricted models to find real vulnerabilities in your code before attackers do.
           </p>
           <div className="hero-actions">
-            <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted}>Get started</HeroKey>
-            <a href={site.githubUrl} className="hero-alt">
+            <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted} track="hero-get-started">Get started</HeroKey>
+            <a href={site.githubUrl} className="hero-alt" data-track="hero-github">
               <GitHubMark />
               View on GitHub
             </a>
@@ -76,7 +76,7 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
       </main>
 
       <HackerAtWork>
-        <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted}>Get started</HeroKey>
+        <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted} track="footer-get-started">Get started</HeroKey>
       </HackerAtWork>
       <SiteFooter />
     </div>

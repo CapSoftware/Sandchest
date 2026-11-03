@@ -6,11 +6,11 @@ export function InstallKey({ secondary = false }: { secondary?: boolean }) {
   if (!slug) return null;
   const href = `https://github.com/apps/${slug}/installations/new`;
   return secondary ? (
-    <a className="key key-secondary" href={href}>
+    <a className="key key-secondary" href={href} data-track="add-repositories">
       <span className="key-face">Add repositories</span>
     </a>
   ) : (
-    <a className="key key-primary key-large key-glow" href={href}>
+    <a className="key key-primary key-large key-glow" href={href} data-track="install-app">
       <span className="key-face">Install on GitHub</span>
     </a>
   );

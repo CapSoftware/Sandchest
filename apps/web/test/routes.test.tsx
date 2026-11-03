@@ -49,7 +49,7 @@ describe("landing page", () => {
     expect(signedIn).not.toContain("Sign in");
 
     const signedOut = renderToStaticMarkup(<SiteHeader visitor="signed-out" />);
-    expect(signedOut).toContain('<a href="/sign-in">Sign in</a>');
+    expect(signedOut).toContain('<a href="/sign-in" data-track="nav-sign-in">Sign in</a>');
     expect(signedOut).not.toContain("Dashboard");
 
     // Docs and legal pages are one static page for everyone: neither.

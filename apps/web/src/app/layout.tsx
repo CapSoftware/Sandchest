@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Jersey_10 } from "next/font/google";
 import type { ReactNode } from "react";
+import { Analytics } from "@/components/analytics";
 import { browserReporter } from "@/lib/sentry-browser";
 import { brandAsset, site, socialImage, socialVideo } from "@/lib/site";
 import "./globals.css";
@@ -67,6 +68,9 @@ const errorReporter = browserReporter({
   release: process.env.VERCEL_GIT_COMMIT_SHA,
 });
 
+/** Vercel's Web Analytics and Speed Insights only exist on Vercel; self-hosted builds never load them. */
+const onVercel = process.env.VERCEL === "1";
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${mono.variable}`} suppressHydrationWarning>
@@ -74,7 +78,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: bootScript }} />
         {errorReporter && <script dangerouslySetInnerHTML={{ __html: errorReporter }} />}
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics vercel={onVercel} />
+      </body>
     </html>
   );
 }

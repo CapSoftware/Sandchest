@@ -22,6 +22,8 @@
     "@sandchest/github": "workspace:*",
     "@sandchest/workspace": "workspace:*",
     "@stripe/stripe-js": "10.2.0",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "better-auth": "1.7.14",
     "fumadocs-core": "16.17.9",
     "fumadocs-mdx": "15.4.10",

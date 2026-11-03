@@ -59,7 +59,11 @@ export function SiteHeader({ current, visitor }: { current?: Section; visitor?: 
             {link.label}
           </a>
         ))}
-        {visitor === "signed-out" && <a href={site.links.signIn}>Sign in</a>}
+        {visitor === "signed-out" && (
+          <a href={site.links.signIn} data-track="nav-sign-in">
+            Sign in
+          </a>
+        )}
         {visitor === "signed-in" && (
           <a href={site.links.dashboard} className="button button-primary button-small">
             <span className="button-face">Dashboard</span>
