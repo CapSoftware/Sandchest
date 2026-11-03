@@ -19,7 +19,7 @@ export const site = {
   /** The company behind the hosted service, credited in the footer. */
   parent: { name: "Cap", url: "https://cap.so" },
   links: {
-    getStarted: "/sign-in",
+    getStarted: "/get-started",
     signIn: "/sign-in",
     dashboard: "/dashboard",
     docs: "/docs",

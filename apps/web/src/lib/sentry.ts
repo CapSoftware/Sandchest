@@ -146,6 +146,7 @@ export const PAGE_TEMPLATES: ReadonlyArray<readonly [string, string]> = [
   ["^/dashboard/billing/confirm$", "/dashboard/billing/confirm"],
   ["^/dashboard/billing/return$", "/dashboard/billing/return"],
   ["^/sign-in$", "/sign-in"],
+  ["^/get-started$", "/get-started"],
 ];
 
 const PAGES = PAGE_TEMPLATES.map(([pattern, template]) => [new RegExp(pattern), template] as const);

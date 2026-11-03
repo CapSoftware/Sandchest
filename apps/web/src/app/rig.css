@@ -612,6 +612,79 @@
   color: var(--color-muted);
 }
 
+/*
+ * The GitHub step before anything is connected: a short path, ticked off as
+ * it's walked, with the read-only promise at the foot of the panel.
+ */
+.onboard-connect {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.onboard-path {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+  counter-reset: path;
+}
+
+.onboard-path li {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.95rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.875rem;
+  color: var(--color-dust);
+  counter-increment: path;
+}
+
+/* Each line's number in a small square, lit gold for the one to do now, filled once done. */
+.onboard-path li::before {
+  content: counter(path);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  border: 1px solid var(--color-edge);
+  font-size: 0.6875rem;
+  color: var(--color-dust);
+}
+
+.onboard-path li[data-state="now"] {
+  color: var(--color-bright);
+}
+
+.onboard-path li[data-state="now"]::before {
+  border-color: var(--phosphor);
+  color: var(--phosphor);
+}
+
+.onboard-path li[data-state="done"] {
+  color: var(--color-sand);
+}
+
+.onboard-path li[data-state="done"]::before {
+  content: "✓" / "Done:";
+  border-color: var(--phosphor);
+  background: var(--phosphor);
+  color: var(--color-void);
+}
+
+.onboard-fine {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: auto 0 0;
+  padding-top: 1.5rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
 .onboard-bad {
   color: #f0a084;
 }

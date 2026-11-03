@@ -1,0 +1,39 @@
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { Recruit } from "@/components/recruit/recruit";
+import { currentUser } from "@/server/access";
+import { signIn } from "@/server/actions";
+import { authConfigured } from "@/server/auth";
+import { billingEnabled } from "@/server/billing";
+import { setupNeeded } from "@/server/setup";
+import { liveStats } from "@/server/stats";
+import "../app.css";
+import "../rig.css";
+
+export const metadata: Metadata = { title: "Get started · Sandchest" };
+
+/**
+ * Where "Get started" leads: the first step of recruiting, before there is
+ * anyone to recruit for. Its way forward is signing in with GitHub, which
+ * comes back to the same step to connect an account; nothing past it opens
+ * until one is connected. Signed in already, it is that step itself.
+ */
+export default async function GetStartedPage() {
+  // A server without a GitHub App or sign-in yet: the sign-in page explains what's missing.
+  if (setupNeeded() || !authConfigured()) redirect("/sign-in");
+  if (await currentUser()) redirect("/dashboard/recruit");
+  const stats = await liveStats().catch(() => null);
+  return (
+    <Recruit
+      accounts={[]}
+      initial={null}
+      startAt="connect"
+      viewer="you"
+      installUrl={null}
+      billing={billingEnabled()}
+      publishableKey={null}
+      stats={stats}
+      signIn={signIn.bind(null, "/dashboard/recruit")}
+    />
+  );
+}

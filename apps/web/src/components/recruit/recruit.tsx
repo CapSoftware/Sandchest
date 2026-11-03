@@ -91,6 +91,11 @@ interface Props {
   stats: LiveStats | null;
   /** The dev preview: no server, so the card form is a stand-in and paying only plays the signing. */
   demo?: boolean;
+  /**
+   * Set for a visitor who hasn't signed in: the first step's way forward is signing in with GitHub, which
+   * comes back to that step. Nothing after it opens before then.
+   */
+  signIn?: () => Promise<void>;
 }
 
 type Opened = { clientSecret: string; publishableKey: string };
@@ -108,10 +113,11 @@ const usd = (amount: number) => `$${amount.toFixed(2)}`;
  * credits to start with, pay. Enter goes on, Esc goes back, and the camera
  * follows along.
  */
-export function Recruit({ accounts, initial, startAt, viewer, installUrl, billing, publishableKey, stats, demo = false }: Props) {
+export function Recruit({ accounts, initial, startAt, viewer, installUrl, billing, publishableKey, stats, demo = false, signIn }: Props) {
   const router = useRouter();
   const [brief, setBrief] = useState<Briefing | null>(initial);
   const [switching, startSwitch] = useTransition();
+  const [signingIn, startSignIn] = useTransition();
   const [profile, setProfile] = useState<HackerProfile>(() => initial?.hacker ?? { ...DEFAULT_HACKER, handle: rollHandle() });
   // The room opens on a still of its first frame, where there is one for this hacker's look.
   const [still] = useState(() => (looksDefault(profile) ? ("onboard" as const) : undefined));
@@ -164,7 +170,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   const name = profile.handle.trim() || "your hacker";
   const handleOk = validHandle(profile.handle);
   const companyOk = company.name.trim().length > 0 && (EMAIL.test(company.email.trim()) || (!billing && company.email.trim() === ""));
-  const busy = pending || payment.state === "paying" || signed;
+  const busy = pending || payment.state === "paying" || signed || signingIn;
   const checkout = current === "pay";
   /** The Hacker step: the panel moves to the side so the hacker can be seen. */
   const panelAside = current === "hacker";
@@ -417,14 +423,16 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       return;
     }
     event.preventDefault();
-    if (current === "connect" && !brief && installUrl) window.location.assign(installUrl);
+    if (current === "connect" && signIn) startSignIn(() => signIn());
+    else if (current === "connect" && !brief && installUrl) window.location.assign(installUrl);
     else if (current === "pay") void pay();
     else go(step + 1);
   };
 
   const total = discount?.dueToday ?? PLAN.price + creditsPrice(credits);
   const forward = (() => {
-    if (pending) return "One moment…";
+    if (pending || signingIn) return "One moment…";
+    if (current === "connect" && signIn) return "Continue with GitHub";
     if (current === "connect") return brief ? `Continue as ${brief.login}` : accounts.length === 0 ? "Connect GitHub" : "Choose an account";
     if (current === "company") return "Continue";
     if (current === "hacker") return `Recruit ${name}`;
@@ -441,7 +449,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     }
     return "Continue";
   })();
-  const forwardOk = current === "connect" ? !!brief || (accounts.length === 0 && !!installUrl) : checkout ? payment.state === "ready" : done(current);
+  const forwardOk = current === "connect" ? !!signIn || !!brief || (accounts.length === 0 && !!installUrl) : checkout ? payment.state === "ready" : done(current);
 
   return (
     <div className="onboard">
@@ -461,12 +469,13 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       <div className="onboard-shade" aria-hidden="true" />
 
       <header className="onboard-top">
-        <Link href="/dashboard?later=1" className="onboard-mark" aria-label="Sandchest dashboard">
+        {/* Signed out there is no dashboard to go back to: the mark and the way out lead home. */}
+        <Link href={signIn ? "/" : "/dashboard?later=1"} className="onboard-mark" aria-label={signIn ? "Sandchest home" : "Sandchest dashboard"}>
           <img src="/sandchest-logo-dark.svg" alt="" width={120} height={22} />
         </Link>
         <Progress steps={steps} step={step} canEnter={canEnter} go={go} />
-        <Link href="/dashboard?later=1" className="onboard-leave">
-          {brief?.hacker ? "Back to the dashboard" : "Finish later"}
+        <Link href={signIn ? "/" : "/dashboard?later=1"} className="onboard-leave">
+          {signIn ? "Back" : brief?.hacker ? "Back to the dashboard" : "Finish later"}
         </Link>
       </header>
 
@@ -476,7 +485,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
 
         <section className="onboard-panel" data-aside={placed || undefined} data-moving={moving || undefined} aria-labelledby="onboard-title">
           <div className="onboard-body" key={current}>
-            {current === "connect" && <Connect heading={heading} accounts={accounts} chosen={brief?.orgId ?? null} switching={switching} choose={choose} installUrl={installUrl} />}
+            {current === "connect" && <Connect heading={heading} accounts={accounts} chosen={brief?.orgId ?? null} switching={switching} choose={choose} installUrl={installUrl} signedOut={!!signIn} viewer={viewer} />}
             {current === "company" && brief && (
               <Company heading={heading} brief={brief} company={company} setCompany={setCompany} target={target} setTarget={setTarget} billing={billing} nudge={nudge} />
             )}
@@ -548,7 +557,8 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
 
       {/* The running count fills the empty side of the room while the panel is centred, and steps away when it moves aside. */}
       {stats && <LiveLines initial={stats} hidden={!wide || placed || moving} />}
-      <Hints current={current} />
+      {/* With no account to pick yet, the GitHub step has nothing to choose with the arrows. */}
+      <Hints current={current} choices={current !== "connect" || accounts.length > 0} />
     </div>
   );
 }
@@ -593,9 +603,10 @@ function Progress({ steps, step, canEnter, go }: { steps: StepId[]; step: number
 }
 
 /** The keys that work on this step, besides Enter and Esc (which are on the buttons). Hidden on touch screens. */
-function Hints({ current }: { current: StepId }) {
-  const hints: [string, string][] =
-    current === "hacker"
+function Hints({ current, choices }: { current: StepId; choices: boolean }) {
+  const hints: [string, string][] = !choices
+    ? []
+    : current === "hacker"
       ? [
           ["↑↓", "Choose"],
           ["←→", "Change"],
@@ -638,6 +649,8 @@ function Connect({
   switching,
   choose,
   installUrl,
+  signedOut,
+  viewer,
 }: {
   heading: RefObject<HTMLHeadingElement | null>;
   accounts: RecruitAccount[];
@@ -645,34 +658,56 @@ function Connect({
   switching: boolean;
   choose: (account: RecruitAccount) => void;
   installUrl: string | null;
+  signedOut: boolean;
+  viewer: string;
 }) {
+  // Nothing connected yet: the way there in three short lines, ticked off as they're done.
+  if (accounts.length === 0) {
+    const path: Array<{ label: string; state: "done" | "now" | "next" }> = [
+      { label: signedOut ? "Sign in with GitHub" : `Signed in as ${viewer}`, state: signedOut ? "now" : "done" },
+      { label: "Pick the repositories it may read", state: signedOut ? "next" : "now" },
+      { label: "Come back here to brief your hacker", state: "next" },
+    ];
+    return (
+      <div className="onboard-connect">
+        <Title heading={heading}>Connect GitHub</Title>
+        <p className="onboard-lead">Your hacker works from your repositories.</p>
+        <ol className="onboard-path">
+          {path.map((item) => (
+            <li key={item.label} data-state={item.state}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+        <p className="onboard-fine">
+          <GitHubMark /> Read-only. It never pushes code.
+        </p>
+      </div>
+    );
+  }
   return (
     <>
       <Title heading={heading}>Connect GitHub</Title>
-      <p className="onboard-lead">Your hacker works from GitHub. You choose the repositories it may read; it reviews their pull requests and scans their code, and never pushes a line.</p>
-      {accounts.length > 0 ? (
-        <fieldset className="onboard-set" aria-busy={switching || undefined}>
-          <legend className="onboard-label">Account</legend>
-          <ul className="onboard-menu">
-            {accounts.map((account) => (
-              <li key={account.id}>
-                <label className="onboard-option onboard-account" data-on={chosen === account.id || undefined}>
-                  <input type="radio" name="account" checked={chosen === account.id} onChange={() => choose(account)} />
-                  <img src={`https://github.com/${encodeURIComponent(account.login)}.png?size=80`} alt="" width={36} height={36} />
-                  <span className="onboard-option-name">{account.login}</span>
-                  <span className="onboard-option-note">
-                    {account.type === "Organization" ? "Organization" : "Personal account"}
-                    {account.handle ? `, ${account.handle} works here` : account.planId ? ", has a plan" : ""}
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        </fieldset>
-      ) : (
-        <p className="onboard-note">GitHub asks which account and which repositories, then sends you straight back here.</p>
-      )}
-      {accounts.length > 0 && installUrl && (
+      <p className="onboard-lead">Pick the account your hacker works for.</p>
+      <fieldset className="onboard-set" aria-busy={switching || undefined}>
+        <legend className="onboard-label">Account</legend>
+        <ul className="onboard-menu">
+          {accounts.map((account) => (
+            <li key={account.id}>
+              <label className="onboard-option onboard-account" data-on={chosen === account.id || undefined}>
+                <input type="radio" name="account" checked={chosen === account.id} onChange={() => choose(account)} />
+                <img src={`https://github.com/${encodeURIComponent(account.login)}.png?size=80`} alt="" width={36} height={36} />
+                <span className="onboard-option-name">{account.login}</span>
+                <span className="onboard-option-note">
+                  {account.type === "Organization" ? "Organization" : "Personal account"}
+                  {account.handle ? `, ${account.handle} works here` : account.planId ? ", has a plan" : ""}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </fieldset>
+      {installUrl && (
         <a className="onboard-link" href={installUrl}>
           <GitHubMark /> Connect another account
         </a>

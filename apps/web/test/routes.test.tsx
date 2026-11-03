@@ -10,6 +10,7 @@ import { navLinks } from "@/components/app/app-header";
 import { currentSection } from "@/components/app/nav";
 import { SiteHeader } from "@/components/site-chrome";
 import { appRedirects, homeRewrites, SESSION_COOKIES } from "@/lib/app-routes";
+import { site } from "@/lib/site";
 import { resetConfig } from "@/server/config";
 import { sessionCookieName } from "@/server/session-token";
 
@@ -34,6 +35,11 @@ describe("landing page", () => {
       expect(sessionCookieName()).toBe(SESSION_COOKIES[index]);
     }
     expect(homeRewrites).toEqual(SESSION_COOKIES.map((key) => ({ source: "/", has: [{ type: "cookie", key }], destination: "/home" })));
+  });
+
+  test("Get started opens recruiting at its first step, where signing in with GitHub is the way on", () => {
+    expect(site.links.getStarted).toBe("/get-started");
+    expect(site.links.signIn).toBe("/sign-in");
   });
 
   test("shows a Dashboard key to people with a session and Sign in to everyone else", () => {
