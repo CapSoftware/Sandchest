@@ -12,12 +12,15 @@ const windows = new Map<string, { until: number; count: number }>();
 const open = new Map<string, number>();
 
 /**
- * The caller's address as the proxy in front reports it. The last hop is the
- * one that proxy added (Vercel sends only that one); earlier hops are the
- * caller's to write. IPv6 counts by /64, which one host usually has whole.
+ * The caller's address as the proxy in front reports it. Behind Cloudflare
+ * the hop Vercel sees is Cloudflare's edge, shared by many visitors, so the
+ * visitor's own address (which Cloudflare always overwrites) comes first.
+ * Otherwise the last hop is the one the proxy added (Vercel sends only that
+ * one); earlier hops are the caller's to write. IPv6 counts by /64, which one
+ * host usually has whole.
  */
 export function clientAddress(request: Request): string {
-  const ip = request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "unknown";
+  const ip = request.headers.get("cf-connecting-ip")?.trim() || request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "unknown";
   const v4 = /\d{1,3}(\.\d{1,3}){3}/.exec(ip);
   if (v4) return v4[0];
   if (!ip.includes(":")) return ip;

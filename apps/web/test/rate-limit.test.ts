@@ -16,6 +16,14 @@ test("the address is the last hop, and IPv6 counts by /64", () => {
   expect(clientAddress(from())).toBe("unknown");
 });
 
+test("behind Cloudflare, the address is the visitor's, not the edge's that connected", () => {
+  const via = (visitor: string, edge: string) => new Request("https://sandchest.test/x", { headers: { "cf-connecting-ip": visitor, "x-forwarded-for": edge } });
+  expect(clientAddress(via("203.0.113.7", "172.68.0.1"))).toBe("203.0.113.7");
+  expect(clientAddress(via("2001:db8:0:1:aaaa::1", "172.68.0.1"))).toBe("2001:db8:0:1::/64");
+  // Two visitors through one edge are counted apart.
+  expect(clientAddress(via("198.51.100.1", "172.68.0.1"))).not.toBe(clientAddress(via("198.51.100.2", "172.68.0.1")));
+});
+
 test("admit counts per key within a window", () => {
   expect([1, 2, 3].map(() => admit("a", 2, 1_000, 0))).toEqual([true, true, false]);
   expect(admit("b", 2, 1_000, 0)).toBe(true);
