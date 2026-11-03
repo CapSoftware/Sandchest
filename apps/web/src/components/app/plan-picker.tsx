@@ -43,7 +43,7 @@ export function PlanPicker({ orgId, current, admin }: { orgId: string; current: 
           </p>
         )}
         {admin && (
-          <Submit className={switching ? "key key-secondary" : "key key-primary"} pending="Opening…">
+          <Submit className={switching ? "key key-secondary" : "key key-primary"} pending="Opening…" track={switching ? "plan-change" : "plan-choose"}>
             {switching ? `Switch to ${PLAN.name}` : `Join for ${usd(PLAN.price + creditsPrice(credits))}`}
           </Submit>
         )}

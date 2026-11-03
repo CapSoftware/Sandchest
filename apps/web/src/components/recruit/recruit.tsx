@@ -573,14 +573,14 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
 
           <footer className="onboard-foot">
             {step > 0 && (
-              <button type="button" className="onboard-back" onClick={() => go(step - 1)} disabled={busy}>
+              <button type="button" className="onboard-back" onClick={() => go(step - 1)} disabled={busy} data-track={`recruit-back-${current}`}>
                 <span className="onboard-face">
                   <Key>Esc</Key>
                   Back
                 </span>
               </button>
             )}
-            <button type="submit" className="onboard-go" disabled={!forwardOk || busy}>
+            <button type="submit" className="onboard-go" disabled={!forwardOk || busy} data-track={`recruit-next-${current}`}>
               <span className="onboard-face">
                 <span className="onboard-go-label">{forward}</span>
                 {/* Enter never pays: that takes a click on the button itself. */}
@@ -621,7 +621,7 @@ function Progress({ steps, step, canEnter, go }: { steps: StepId[]; step: number
           const state = i < step ? "done" : i === step ? "current" : "next";
           return (
             <li key={id} data-state={state}>
-              <button type="button" onClick={() => go(i)} disabled={i === step || !canEnter(i)} aria-current={state === "current" ? "step" : undefined}>
+              <button type="button" onClick={() => go(i)} disabled={i === step || !canEnter(i)} aria-current={state === "current" ? "step" : undefined} data-track="recruit-step-nav">
                 <span className="onboard-step-mark" aria-hidden="true">
                   {state === "done" ? <Check /> : i + 1}
                 </span>
@@ -859,7 +859,7 @@ function Company({
               })}
             </ul>
             {brief.repos.length > REPOS_SHOWN && !all && (
-              <button type="button" className="onboard-link" onClick={() => setAll(true)}>
+              <button type="button" className="onboard-link" onClick={() => setAll(true)} data-track="recruit-show-all-repos">
                 Show all {brief.repos.length}
               </button>
             )}
@@ -1004,7 +1004,7 @@ function Credits({
         {code && (
           <p className="onboard-help onboard-gift-code">
             Code {code.code} applied.{" "}
-            <button type="button" className="onboard-bill-link" onClick={code.remove}>
+            <button type="button" className="onboard-bill-link" onClick={code.remove} data-track="recruit-code-remove">
               Remove
             </button>
           </p>
@@ -1148,7 +1148,7 @@ function Pay({
             <div className="onboard-bill-saving">
               <dt>
                 Code {discount.code}{" "}
-                <button type="button" className="onboard-bill-link" onClick={removeDiscount}>
+                <button type="button" className="onboard-bill-link" onClick={removeDiscount} data-track="recruit-discount-remove">
                   Remove
                 </button>
               </dt>
@@ -1228,7 +1228,7 @@ function DiscountCode({ apply }: { apply: (code: string) => Promise<string | nul
   if (!open) {
     return (
       <p className="onboard-discount">
-        <button type="button" className="onboard-bill-link" onClick={() => setOpen(true)}>
+        <button type="button" className="onboard-bill-link" onClick={() => setOpen(true)} data-track="recruit-have-code">
           Have a code?
         </button>
       </p>
@@ -1260,7 +1260,7 @@ function DiscountCode({ apply }: { apply: (code: string) => Promise<string | nul
           autoCapitalize="characters"
           spellCheck={false}
         />
-        <button type="button" className="onboard-discount-apply" onClick={() => void submit()} disabled={!code.trim() || checking}>
+        <button type="button" className="onboard-discount-apply" onClick={() => void submit()} disabled={!code.trim() || checking} data-track="recruit-code-apply">
           {checking ? "Checking…" : "Apply"}
         </button>
       </div>

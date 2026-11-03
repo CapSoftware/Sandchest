@@ -51,7 +51,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
             <span className="text-field-label">Or paste the token from that link</span>
             <input name="token" type="password" required autoComplete="off" spellCheck={false} />
           </label>
-          <button type="submit" className="key key-primary">
+          <button type="submit" className="key key-primary" data-track="setup-continue">
             <span className="key-face">Continue</span>
           </button>
         </form>

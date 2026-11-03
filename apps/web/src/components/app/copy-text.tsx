@@ -8,6 +8,7 @@ export function CopyText({ text, label = "Copy" }: { text: string; label?: strin
     <button
       type="button"
       className="key key-primary key-glow"
+      data-track="copy-text"
       onClick={async () => {
         const ok = await navigator.clipboard.writeText(text).then(
           () => true,

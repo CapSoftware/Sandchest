@@ -156,17 +156,19 @@ export default async function FindingPage({ params }: Params) {
               <div className="decide-row">
                 <form action={change}>
                   <input type="hidden" name="type" value="fix" />
-                  <Submit pending="Marking…">Mark fixed</Submit>
+                  <Submit pending="Marking…" track="finding-mark-fixed">
+                    Mark fixed
+                  </Submit>
                 </form>
                 <details className="dismiss">
-                  <summary className="key key-secondary">
+                  <summary className="key key-secondary" data-track="finding-dismiss-open">
                     <span className="key-face">Dismiss</span>
                   </summary>
                   <form action={change} className="dismiss-menu">
                     <input type="hidden" name="type" value="dismiss" />
                     <p>Why? It won’t be raised again.</p>
                     {Object.entries(DISMISS_REASON_LABEL).map(([reason, label]) => (
-                      <Submit key={reason} name="reason" value={reason} className="menu-item" bare>
+                      <Submit key={reason} name="reason" value={reason} className="menu-item" bare track={`finding-dismiss-${reason}`}>
                         {label}
                       </Submit>
                     ))}
@@ -176,7 +178,9 @@ export default async function FindingPage({ params }: Params) {
             ) : (
               <form action={change} className="decide-row">
                 <input type="hidden" name="type" value="reopen" />
-                <Submit pending="Reopening…">Reopen</Submit>
+                <Submit pending="Reopening…" track="finding-reopen">
+                  Reopen
+                </Submit>
               </form>
             )}
           </div>

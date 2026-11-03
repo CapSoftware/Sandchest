@@ -97,7 +97,7 @@ export default async function SettingsPage() {
           <p className="account-role">Signed in with GitHub</p>
         </div>
         <ForgetShapesForm action={signOut}>
-          <button type="submit" className="key key-secondary">
+          <button type="submit" className="key key-secondary" data-track="sign-out">
             <span className="key-face">Sign out</span>
           </button>
         </ForgetShapesForm>

@@ -125,7 +125,7 @@ export function FindingStrip() {
             </pre>
 
             <details className="fix-prompt">
-              <summary>Fix prompt for your coding agent</summary>
+              <summary data-track="landing-fix-prompt-open">Fix prompt for your coding agent</summary>
               <pre>{FIX_PROMPT}</pre>
             </details>
           </div>

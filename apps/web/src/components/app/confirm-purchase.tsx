@@ -11,7 +11,7 @@ export function ConfirmPurchase({ orgId, fields, label }: { orgId: string; field
       {Object.entries(fields).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
-      <Submit className="key key-primary" pending="Charging…">
+      <Submit className="key key-primary" pending="Charging…" track="purchase-confirm">
         {label}
       </Submit>
       <a className="quiet" href="/dashboard/settings#billing">

@@ -122,7 +122,7 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
         <form action={openPortal.bind(null, org.id)}>
           <p className="field-legend">Card and invoices</p>
           <p className="field-help">Update the card, download invoices or cancel, on Stripe.</p>
-          <Submit className="key key-secondary" pending="Opening…">
+          <Submit className="key key-secondary" pending="Opening…" track="billing-portal">
             Manage billing
           </Submit>
         </form>

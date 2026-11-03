@@ -24,7 +24,7 @@ export function TopUpForm({ orgId }: { orgId: string }) {
           </option>
         ))}
       </select>
-      <Submit className="key key-secondary" pending="Opening…">
+      <Submit className="key key-secondary" pending="Opening…" track="top-up">
         Buy credits
       </Submit>
       {state.error && (

@@ -9,6 +9,7 @@ export function CopyPrompt({ findingId, prompt }: { findingId: string; prompt: s
     <button
       type="button"
       className="key key-primary key-glow"
+      data-track="copy-fix-prompt"
       onClick={async () => {
         await navigator.clipboard.writeText(prompt);
         setCopied(true);

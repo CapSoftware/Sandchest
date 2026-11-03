@@ -38,7 +38,7 @@ export function CopyMarkdown({ href }: { href: string }) {
     }
   }
   return (
-    <button type="button" className="docs-key" onClick={copy} aria-live="polite">
+    <button type="button" className="docs-key" onClick={copy} aria-live="polite" data-track="docs-copy-markdown">
       <span className="docs-key-face">{note ?? "Copy as Markdown"}</span>
     </button>
   );
@@ -56,6 +56,7 @@ export function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
       <button
         type="button"
         className="code-copy"
+        data-track="docs-copy-code"
         aria-live="polite"
         onClick={async () => {
           try {

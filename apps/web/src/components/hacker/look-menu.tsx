@@ -145,14 +145,14 @@ function Cycle({
     <fieldset className="onboard-look" {...row}>
       <legend className="onboard-look-name">{legend}</legend>
       <div className="onboard-cycle">
-        <button type="button" tabIndex={-1} aria-hidden="true" className="onboard-arrow" onClick={() => step(-1)}>
+        <button type="button" tabIndex={-1} aria-hidden="true" className="onboard-arrow" onClick={() => step(-1)} data-track="look-previous">
           <Arrow left />
         </button>
         <span className="onboard-look-value" aria-hidden="true">
           {chosen.color && <span className="onboard-chip" style={{ background: chosen.color }} />}
           {chosen.label}
         </span>
-        <button type="button" tabIndex={-1} aria-hidden="true" className="onboard-arrow" onClick={() => step(1)}>
+        <button type="button" tabIndex={-1} aria-hidden="true" className="onboard-arrow" onClick={() => step(1)} data-track="look-next">
           <Arrow />
         </button>
       </div>

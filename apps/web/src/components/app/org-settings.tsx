@@ -40,7 +40,7 @@ export function OrgSettingsForm({ orgId, threshold, email, admin }: { orgId: str
       </fieldset>
       {admin && (
         <div className="form-foot">
-          <Submit className="key key-primary" pending="Saving…">
+          <Submit className="key key-primary" pending="Saving…" track="settings-save">
             Save
           </Submit>
           {state.saved && <span role="status">Saved.</span>}

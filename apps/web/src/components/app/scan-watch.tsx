@@ -101,7 +101,7 @@ export function ScanWatch({ profile, repo, findings, hackerHref }: { profile: Ha
   if (hidden)
     return (
       <div className="watch-off">
-        <button type="button" className="cap-key" onClick={() => hide(false)}>
+        <button type="button" className="cap-key" onClick={() => hide(false)} data-track="scan-view-show">
           <span className="cap-key-face">
             <HackerMark profile={profile} size={18} />
             Watch {profile.handle}’s screen <Keycap>H</Keycap>
@@ -136,21 +136,21 @@ export function ScanWatch({ profile, repo, findings, hackerHref }: { profile: Ha
           </span>
         </p>
         <span className="watch-tools">
-          <button type="button" className="cap-key cap-key-small" aria-pressed={shot === "screen"} onClick={closer} aria-label={shot === "screen" ? "Step back" : "Look closer"}>
+          <button type="button" className="cap-key cap-key-small" aria-pressed={shot === "screen"} onClick={closer} data-track="scan-view-closer" aria-label={shot === "screen" ? "Step back" : "Look closer"}>
             <span className="cap-key-face">
               <LensIcon />
               <span className="cap-key-label">{shot === "screen" ? "Step back" : "Look closer"}</span>
               <Keycap>C</Keycap>
             </span>
           </button>
-          <button type="button" className="cap-key cap-key-small" aria-pressed={full} onClick={fullscreen} aria-label={full ? "Leave full screen" : "Full screen"}>
+          <button type="button" className="cap-key cap-key-small" aria-pressed={full} onClick={fullscreen} data-track="scan-view-fullscreen" aria-label={full ? "Leave full screen" : "Full screen"}>
             <span className="cap-key-face">
               <FullIcon />
               <span className="cap-key-label">{full ? "Exit" : "Full screen"}</span>
               <Keycap>F</Keycap>
             </span>
           </button>
-          <button type="button" className="cap-key cap-key-small" onClick={() => hide(true)} aria-label="Hide the view">
+          <button type="button" className="cap-key cap-key-small" onClick={() => hide(true)} aria-label="Hide the view" data-track="scan-view-hide">
             <span className="cap-key-face">
               <HideIcon />
               <span className="cap-key-label">Hide</span>

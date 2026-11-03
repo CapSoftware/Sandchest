@@ -157,12 +157,12 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
             )}
           </div>
           <div className="hq-panel-foot">
-            <button type="button" className="cap-key" onClick={close} disabled={saving}>
+            <button type="button" className="cap-key" onClick={close} disabled={saving} data-track="hacker-customize-cancel">
               <span className="cap-key-face">
                 <Keycap>Esc</Keycap> Cancel
               </span>
             </button>
-            <button type="button" className="cap-key cap-key-gold" onClick={save} disabled={!handleOk || saving}>
+            <button type="button" className="cap-key cap-key-gold" onClick={save} disabled={!handleOk || saving} data-track="hacker-customize-save">
               <span className="cap-key-face">
                 {saving ? "Saving…" : changed ? `Save ${profile.handle}` : "Done"} <Keycap>Enter</Keycap>
               </span>
@@ -192,7 +192,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
               </p>
             )}
             {admin && (
-              <button ref={edit} type="button" className="cap-key" onClick={open}>
+              <button ref={edit} type="button" className="cap-key" onClick={open} data-track="hacker-customize-open">
                 <span className="cap-key-face">
                   Customize <Keycap>C</Keycap>
                 </span>

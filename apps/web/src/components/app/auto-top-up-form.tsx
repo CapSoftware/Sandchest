@@ -40,7 +40,7 @@ export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { org
           <input id={`limit-${orgId}`} name="limit" type="number" inputMode="numeric" min={1} step={10} defaultValue={limit} />
         </span>
         <span className="field-help">a month</span>
-        <Submit className="key key-secondary" pending="Saving…">
+        <Submit className="key key-secondary" pending="Saving…" track="auto-top-up-save">
           Save
         </Submit>
         {state.saved && <span role="status">Saved.</span>}

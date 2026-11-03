@@ -39,7 +39,7 @@ export function FixPrompt({ findingId, prompt }: { findingId: string; prompt: st
         </h2>
         <div className="tabs" role="tablist" aria-label="Format">
           {TABS.map((tab) => (
-            <button key={tab.id} type="button" role="tab" aria-selected={target === tab.id} className="tab" onClick={() => setTarget(tab.id)}>
+            <button key={tab.id} type="button" role="tab" aria-selected={target === tab.id} className="tab" onClick={() => setTarget(tab.id)} data-track={`fix-prompt-tab-${tab.id}`}>
               {tab.label}
             </button>
           ))}
@@ -49,7 +49,7 @@ export function FixPrompt({ findingId, prompt }: { findingId: string; prompt: st
         {text}
       </pre>
       <div className="prompt-actions">
-        <button type="button" className="key key-primary" onClick={copy}>
+        <button type="button" className="key key-primary" onClick={copy} data-track={`fix-prompt-copy-${target}`}>
           <span className="key-face">{copied === target ? "Copied" : target === "prompt" ? "Copy prompt" : "Copy command"}</span>
         </button>
         {cursor.length <= CURSOR_LIMIT && (

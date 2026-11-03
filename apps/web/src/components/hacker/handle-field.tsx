@@ -39,7 +39,7 @@ export function HandleField({
         aria-invalid={!validHandle(profile.handle) || undefined}
         aria-describedby="handle-help"
       />
-      <button type="button" onClick={() => update({ handle: rollHandle(profile.handle) })}>
+      <button type="button" onClick={() => update({ handle: rollHandle(profile.handle) })} data-track="hacker-handle-roll">
         <Dice /> Roll
       </button>
     </div>

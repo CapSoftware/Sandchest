@@ -13,17 +13,17 @@ export function DigButton({ repoId, label, note, confirm }: { repoId: string; la
   return (
     <form action={action} className="repo-dig">
       {confirm && !asking ? (
-        <button type="button" className="key key-primary" onClick={() => setAsking(true)}>
+        <button type="button" className="key key-primary" onClick={() => setAsking(true)} data-track="deep-scan-open">
           <span className="key-face">{label}</span>
         </button>
       ) : (
         <span className="dig-confirm">
           {confirm && (
-            <button type="button" className="dig-cancel" onClick={() => setAsking(false)}>
+            <button type="button" className="dig-cancel" onClick={() => setAsking(false)} data-track="deep-scan-cancel">
               Cancel
             </button>
           )}
-          <Submit className="key key-primary" pending="Starting…">
+          <Submit className="key key-primary" pending="Starting…" track="deep-scan-confirm">
             {confirm ?? label}
           </Submit>
         </span>

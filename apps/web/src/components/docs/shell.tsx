@@ -69,7 +69,7 @@ export function DocsShell({ pages, current, children }: { pages: DocsPage[]; cur
       <SiteHeader current="docs" />
       <div className="docs-body">
         <div className="docs-menu-bar">
-          <button type="button" className="docs-key" popoverTarget="docs-menu">
+          <button type="button" className="docs-key" popoverTarget="docs-menu" data-track="docs-menu-open">
             <span className="docs-key-face">
               <MenuIcon />
               Menu
@@ -79,7 +79,7 @@ export function DocsShell({ pages, current, children }: { pages: DocsPage[]; cur
         </div>
         <nav id="docs-menu" className="docs-menu" aria-label="Docs" popover="auto">
           <DocsLinks pages={pages} current={current} />
-          <button type="button" className="docs-menu-close" popoverTarget="docs-menu" popoverTargetAction="hide">
+          <button type="button" className="docs-menu-close" popoverTarget="docs-menu" popoverTargetAction="hide" data-track="docs-menu-close">
             Close
           </button>
         </nav>
