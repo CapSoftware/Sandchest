@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { Recruit } from "@/components/recruit/recruit";
 import { currentUser } from "@/server/access";
 import { signIn } from "@/server/actions";
@@ -19,6 +20,9 @@ export const metadata: Metadata = { title: "Get started · Sandchest" };
  * until one is connected. Signed in already, it is that step itself.
  */
 export default async function GetStartedPage() {
+  // Rendered per request, never at build: it reads the server's settings and the visitor's session, and a
+  // build has neither.
+  await connection();
   // A server without a GitHub App or sign-in yet: the sign-in page explains what's missing.
   if (setupNeeded() || !authConfigured()) redirect("/sign-in");
   if (await currentUser()) redirect("/dashboard/recruit");

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Pushing to main deploys, so check first what the deploy will check: types,
+# tests, and a build from a clean checkout. Skip with `git push --no-verify`.
+# Enable once per clone: `git config core.hooksPath .githooks`.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+echo "pre-push: type check" && bun run typecheck >/dev/null
+echo "pre-push: tests" && bun run test >/dev/null
+echo "pre-push: clean build" && scripts/check-build.sh >/dev/null
+echo "pre-push: ok"

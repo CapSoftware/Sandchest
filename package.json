@@ -11,7 +11,8 @@
     "test": "turbo run test",
     "indexer:build": "cargo build --release -p sandchest-indexer",
     "scan": "bun run --cwd packages/engine scan",
-    "evals": "bun run --cwd evals evals"
+    "evals": "bun run --cwd evals evals",
+    "check:build": "scripts/check-build.sh"
   },
   "devDependencies": {
     "turbo": "^2.11.10"
