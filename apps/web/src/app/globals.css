@@ -484,9 +484,16 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   }
 }
 
-/* On the landing, centred under the chest panel. */
+/*
+ * On the landing, centred under the chest panel. The number's glow reaches
+ * past the column: the box runs to the window's edges and clips there, so
+ * the glow never widens the page on a phone. Its content stays the column.
+ */
 .landing-live {
   margin-top: clamp(2.5rem, 6vw, 3.5rem);
+  margin-inline: calc(50% - 50vw);
+  padding-inline: calc(50vw - 50%);
+  overflow-x: clip;
   text-align: center;
 }
 
