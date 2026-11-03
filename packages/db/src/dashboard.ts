@@ -587,7 +587,8 @@ export interface UserHacker {
 /**
  * The hackers a user works with: one per installed org they administer or can
  * see a repository in. Recruited ones first, then the orgs they administer,
- * then by name. One query.
+ * then by name. One query, starting from the person's own rows (both lookups
+ * lead with user_id), so it costs the same however many orgs there are.
  */
 export async function userHackers(database: Db, userId: string): Promise<UserHacker[]> {
   const rows = await database.execute<{ id: string; login: string; hacker: unknown; admin: boolean; working: boolean }>(sql`
@@ -598,10 +599,12 @@ export async function userHackers(database: Db, userId: string): Promise<UserHac
         where s.org_id = o.id and s.status in ('queued', 'running', 'publishing')
       ) as working
     from ${orgs} o
-    where o.installation_id is not null and (
-      exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id)
-      or exists (select 1 from ${repos} r join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId} where r.org_id = o.id and r.enabled)
-    )
+    join (
+      select oa.org_id from ${orgAdmins} oa where oa.user_id = ${userId}
+      union
+      select r.org_id from ${permissionCache} pc join ${repos} r on r.id = pc.repo_id where pc.user_id = ${userId} and r.enabled
+    ) mine on mine.org_id = o.id
+    where o.installation_id is not null
     order by (o.settings ? 'hacker') desc, 4 desc, o.github_login
   `);
   return rows.map((row) => ({ orgId: row.id, login: row.login, hacker: row.hacker ?? null, admin: row.admin, working: row.working }));

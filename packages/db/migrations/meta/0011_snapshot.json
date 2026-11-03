@@ -1,5 +1,5 @@
 {
-  "id": "39676bc9-33a5-4214-a66f-8d2646536c84",
+  "id": "2f57ec6c-2e1f-45f9-81f7-a66a9c64a14b",
   "prevId": "eb4bfbb8-ec7a-46b0-91fd-0c2ebe891e46",
   "version": "7",
   "dialect": "postgresql",
@@ -343,6 +343,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "events_identified_unique": {
+          "name": "events_identified_unique",
+          "columns": [
+            {
+              "expression": "anon_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"events\".\"name\" = 'identified'",
           "concurrently": false,
           "method": "btree",
           "with": {}

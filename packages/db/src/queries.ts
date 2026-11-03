@@ -91,12 +91,14 @@ export async function disableRepos(database: Db, githubRepoIds: number[]): Promi
  * Uninstall (or suspension): forget the installation, disable its repos and
  * delete the code their findings quote. Findings stay until data deletion.
  */
-export async function removeInstallation(database: Db, installationId: number): Promise<void> {
-  await database.transaction(async (tx) => {
+/** Forgets an installation. Returns the org it belonged to, if Sandchest knew it. */
+export async function removeInstallation(database: Db, installationId: number): Promise<{ id: string } | undefined> {
+  return database.transaction(async (tx) => {
     const [org] = await tx.update(orgs).set({ installationId: null }).where(eq(orgs.installationId, installationId)).returning({ id: orgs.id });
-    if (!org) return;
+    if (!org) return undefined;
     await tx.update(repos).set({ enabled: false }).where(eq(repos.orgId, org.id));
     await tx.update(findings).set(forgetCode).where(sql`${findings.repoId} in (select id from ${repos} where org_id = ${org.id})`);
+    return org;
   });
 }
 
@@ -420,6 +422,12 @@ export async function repoHistory(database: Db, repoId: string, limit = 60): Pro
     const last = (row.attackPath as Array<{ file: string; line: number }>).at(-1);
     return [{ title: row.title, category: row.category, at: last ? `${last.file}:${last.line}` : "", outcome }];
   });
+}
+
+/** Whether a repository has any open finding: one index lookup, not the findings themselves. */
+export async function hasOpenFindings(database: Db, repoId: string): Promise<boolean> {
+  const [row] = await database.select({ id: findings.id }).from(findings).where(and(eq(findings.repoId, repoId), eq(findings.status, "open"))).limit(1);
+  return row !== undefined;
 }
 
 export async function openFindings(database: Db, repoId: string): Promise<FindingRow[]> {

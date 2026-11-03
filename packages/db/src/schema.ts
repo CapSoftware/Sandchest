@@ -155,6 +155,9 @@ export const scans = pgTable(
     uniqueIndex("scans_active_deep_unique").on(table.repoId).where(sql`${table.kind} = 'deep' and ${table.status} in ('queued', 'running', 'publishing')`),
     // Few rows: scans holding credits, for the sweep that settles them.
     index("scans_billing_reserved_idx").on(table.status).where(sql`${table.billing} = 'reserved'`),
+    // The sweep's two questions (strandedScans): only the few scans in these states are in each index.
+    index("scans_unstarted_idx").on(table.createdAt).where(sql`${table.status} = 'queued' and ${table.workflowRunId} is null`),
+    index("scans_in_flight_idx").on(table.startedAt).where(sql`${table.status} in ('running', 'publishing')`),
   ],
 );
 
@@ -236,7 +239,9 @@ export const findings = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
     fixedAt: timestamp("fixed_at", { withTimezone: true }),
   },
-  (table) => [uniqueIndex("findings_repo_fingerprint_unique").on(table.repoId, table.fingerprint), index("findings_repo_status_idx").on(table.repoId, table.status), index("findings_first_seen_idx").on(table.firstSeenAt)],
+  (table) => [uniqueIndex("findings_repo_fingerprint_unique").on(table.repoId, table.fingerprint), index("findings_repo_status_idx").on(table.repoId, table.status), index("findings_first_seen_idx").on(table.firstSeenAt),
+    // Deleting a scan sets these to null: without an index, every delete reads the whole table.
+    index("findings_source_scan_idx").on(table.sourceScanId)],
 );
 
 export const findingEvents = pgTable(
@@ -253,7 +258,12 @@ export const findingEvents = pgTable(
     createdAt: createdAt(),
   },
   // By type and time for operator dashboards: "seen" rows, by far the most, are skipped.
-  (table) => [index("finding_events_finding_idx").on(table.findingId), index("finding_events_type_created_idx").on(table.type, table.createdAt)],
+  (table) => [
+    index("finding_events_finding_idx").on(table.findingId),
+    index("finding_events_type_created_idx").on(table.type, table.createdAt),
+    // Deleting a scan sets scan_id to null (see findings_source_scan_idx). Most events have none.
+    index("finding_events_scan_idx").on(table.scanId).where(sql`${table.scanId} is not null`),
+  ],
 );
 
 /** GitHub retries webhooks; each delivery is handled once. */
@@ -370,7 +380,7 @@ export const orgAdmins = pgTable(
       .references(() => orgs.id, { onDelete: "cascade" }),
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.userId, table.orgId] })],
+  (table) => [primaryKey({ columns: [table.userId, table.orgId] }), index("org_admins_org_idx").on(table.orgId)],
 );
 
 /**
@@ -485,6 +495,8 @@ export const EVENT_NAMES = [
   "signed_out",
   /** Someone opened the dashboard: recorded at most once per person per UTC day. */
   "dashboard_visit",
+  /** A signed-in person was seen in this browser: recorded once per browser and person. Ties browsers signed in before analytics, or on other devices, to the person. */
+  "identified",
 
   // ---- GitHub App ----
   /** The App was installed (or unsuspended) on an account. org_id set. props: action, account_type ("User" | "Organization"), repos. */
@@ -558,6 +570,8 @@ export const events = pgTable(
     index("events_user_created_idx").on(table.userId, table.createdAt),
     index("events_anon_created_idx").on(table.anonId, table.createdAt),
     index("events_org_created_idx").on(table.orgId, table.createdAt),
+    // One link per browser and person, however many pages or server instances record it.
+    uniqueIndex("events_identified_unique").on(table.anonId, table.userId).where(sql`${table.name} = 'identified'`),
     // One visit per person per day, however many pages or server instances record it.
     uniqueIndex("events_daily_visit_unique")
       .on(table.userId, sql`((${table.createdAt} at time zone 'UTC')::date)`)
