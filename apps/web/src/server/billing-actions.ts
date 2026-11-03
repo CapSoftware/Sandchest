@@ -13,7 +13,8 @@ import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { viewer } from "./access";
+import { currentUser, viewer } from "./access";
+import { track } from "./analytics";
 import { applyAutoTopUp, autumn, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
@@ -50,12 +51,32 @@ function purchaseQuery(input: PurchaseInput): string {
   return input.kind === "plan" ? `plan=${input.plan}${input.credits ? `&credits=${input.credits}` : ""}` : `topup=${input.credits}`;
 }
 
+/** What a purchase was, as recorded: its kind, plan and credits. */
+const purchaseProps = (input: PurchaseInput) => ({ kind: input.kind, plan: input.kind === "plan" ? input.plan : null, credits: input.credits ?? null });
+
+/** Records a billing step, then hands back its outcome. The org is named only once it was found (it is a foreign key). */
+async function tracked<T extends BillingOutcome>(
+  name: "purchase_started" | "purchase_confirmed",
+  context: { orgId?: string; input?: PurchaseInput; route?: string },
+  result: T,
+  reason: string,
+): Promise<T> {
+  const user = await currentUser().catch(() => undefined);
+  await track(name, {
+    userId: user?.id,
+    orgId: context.orgId,
+    props: { ...(context.input ? purchaseProps(context.input) : {}), ...(context.route ? { route: context.route } : {}), outcome: result.error ? reason : "ok" },
+  });
+  return result;
+}
+
 /** Picks or changes the plan, or buys credits. Without a card on file this opens Stripe Checkout. */
 export async function purchase(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
   const input = Purchase.safeParse(Object.fromEntries(form));
-  if (!input.success) return { error: "That isn’t something you can buy." };
+  if (!input.success) return tracked("purchase_started", {}, { error: "That isn’t something you can buy." }, "invalid");
   const row = await adminOrg(orgId);
-  if (!row) return { error: NOT_ADMIN };
+  if (!row) return tracked("purchase_started", { input: input.data }, { error: NOT_ADMIN }, "not_admin");
+  const context = { orgId, input: input.data };
   // Read Autumn rather than the stored copy, which can be a minute old. This also creates the customer.
   let planId: string | null;
   try {
@@ -63,29 +84,34 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
   } catch (error) {
     console.error(`Billing read for org ${orgId} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "read" }, handled: true });
-    return { error: FAILED };
+    return tracked("purchase_started", context, { error: FAILED }, "error");
   }
-  if (input.data.kind === "plan" && planId === input.data.plan) return { error: "That’s already your plan." };
+  if (input.data.kind === "plan" && planId === input.data.plan) return tracked("purchase_started", context, { error: "That’s already your plan." }, "same_plan");
   // No plan, or only the free one: no card on file, so the plan (with its credits) is bought on Stripe Checkout.
   if (!planId || isTrial(planId)) {
-    if (input.data.kind === "top_up") return { error: "Join the plan first: credits are bought with it." };
-    return checkout(row.org, input.data);
+    if (input.data.kind === "top_up") return tracked("purchase_started", context, { error: "Join the plan first: credits are bought with it." }, "needs_plan");
+    return checkout(row.org, input.data, "purchase_started");
   }
+  await tracked("purchase_started", { ...context, route: "confirm" }, {}, "ok");
   redirect(`/dashboard/billing/confirm?org=${orgId}&${purchaseQuery(input.data)}`);
 }
 
 /** Charges a purchase the admin confirmed. */
 export async function confirmPurchase(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
   const input = Purchase.safeParse(Object.fromEntries(form));
-  if (!input.success) return { error: "That isn’t something you can buy." };
+  if (!input.success) return tracked("purchase_confirmed", {}, { error: "That isn’t something you can buy." }, "invalid");
   const row = await adminOrg(orgId);
-  if (!row) return { error: NOT_ADMIN };
+  if (!row) return tracked("purchase_confirmed", { input: input.data }, { error: NOT_ADMIN }, "not_admin");
+  const context = { orgId, input: input.data };
   // Free credits don't sell credits on their own: joining the plan comes first, as from Settings.
-  if (input.data.kind === "top_up" && (!row.billing?.planId || isTrial(row.billing.planId))) return { error: "Join the plan first: credits are bought with it." };
-  return checkout(row.org, input.data);
+  if (input.data.kind === "top_up" && (!row.billing?.planId || isTrial(row.billing.planId))) {
+    return tracked("purchase_confirmed", context, { error: "Join the plan first: credits are bought with it." }, "needs_plan");
+  }
+  return checkout(row.org, input.data, "purchase_confirmed");
 }
 
-async function checkout(org: { id: string; githubLogin: string }, input: PurchaseInput): Promise<BillingOutcome> {
+/** Charges the purchase, or opens Stripe for it, recording the step that led here with where it went. */
+async function checkout(org: { id: string; githubLogin: string }, input: PurchaseInput, step: "purchase_started" | "purchase_confirmed"): Promise<BillingOutcome> {
   const successUrl = `${appUrl()}/dashboard/billing/return?org=${org.id}`;
   let paymentUrl: string | null;
   try {
@@ -98,8 +124,9 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
   } catch (error) {
     console.error(`Purchase for org ${org.id} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "purchase" }, handled: true });
-    return { error: FAILED };
+    return tracked(step, { orgId: org.id, input }, { error: FAILED }, "checkout_failed");
   }
+  await tracked(step, { orgId: org.id, input, route: paymentUrl ? "stripe" : "charged" }, {}, "ok");
   // Checkout, or a card step (3-D Secure, a declined card): Stripe sends them back to the return page.
   if (paymentUrl) redirect(paymentUrl);
   redirect(`/dashboard/billing/return?org=${org.id}`);
@@ -109,14 +136,17 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
 export async function openPortal(orgId: string): Promise<void> {
   const row = await adminOrg(orgId);
   if (!row) redirect("/dashboard/settings");
+  const userId = (await viewer()).id;
   let url: string;
   try {
     url = await autumn()!.portal(orgId, `${appUrl()}/dashboard/billing/return?org=${orgId}`);
   } catch (error) {
     console.error(`Billing portal for org ${orgId} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "portal" }, handled: true });
+    await track("billing_portal_opened", { userId, orgId, props: { outcome: "error" } });
     redirect("/dashboard/settings?billing=unavailable#billing");
   }
+  await track("billing_portal_opened", { userId, orgId, props: { outcome: "ok" } });
   redirect(url);
 }
 
@@ -137,6 +167,8 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
   const quantity = parsed.data.quantity ?? row.org.settings.autoTopUp?.quantity ?? DEFAULT_CREDITS;
   const choice = { enabled: parsed.data.enabled === "on", quantity, monthlyLimitUsd: parsed.data.limit || defaultAutoTopUpLimit(quantity) };
   const user = await viewer();
+  const record = (outcome: string) =>
+    track("auto_top_up_saved", { userId: user.id, orgId, props: { enabled: choice.enabled, quantity: choice.quantity, monthly_limit_usd: choice.monthlyLimitUsd, outcome } });
   if (!(await updateOrgSettings(db(), user.id, orgId, { autoTopUp: choice }))) return { error: NOT_ADMIN };
   try {
     await applyAutoTopUp(orgId, plan.id, choice);
@@ -144,8 +176,10 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
   } catch (error) {
     console.error(`Auto top-up for org ${orgId} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "auto_top_up" }, handled: true });
+    await record("error");
     return { error: "Saved here, but billing didn’t take the change. Try again in a minute." };
   }
+  await record("ok");
   revalidatePath("/dashboard/settings");
   return { saved: true };
 }

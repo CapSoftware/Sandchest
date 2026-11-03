@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { HackerProfile } from "@/lib/hacker";
 import { viewer } from "./access";
+import { track } from "./analytics";
 import { db } from "./db";
 import { HackerSchema } from "./hacker-schema";
 
@@ -18,6 +19,7 @@ export async function saveHacker(orgId: string, raw: HackerProfile): Promise<Sav
   if (!input.success) return { error: "Check the name: letters, numbers, spaces, dots and dashes, up to 16." };
   const hacker = { ...input.data, stickers: [...new Set(input.data.stickers)] };
   if (!(await updateOrgSettings(db(), user.id, orgId, { hacker }))) return { error: "Only an admin of this account can change its hacker." };
+  await track("hacker_saved", { userId: user.id, orgId, props: { outcome: "ok" } });
   revalidatePath("/dashboard", "layout");
   return { ok: true };
 }

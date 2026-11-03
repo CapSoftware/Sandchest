@@ -8,6 +8,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 import { recordEvent, schema, setGithubIdentity } from "@sandchest/db";
+import { anonId } from "./analytics";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
@@ -51,7 +52,7 @@ function createAuth() {
     },
     account: { encryptOAuthTokens: true, accountLinking: { enabled: false } },
     session: { expiresIn: SESSION_EXPIRES_IN_S, updateAge: SESSION_UPDATE_AGE_S },
-    // A new session is a sign-in: recorded for the funnel with the user id only. Never fails sign-in.
+    // A new session is a sign-in: recorded for the funnel with opaque ids only. Never fails sign-in.
     databaseHooks: {
       // The account id is GitHub's numeric user id, so admins are recognised from the first page.
       account: {
@@ -62,10 +63,18 @@ function createAuth() {
           },
         },
       },
+      // A new user is a sign-up; it comes with the browser's anonymous id, which ties the visits before it to them.
+      user: {
+        create: {
+          after: async (user) => {
+            await recordEvent(db(), { name: "signed_up", userId: user.id, anonId: await anonId() }).catch(() => {});
+          },
+        },
+      },
       session: {
         create: {
           after: async (session) => {
-            await recordEvent(db(), { name: "signed_in", userId: session.userId }).catch(() => {});
+            await recordEvent(db(), { name: "signed_in", userId: session.userId, anonId: await anonId() }).catch(() => {});
           },
         },
       },

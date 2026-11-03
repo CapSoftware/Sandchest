@@ -8,7 +8,9 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { viewer } from "./access";
+import { currentUser, viewer } from "./access";
+import { routeOf } from "@/lib/analytics";
+import { track } from "./analytics";
 import { auth } from "./auth";
 import { db } from "./db";
 
@@ -17,12 +19,15 @@ const Id = z.uuid();
 export async function signIn(next: string): Promise<void> {
   // Checked again here: a bound argument can be changed by the client.
   const callbackURL = /^\/(?![/\\])/.test(next) ? next : "/dashboard";
+  await track("sign_in_started", { props: { next: routeOf(callbackURL) } });
   const result = await auth().api.signInSocial({ body: { provider: "github", callbackURL, errorCallbackURL: "/sign-in?error=1" }, headers: await headers() });
   if (!result.url) throw new Error("GitHub sign-in did not return a URL");
   redirect(result.url);
 }
 
 export async function signOut(): Promise<void> {
+  const user = await currentUser().catch(() => undefined);
+  await track("signed_out", { userId: user?.id });
   await auth().api.signOut({ headers: await headers() });
   redirect("/");
 }
@@ -61,6 +66,11 @@ export async function saveOrgSettings(orgId: string, _previous: SettingsOutcome,
   const parsed = SettingsForm.safeParse(Object.fromEntries(form));
   if (!parsed.success || !Id.safeParse(orgId).success) return { error: "Those settings aren’t valid." };
   const ok = await updateOrgSettings(db(), user.id, orgId, { checkThreshold: parsed.data.checkThreshold, emailNotifications: parsed.data.emailNotifications === "on" });
+  await track("org_settings_saved", {
+    userId: user.id,
+    orgId: ok ? orgId : null,
+    props: { check_threshold: parsed.data.checkThreshold, email_notifications: parsed.data.emailNotifications === "on", outcome: ok ? "ok" : "not_admin" },
+  });
   if (!ok) return { error: "Only an admin of this account can change its settings." };
   revalidatePath("/dashboard/settings");
   return { saved: true };

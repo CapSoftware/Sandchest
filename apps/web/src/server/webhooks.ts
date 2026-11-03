@@ -7,7 +7,9 @@ import {
   createScan,
   disableRepos,
   openFindings,
+  orgByInstallation,
   queuePendingRecons,
+  recordEvent,
   removeInstallation,
   repoByGithubId,
   threatModel,
@@ -76,7 +78,9 @@ async function dispatch(deps: WebhookDeps, event: string, payload: unknown): Pro
 async function onInstallation(deps: WebhookDeps, payload: InstallationEvent): Promise<WebhookOutcome> {
   const { installation } = payload;
   if (payload.action === "deleted" || payload.action === "suspend") {
+    const org = await orgByInstallation(deps.db, installation.id);
     await removeInstallation(deps.db, installation.id);
+    if (org) await recordEvent(deps.db, { name: "app_uninstalled", orgId: org.id, props: { action: payload.action } }).catch(() => {});
     return { status: "handled", detail: "installation removed" };
   }
   if (payload.action !== "created" && payload.action !== "unsuspend" && payload.action !== "new_permissions_accepted") {
@@ -84,6 +88,10 @@ async function onInstallation(deps: WebhookDeps, payload: InstallationEvent): Pr
   }
   if (installation.account.type === "Bot") return { status: "ignored", detail: "bot account" };
   const org = await recordInstallation(deps, { id: installation.id, account: { ...installation.account, type: installation.account.type } });
+  if (payload.action !== "new_permissions_accepted") {
+    const props = { action: payload.action, account_type: installation.account.type, repos: payload.repositories?.length ?? null };
+    await recordEvent(deps.db, { name: "app_installed", orgId: org.id, props }).catch(() => {});
+  }
   return startRecon(deps, org);
 }
 
@@ -110,11 +118,16 @@ export async function recordInstallation(
 
 async function onInstallationRepositories(deps: WebhookDeps, payload: InstallationRepositoriesEvent): Promise<WebhookOutcome> {
   await disableRepos(deps.db, payload.repositories_removed.map((r) => r.id));
+  const known = await orgByInstallation(deps.db, payload.installation.id);
+  if (known) {
+    const props = { added: payload.repositories_added.length, removed: payload.repositories_removed.length };
+    await recordEvent(deps.db, { name: "repos_changed", orgId: known.id, props }).catch(() => {});
+  }
   if (payload.repositories_added.length === 0) return { status: "handled" };
   const added = new Set(payload.repositories_added.map((r) => r.id));
   const details = (await deps.github.installation(payload.installation.id).repositories()).filter((r) => added.has(r.id));
   const existing = await repoByGithubId(deps.db, payload.repositories_added[0]!.id);
-  const org = existing?.org ?? (await deps.db.query.orgs.findFirst({ where: (orgs, { eq }) => eq(orgs.installationId, payload.installation.id) }));
+  const org = existing?.org ?? known;
   if (!org) return { status: "ignored", detail: "unknown installation" };
   await upsertRepos(deps.db, org.id, details.map((r) => ({ githubRepoId: r.id, fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })));
   return startRecon(deps, org);
