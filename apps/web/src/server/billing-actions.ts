@@ -6,7 +6,9 @@
  *
  * Without a card on file, the plan (and any credits bought with it) goes
  * through Stripe Checkout. Once the org has one, every charge is shown on a
- * confirm page first, then charged at once.
+ * confirm page first, then charged at once. Each confirm page carries a
+ * purchase id the charge is made under, so confirming it again (a second
+ * tab, a retry after a timeout) never charges twice.
  */
 import { isTrial, MAX_PURCHASE_CREDITS, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
 import { orgForAdmin } from "@sandchest/db";
@@ -15,7 +17,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser, viewer } from "./access";
 import { track } from "./analytics";
-import { autumn, saveAutoTopUpChoice, syncBilling } from "./billing";
+import { autumn, chargePurchase, saveAutoTopUpChoice, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
@@ -35,6 +37,8 @@ export type PurchaseInput = z.infer<typeof Purchase>;
 
 const NOT_ADMIN = "Only an admin of this account can change its billing.";
 const FAILED = "Billing didn’t go through. Check your plan and credits before trying again.";
+// A confirmed charge that wasn't answered may have gone through, but sending it again charges it once.
+const UNCONFIRMED = "Billing didn’t confirm this purchase, so it may or may not have been charged. Trying again here won’t charge it twice.";
 
 async function adminOrg(orgId: string) {
   if (!Id.safeParse(orgId).success || !autumn()) return undefined;
@@ -93,7 +97,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
     return checkout(row.org, input.data, "purchase_started");
   }
   await tracked("purchase_started", { ...context, route: "confirm" }, {}, "ok");
-  redirect(`/dashboard/billing/confirm?org=${orgId}&${purchaseQuery(input.data)}`);
+  redirect(`/dashboard/billing/confirm?org=${orgId}&${purchaseQuery(input.data)}&purchase=${crypto.randomUUID()}`);
 }
 
 /** Charges a purchase the admin confirmed. */
@@ -107,26 +111,29 @@ export async function confirmPurchase(orgId: string, _previous: BillingOutcome, 
   if (input.data.kind === "top_up" && (!row.billing?.planId || isTrial(row.billing.planId))) {
     return tracked("purchase_confirmed", context, { error: "Join the plan first: credits are bought with it." }, "needs_plan");
   }
-  return checkout(row.org, input.data, "purchase_confirmed");
+  // A page opened before purchases had ids: reloading it gives it one.
+  const purchaseId = Id.safeParse(form.get("purchase"));
+  if (!purchaseId.success) return tracked("purchase_confirmed", context, { error: "This page is out of date. Reload it and confirm again." }, "stale");
+  return checkout(row.org, input.data, "purchase_confirmed", purchaseId.data);
 }
 
-/** Charges the purchase, or opens Stripe for it, recording the step that led here with where it went. */
-async function checkout(org: { id: string; githubLogin: string }, input: PurchaseInput, step: "purchase_started" | "purchase_confirmed"): Promise<BillingOutcome> {
+/**
+ * Charges the purchase, or opens Stripe for it, recording the step that led here with where it went. A confirmed
+ * purchase is charged under its id: one asked for already goes to the return page, which shows what it bought.
+ */
+async function checkout(org: { id: string; githubLogin: string }, input: PurchaseInput, step: "purchase_started" | "purchase_confirmed", purchaseId?: string): Promise<BillingOutcome> {
   const successUrl = `${appUrl()}/dashboard/billing/return?org=${org.id}`;
+  const purchase = { planId: input.kind === "plan" ? input.plan : TOP_UP.id, credits: input.credits, successUrl };
   let paymentUrl: string | null;
+  let repeated: boolean | undefined;
   try {
-    ({ paymentUrl } = await autumn()!.attach({
-      customerId: org.id,
-      planId: input.kind === "plan" ? input.plan : TOP_UP.id,
-      credits: input.credits,
-      successUrl,
-    }));
+    ({ paymentUrl, repeated } = purchaseId ? await chargePurchase(org, purchaseId, purchase) : await autumn()!.attach({ customerId: org.id, ...purchase }));
   } catch (error) {
     console.error(`Purchase for org ${org.id} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "purchase" }, handled: true });
-    return tracked(step, { orgId: org.id, input }, { error: FAILED }, "checkout_failed");
+    return tracked(step, { orgId: org.id, input }, { error: purchaseId ? UNCONFIRMED : FAILED }, "checkout_failed");
   }
-  await tracked(step, { orgId: org.id, input, route: paymentUrl ? "stripe" : "charged" }, {}, "ok");
+  await tracked(step, { orgId: org.id, input, route: repeated ? "repeated" : paymentUrl ? "stripe" : "charged" }, {}, "ok");
   // Checkout, or a card step (3-D Secure, a declined card): Stripe sends them back to the return page.
   if (paymentUrl) redirect(paymentUrl);
   redirect(`/dashboard/billing/return?org=${org.id}`);

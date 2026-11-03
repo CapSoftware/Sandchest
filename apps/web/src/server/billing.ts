@@ -15,7 +15,21 @@
  * This module stays light: pages import it, and the workflow runtime is
  * loaded only when an org's first plan starts its recon.
  */
-import { autoTopUpControl, createAutumn, createStripe, DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, planById, type Autumn, type BillingState, type Stripe } from "@sandchest/billing";
+import {
+  autoTopUpControl,
+  createAutumn,
+  createStripe,
+  DEFAULT_CREDITS,
+  defaultAutoTopUpLimit,
+  isTrial,
+  planById,
+  type AttachResult,
+  type Autumn,
+  type BillingState,
+  type PlanId,
+  type Stripe,
+  type TOP_UP,
+} from "@sandchest/billing";
 import {
   markScanReserved,
   orgBillingRow,
@@ -228,6 +242,20 @@ async function matchAutoTopUp(orgId: string, state: BillingState): Promise<Billi
   const choice = org?.settings.autoTopUp;
   if (!choice?.enabled && !state.autoTopUp?.enabled) return state;
   return { ...state, autoTopUp: await applyAutoTopUp(orgId, state.planId, choice) };
+}
+
+// ---- Purchases ---------------------------------------------------------------
+
+/**
+ * Charges a purchase the admin confirmed, under the id its confirm page was
+ * opened with. Autumn charges each purchase once, so sending it again (a
+ * second tab, a retry after a timeout that charged anyway) comes back
+ * `repeated` instead of charging twice. Other credits, or another purchase,
+ * are a purchase of their own.
+ */
+export function chargePurchase(org: BillingOrg, purchaseId: string, input: { planId: PlanId | typeof TOP_UP.id; credits?: number; successUrl: string }): Promise<AttachResult> {
+  const idempotencyKey = `purchase:${org.id}:${purchaseId}:${input.planId}:${input.credits ?? 0}`;
+  return autumn()!.attach({ customerId: org.id, ...input, idempotencyKey });
 }
 
 // ---- The scan gate -----------------------------------------------------------

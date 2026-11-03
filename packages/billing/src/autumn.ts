@@ -4,7 +4,9 @@
  *
  * Calls that only read, or that Autumn makes idempotent by id (customers,
  * locks), are retried on network errors and 5xx/429. Calls that can charge a
- * card are never retried: a timeout there may still have charged.
+ * card are never retried: a timeout there may still have charged. A charge
+ * sent with an idempotency key can be sent again by the caller, though:
+ * Autumn turns away a key it has seen, so it charges once.
  */
 import { CREDITS, planById, PLANS, TOP_UP, type PlanId } from "./plans";
 
@@ -50,6 +52,8 @@ export interface Reservation {
 export interface AttachResult {
   /** Where to send the person to pay (Stripe Checkout or a 3-D Secure step). Null when it was charged already. */
   paymentUrl: string | null;
+  /** Autumn had this idempotency key already: the purchase was asked for before, and nothing more is charged. */
+  repeated?: true;
 }
 
 export interface ChargePreview {
@@ -82,9 +86,10 @@ export interface Autumn {
   /**
    * Subscribes to a plan, or buys credits on their own (`top_up`). `credits`
    * buys that many credits with it. Charges a saved card at once, otherwise
-   * returns a checkout URL.
+   * returns a checkout URL. Under an `idempotencyKey`, sending the same
+   * purchase again charges nothing more and comes back `repeated`.
    */
-  attach(input: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; promotionCode?: string; successUrl: string }): Promise<AttachResult>;
+  attach(input: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; promotionCode?: string; successUrl: string; idempotencyKey?: string }): Promise<AttachResult>;
   /** What attaching would charge, with a promotion code's discount if one is given. */
   preview(input: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; promotionCode?: string }): Promise<ChargePreview>;
   /** A Stripe billing portal session: card, invoices, cancellation. */
@@ -98,13 +103,17 @@ export function createAutumn(config: AutumnConfig): Autumn {
   const base = (config.baseUrl ?? "https://api.useautumn.com").replace(/\/$/, "");
   const doFetch = config.fetch ?? fetch;
 
-  async function call<T>(path: string, body: unknown, options: { retry: boolean; timeoutMs?: number }): Promise<T> {
+  async function call<T>(path: string, body: unknown, options: { retry: boolean; timeoutMs?: number; idempotencyKey?: string }): Promise<T> {
     const attempts = options.retry ? 3 : 1;
     for (let attempt = 1; ; attempt++) {
       try {
         const response = await doFetch(`${base}/v1/${path}`, {
           method: "POST",
-          headers: { authorization: `Bearer ${config.secretKey}`, "content-type": "application/json" },
+          headers: {
+            authorization: `Bearer ${config.secretKey}`,
+            "content-type": "application/json",
+            ...(options.idempotencyKey ? { "idempotency-key": options.idempotencyKey } : {}),
+          },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(options.timeoutMs ?? config.timeoutMs ?? 10_000),
         });
@@ -198,19 +207,26 @@ export function createAutumn(config: AutumnConfig): Autumn {
       }
     },
 
-    async attach({ customerId, planId, credits, promotionCode, successUrl }) {
-      const raw = await call<{ payment_url: string | null }>(
-        "billing.attach",
-        {
-          customer_id: customerId,
-          plan_id: planId,
-          feature_quantities: quantities(planId, credits),
-          ...discounts(promotionCode),
-          redirect_mode: "if_required",
-          success_url: successUrl,
-        },
-        { retry: false, timeoutMs: 45_000 },
-      );
+    async attach({ customerId, planId, credits, promotionCode, successUrl, idempotencyKey }) {
+      let raw: { payment_url: string | null };
+      try {
+        raw = await call<{ payment_url: string | null }>(
+          "billing.attach",
+          {
+            customer_id: customerId,
+            plan_id: planId,
+            feature_quantities: quantities(planId, credits),
+            ...discounts(promotionCode),
+            redirect_mode: "if_required",
+            success_url: successUrl,
+          },
+          { retry: false, timeoutMs: 45_000, idempotencyKey },
+        );
+      } catch (error) {
+        // Autumn turns away a key it has seen with a 409. Its other 409 here is the plan being attached already.
+        if (idempotencyKey && error instanceof AutumnError && error.status === 409 && error.code !== "plan_already_attached") return { paymentUrl: null, repeated: true };
+        throw error;
+      }
       return { paymentUrl: raw.payment_url ?? null };
     },
 

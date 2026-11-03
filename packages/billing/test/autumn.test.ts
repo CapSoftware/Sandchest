@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
 import { billingState, createAutumn, planById, autoTopUpControl, AutumnError } from "../src";
 
-type Call = { path: string; body: Record<string, unknown> };
+type Call = { path: string; body: Record<string, unknown>; headers: Headers };
 
 /** A fake Autumn answering each path from a script of responses. */
 function fake(script: Record<string, Array<{ status: number; body?: unknown } | Error>>) {
   const calls: Call[] = [];
   const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
     const path = new URL(String(input)).pathname.replace("/v1/", "");
-    calls.push({ path, body: JSON.parse(String(init?.body)) });
+    calls.push({ path, body: JSON.parse(String(init?.body)), headers: new Headers(init?.headers) });
     const next = script[path]?.shift();
     if (!next) throw new Error(`unexpected ${path}`);
     if (next instanceof Error) throw next;
@@ -58,6 +58,25 @@ test("reads retry on 5xx; charges never retry", async () => {
   await expect(autumn.attach({ customerId: "o", planId: "top_up", credits: 50, successUrl: "https://x" })).rejects.toMatchObject({ status: 503 });
   expect(calls.filter((c) => c.path === "billing.attach")).toHaveLength(1);
   expect(calls.at(-1)!.body).toMatchObject({ plan_id: "top_up", feature_quantities: [{ feature_id: "credits", quantity: 50 }], redirect_mode: "if_required" });
+});
+
+test("a confirmed purchase goes under its idempotency key, and a repeat of the key charges nothing more", async () => {
+  const { calls, autumn } = fake({
+    "billing.attach": [
+      { status: 200, body: { payment_url: null } },
+      { status: 409, body: { message: "Duplicate request" } },
+      { status: 409, body: { code: "plan_already_attached", message: "Cannot attach because the customer's current product is the same as the product being attached" } },
+      { status: 409, body: { message: "Duplicate request" } },
+    ],
+  });
+  const purchase = { customerId: "o", planId: "top_up" as const, credits: 50, successUrl: "https://x", idempotencyKey: "purchase-1" };
+  expect(await autumn.attach(purchase)).toEqual({ paymentUrl: null });
+  expect(await autumn.attach(purchase)).toEqual({ paymentUrl: null, repeated: true });
+  expect(calls.map((c) => c.headers.get("idempotency-key"))).toEqual(["purchase-1", "purchase-1"]);
+  // Any other refusal is still an error, and without a key a 409 is never taken for a repeat.
+  await expect(autumn.attach({ ...purchase, planId: "standard" })).rejects.toMatchObject({ status: 409, code: "plan_already_attached" });
+  await expect(autumn.attach({ customerId: "o", planId: "top_up", credits: 50, successUrl: "https://x" })).rejects.toMatchObject({ status: 409 });
+  expect(calls.at(-1)!.headers.get("idempotency-key")).toBeNull();
 });
 
 test("billing state: active plan, cancellation, scheduled downgrade, auto top-up", () => {

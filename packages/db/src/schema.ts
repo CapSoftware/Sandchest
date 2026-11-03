@@ -610,7 +610,7 @@ export const EVENT_NAMES = [
   // ---- Billing ----
   /** A plan or credits were chosen. props: kind ("plan" | "top_up"), plan, credits, route ("confirm" | "stripe" | "charged"), outcome ("ok" | "invalid" | "not_admin" | "same_plan" | "needs_plan" | "checkout_failed" | "error"). */
   "purchase_started",
-  /** A purchase was confirmed on the confirm page. props: kind, plan, credits, route ("stripe" | "charged"), outcome (as purchase_started). */
+  /** A purchase was confirmed on the confirm page. props: kind, plan, credits, route ("stripe" | "charged" | "repeated": confirmed before, not charged again), outcome (as purchase_started, or "stale": a page from before purchase ids). */
   "purchase_confirmed",
   /** Stripe's billing portal was opened. props: outcome ("ok" | "error"). */
   "billing_portal_opened",

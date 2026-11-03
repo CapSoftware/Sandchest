@@ -2,6 +2,7 @@ import { isTrial, MAX_PURCHASE_CREDITS, planById, TOP_UP } from "@sandchest/bill
 import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { PageShape } from "@/components/app/skeleton";
 import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
@@ -12,7 +13,7 @@ import { ConfirmView } from "./confirm-view";
 export const metadata: Metadata = { title: "Confirm · Sandchest" };
 
 /** Shows exactly what a plan change or credits will charge the card on file, before charging it. */
-export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ org?: string; plan?: string; credits?: string; topup?: string }> }) {
+export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ org?: string; plan?: string; credits?: string; topup?: string; purchase?: string }> }) {
   const params = await searchParams;
   const user = await viewer();
   const client = autumn();
@@ -28,11 +29,20 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   // Free credits aren't a plan anything is charged on: joining from them goes through Settings, to Stripe Checkout.
   const current = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
   if ((plan ? !plan.offered : !credits) || !current || plan?.id === current.id) redirect("/dashboard/settings#billing");
+  // The purchase is charged under this id, kept in the address so a reload or a second tab can't charge it twice.
+  const purchase = z.uuid().safeParse(params.purchase);
+  if (!purchase.success) {
+    const what = plan ? `plan=${plan.id}${credits ? `&credits=${credits}` : ""}` : `topup=${credits}`;
+    redirect(`/dashboard/billing/confirm?org=${row.org.id}&${what}&purchase=${crypto.randomUUID()}`);
+  }
 
   const preview = await client.preview({ customerId: row.org.id, planId: plan ? plan.id : TOP_UP.id, credits }).catch(() => undefined);
   const downgrade = plan && plan.price < current.price;
   const title = plan ? `Switch ${row.org.githubLogin} to ${plan.name}` : `Buy ${credits!.toLocaleString("en-US")} credits for ${row.org.githubLogin}`;
-  const fields: Record<string, string> = plan ? { kind: "plan", plan: plan.id, ...(credits ? { credits: String(credits) } : {}) } : { kind: "top_up", credits: String(credits) };
+  const fields: Record<string, string> = {
+    ...(plan ? { kind: "plan", plan: plan.id, ...(credits ? { credits: String(credits) } : {}) } : { kind: "top_up", credits: String(credits) }),
+    purchase: purchase.data,
+  };
   const monthly = (p: { credits: number }) => (p.credits > 0 ? ` with ${p.credits.toLocaleString("en-US")} credits a month` : "");
 
   const help = plan

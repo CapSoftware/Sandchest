@@ -1,8 +1,9 @@
 /**
  * An in-memory Autumn with the behaviour measured against the real sandbox:
  * a reservation holds credits under a lock id, retrying it is harmless,
- * finalizing twice is harmless, a confirm can charge less than was held, and
- * auto top-up buys more once usage drops the balance below its threshold.
+ * finalizing twice is harmless, a confirm can charge less than was held,
+ * auto top-up buys more once usage drops the balance below its threshold, and
+ * a purchase sent again under the same idempotency key charges nothing more.
  */
 import { AutumnError, creditsPrice, planById, PLANS, TOP_UP, type Autumn, type BillingState, type PlanId } from "@sandchest/billing";
 
@@ -26,6 +27,11 @@ export class FakeAutumn implements Autumn {
   failNext = new Set<string>();
   /** How long reads and reservations take, so concurrent calls overlap the way real ones do. */
   latencyMs = 0;
+  /** Every idempotency key a purchase was sent with, in order, repeats included. */
+  readonly attachKeys: string[] = [];
+  private readonly seenKeys = new Set<string>();
+  /** Make the next purchase charge, then fail anyway, like a timeout after the charge went through. */
+  loseNextAnswer = false;
 
   /** Every new customer starts with this plan (null: none), as if it had bought it. */
   constructor(private readonly defaultPlan: PlanId | null = null) {}
@@ -114,8 +120,22 @@ export class FakeAutumn implements Autumn {
     customer.credits += action === "release" ? held : held - (credits ?? held);
   }
 
-  async attach({ customerId, planId, credits }: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; successUrl: string }) {
+  async attach({ customerId, planId, credits, idempotencyKey }: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; successUrl: string; idempotencyKey?: string }) {
     this.enter("attach");
+    if (idempotencyKey) {
+      this.attachKeys.push(idempotencyKey);
+      if (this.seenKeys.has(idempotencyKey)) return { paymentUrl: null, repeated: true as const };
+      this.seenKeys.add(idempotencyKey);
+    }
+    const result = this.charge(customerId, planId, credits);
+    if (this.loseNextAnswer) {
+      this.loseNextAnswer = false;
+      throw new AutumnError("Autumn billing.attach: The operation timed out.", 0, "network");
+    }
+    return result;
+  }
+
+  private charge(customerId: string, planId: PlanId | typeof TOP_UP.id, credits?: number) {
     const customer = this.get(customerId);
     if (customer.planId === planId) throw new AutumnError("Cannot attach because the customer's current product is the same as the product being attached", 409, "plan_already_attached");
     // A free plan never asks for a card.
