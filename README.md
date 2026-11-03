@@ -19,9 +19,9 @@
 
 ## What is Sandchest
 
-Sandchest is a hacker you add to your team. It's a GitHub App that reads your code the way an attacker would and finds the holes someone could actually get through, so you can close them first.
+Sandchest acts like a real hacker embedded in your team, using abliterated, unrestricted models to find real vulnerabilities in your code before attackers do.
 
-You install it, pick the repos it can see, and it gets to work.
+Attackers already use these models to scan code for holes. Sandchest runs the same models on your repos and sends you what it finds. Install the GitHub App, pick the repos it can see, and it gets to work.
 
 - **It maps every repo** into a threat model, with the entry points, auth checks, sensitive data and dangerous code an attacker would look for first
 - **It reviews every pull request** and puts what it finds on the exact lines, so new holes don't make it to main
