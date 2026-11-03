@@ -7,7 +7,7 @@ import { count, money, percent } from "@/lib/admin-format";
 import { costPerCredit, dailySeries, kindSummary, lastDays, parseRange, planMargins } from "@/lib/admin-metrics";
 import { compactNumber, duration, SCAN_KIND_LABEL } from "@/lib/format";
 import { requireAdmin } from "@/server/admin";
-import { db } from "@/server/db";
+import { replicaDb } from "@/server/db";
 
 export const metadata: Metadata = { title: "Cost · Admin · Sandchest" };
 
@@ -21,7 +21,7 @@ const seconds = (ms: number | undefined) => (ms === undefined ? "–" : duration
 export default async function CostPage({ searchParams }: Props) {
   await requireAdmin();
   const range = parseRange((await searchParams).range);
-  const [byKind, daily, plans] = await Promise.all([adminCostByKind(db(), range), adminDailyScans(db(), range), adminPlanCosts(db(), range)]);
+  const [byKind, daily, plans] = await Promise.all([adminCostByKind(replicaDb(), range), adminDailyScans(replicaDb(), range), adminPlanCosts(replicaDb(), range)]);
 
   const total = byKind.find((row) => row.kind === null);
   const summary = total ? kindSummary(total) : undefined;

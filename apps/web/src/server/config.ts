@@ -6,6 +6,15 @@ import { z } from "zod";
 
 const Schema = z.object({
   DATABASE_URL: z.string().min(1),
+  /**
+   * A connection pooler in front of the same database (PgBouncer, transaction
+   * mode), for analytics writes: they hold a database connection only for the
+   * milliseconds each write takes, so they never crowd out the app. Default
+   * DATABASE_URL.
+   */
+  DATABASE_POOLER_URL: z.string().min(1).optional(),
+  /** A read replica, for the operator dashboards and analysis, so heavy reads never touch the primary. Default DATABASE_URL. */
+  DATABASE_REPLICA_URL: z.string().min(1).optional(),
   GITHUB_APP_ID: z.string().min(1),
   GITHUB_APP_PRIVATE_KEY: z.string().min(1),
   GITHUB_WEBHOOK_SECRET: z.string().min(1),

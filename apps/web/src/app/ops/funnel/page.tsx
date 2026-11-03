@@ -7,7 +7,7 @@ import { count, percent } from "@/lib/admin-format";
 import { funnelSteps, lastDays, parseRange, perDay, ratio } from "@/lib/admin-metrics";
 import { requireAdmin } from "@/server/admin";
 import { config } from "@/server/config";
-import { db } from "@/server/db";
+import { replicaDb } from "@/server/db";
 
 export const metadata: Metadata = { title: "Funnel · Admin · Sandchest" };
 
@@ -18,7 +18,7 @@ export default async function FunnelPage({ searchParams }: Props) {
   const range = parseRange((await searchParams).range);
   // Billing is on when Autumn is configured (as `billingEnabled` decides), without loading the billing client.
   const billing = Boolean(config().AUTUMN_SECRET_KEY);
-  const [funnel, activity, daily] = await Promise.all([adminFunnel(db(), range, { billing }), adminActivity(db()), adminDailySignups(db(), range)]);
+  const [funnel, activity, daily] = await Promise.all([adminFunnel(replicaDb(), range, { billing }), adminActivity(replicaDb()), adminDailySignups(replicaDb(), range)]);
 
   const days = lastDays(range);
   const signups = perDay(days, daily, (row) => row.signups);

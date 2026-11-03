@@ -1,13 +1,14 @@
 /**
  * Server-side analytics: records what people did, where it happened, in the
  * first-party `events` table (see packages/db/ANALYTICS.md). Recording runs
- * after the response and never fails or slows the action that called it.
+ * after the response, on its own connection (`analyticsDb`), and never fails
+ * or slows the action that called it.
  */
-import { recordEvent, type EventName, type EventProps } from "@sandchest/db";
+import { recordEvents, type AnalyticsEvent, type EventName, type EventProps } from "@sandchest/db";
 import { cookies } from "next/headers";
 import { after } from "next/server";
 import { ANON_COOKIE, isUuid } from "@/lib/analytics";
-import { db } from "./db";
+import { analyticsDb } from "./db";
 
 /** Runs a task after the response when there is one, else at once in the background. Never throws. */
 export function later(task: () => Promise<unknown>): void {
@@ -18,6 +19,11 @@ export function later(task: () => Promise<unknown>): void {
     // Outside a request (tests, scripts): nothing to wait for.
     void run();
   }
+}
+
+/** Records events after the response, on the analytics connection. */
+export function recordLater(events: AnalyticsEvent[], options?: { ignoreDuplicates?: boolean }): void {
+  if (events.length > 0) later(() => recordEvents(analyticsDb(), events, options));
 }
 
 /** The browser's anonymous id from its cookie, when there is a request with one. */
@@ -36,6 +42,5 @@ export async function anonId(): Promise<string | null> {
  * names, code or finding text.
  */
 export async function track(name: EventName, event: { userId?: string | null; orgId?: string | null; props?: EventProps } = {}): Promise<void> {
-  const anon = await anonId();
-  later(() => recordEvent(db(), { name, userId: event.userId, orgId: event.orgId, anonId: anon, props: event.props }));
+  recordLater([{ name, userId: event.userId, orgId: event.orgId, anonId: await anonId(), props: event.props }]);
 }

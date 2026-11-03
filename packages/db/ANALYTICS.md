@@ -6,7 +6,7 @@ Everything is first-party and lives in Postgres. Hosted Sandchest also runs Verc
 
 ## Rules
 
-- **Read only.** Run `select` statements and nothing else. Prefer a read replica or a read-only role when you have one.
+- **Read only, on the replica.** Run `select` statements and nothing else, against the read replica (`DATABASE_REPLICA_URL`; on PlanetScale, the same credentials with `|replica` appended to the username), never the primary. Analysis then costs the app nothing.
 - Events never hold code, finding text, repository or account names, emails or IP addresses. Don't join them to tables that do (`users.email`, `repos.full_name`, `findings.title`) in anything you save or share. Report counts and rates, not people.
 
 ## Where things live
@@ -27,7 +27,7 @@ Everything is first-party and lives in Postgres. Hosted Sandchest also runs Verc
 | Column | Meaning |
 | --- | --- |
 | `name` | What happened. The catalog, with each event's props, is `EVENT_NAMES` in `src/schema.ts`. |
-| `user_id` | The signed-in person, when there is one. |
+| `user_id` | The person, on server-side events. Browser events (`page_view`, `page_left`, `clicked`, `step_viewed`) leave it empty: the beacon never reads the database, so resolve them through `anon_id` (below). |
 | `anon_id` | The browser: a random UUID in the `sc_aid` cookie (one year). Set on everything a browser causes, before and after sign-in. |
 | `org_id` | The GitHub account (org or personal) the action was about. |
 | `props` | JSON with opaque ids, counts and enums. Actions carry `outcome`: `"ok"`, or the reason it didn't go through. |
@@ -39,7 +39,7 @@ Browser events (`page_view`, `page_left`, `clicked`, `step_viewed`) come from th
 
 ### Tying browsers to people
 
-`signed_up` and `signed_in` carry both `anon_id` and `user_id`. That is the link: every earlier event from that browser belongs to that person. Resolve the person for every event like this:
+`signed_up`, `signed_in` and `identified` carry both `anon_id` and `user_id`. `identified` is recorded the first time a signed-in person opens the dashboard in a browser, so browsers signed in before analytics existed, or on a second device, are linked too. That is the link: every event from that browser, before and after, belongs to that person. Resolve the person for every event like this:
 
 ```sql
 with identity as (
@@ -60,7 +60,7 @@ stream as (
 select * from stream;
 ```
 
-Limits: a person on two browsers is two browsers until they sign in on each, and cleared cookies start a new browser. Visitors with JavaScript off, and bots, record no browser events.
+Limits: a person on two browsers is two browsers until they open the dashboard on each, a shared browser counts as its first person, and cleared cookies start a new browser. Visitors with JavaScript off, and bots, record no browser events.
 
 ## Example questions
 
@@ -148,6 +148,12 @@ select next_path, count(*) from views where path = '/' and next_path is not null
 ```
 
 The signed-up funnel (install, plan, recon, first deep scan, coming back) is already computed by `adminFunnel` in `src/admin.ts`, and shown at `/admin/funnel`.
+
+## How it stays off the app's back
+
+- The beacon at `/api/e` never reads the database, and the browser batches a page's clicks and steps into the page's own requests, so a page view costs about one request and one insert.
+- Every analytics write runs after the response, through the pooler (`DATABASE_POOLER_URL`), on one connection per server instance that closes after 5 idle seconds. Each write is one insert in a transaction that gives up after 200 ms waiting on a lock or 1 s running, so a write can be lost but never hold anything up.
+- The operator dashboards (`/admin`) and analysis read the replica.
 
 ## Adding an event
 

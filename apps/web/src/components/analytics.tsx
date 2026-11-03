@@ -26,10 +26,23 @@ function hint(): string | undefined {
   }
 }
 
-/** Sends an event. `unloading`: the page is going away, so it goes by `sendBeacon`, which the browser finishes afterwards. */
-function send(event: Record<string, unknown>, unloading = false): void {
+/** Events waiting to go: a page's clicks and steps travel together, so a page view costs about one request. */
+const queue: Record<string, unknown>[] = [];
+let timer: ReturnType<typeof setTimeout> | undefined;
+/** Queued events wait at most this long, and a queue this long goes at once. */
+const FLUSH_MS = 5_000;
+const FLUSH_AT = 20;
+
+/**
+ * Sends everything queued in one request. `unloading`: the page is going away,
+ * so it goes by `sendBeacon`, which the browser finishes afterwards.
+ */
+function flush(unloading = false): void {
+  clearTimeout(timer);
+  timer = undefined;
+  if (queue.length === 0) return;
   try {
-    const body = JSON.stringify({ path: location.pathname, ...event, hint: hint() });
+    const body = JSON.stringify({ events: queue.splice(0), hint: hint() });
     // Plain text, so the beacon is a simple request; the server reads the body as JSON whatever its type.
     if (unloading && navigator.sendBeacon?.(BEACON_PATH, new Blob([body], { type: "text/plain" }))) return;
     void fetch(BEACON_PATH, {
@@ -43,6 +56,13 @@ function send(event: Record<string, unknown>, unloading = false): void {
   } catch {
     // Analytics never breaks a page.
   }
+}
+
+/** Queues an event; `now` sends the queue at once. */
+function send(event: Record<string, unknown>, now = false): void {
+  queue.push({ path: location.pathname, ...event });
+  if (now || queue.length >= FLUSH_AT) flush();
+  else timer ??= setTimeout(() => flush(), FLUSH_MS);
 }
 
 /** Records that a step of a multi-step flow was shown. */
@@ -62,28 +82,39 @@ function startVisible(path: string): void {
   visible.since = document.visibilityState === "visible" ? performance.now() : null;
 }
 
-function pauseVisible(): void {
+/** Queues the time the page has been on screen since the last report, and starts counting again if it still is. */
+function reportVisible(): void {
   if (visible.since !== null) visible.ms += performance.now() - visible.since;
-  visible.since = null;
-}
-
-/** Records how long the page was looked at, once, when it is left (navigation, tab closed or hidden). */
-function leave(): void {
-  pauseVisible();
-  if (visible.path && visible.ms > 0) send({ name: "page_left", path: visible.path, visible_ms: Math.round(visible.ms) }, true);
+  visible.since = document.visibilityState === "visible" ? performance.now() : null;
+  if (visible.path && visible.ms >= 1) send({ name: "page_left", path: visible.path, visible_ms: Math.round(visible.ms) });
   visible.ms = 0;
 }
 
+/** Hidden (tab switched or closed, page unloading): report the time and send everything now. */
 function onVisibility(): void {
-  if (document.visibilityState === "hidden") leave();
-  else if (visible.since === null) visible.since = performance.now();
+  if (document.visibilityState === "hidden") {
+    reportVisible();
+    flush(true);
+  } else if (visible.since === null) visible.since = performance.now();
+}
+
+function onPageHide(): void {
+  reportVisible();
+  flush(true);
 }
 
 function onClick(event: MouseEvent): void {
   const element = event.target instanceof Element ? event.target.closest("a[href], [data-track]") : null;
   if (!element) return;
-  const target = clickTarget({ track: element.getAttribute("data-track"), href: element.getAttribute("href") }, location.origin);
-  if (target) send({ name: "clicked", target });
+  const href = element.getAttribute("href");
+  const target = clickTarget({ track: element.getAttribute("data-track"), href }, location.origin);
+  if (!target) return;
+  send({ name: "clicked", target });
+  // A link usually leaves the page: send now, with the time spent so far, while the request can still go.
+  if (href && element.tagName === "A") {
+    reportVisible();
+    flush();
+  }
 }
 
 /** Vercel gets the same reduced URL we record: the route, and campaign tags only. */
@@ -111,26 +142,30 @@ function Tracker() {
     const view = `${location.pathname}${location.search}`;
     if (lastView === view) return;
     const first = lastView === null;
-    if (!first) leave();
+    if (!first) reportVisible();
     lastView = view;
     startVisible(location.pathname);
     // Where they came from matters only for the page they landed on. The server keeps only known parameters.
-    send({
-      name: "page_view",
-      referrer: first ? referrerHost(document.referrer, location.hostname) : undefined,
-      search: location.search,
-      device: deviceOf(window.innerWidth),
-    });
+    // Sent at once, with whatever the last page queued: about one request per page.
+    send(
+      {
+        name: "page_view",
+        referrer: first ? referrerHost(document.referrer, location.hostname) : undefined,
+        search: location.search,
+        device: deviceOf(window.innerWidth),
+      },
+      true,
+    );
   }, [pathname, search]);
 
   useEffect(() => {
     document.addEventListener("click", onClick, { capture: true });
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", leave);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       document.removeEventListener("click", onClick, { capture: true });
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, []);
 

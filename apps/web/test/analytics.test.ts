@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { createDb, EVENT_NAMES, schema, type Db } from "@sandchest/db";
+import { createDb, EVENT_NAMES, recordDailyVisit, recordEvent, recordIdentified, schema, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import { NextRequest } from "next/server";
 import { ANON_COOKIE, BOT_AGENT, BROWSER_EVENTS, clickTarget, deviceOf, queryOf, referrerHost, routeOf, safeToken, utmOf, withUtm } from "@/lib/analytics";
@@ -120,10 +120,16 @@ afterAll(async () => {
 const BROWSER = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15";
 const HINT = "7d9f2c1e-4b3a-4c5d-8e6f-0a1b2c3d4e5f";
 
+/** A beacon request. One event is sent as the browser sends it: a batch of one, with the tab's hint. */
 function beacon(body: unknown, headers: Record<string, string> = {}): NextRequest {
+  let payload = body;
+  if (body && typeof body === "object" && "name" in body) {
+    const { hint, ...event } = body as Record<string, unknown>;
+    payload = { events: [event], hint };
+  }
   return new NextRequest("https://sandchest.test/api/e", {
     method: "POST",
-    body: typeof body === "string" ? body : JSON.stringify(body),
+    body: typeof payload === "string" ? payload : JSON.stringify(payload),
     headers: { "content-type": "application/json", "user-agent": BROWSER, ...headers },
   });
 }
@@ -209,6 +215,45 @@ describe("the beacon", () => {
     expect(await database.select().from(schema.events)).toEqual([]);
   });
 
+  test("records a page's events in one request, dropping only the ones that don't pass", async () => {
+    if (!available) return;
+    await database.delete(schema.events);
+    const events = [
+      { name: "page_left", path: "/docs", visible_ms: 4_000 },
+      { name: "clicked", path: "/docs", target: "docs-copy-code" },
+      { name: "clicked", path: "/docs", target: "user@example.com" },
+      { name: "signed_up", path: "/docs" },
+      { name: "page_view", path: "/pricing", search: "?plan=started" },
+    ];
+    await POST(beacon({ events, hint: HINT }));
+    const rows = await recorded(3);
+    expect(rows.map((row) => [row.name, row.props])).toEqual([
+      ["page_left", { path: "/docs", visible_ms: 4_000 }],
+      ["clicked", { path: "/docs", target: "docs-copy-code" }],
+      ["page_view", { path: "/pricing", q_plan: "started" }],
+    ]);
+    // One insert: every row shares the transaction's timestamp.
+    expect(new Set(rows.map((row) => row.createdAt.getTime())).size).toBe(1);
+  });
+
+  test("never reads the database: browser events carry the browser, not the person", async () => {
+    if (!available) return;
+    await database.delete(schema.events);
+    // Even with a session cookie, the beacon doesn't look the person up; `identified` and `signed_in` tie them.
+    await POST(beacon({ name: "page_view", path: "/dashboard", hint: HINT }, { cookie: "better-auth.session_token=anything.signed" }));
+    const [row] = await recorded(1);
+    expect(row).toMatchObject({ anonId: HINT, userId: null });
+  });
+
+  test("oversized batches are dropped whole", async () => {
+    if (!available) return;
+    await database.delete(schema.events);
+    const events = Array.from({ length: 26 }, () => ({ name: "clicked", path: "/", target: "x" }));
+    expect((await POST(beacon({ events, hint: HINT }))).status).toBe(204);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await database.select().from(schema.events)).toEqual([]);
+  });
+
   test("a bad hint gets a fresh anonymous id", async () => {
     if (!available) return;
     await database.delete(schema.events);
@@ -217,5 +262,36 @@ describe("the beacon", () => {
     expect(value).toMatch(/^[0-9a-f-]{36}$/);
     const [row] = await recorded(1);
     expect(row!.anonId).toBe(value!);
+  });
+});
+
+describe("writes", () => {
+  test("a browser is tied to a person once, and a visit counted once a day, however often they're recorded", async () => {
+    if (!available) return;
+    await database.delete(schema.events);
+    const [person] = await database.insert(schema.users).values({ name: "Analytics", email: "user@example.com" }).returning();
+    await Promise.all([recordIdentified(database, person!.id, HINT), recordIdentified(database, person!.id, HINT), recordDailyVisit(database, person!.id, HINT), recordDailyVisit(database, person!.id, HINT)]);
+    const rows = await database.select().from(schema.events);
+    expect(rows.map((row) => row.name).sort()).toEqual(["dashboard_visit", "identified"]);
+    await database.delete(schema.users);
+  });
+
+  test("an analytics write gives way to a lock instead of waiting on it", async () => {
+    if (!available) return;
+    await database.delete(schema.events);
+    // Something holds the events table (a migration, say): the write is dropped after a short wait, not queued behind it.
+    const holder = await database.$client.reserve();
+    await holder`begin`;
+    await holder`lock table events in access exclusive mode`;
+    const started = performance.now();
+    const error = await recordEvent(database, { name: "page_view", anonId: HINT, props: { path: "/" } }).then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+    const waited = performance.now() - started;
+    await holder`rollback`;
+    holder.release();
+    expect(error).toBeDefined();
+    expect(waited).toBeLessThan(1_500);
   });
 });

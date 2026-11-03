@@ -8,7 +8,7 @@ import { count, percent } from "@/lib/admin-format";
 import { outcomes, parseRange, ratio, survival } from "@/lib/admin-metrics";
 import { SCAN_KIND_LABEL, SEVERITIES } from "@/lib/format";
 import { requireAdmin } from "@/server/admin";
-import { db } from "@/server/db";
+import { replicaDb } from "@/server/db";
 
 export const metadata: Metadata = { title: "Quality · Admin · Sandchest" };
 
@@ -28,7 +28,7 @@ const STATUS_COLUMNS = [
 export default async function QualityPage({ searchParams }: Props) {
   await requireAdmin();
   const range = parseRange((await searchParams).range);
-  const [scans, findings, activity] = await Promise.all([adminScanTallies(db(), range), adminFindingTallies(db(), range), adminFindingActivity(db(), range)]);
+  const [scans, findings, activity] = await Promise.all([adminScanTallies(replicaDb(), range), adminFindingTallies(replicaDb(), range), adminFindingActivity(replicaDb(), range)]);
 
   const kept = survival(scans);
   const result = outcomes(findings);

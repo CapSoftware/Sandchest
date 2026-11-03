@@ -7,8 +7,8 @@
  * immediate. IP addresses are not recorded and telemetry is off.
  */
 import { timingSafeEqual } from "node:crypto";
-import { recordEvent, schema, setGithubIdentity } from "@sandchest/db";
-import { anonId } from "./analytics";
+import { schema, setGithubIdentity } from "@sandchest/db";
+import { anonId, recordLater } from "./analytics";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
@@ -67,14 +67,14 @@ function createAuth() {
       user: {
         create: {
           after: async (user) => {
-            await recordEvent(db(), { name: "signed_up", userId: user.id, anonId: await anonId() }).catch(() => {});
+            recordLater([{ name: "signed_up", userId: user.id, anonId: await anonId() }]);
           },
         },
       },
       session: {
         create: {
           after: async (session) => {
-            await recordEvent(db(), { name: "signed_in", userId: session.userId, anonId: await anonId() }).catch(() => {});
+            recordLater([{ name: "signed_in", userId: session.userId, anonId: await anonId() }]);
           },
         },
       },
