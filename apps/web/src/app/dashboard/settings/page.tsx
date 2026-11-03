@@ -57,12 +57,10 @@ export default async function SettingsPage() {
             <div>
               <p className="field-legend">Hacker</p>
               <p className="field-help">
-                {org.settings.hacker ? `${readHacker(org.settings.hacker).handle} works for ${org.login}.` : `${org.login} hasn’t recruited its hacker yet.`}{" "}
-                {org.admin && (
-                  <Link className="quiet" href={`/dashboard/recruit?org=${org.id}`}>
-                    {org.settings.hacker ? "Change its look and voice" : "Recruit one"}
-                  </Link>
-                )}
+                {readHacker(org.settings.hacker).handle} works for {org.login}.{" "}
+                <Link className="quiet" href={`/dashboard/hacker?org=${org.id}`}>
+                  {org.admin ? `Customize ${readHacker(org.settings.hacker).handle}` : `Visit ${readHacker(org.settings.hacker).handle}`}
+                </Link>
               </p>
             </div>
             <div>

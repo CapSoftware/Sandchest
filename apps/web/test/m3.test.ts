@@ -13,6 +13,8 @@ import {
   dashboardRepos,
   dashboardScans,
   findingForUser,
+  hackerRecord,
+  userHackers,
   notificationRecipients,
   schema,
   scanForUser,
@@ -362,6 +364,43 @@ describe("overview and scan history", () => {
       expect(nobody.now).toEqual({ pullRequests: 0, reviews: 0, deepScans: 0, found: 0, fixed: 0, credits: 0 });
     } finally {
       await database.$client`delete from scans where id = any(${added.map((row) => row.id)})`;
+    }
+  });
+});
+
+describe("hackers", () => {
+  test("each org's hacker, recruited ones first, and only what the person can see of their work", async () => {
+    if (!available) return;
+    await database.$client`update orgs set settings = settings || ${JSON.stringify({ hacker: { handle: "zora" } })}::jsonb where id = ${ids.org}`;
+    const added = await database
+      .insert(schema.scans)
+      .values([
+        { repoId: ids.web, orgId: ids.org, kind: "pr_review", status: "running", trigger: "webhook", headSha: "h1", prNumber: 9 },
+        // On acme/secret, which Alice can't push to: neither the job nor its size is hers to see.
+        { repoId: ids.secret, orgId: ids.org, kind: "deep", status: "completed", trigger: "manual", headSha: "h2", stats: { loc: 9_000 } },
+      ])
+      .returning({ id: schema.scans.id });
+    try {
+      const hackers = await userHackers(database, ids.alice);
+      // acme has recruited (and is first); Alice's own account hasn't, and she runs both.
+      expect(hackers.map((h) => [h.login, h.admin])).toEqual([
+        ["acme", true],
+        ["alice", true],
+      ]);
+      expect(hackers[0]).toMatchObject({ hacker: { handle: "zora" }, working: true });
+      expect(hackers[1]).toMatchObject({ hacker: null, working: false });
+      expect(await userHackers(database, "00000000-0000-0000-0000-000000000000")).toEqual([]);
+
+      const record = await hackerRecord(database, ids.alice, ids.org);
+      expect(record.jobs).toEqual({ deep: 1, reviews: 0, other: 0 });
+      expect(record.lines).toBe(0);
+      // Low confidence left out, and acme/secret's critical isn't hers to count.
+      expect({ found: record.found, open: record.open, fixed: record.fixed }).toEqual({ found: 2, open: 2, fixed: 0 });
+      expect(record.active).toMatchObject({ id: added[0]!.id, kind: "pr_review", status: "running", repoFullName: "acme/web" });
+      expect((await dashboardScans(database, ids.alice, { orgId: ids.personal })).length).toBe(0);
+    } finally {
+      await database.$client`delete from scans where id = any(${added.map((row) => row.id)})`;
+      await database.$client`update orgs set settings = settings - 'hacker' where id = ${ids.org}`;
     }
   });
 });

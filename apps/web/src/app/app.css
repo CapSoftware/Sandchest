@@ -26,7 +26,7 @@
   width: 100%;
   max-width: calc(var(--shell) + 2 * var(--gutter));
   margin: 0 auto;
-  padding: 0 var(--gutter);
+  padding: 0 max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
 }
 
 /* ---- Header ----------------------------------------------------------- */
@@ -58,18 +58,11 @@
   image-rendering: pixelated;
 }
 
-/* Five sections (six for operators): on a phone the row scrolls sideways instead of wrapping. */
 .app-nav {
   display: flex;
   gap: 0.25rem;
   height: 100%;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.app-nav::-webkit-scrollbar {
-  display: none;
 }
 
 .app-nav a {
@@ -79,7 +72,9 @@
   padding: 0 0.75rem;
   color: var(--color-dust);
   text-decoration: none;
+  white-space: nowrap;
   transition: color 120ms;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .app-nav a:hover {
@@ -101,6 +96,12 @@
   background: var(--color-gold);
 }
 
+/* Icons are for the phone's tab bar. */
+.app-nav-icon {
+  display: none;
+  flex: none;
+}
+
 .app-user {
   display: flex;
   align-items: center;
@@ -119,37 +120,165 @@
   background: var(--color-seam);
 }
 
-@media (max-width: 40rem) {
+/*
+ * The hacker: a portrait and a name in the display face, on a notched plate
+ * of its own, so it reads as someone, not a section. Gold-edged while their
+ * page is open.
+ */
+.app-hacker {
+  --notch: 2px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  height: 2.5rem;
+  padding: 0 0.85rem 0 0.4rem;
+  margin-right: 0.5rem;
+  background: var(--color-soot);
+  box-shadow: inset 0 0 0 1px var(--color-seam);
+  clip-path: polygon(
+    var(--notch) 0, calc(100% - var(--notch)) 0, calc(100% - var(--notch)) var(--notch), 100% var(--notch),
+    100% calc(100% - var(--notch)), calc(100% - var(--notch)) calc(100% - var(--notch)), calc(100% - var(--notch)) 100%,
+    var(--notch) 100%, var(--notch) calc(100% - var(--notch)), 0 calc(100% - var(--notch)), 0 var(--notch), var(--notch) var(--notch)
+  );
+  color: var(--color-sand);
+  text-decoration: none;
+  transition: box-shadow 120ms, background-color 120ms;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-hacker:hover {
+  background: #1b140e;
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+}
+
+.app-hacker[aria-current="page"] {
+  box-shadow:
+    inset 0 0 0 1px var(--color-gold),
+    inset 0 -3px 0 color-mix(in oklab, var(--color-gold) 35%, transparent);
+}
+
+.app-hacker-pending {
+  width: 7.5rem;
+}
+
+.app-hacker-mark {
+  position: relative;
+  display: flex;
+}
+
+.app-hacker-mark svg {
+  display: block;
+}
+
+/* On a job: a pixel at the hood's shoulder that blinks like a recording light. */
+.app-hacker-busy {
+  position: absolute;
+  top: -1px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  background: var(--color-gold);
+  box-shadow: 0 0 0 2px var(--color-soot);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-hacker-busy {
+    animation: blink 1s steps(1) infinite;
+  }
+}
+
+.app-hacker-name {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  line-height: 1;
+  color: var(--color-bright);
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Narrow laptops and tablets: the person's own name gives way first. */
+@media (max-width: 62rem) {
   .app-header .shell {
-    gap: 0.75rem;
+    gap: 1rem;
   }
   .app-nav a {
-    padding: 0 0.5rem;
-    font-size: 0.875rem;
-    white-space: nowrap;
+    padding: 0 0.55rem;
   }
   .app-nav a[aria-current="page"]::after {
-    left: 0.5rem;
-    right: 0.5rem;
+    left: 0.55rem;
+    right: 0.55rem;
   }
   .app-user-name {
     display: none;
   }
 }
 
-/* Operators see a fourth section; keep it and the avatar on a small phone. */
-@media (max-width: 26rem) {
+/*
+ * Phones: the sections become a tab bar along the foot of the screen, under
+ * the thumb, each with its pixel icon; the header keeps the mark, the hacker
+ * and the person. The bar clears the home indicator.
+ */
+@media (max-width: 44rem) {
   .app-header .shell {
-    gap: 0.5rem;
+    height: 3.5rem;
+  }
+  .app-hacker {
+    margin-right: 0;
+    height: 2.375rem;
+  }
+  .app-nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 30;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 0;
+    height: calc(4rem + env(safe-area-inset-bottom));
+    padding: 0 max(0.25rem, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(0.25rem, env(safe-area-inset-left));
+    border-top: 1px solid var(--color-seam);
+    background: var(--color-void);
   }
   .app-nav a {
-    padding: 0 0.4rem;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0;
+    font-size: 0.6875rem;
+    letter-spacing: 0.01em;
+  }
+  .app-nav-icon {
+    display: block;
+  }
+  .app-nav a[aria-current="page"] .app-nav-icon {
+    color: var(--color-gold);
+  }
+  /* The bar for the current tab moves to the top edge, against the page. */
+  .app-nav a[aria-current="page"]::after {
+    left: 28%;
+    right: 28%;
+    top: -1px;
+    bottom: auto;
+  }
+  .app-nav a:active {
+    background: var(--color-soot);
   }
 }
 
 .app-main {
-  padding-top: clamp(2rem, 6vh, 3.5rem);
+  --main-top: clamp(2rem, 6vh, 3.5rem);
+  padding-top: var(--main-top);
   padding-bottom: 6rem;
+}
+
+@media (max-width: 44rem) {
+  .app-main {
+    --main-top: 1.75rem;
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom));
+  }
 }
 
 /* ---- Page heads -------------------------------------------------------- */

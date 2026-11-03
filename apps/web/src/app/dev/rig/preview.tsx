@@ -102,7 +102,7 @@ function WatchPreview() {
   return (
     <main className="app-main shell" style={{ paddingTop: "2rem" }}>
       <LiveContext.Provider value={live}>
-        <ScanWatch profile={{ ...DEFAULT_HACKER, handle: "Nightjar", room: "neon", phosphor: "cyan" }} repo="acme/storefront" findings={2} recruitHref="/dev/rig" recruited />
+        <ScanWatch profile={{ ...DEFAULT_HACKER, handle: "Nightjar", room: "neon", phosphor: "cyan" }} repo="acme/storefront" findings={2} hackerHref="/dev/rig" />
         <ScanFeed />
       </LiveContext.Provider>
     </main>

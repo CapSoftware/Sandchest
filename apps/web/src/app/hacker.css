@@ -1,0 +1,379 @@
+/*
+ * The hacker's page: them at their desk across the full width under the
+ * header, their name over the dark of the room, then their record. While
+ * customizing, the game menu takes the room's dark left side on wide
+ * screens; on phones the room stays pinned at the top and the menu runs
+ * under it.
+ */
+
+/* The stage runs edge to edge, past the shell; never let it widen the page. */
+body:has(.hq-stage) {
+  overflow-x: clip;
+}
+
+.hq-stage {
+  position: relative;
+  height: clamp(28rem, 74vh, 52rem);
+  margin: calc(-1 * var(--main-top)) calc(50% - 50vw) 0;
+  background: #000;
+  color: var(--color-sand);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.hq-scene {
+  position: absolute;
+  inset: 0;
+}
+
+.hq-scene .rig {
+  width: 100%;
+  height: 100%;
+}
+
+/* Words sit on the room's own dark: deepest at the foot and the left, clear over the hacker. */
+.hq-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(0deg, rgb(0 0 0 / 0.88) 0%, rgb(0 0 0 / 0.35) 34%, transparent 58%),
+    linear-gradient(90deg, rgb(0 0 0 / 0.55) 0%, transparent 46%);
+  transition: background 0.4s ease;
+}
+
+.hq-stage[data-editing] .hq-shade {
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.75) 0%, rgb(0 0 0 / 0.35) 34%, transparent 52%);
+}
+
+/* Lined up with the page's shell, inside a stage as wide as the window. */
+.hq-card,
+.hq-panel {
+  --edge: max(var(--gutter), env(safe-area-inset-left), calc((100% - var(--shell)) / 2));
+}
+
+.hq-card {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 2;
+  padding: 0 var(--edge) clamp(1.75rem, 5vh, 3rem);
+  pointer-events: none;
+}
+
+.hq-card > * {
+  pointer-events: auto;
+}
+
+.hq-of {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.hq-name {
+  margin: 0.35rem 0 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-size: clamp(4.25rem, 13vw, 9.5rem);
+  font-weight: 400;
+  line-height: 0.78;
+  color: var(--color-bright);
+  text-shadow:
+    0 0 0.06em color-mix(in srgb, var(--phosphor) 55%, transparent),
+    0 0 0.5em color-mix(in srgb, var(--phosphor) 28%, transparent);
+}
+
+.hq-line {
+  max-width: 40ch;
+  margin-top: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+  text-wrap: pretty;
+}
+
+.hq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-top: 1.5rem;
+}
+
+/* On a job: a dark pixel on the gold key, blinking like a recording light. */
+.hq-live {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  background: var(--color-void);
+}
+
+.hq-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-right: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.hq-idle-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--phosphor);
+  box-shadow: 0 0 10px var(--phosphor);
+}
+
+.hq-note {
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.hq-hint {
+  position: absolute;
+  right: max(var(--gutter), env(safe-area-inset-right), calc((100% - var(--shell)) / 2));
+  bottom: clamp(1.75rem, 5vh, 3rem);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+
+.hq-hint[data-gone] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq-live {
+    animation: blink 1s steps(1) infinite;
+  }
+}
+
+/* ---- Customizing --------------------------------------------------------------- */
+
+.hq-stage[data-editing] {
+  height: clamp(40rem, 82vh, 54rem);
+}
+
+.hq-panel {
+  position: absolute;
+  top: clamp(1.25rem, 3vh, 2rem);
+  bottom: clamp(1.25rem, 3vh, 2rem);
+  left: var(--edge);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  width: min(25rem, calc(100% - 2 * var(--gutter)));
+  background: rgb(8 6 4 / 0.82);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+}
+
+.hq-panel-body {
+  flex: 1;
+  min-height: 0;
+  padding: 1.5rem 1.5rem 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.hq-panel-title {
+  margin: 0 0 1.25rem;
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  font-weight: 400;
+  line-height: 0.9;
+  color: var(--color-bright);
+}
+
+.hq-panel .onboard-name input {
+  font-size: 2rem;
+}
+
+.hq-panel-foot {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.hq-panel-foot .cap-key-gold {
+  flex: 1;
+}
+
+/*
+ * Phones and tablets: the room pins under the header at the top of the
+ * screen and the menu scrolls beneath it, so every change shows as it's
+ * made. The buttons ride above the tab bar.
+ */
+@media (max-width: 59.99rem) {
+  .hq-stage[data-editing] {
+    height: auto;
+    overflow: visible;
+    background: var(--color-void);
+  }
+  .hq-stage[data-editing] .hq-scene {
+    position: sticky;
+    top: 3.5rem;
+    z-index: 2;
+    height: 44svh;
+  }
+  .hq-stage[data-editing] .hq-shade {
+    background: linear-gradient(0deg, rgb(0 0 0 / 0.5), transparent 30%);
+  }
+  .hq-panel {
+    position: relative;
+    inset: auto;
+    width: auto;
+    padding: 0;
+    background: var(--color-void);
+    border: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .hq-panel-body {
+    padding: 1.5rem var(--edge) 1rem;
+    overflow: visible;
+  }
+  .hq-panel-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding: 0.75rem var(--edge) calc(0.75rem + env(safe-area-inset-bottom));
+    background: rgb(13 10 7 / 0.96);
+  }
+}
+
+@media (max-width: 44rem) {
+  .hq-stage {
+    height: clamp(26rem, 74svh, 40rem);
+  }
+  .hq-stage[data-editing] .hq-scene {
+    height: 40svh;
+  }
+  .hq-panel-foot {
+    bottom: calc(4rem + env(safe-area-inset-bottom));
+    padding-bottom: 0.75rem;
+  }
+  .hq-hint {
+    display: none;
+  }
+}
+
+/* ---- Record --------------------------------------------------------------------- */
+
+.hq-record {
+  margin-top: clamp(2.5rem, 6vh, 3.5rem);
+}
+
+.hq-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--color-seam);
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.hq-stat {
+  display: grid;
+  gap: 0.6rem;
+  padding: 1.5rem;
+  border-left: 1px solid var(--color-seam);
+}
+
+.hq-stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.hq-stat dt {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.hq-stat-value {
+  font-family: var(--font-display);
+  font-size: clamp(2.75rem, 5vw, 3.5rem);
+  line-height: 0.85;
+  color: var(--color-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.hq-stat-foot {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.hq-since {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.hq-record + * {
+  margin-top: 3rem;
+}
+
+.hq-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 3rem 4rem;
+}
+
+.hq-crew-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.75rem 0.75rem;
+  margin: 0 -0.75rem;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 120ms;
+}
+
+.hq-crew-row:hover {
+  background: var(--color-soot);
+}
+
+.hq-crew-name {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.hq-crew-org {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.hq-crew-row .blink {
+  margin-left: auto;
+}
+
+@media (max-width: 52rem) {
+  .hq-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hq-stat {
+    padding: 1.25rem 1rem;
+  }
+  .hq-stat:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .hq-stat:nth-child(n + 3) {
+    border-top: 1px solid var(--color-seam);
+  }
+  .hq-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

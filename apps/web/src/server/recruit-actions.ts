@@ -16,36 +16,24 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { Briefing } from "@/lib/briefing";
-import { HOODIES, MAX_STICKERS, PHOSPHORS, ROOMS, SHELLS, STICKERS, validHandle, VOICES } from "@/lib/hacker";
 import { viewer } from "./access";
 import { autumn, billingEnabled, stripe, stripePublishableKey, syncBilling } from "./billing";
 import { purchase } from "./billing-actions";
 import { briefing } from "./briefing";
 import { config } from "./config";
 import { db } from "./db";
+import { HackerSchema } from "./hacker-schema";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 
 export type RecruitOutcome = { error?: string };
-
-const oneOf = (list: readonly { id: string }[]) => z.enum(list.map((item) => item.id) as [string, ...string[]]);
-
-const Hacker = z.object({
-  handle: z.string().refine(validHandle),
-  hoodie: oneOf(HOODIES),
-  shell: oneOf(SHELLS),
-  phosphor: oneOf(PHOSPHORS),
-  room: oneOf(ROOMS),
-  stickers: z.array(oneOf(STICKERS)).max(MAX_STICKERS),
-  voice: oneOf(VOICES),
-});
 
 const Company = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.union([z.literal(""), z.email().max(254)]),
 });
 
-const Recruitment = z.object({ hacker: Hacker, company: Company, firstTarget: z.uuid().nullable() });
+const Recruitment = z.object({ hacker: HackerSchema, company: Company, firstTarget: z.uuid().nullable() });
 export type RecruitInput = z.input<typeof Recruitment>;
 
 /** What joining buys: credits to start on, and whether auto top-up buys that many again when they run low. */

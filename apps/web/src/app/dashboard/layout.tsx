@@ -1,3 +1,4 @@
+import type { Viewport } from "next";
 import type { ReactNode } from "react";
 import { after } from "next/server";
 import { recordDailyVisit } from "@sandchest/db";
@@ -10,6 +11,9 @@ import { db } from "@/server/db";
 import { sessionRefreshDue } from "@/server/session-token";
 import { redirect } from "next/navigation";
 import "../app.css";
+
+/** Edge to edge on phones with a notch: the tab bar and the shell keep clear of it themselves (safe-area insets). */
+export const viewport: Viewport = { viewportFit: "cover" };
 
 /** People already recorded as visiting today by this server instance, so most page views write nothing. */
 const visited = new Map<string, string>();

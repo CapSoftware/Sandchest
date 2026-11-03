@@ -24,7 +24,8 @@ import {
   type Choice,
   type HackerProfile,
 } from "@/lib/hacker";
-import { loadFonts, pageFonts, stickerDataUrl } from "@/components/rig/art";
+import { HandleField } from "@/components/hacker/handle-field";
+import { LookMenu, LOOKS } from "@/components/hacker/look-menu";
 import { recruitPainter, type RecruitModel, type RecruitStep } from "@/components/rig/paint-recruit";
 import { RigView } from "@/components/rig/rig-view";
 import type { Painter } from "@/components/rig/screen";
@@ -45,19 +46,6 @@ const STEP_INFO: Record<StepId, { name: string; shot: ShotName }> = {
   plan: { name: "Credits", shot: "preview" },
   pay: { name: "Pay", shot: "preview" },
 };
-
-/** What can be customized, in order, and what the camera turns to for each. */
-const LOOKS = [
-  { id: "hoodie", name: "Hoodie", shot: "hood" },
-  { id: "shell", name: "Laptop", shot: "rig" },
-  { id: "stickers", name: "Stickers", shot: "rig" },
-  { id: "phosphor", name: "Screen", shot: "screen" },
-  { id: "room", name: "Room", shot: "wide" },
-  { id: "voice", name: "Voice", shot: "preview" },
-] as const satisfies readonly { id: string; name: string; shot: ShotName }[];
-
-/** How long the pointer rests on a line of the look menu before the camera turns to it. */
-const LOOK_DWELL_MS = 220;
 
 /** How far right the picture sits on the Hacker step, to leave the left side for the panel. */
 const SHIFT = 0.17;
@@ -838,114 +826,19 @@ function Hacker({
   setLook: (at: number) => void;
 }) {
   const handleOk = validHandle(profile.handle);
-  const menu = useRef<HTMLDivElement>(null);
   const name = useRef<HTMLInputElement>(null);
-  // The lit line, read by the window's key listener as well as here.
-  const lit = useRef(look);
-  lit.current = look;
-  const move = (by: number) => {
-    const rows = [...(menu.current?.querySelectorAll<HTMLElement>("[data-look]") ?? [])];
-    const from = rows.findIndex((r) => r.contains(document.activeElement));
-    const to = (from < 0 ? lit.current : from) + by;
-    if (to < 0) return name.current?.focus();
-    const row = rows[Math.min(rows.length - 1, to)];
-    (row?.querySelector<HTMLInputElement>("input:checked") ?? row?.querySelector<HTMLInputElement>("input:not(:disabled)"))?.focus();
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-      event.preventDefault();
-      move(event.key === "ArrowUp" ? -1 : 1);
-    }
-  };
-  // The arrows work from anywhere on the step, not only once a line has focus: ↑↓ pick a line, ←→ change the
-  // one that's lit (by focus or by the pointer). Inside the name field and on a choice, the field answers.
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
-      if (!vertical && event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const at = document.activeElement;
-      if (at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement || at instanceof HTMLSelectElement) return;
-      event.preventDefault();
-      if (vertical) return move(event.key === "ArrowUp" ? -1 : 1);
-      const rows = [...(menu.current?.querySelectorAll<HTMLElement>("[data-look]") ?? [])];
-      const row = rows.find((r) => r.contains(at)) ?? rows[Math.max(0, lit.current)];
-      const choices = [...(row?.querySelectorAll<HTMLInputElement>("input:not(:disabled)") ?? [])];
-      if (choices.length === 0) return;
-      if (choices[0]!.type === "checkbox") return choices[event.key === "ArrowLeft" ? choices.length - 1 : 0]!.focus();
-      const from = Math.max(0, choices.findIndex((c) => c.checked));
-      const next = choices[(from + (event.key === "ArrowLeft" ? -1 : 1) + choices.length) % choices.length]!;
-      next.click();
-      next.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // move reads the menu and the lit line through refs, so the first one is enough.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // The pointer has to rest on a line before the camera turns to it, so sweeping across the menu doesn't
-  // send the camera around the room after every line it crosses. Focus turns it at once.
-  const dwell = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(dwell.current), []);
-  const row = (at: number) => ({
-    "data-look": LOOKS[at]!.id,
-    "data-on": look === at || undefined,
-    onFocus: () => {
-      clearTimeout(dwell.current);
-      setLook(at);
-    },
-    onPointerEnter: () => {
-      clearTimeout(dwell.current);
-      dwell.current = setTimeout(() => setLook(at), LOOK_DWELL_MS);
-    },
-    onPointerLeave: () => clearTimeout(dwell.current),
-  });
-  const voices = VOICES.map((v) => ({ ...v, note: `“${aside(v.id, "finding", 1)}”` }));
+  const move = useRef<((by: number) => void) | null>(null);
   return (
     <>
       <Title heading={heading}>Your hacker</Title>
       <label className="onboard-label onboard-name-label" htmlFor="onboard-handle">
         Name
       </label>
-      <div className="onboard-name">
-        <input
-          id="onboard-handle"
-          ref={name}
-          value={profile.handle}
-          onChange={(event) => update({ handle: event.target.value.slice(0, HANDLE_MAX) })}
-          onFocus={() => setLook(-1)}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              move(1);
-            }
-          }}
-          maxLength={HANDLE_MAX}
-          autoComplete="off"
-          spellCheck={false}
-          aria-invalid={!handleOk || undefined}
-          aria-describedby="handle-help"
-        />
-        <button type="button" onClick={() => update({ handle: rollHandle(profile.handle) })}>
-          <Dice /> Roll
-        </button>
-      </div>
+      <HandleField id="onboard-handle" inputRef={name} profile={profile} update={update} onFocus={() => setLook(-1)} onDown={() => move.current?.(1)} />
       <p id="handle-help" className={handleOk ? "onboard-help" : "onboard-help onboard-bad"}>
         {handleOk ? "The name on their scans and reviews." : "Start with a letter or number, and keep it to 16 characters."}
       </p>
-
-      <div className="onboard-looks" ref={menu} onKeyDown={onKeyDown} role="group" aria-label="Look">
-        <Cycle {...row(0)} legend="Hoodie" group="hoodie" items={HOODIES} value={profile.hoodie} onChange={(hoodie) => update({ hoodie })} />
-        <Cycle {...row(1)} legend="Laptop" group="shell" items={SHELLS} value={profile.shell} onChange={(shell) => update({ shell })} />
-        <Stickers {...row(2)} value={profile.stickers} onChange={(stickers) => update({ stickers })} />
-        <Cycle {...row(3)} legend="Screen" group="phosphor" items={PHOSPHORS} value={profile.phosphor} onChange={(phosphor) => update({ phosphor })} />
-        <Cycle {...row(4)} legend="Room" group="room" items={ROOMS} value={profile.room} onChange={(room) => update({ room })} />
-        <Cycle {...row(5)} legend="Voice" group="voice" items={voices} value={profile.voice} onChange={(voice) => update({ voice })} />
-      </div>
-      {/* The lit line's description, in one place with its height kept, so lighting a line never moves the menu. */}
-      <p className="onboard-look-detail" aria-hidden="true">
-        {look === 1 ? SHELLS.find((s) => s.id === profile.shell)?.note : look === 4 ? ROOMS.find((r) => r.id === profile.room)?.note : look === 5 ? voices.find((v) => v.id === profile.voice)?.note : null}
-      </p>
+      <LookMenu profile={profile} update={update} look={look} setLook={setLook} onTop={() => name.current?.focus()} move={move} />
     </>
   );
 }
@@ -1338,111 +1231,7 @@ function DemoCard({ address }: { address: boolean }) {
   );
 }
 
-// ---- Menu lines ------------------------------------------------------------------
-
-type RowProps = { "data-look": string; "data-on": true | undefined; onFocus: () => void; onPointerEnter: () => void; onPointerLeave: () => void };
-
-/**
- * One menu line: the name, ◀ the value ▶, and a pip for each choice. The
- * pips are the radio buttons, so ←→ (and clicking a pip) choose natively.
- */
-function Cycle({
-  legend,
-  group,
-  items,
-  value,
-  onChange,
-  ...row
-}: RowProps & { legend: string; group: string; items: readonly (Choice & { color?: string })[]; value: string; onChange: (id: string) => void }) {
-  const at = Math.max(0, items.findIndex((item) => item.id === value));
-  const chosen = items[at]!;
-  const step = (by: number) => onChange(items[(at + by + items.length) % items.length]!.id);
-  return (
-    <fieldset className="onboard-look" {...row}>
-      <legend className="onboard-look-name">{legend}</legend>
-      <div className="onboard-cycle">
-        <button type="button" tabIndex={-1} aria-hidden="true" className="onboard-arrow" onClick={() => step(-1)}>
-          <Arrow left />
-        </button>
-        <span className="onboard-look-value" aria-hidden="true">
-          {chosen.color && <span className="onboard-chip" style={{ background: chosen.color }} />}
-          {chosen.label}
-        </span>
-        <button type="button" tabIndex={-1} aria-hidden="true" className="onboard-arrow" onClick={() => step(1)}>
-          <Arrow />
-        </button>
-      </div>
-      <div className="onboard-pips">
-        {items.map((item) => (
-          <label key={item.id} className="onboard-pip" data-on={item.id === value || undefined} title={item.label} style={item.color ? ({ "--swatch": item.color } as CSSProperties) : undefined}>
-            <input type="radio" name={`look-${group}`} checked={item.id === value} onChange={() => onChange(item.id)} />
-            <span className="sr-only">{item.note ? `${item.label}: ${item.note}` : item.label}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-/** Stickers: up to four, so checkboxes in place of the arrows. ←→ move between them; space sticks one on. */
-function Stickers({ value, onChange, ...row }: RowProps & { value: string[]; onChange: (ids: string[]) => void }) {
-  const [art, setArt] = useState<Record<string, string>>({});
-  useEffect(() => {
-    let alive = true;
-    const fonts = pageFonts();
-    loadFonts(fonts)
-      .then(() => Promise.all(STICKERS.map(async (s) => [s.id, await stickerDataUrl(s.id, fonts)] as const)))
-      .then((pairs) => alive && setArt(Object.fromEntries(pairs)));
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    const boxes = [...event.currentTarget.querySelectorAll<HTMLInputElement>("input")];
-    const at = boxes.indexOf(event.target as HTMLInputElement);
-    if (at < 0) return;
-    event.preventDefault();
-    boxes[Math.max(0, Math.min(boxes.length - 1, at + (event.key === "ArrowLeft" ? -1 : 1)))]?.focus();
-  };
-  return (
-    <fieldset className="onboard-look" {...row}>
-      <legend className="onboard-look-name">Stickers</legend>
-      <span className="onboard-look-value">{value.length === 0 ? "None" : `${value.length} of ${MAX_STICKERS}`}</span>
-      <div className="onboard-stickers" onKeyDown={onKeyDown}>
-        {STICKERS.map((sticker) => {
-          const on = value.includes(sticker.id);
-          const full = !on && value.length >= MAX_STICKERS;
-          return (
-            <label key={sticker.id} className="onboard-sticker" data-on={on || undefined} data-off={full || undefined} title={sticker.label}>
-              <input type="checkbox" checked={on} disabled={full} onChange={() => onChange(on ? value.filter((v) => v !== sticker.id) : [...value, sticker.id])} />
-              {art[sticker.id] ? <img src={art[sticker.id]} alt="" width={40} height={40} /> : <span className="onboard-sticker-blank" />}
-              <span className="sr-only">{sticker.label}</span>
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-}
-
 // ---- Pixel icons -----------------------------------------------------------------
-
-function Arrow({ left }: { left?: boolean }) {
-  return (
-    <svg width="10" height="10" viewBox="0 0 5 5" aria-hidden="true" shapeRendering="crispEdges" style={left ? { transform: "scaleX(-1)" } : undefined}>
-      <path fill="currentColor" d="M1 0h1v1H1zM2 1h1v1H2zM3 2h1v1H3zM2 3h1v1H2zM1 4h1v1H1z" />
-    </svg>
-  );
-}
-
-function Dice() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 7 7" aria-hidden="true" shapeRendering="crispEdges">
-      <path fill="currentColor" d="M0 0h7v7H0zM1 1v5h5V1zM2 2h1v1H2zM4 4h1v1H4zM3 3h1v1H3z" fillRule="evenodd" />
-    </svg>
-  );
-}
 
 function Check() {
   return (

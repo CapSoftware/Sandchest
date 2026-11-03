@@ -1,4 +1,4 @@
-import { dashboardRepos, orgForAdmin, scanForUser } from "@sandchest/db";
+import { dashboardRepos, scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { HoverLink } from "@/components/app/hover-link";
@@ -42,12 +42,10 @@ export default async function ScanPage({ params }: Params) {
   const user = await viewer();
   const live = ACTIVE.has(scan.status);
   // A finished deep scan can be run again from here: the repo's Dig key, priced for its org.
-  const [admin, again] = await Promise.all([
-    orgForAdmin(db(), user.id, scan.orgId).then((org) => !!org),
+  const again =
     scan.kind === "deep" && !live
-      ? dashboardRepos(db(), user.id, { repoId: repo.id }).then(async ([row]) => (row ? { repo: row, plan: (await orgPlans([row])).get(row.orgId) } : undefined))
-      : undefined,
-  ]);
+      ? await dashboardRepos(db(), user.id, { repoId: repo.id }).then(async ([row]) => (row ? { repo: row, plan: (await orgPlans([row])).get(row.orgId) } : undefined))
+      : undefined;
   const shown = findings.filter((finding) => finding.confidence !== "low");
   const stats = (scan.stats ?? {}) as { loc?: number; checked?: number; fixed?: number };
 
@@ -90,7 +88,7 @@ export default async function ScanPage({ params }: Params) {
 
         {scan.error && <p className="scan-error">{scan.error}</p>}
 
-        <ScanWatch profile={readHacker(org.hacker)} repo={repo.fullName} findings={shown.length} recruitHref={admin ? `/dashboard/recruit?org=${scan.orgId}` : null} recruited={!!org.hacker} />
+        <ScanWatch profile={readHacker(org.hacker)} repo={repo.fullName} findings={shown.length} hackerHref={`/dashboard/hacker?org=${scan.orgId}`} />
 
         <dl className="stats">
           <ScanClock />

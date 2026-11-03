@@ -1,0 +1,151 @@
+/*
+ * Keycaps: the game's buttons. A face on a darker skirt, like a key on a
+ * keyboard, cut on the 2px pixel corner; pressing sinks the face into the
+ * skirt. Quiet ones are dark caps, the one way on is the gold cap with its
+ * rust skirt. `.keycap` is a key's legend: the shortcut, printed small.
+ */
+.cap-key {
+  --cap: #241b13;
+  --cap-hover: #2f241a;
+  --cap-top: #3d3024;
+  --cap-skirt: #050302;
+  --cap-ink: var(--color-sand);
+  --cap-notch: polygon(
+    2px 0, calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px, 100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px),
+    calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px), 0 calc(100% - 2px), 0 2px, 2px 2px
+  );
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--cap-ink);
+  text-decoration: none;
+  cursor: pointer;
+  isolation: isolate;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* The skirt: the key's side, showing under the face. */
+.cap-key::before {
+  content: "";
+  position: absolute;
+  inset: 3px 0 0;
+  z-index: -1;
+  background: var(--cap-skirt);
+  clip-path: var(--cap-notch);
+}
+
+.cap-key-face {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+  padding: 0 0.95rem;
+  background: var(--cap);
+  color: var(--cap-ink);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  clip-path: var(--cap-notch);
+  box-shadow:
+    inset 0 2px 0 var(--cap-top),
+    inset 0 0 0 1px rgb(255 243 220 / 0.06);
+  transition:
+    transform 70ms ease-out,
+    background-color 120ms,
+    box-shadow 120ms;
+}
+
+.cap-key:not(:disabled):hover .cap-key-face {
+  background: var(--cap-hover);
+}
+
+.cap-key:not(:disabled):active .cap-key-face {
+  transform: translateY(3px);
+  box-shadow: inset 0 1px 0 var(--cap-top);
+}
+
+/* Held down: a toggle that's on stays pressed in, lit in the screen's colour. */
+.cap-key[aria-pressed="true"] .cap-key-face {
+  transform: translateY(2px);
+  color: var(--phosphor, var(--color-gold));
+  box-shadow:
+    inset 0 1px 0 var(--cap-top),
+    inset 0 0 0 1px color-mix(in srgb, var(--phosphor, var(--color-gold)) 45%, transparent);
+}
+
+.cap-key:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 3px;
+}
+
+.cap-key:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cap-key-gold {
+  --cap: var(--color-gold);
+  --cap-hover: var(--color-gold-light);
+  --cap-top: #ffe08a;
+  --cap-skirt: var(--color-rust);
+  --cap-ink: var(--color-void);
+}
+
+.cap-key-gold .cap-key-face {
+  font-weight: 600;
+}
+
+/* An icon alone: a square key. */
+.cap-key-icon .cap-key-face {
+  width: 2.5rem;
+  padding: 0;
+}
+
+/* The part of a key's label after a seam, such as "Watch" on a job. */
+.cap-key-go {
+  margin-left: 0.15rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid rgb(0 0 0 / 0.25);
+}
+
+.keycap {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.45rem;
+  height: 1.3rem;
+  padding: 0 0.3rem;
+  border: 1px solid rgb(255 243 220 / 0.2);
+  border-bottom-width: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.cap-key-gold .keycap {
+  border-color: rgb(0 0 0 / 0.3);
+}
+
+/* Shortcuts mean nothing without a keyboard. */
+@media (pointer: coarse) {
+  .keycap {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cap-key-face {
+    transition: none;
+  }
+}

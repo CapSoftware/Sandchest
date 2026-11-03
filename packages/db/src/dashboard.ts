@@ -507,6 +507,7 @@ function utcDay(date: Date): string {
 
 export interface ScanFilters {
   repoId?: string;
+  orgId?: string;
   kind?: "recon" | "pr_review" | "deep" | "fix_check";
   /** Only scans created before this, for the next page. */
   before?: Date;
@@ -532,6 +533,7 @@ export interface ScanListItem {
 export async function dashboardScans(database: Db, userId: string, filters: ScanFilters = {}, limit = 50): Promise<ScanListItem[]> {
   const where: SQL[] = [canSee(userId), eq(repos.enabled, true)];
   if (filters.repoId) where.push(eq(scans.repoId, filters.repoId));
+  if (filters.orgId) where.push(eq(scans.orgId, filters.orgId));
   if (filters.kind) where.push(eq(scans.kind, filters.kind));
   if (filters.before) where.push(sql`${scans.createdAt} < ${filters.before.toISOString()}::timestamptz`);
   const reported = sql`${findings.id} in (select jsonb_array_elements_text(coalesce(${scans.stats} -> 'findingIds', '[]'::jsonb))::uuid) and ${findings.confidence} <> 'low'`;
@@ -567,6 +569,97 @@ export async function dashboardScans(database: Db, userId: string, filters: Scan
     durationMs: row.durationMs ?? (startedAt && row.finishedAt ? row.finishedAt.getTime() - startedAt.getTime() : null),
     credits: Number(row.credits),
   }));
+}
+
+// ---- Hackers ----------------------------------------------------------------
+
+export interface UserHacker {
+  orgId: string;
+  login: string;
+  /** The org's hacker as stored, unchecked; null before it recruits one. */
+  hacker: unknown;
+  /** Whether the user may change it. */
+  admin: boolean;
+  /** Whether a scan the user can see is under way. */
+  working: boolean;
+}
+
+/**
+ * The hackers a user works with: one per installed org they administer or can
+ * see a repository in. Recruited ones first, then the orgs they administer,
+ * then by name. One query.
+ */
+export async function userHackers(database: Db, userId: string): Promise<UserHacker[]> {
+  const rows = await database.execute<{ id: string; login: string; hacker: unknown; admin: boolean; working: boolean }>(sql`
+    select o.id, o.github_login as login, o.settings -> 'hacker' as hacker,
+      exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id) as admin,
+      exists (
+        select 1 from ${scans} s join ${permissionCache} pc on pc.repo_id = s.repo_id and pc.user_id = ${userId}
+        where s.org_id = o.id and s.status in ('queued', 'running', 'publishing')
+      ) as working
+    from ${orgs} o
+    where o.installation_id is not null and (
+      exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id)
+      or exists (select 1 from ${repos} r join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId} where r.org_id = o.id and r.enabled)
+    )
+    order by (o.settings ? 'hacker') desc, 4 desc, o.github_login
+  `);
+  return rows.map((row) => ({ orgId: row.id, login: row.login, hacker: row.hacker ?? null, admin: row.admin, working: row.working }));
+}
+
+export interface HackerRecord {
+  /** Completed scans of each kind. */
+  jobs: { deep: number; reviews: number; other: number };
+  /** Lines read across completed scans. */
+  lines: number;
+  /** Findings reported, low confidence left out, and how many are fixed and open. */
+  found: number;
+  fixed: number;
+  open: number;
+  /** The first scan's time: when they started work. */
+  since: Date | null;
+  /** The scan under way, if any: the newest one queued or running. */
+  active: { id: string; kind: string; status: string; repoFullName: string } | null;
+}
+
+/** What an org's hacker has done, over the repositories the user can see. One query. */
+export async function hackerRecord(database: Db, userId: string, orgId: string): Promise<HackerRecord> {
+  const visible = sql`select r.id from ${repos} r join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId} where r.enabled and r.org_id = ${orgId}`;
+  const [row] = await database.execute<{
+    deep: number;
+    reviews: number;
+    other: number;
+    lines: string | null;
+    since: string | null;
+    found: number;
+    fixed: number;
+    open: number;
+    active: { id: string; kind: string; status: string; repoFullName: string } | null;
+  }>(sql`
+    with s as (select id, repo_id, kind, status, stats, created_at from ${scans} where org_id = ${orgId} and repo_id in (${visible})),
+         f as (select status from ${findings} where repo_id in (${visible}) and confidence <> 'low')
+    select
+      (select count(*) from s where status = 'completed' and kind = 'deep')::int as deep,
+      (select count(*) from s where status = 'completed' and kind = 'pr_review')::int as reviews,
+      (select count(*) from s where status = 'completed' and kind not in ('deep', 'pr_review'))::int as other,
+      (select sum((stats ->> 'loc')::bigint) from s where status = 'completed') as lines,
+      (select min(created_at) from s) as since,
+      (select count(*) from f)::int as found,
+      (select count(*) from f where status = 'fixed')::int as fixed,
+      (select count(*) from f where status = 'open')::int as open,
+      (select json_build_object('id', s.id, 'kind', s.kind, 'status', s.status, 'repoFullName', r.full_name)
+        from s join ${repos} r on r.id = s.repo_id
+        where s.status in ('queued', 'running', 'publishing') order by s.created_at desc limit 1) as active
+  `);
+  return {
+    jobs: { deep: row?.deep ?? 0, reviews: row?.reviews ?? 0, other: row?.other ?? 0 },
+    lines: Number(row?.lines ?? 0),
+    found: row?.found ?? 0,
+    fixed: row?.fixed ?? 0,
+    open: row?.open ?? 0,
+    since: row?.since ? new Date(row.since) : null,
+    active: row?.active ?? null,
+  };
 }
 
 // ---- Settings --------------------------------------------------------------
