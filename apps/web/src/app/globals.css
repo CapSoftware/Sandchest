@@ -276,6 +276,15 @@ html:has(.page) {
   text-decoration: none;
 }
 
+button.hero-alt {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
 .hero-alt:hover {
   color: var(--color-sand);
   text-decoration: underline;

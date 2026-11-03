@@ -81,6 +81,28 @@
   image-rendering: pixelated;
 }
 
+.onboard-exits {
+  justify-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  align-items: center;
+  gap: 0.35rem 1.25rem;
+}
+
+button.onboard-leave {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.onboard-leave.onboard-agent {
+  color: var(--color-gold);
+}
+
 .onboard-leave {
   justify-self: end;
   font-size: 0.8125rem;

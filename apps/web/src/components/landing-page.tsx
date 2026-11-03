@@ -6,6 +6,7 @@ import { HowItWorks } from "@/components/how-it-works";
 import { LiveLines } from "@/components/recruit/live-lines";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
 import { site } from "@/lib/site";
+import { AgentPromptButton } from "./agent-prompt-button";
 
 export type Visitor = "signed-in" | "signed-out";
 
@@ -38,6 +39,7 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
           </p>
           <div className="hero-actions">
             <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted} track="hero-get-started">Get started</HeroKey>
+            <AgentPromptButton className="hero-alt" track="hero-agent-prompt" />
             <a href={site.githubUrl} className="hero-alt" data-track="hero-github">
               <GitHubMark />
               View on GitHub

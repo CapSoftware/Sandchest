@@ -37,6 +37,7 @@ import { checkDiscount, completePayment, loadBriefing, preparePayment, recruit, 
 import type { LiveStats } from "@/server/stats";
 import { CardForm, type CardHandle } from "./card-form";
 import { LiveLines } from "./live-lines";
+import { AgentPromptButton } from "../agent-prompt-button";
 
 type StepId = RecruitStepId;
 
@@ -494,9 +495,12 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
           <img src="/sandchest-logo-dark.svg" alt="" width={120} height={22} />
         </Link>
         <Progress steps={steps} step={step} canEnter={canEnter} go={go} />
-        <Link href={signIn ? "/" : "/dashboard?later=1"} className="onboard-leave">
-          {signIn ? "Back" : brief?.hacker ? "Back to the dashboard" : "Finish later"}
-        </Link>
+        <div className="onboard-exits">
+          <AgentPromptButton className="onboard-leave onboard-agent" track="onboard-agent-prompt" label="Let your agent do it" />
+          <Link href={signIn ? "/" : "/dashboard?later=1"} className="onboard-leave">
+            {signIn ? "Back" : brief?.hacker ? "Back to the dashboard" : "Finish later"}
+          </Link>
+        </div>
       </header>
 
       <form ref={form} action={action} className="onboard-hud" onKeyDown={onKeyDown} onSubmit={onSubmit}>
