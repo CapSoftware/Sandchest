@@ -12,6 +12,7 @@ import { saveHacker } from "@/server/hacker-actions";
 import { HandleField } from "./handle-field";
 import { Keycap } from "./keycap";
 import { LookMenu, LOOKS } from "./look-menu";
+import { RadioKeys, useRadio } from "./radio";
 
 /** How far right the picture sits on wide screens: a little to clear the name, more while the customize panel covers the left. */
 const SHIFT = { resting: 0.12, editing: 0.17 };
@@ -46,6 +47,8 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
   const move = useRef<((by: number) => void) | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const edit = useRef<HTMLButtonElement>(null);
+  // Up here, not in the card, so the music carries on while they customize.
+  const radio = useRadio();
 
   // The look as last saved: the server's, or ours the moment a save succeeds (before the page refreshes with it,
   // so the room never flicks back to the old look in between). A new one from the server is taken unless editing.
@@ -98,8 +101,8 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
   useEffect(() => {
     if (editing) name.current?.focus({ preventScroll: true });
   }, [editing]);
-  const keys = useRef({ save, close, open, editing, admin });
-  keys.current = { save, close, open, editing, admin };
+  const keys = useRef({ save, close, open, editing, admin, radio });
+  keys.current = { save, close, open, editing, admin, radio };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -115,6 +118,9 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
       } else if (!k.editing && k.admin && (event.key === "c" || event.key === "C") && !typing && !(at instanceof HTMLTextAreaElement)) {
         event.preventDefault();
         k.open();
+      } else if (!k.editing && k.radio.supported && (event.key === "r" || event.key === "R") && !typing && !(at instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        k.radio.toggle();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -196,6 +202,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
                 </span>
               </button>
             )}
+            <RadioKeys radio={radio} />
           </div>
           {!admin && <p className="hq-note">Only an admin of {login} can change how {profile.handle} looks.</p>}
         </div>

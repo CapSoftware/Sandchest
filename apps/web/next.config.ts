@@ -44,7 +44,8 @@ const nextConfig: NextConfig = {
   async redirects() {
     return appRedirects;
   },
-  // Approving an agent can't happen inside someone else's frame (clickjacking).
+  // Approving an agent can't happen inside someone else's frame (clickjacking). The hacker page's
+  // radio tracks never change under a URL (radio.tsx versions them), so browsers and the CDN keep them.
   async headers() {
     const noFrames = [
       { key: "X-Frame-Options", value: "DENY" },
@@ -53,6 +54,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/device", headers: noFrames },
       { source: "/oauth/:path*", headers: noFrames },
+      { source: "/radio/:file*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
     ];
   },
   async rewrites() {
