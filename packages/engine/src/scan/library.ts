@@ -12,10 +12,11 @@
  *
  * Language-agnostic: every ecosystem the indexer reads lockfiles for publishes a
  * per-version source archive — tar.gz (npm, crates.io, PyPI sdists, RubyGems) or
- * zip (Go modules, PyPI wheels, Maven source jars, Packagist). Downloads are
- * size- and time-capped and cached per process.
+ * zip (Go modules, PyPI wheels, Maven source jars, Packagist). Downloads come
+ * only from registry hosts, are size- and time-capped, inflate to a bounded
+ * size, and are cached per process.
  */
-import { inflateRawSync } from "node:zlib";
+import { gunzipSync, inflateRawSync } from "node:zlib";
 
 export interface LibraryRef {
   ecosystem: string;
@@ -31,7 +32,29 @@ export interface SourceFile {
 const MAX_DOWNLOAD = 40 * 1024 * 1024;
 const MAX_FILE = 400 * 1024;
 const MAX_FILES = 6_000;
+// What one archive may inflate to. Packages are attacker-published, so this is
+// enforced while inflating; the largest common packages unpack to under 200 MB.
+const MAX_UNPACKED = 256 * 1024 * 1024;
+const MAX_ENTRIES = 100_000;
 const FETCH_TIMEOUT_MS = 20_000;
+const MAX_REDIRECTS = 5;
+// Where registries serve metadata and archives from. Packagist and PyPI archive
+// URLs come from metadata the package author writes, and Packagist's point at
+// the code host (GitHub zipballs redirect to codeload).
+const REGISTRY_HOSTS = new Set([
+  "registry.npmjs.org",
+  "static.crates.io",
+  "rubygems.org",
+  "pypi.org",
+  "files.pythonhosted.org",
+  "proxy.golang.org",
+  "repo1.maven.org",
+  "repo.packagist.org",
+  "api.github.com",
+  "codeload.github.com",
+  "gitlab.com",
+  "bitbucket.org",
+]);
 const SOURCE = /\.(rs|rb|py|pyi|js|mjs|cjs|ts|mts|cts|go|java|kt|php|c|h|cc|cpp|hpp|cs|swift|scala|ex|exs)$/i;
 
 // ---- archives ---------------------------------------------------------------
@@ -43,7 +66,7 @@ export function readTar(bytes: Uint8Array): Array<{ path: string; data: Uint8Arr
   const field = (offset: number, length: number) => decoder.decode(bytes.subarray(offset, offset + length)).replace(/\0.*$/s, "");
   let offset = 0;
   let longName: string | undefined;
-  while (offset + 512 <= bytes.length) {
+  while (offset + 512 <= bytes.length && out.length < MAX_ENTRIES) {
     const name = field(offset, 100);
     if (!name) break;
     const size = Number.parseInt(field(offset + 124, 12).trim() || "0", 8);
@@ -91,7 +114,8 @@ export function readZip(bytes: Uint8Array): Array<{ path: string; data: () => Ui
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
     const raw = bytes.subarray(start, start + compressed);
     if (method !== 0 && method !== 8) continue;
-    out.push({ path, data: () => (method === 0 ? raw : new Uint8Array(inflateRawSync(raw))) });
+    // No file over MAX_FILE is read, so never inflate an entry past it.
+    out.push({ path, data: () => (method === 0 ? raw : new Uint8Array(inflateRawSync(raw, { maxOutputLength: MAX_FILE + 1 }))) });
   }
   return out;
 }
@@ -100,8 +124,23 @@ export function readZip(bytes: Uint8Array): Array<{ path: string; data: () => Ui
 
 type Fetch = typeof fetch;
 
+/** GET from a registry host over https, checking every redirect hop the same way. */
+async function get(url: string, fetchImpl: Fetch): Promise<Response> {
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const target = new URL(url);
+    if (target.protocol !== "https:" || !REGISTRY_HOSTS.has(target.host)) throw new Error("archive is not on a known registry host");
+    const response = await fetchImpl(target.href, { signal, redirect: "manual" });
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status >= 400 || !location) return response;
+    await response.body?.cancel();
+    url = new URL(location, target).href;
+  }
+  throw new Error("too many redirects");
+}
+
 async function download(url: string, fetchImpl: Fetch): Promise<Uint8Array> {
-  const response = await fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" });
+  const response = await get(url, fetchImpl);
   if (!response.ok) throw new Error(`${response.status} from ${new URL(url).host}`);
   const length = Number(response.headers.get("content-length") ?? 0);
   if (length > MAX_DOWNLOAD) throw new Error("archive too large");
@@ -111,20 +150,42 @@ async function download(url: string, fetchImpl: Fetch): Promise<Uint8Array> {
 }
 
 async function json(url: string, fetchImpl: Fetch): Promise<any> {
-  const response = await fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const response = await get(url, fetchImpl);
   if (!response.ok) throw new Error(`${response.status} from ${new URL(url).host}`);
   return response.json();
 }
 
-const gunzip = (bytes: Uint8Array) => Bun.gunzipSync(bytes as Uint8Array<ArrayBuffer>);
+const tooLarge = (error: unknown) => (error as { code?: string }).code === "ERR_BUFFER_TOO_LARGE";
+
+function gunzip(bytes: Uint8Array): Uint8Array {
+  try {
+    return gunzipSync(bytes, { maxOutputLength: MAX_UNPACKED });
+  } catch (error) {
+    throw tooLarge(error) ? new Error("archive unpacks too large") : error;
+  }
+}
 
 function sources(entries: Array<{ path: string; data: Uint8Array | (() => Uint8Array) }>): SourceFile[] {
   const decoder = new TextDecoder();
   const files: SourceFile[] = [];
+  let inflated = 0;
   for (const entry of entries) {
     if (files.length >= MAX_FILES) break;
     if (!SOURCE.test(entry.path) || /(^|\/)(tests?|spec|examples?|benches|__tests__)\//i.test(entry.path)) continue;
-    const data = typeof entry.data === "function" ? entry.data() : entry.data;
+    let data = entry.data;
+    if (typeof data === "function") {
+      // Zip entries inflate one at a time, here, so bound their total here too.
+      let read: Uint8Array | undefined;
+      try {
+        read = data();
+      } catch (error) {
+        if (!tooLarge(error)) throw error;
+      }
+      inflated += read?.length ?? MAX_FILE + 1;
+      if (inflated > MAX_UNPACKED) throw new Error("archive unpacks too large");
+      if (!read) continue;
+      data = read;
+    }
     if (data.length > MAX_FILE) continue;
     files.push({ path: entry.path, text: decoder.decode(data) });
   }

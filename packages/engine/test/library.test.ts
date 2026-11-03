@@ -120,6 +120,96 @@ describe("fetchLibrary", () => {
   });
 });
 
+/**
+ * A fake network: `routes` answers by URL, and anything else answers 200 like
+ * an internal service would. Redirects are followed unless the caller asks for
+ * `redirect: "manual"`, as real fetch does. Every URL requested is recorded.
+ */
+function network(routes: Record<string, () => Response>) {
+  const requested: string[] = [];
+  const fake = (async (input: string | URL, init?: RequestInit) => {
+    let url = String(input);
+    for (;;) {
+      requested.push(url);
+      const response = routes[url]?.() ?? new Response(zip({ "leak.php": "function verify() { return 'internal'; }" }));
+      const location = response.headers.get("location");
+      if (init?.redirect === "manual" || !location) return response;
+      url = new URL(location, url).href;
+    }
+  }) as unknown as typeof fetch;
+  return { fake, requested };
+}
+
+const redirect = (to: string) => () => new Response(null, { status: 302, headers: { location: to } });
+
+describe("fetchLibrary only downloads from registry hosts", () => {
+  const packagist = "https://repo.packagist.org/p2/acme/app.json";
+  const meta = (url: string) => () => Response.json({ packages: { "acme/app": [{ version: "1.0.0", dist: { url } }] } });
+
+  test("a Packagist dist URL on an internal host is never fetched", async () => {
+    const { fake, requested } = network({ [packagist]: meta("http://169.254.169.254/latest/meta-data/") });
+    await expect(fetchLibrary({ ecosystem: "Packagist", name: "acme/app", version: "1.0.0" }, fake)).rejects.toThrow();
+    expect(requested).toEqual([packagist]);
+  });
+
+  test("a PyPI wheel URL off the registry is never fetched", async () => {
+    const release = "https://pypi.org/pypi/acme/1.0.0/json";
+    const { fake, requested } = network({
+      [release]: () => Response.json({ urls: [{ url: "https://10.0.0.5/acme-1.0.0-py3-none-any.whl", packagetype: "bdist_wheel", filename: "acme-1.0.0-py3-none-any.whl" }] }),
+    });
+    await expect(fetchLibrary({ ecosystem: "PyPI", name: "acme", version: "1.0.0" }, fake)).rejects.toThrow();
+    expect(requested).toEqual([release]);
+  });
+
+  test("a registry redirect to an internal host is not followed", async () => {
+    const tgz = "https://registry.npmjs.org/acme/-/acme-1.0.0.tgz";
+    const { fake, requested } = network({ [tgz]: redirect("http://127.0.0.1:6379/") });
+    await expect(fetchLibrary({ ecosystem: "npm", name: "acme", version: "1.0.0" }, fake)).rejects.toThrow();
+    expect(requested).toEqual([tgz]);
+  });
+
+  test("Packagist zipballs still download through the code host's redirect", async () => {
+    const zipball = "https://api.github.com/repos/acme/app/zipball/abc123";
+    const codeload = "https://codeload.github.com/acme/app/legacy.zip/abc123";
+    const { fake, requested } = network({
+      [packagist]: meta(zipball),
+      [zipball]: redirect(codeload),
+      [codeload]: () => new Response(zip({ "acme-app-abc123/src/Verify.php": "function verify() {}" })),
+    });
+    const files = await fetchLibrary({ ecosystem: "Packagist", name: "acme/app", version: "1.0.0" }, fake);
+    expect(files.map((f) => f.path)).toEqual(["acme-app-abc123/src/Verify.php"]);
+    expect(requested).toEqual([packagist, zipball, codeload]);
+  });
+});
+
+describe("fetchLibrary bounds what an archive unpacks to", () => {
+  test("a gzip that inflates past the cap is refused with a catchable error", async () => {
+    // ~260 KB on the wire, 260 MB of zeros once inflated.
+    const bomb = Bun.gzipSync(new Uint8Array(260 * 1024 * 1024));
+    const fake = (async () => new Response(bomb)) as unknown as typeof fetch;
+    await expect(fetchLibrary({ ecosystem: "npm", name: "acme", version: "1.0.0" }, fake)).rejects.toThrow(/too large/);
+  });
+
+  test("a zip entry is never inflated past the source-file cap", () => {
+    const [, big] = readZip(zip({ "m/a.go": "package m", "m/big.go": "a".repeat(8 * 1024 * 1024) }));
+    expect(() => big!.data()).toThrow();
+  });
+
+  test("a zip whose sources together inflate past the cap is refused", async () => {
+    const files = Object.fromEntries(Array.from({ length: 700 }, (_, i) => [`m/f${i}.go`, "a".repeat(399 * 1024)]));
+    const archive = zip(files);
+    const fake = (async () => new Response(archive)) as unknown as typeof fetch;
+    await expect(fetchLibrary({ ecosystem: "Go", name: "example.com/m", version: "v1.0.0" }, fake)).rejects.toThrow(/too large/);
+  });
+
+  test("oversized zip entries are skipped and the rest still read", async () => {
+    const archive = zip({ "m/a.go": "func A() {}", "m/big.go": "a".repeat(8 * 1024 * 1024), "m/b.go": "func B() {}" });
+    const fake = (async () => new Response(archive)) as unknown as typeof fetch;
+    const files = await fetchLibrary({ ecosystem: "Go", name: "example.com/m", version: "v1.0.0" }, fake);
+    expect(files.map((f) => f.path)).toEqual(["m/a.go", "m/b.go"]);
+  });
+});
+
 describe("findDefinitions", () => {
   const files = [
     { path: "totp/src/lib.rs", text: "impl Totp {\n    pub fn check_current(&self, token: &str) -> Option<u64> {\n        self.check(token, now())\n    }\n}\n// check_current is handy\n" },
