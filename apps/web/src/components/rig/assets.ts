@@ -36,3 +36,16 @@ export const RIG_STILL_MASTERS = {
 } as const;
 
 export type StillKind = keyof typeof RIG_STILL_MASTERS;
+
+/**
+ * The landing band's placeholder: its still, already dithered, as plain
+ * images in the HTML, so the room shows before any script runs or the band
+ * comes near. Drawn by `/dev/rig?view=placeholder&rig-tier=low` as the low
+ * tier draws it, for the band's two shapes: 2:1, and 4:3 where
+ * `narrow.media` matches (the band's own breakpoint in globals.css).
+ * Re-render them with the landing's masters.
+ */
+export const RIG_LANDING_PLACEHOLDER = {
+  wide: { src: "/rig/placeholder-landing-wide.webp", width: 1216, height: 608 },
+  narrow: { src: "/rig/placeholder-landing-narrow.webp", width: 400, height: 300, media: "(max-width: 48rem)" },
+} as const;

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { RigPreview } from "./preview";
 import { StillMaster } from "./still-master";
+import { StillPlaceholder } from "./still-placeholder";
 import "../../app.css";
 import "../../rig.css";
 
@@ -8,6 +9,7 @@ import "../../rig.css";
 export default async function RigPreviewPage({ searchParams }: { searchParams: Promise<{ view?: string; room?: string; shot?: string; hoodie?: string; phosphor?: string; step?: string; kind?: string; tier?: string; claim?: string }> }) {
   if (process.env.NODE_ENV === "production") notFound();
   const { view, room, shot, hoodie, phosphor, step, kind, tier, claim } = await searchParams;
+  if (view === "placeholder") return <StillPlaceholder />;
   if (view === "master") return <StillMaster kind={kind === "landing" ? "landing" : "onboard"} tier={tier === "low" ? "low" : "high"} />;
   return <RigPreview view={view === "watch" || view === "poster" ? view : "recruit"} room={room} shot={shot} hoodie={hoodie} phosphor={phosphor} step={step} claim={claim} />;
 }

@@ -1669,6 +1669,12 @@ body:has(.hacker-at-work) {
 .hacker-at-work .rig {
   aspect-ratio: 2 / 1;
   width: 100%;
+  /* See-through until the scene's first frame is up, so the placeholder under it shows. */
+  background: transparent;
+}
+
+.hacker-at-work .rig,
+.hacker-placeholder {
   mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent), linear-gradient(180deg, transparent, #000 14%, #000 80%, transparent);
   mask-composite: intersect;
 }
@@ -1676,8 +1682,29 @@ body:has(.hacker-at-work) {
 @media (max-width: 48rem) {
   .hacker-at-work .rig {
     aspect-ratio: 4 / 3;
+  }
+  .hacker-at-work .rig,
+  .hacker-placeholder {
     mask-image: linear-gradient(180deg, transparent, #000 12%, #000 85%, transparent);
   }
+}
+
+/*
+ * The scene's first frame, already dithered, under the room from the first
+ * paint. The still and then the scene come up over it; once the scene is
+ * fully in, it goes.
+ */
+.hacker-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hacker-at-work:has(.rig[data-ready]) .hacker-placeholder {
+  visibility: hidden;
+  transition: visibility 0s linear 0.4s;
 }
 
 /* The last call to action, floating over the foot of the room. Only the key takes the pointer, so the rest of the room can still be dragged. */

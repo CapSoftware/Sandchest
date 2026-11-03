@@ -57,7 +57,8 @@ type Props = Omit<RigSceneProps, "active" | "still" | "onReady" | "onSlow" | "ti
   opening?: StillKind;
 };
 
-const stillSpec = (kind: StillKind): StillSpec => ({ ...RIG_STILL_MASTERS[kind], levels: 12, floor: 0.06, vignette: VIGNETTE });
+/** The still for one view, with the dither and vignette the scene draws with. */
+export const stillSpec = (kind: StillKind): StillSpec => ({ ...RIG_STILL_MASTERS[kind], levels: 12, floor: 0.06, vignette: VIGNETTE });
 
 /** How long the picture takes to dip to black, and to come back, when the room changes. */
 const CUT_MS = 170;
