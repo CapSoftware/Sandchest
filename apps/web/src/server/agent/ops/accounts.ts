@@ -2,13 +2,14 @@
 import { orgRepos, updateOrgSettings } from "@sandchest/db";
 import { z } from "zod";
 import { HOODIES, MAX_STICKERS, PHOSPHORS, readHacker, ROOMS, SHELLS, STICKERS, validHandle, VOICES } from "@/lib/hacker";
+import { isUuid } from "@/lib/uuid";
 import { ensureAccess } from "../../access";
 import { track } from "../../analytics";
 import { db } from "../../db";
 import { HackerSchema } from "../../hacker-schema";
 import { ApiError, notAdmin } from "../errors";
 import { AccountRef, flag, int, operation, RepoRef } from "../operation";
-import { isUuid, resolveAccount, visibleAccounts } from "../resolve";
+import { resolveAccount, visibleAccounts } from "../resolve";
 import { accountView, installUrl } from "../views";
 
 const ids = (list: readonly { id: string }[]) => list.map((item) => item.id) as [string, ...string[]];

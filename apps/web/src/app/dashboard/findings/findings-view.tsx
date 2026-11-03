@@ -5,6 +5,7 @@ import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
 import { When } from "@/components/app/when";
 import { SEVERITIES, SEVERITY_LABEL, type Severity } from "@/lib/format";
+import { isUuid } from "@/lib/uuid";
 
 type Status = "open" | "fixed" | "dismissed";
 const STATUSES: Array<{ id: Status; label: string }> = [
@@ -23,7 +24,7 @@ export interface Query {
 export function parse(query: Query) {
   const status = STATUSES.some((s) => s.id === query.status) ? (query.status as Status) : "open";
   const severities = (query.severity ?? "").split(",").filter((s): s is Severity => (SEVERITIES as string[]).includes(s));
-  const repo = query.repo && /^[0-9a-f-]{36}$/.test(query.repo) ? query.repo : undefined;
+  const repo = isUuid(query.repo) ? query.repo : undefined;
   return { status, severities, repo, low: query.low === "1" };
 }
 

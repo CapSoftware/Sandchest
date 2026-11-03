@@ -4,12 +4,10 @@
  * scoped to the person in SQL, exactly as the dashboard's are.
  */
 import { orgForAdmin, repoForUser, settingsOrgs, visibleRepos, type SettingsOrg } from "@sandchest/db";
+import { isUuid } from "@/lib/uuid";
 import { db } from "../db";
 import { ApiError, notAdmin, notFound } from "./errors";
 import type { Context } from "./operation";
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const isUuid = (value: string) => UUID.test(value);
 
 /** The accounts a person can see (admin of, or push access to a repository in), installed ones only. */
 export function visibleAccounts(context: Context): Promise<SettingsOrg[]> {

@@ -2,6 +2,7 @@ import type { ScanFilters, ScanListItem } from "@sandchest/db";
 import { AutoSubmitSelect } from "@/components/app/auto-submit";
 import { HoverLink, Link } from "@/components/app/hover-link";
 import { ScanRows } from "@/components/app/scan-rows";
+import { isUuid } from "@/lib/uuid";
 
 /** Runs on a page. */
 export const PAGE = 50;
@@ -23,7 +24,7 @@ export interface Query {
 
 export function parse(query: Query) {
   const kind = KINDS.find((k) => k.id !== undefined && k.id === query.kind)?.id;
-  const repo = query.repo && /^[0-9a-f-]{36}$/.test(query.repo) ? query.repo : undefined;
+  const repo = isUuid(query.repo) ? query.repo : undefined;
   const before = query.before && !Number.isNaN(Date.parse(query.before)) ? new Date(query.before) : undefined;
   return { kind, repo, before };
 }

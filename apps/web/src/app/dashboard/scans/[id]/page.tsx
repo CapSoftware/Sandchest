@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { PageShape } from "@/components/app/skeleton";
+import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
 import { orgPlans } from "@/server/org-plans";
@@ -12,7 +13,7 @@ type Params = { params: Promise<{ id: string }> };
 
 const load = cache(async (id: string) => {
   const user = await viewer();
-  return /^[0-9a-f-]{36}$/.test(id) ? scanForUser(db(), user.id, id, { events: 1_000 }) : undefined;
+  return isUuid(id) ? scanForUser(db(), user.id, id, { events: 1_000 }) : undefined;
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {

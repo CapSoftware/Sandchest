@@ -1,5 +1,6 @@
 /** The live feed as server-sent events, for people who can see the scan's repository (or operators). */
 import { canSeeScan, feedSince, scanById } from "@sandchest/db";
+import { isUuid } from "@/lib/uuid";
 import { currentUser, ensureAccess } from "@/server/access";
 import { isOperator } from "@/server/auth";
 import { db } from "@/server/db";
@@ -10,7 +11,7 @@ export const maxDuration = 300;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await params;
-  if (!/^[0-9a-f-]{36}$/.test(id)) return Response.json({ error: "not found" }, { status: 404 });
+  if (!isUuid(id)) return Response.json({ error: "not found" }, { status: 404 });
   let viewer: string | null = null;
   if (!isOperator(request)) {
     const user = await currentUser();

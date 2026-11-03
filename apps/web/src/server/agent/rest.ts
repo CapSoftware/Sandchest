@@ -3,11 +3,11 @@
  * out, `Authorization: Bearer <key>`. Path parameters, the query string and
  * a JSON body are merged into the operation's input.
  */
+import { isUuid } from "@/lib/uuid";
 import { ApiError } from "./errors";
 import type { Operation } from "./operation";
 import { OPERATIONS } from "./registry";
 import { appUrl, authenticate, connectHelp, execute } from "./run";
-import { isUuid } from "./resolve";
 
 const HEADERS = {
   "cache-control": "no-store",

@@ -7,6 +7,7 @@
  * clicks on links to other sites keep only the host. No text a person typed
  * or was shown is ever recorded.
  */
+import { isUuid } from "./uuid";
 
 /** The anonymous visitor id: a random UUID in a first-party, HttpOnly cookie, set by the beacon. */
 export const ANON_COOKIE = "sc_aid";
@@ -24,9 +25,6 @@ export type Utm = Partial<Record<(typeof UTM_KEYS)[number], string>>;
 
 export const DEVICES = ["mobile", "tablet", "desktop"] as const;
 export type Device = (typeof DEVICES)[number];
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const isUuid = (value: unknown): value is string => typeof value === "string" && UUID.test(value);
 
 /** A tag, slug or id as recorded: short, and only letters, digits and `._:/-`. */
 const SAFE = /^[A-Za-z0-9._:/-]+$/;
@@ -54,7 +52,7 @@ export function routeOf(path: string): string {
       } catch {
         return ":id";
       }
-      if (UUID.test(decoded) || /^\d+$/.test(decoded) || decoded.length > 40 || !/^[a-z0-9._-]+$/.test(decoded)) return ":id";
+      if (isUuid(decoded) || /^\d+$/.test(decoded) || decoded.length > 40 || !/^[a-z0-9._-]+$/.test(decoded)) return ":id";
       return decoded;
     });
   return `/${segments.join("/")}`;

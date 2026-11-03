@@ -15,7 +15,8 @@ import { randomUUID } from "node:crypto";
 import { MAX_EVENTS_PER_WRITE, type AnalyticsEvent, type EventProps } from "@sandchest/db";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { ANON_COOKIE, ANON_COOKIE_MAX_AGE_S, BOT_AGENT, DEVICES, isUuid, queryOf, routeOf, safeToken, utmOf } from "@/lib/analytics";
+import { ANON_COOKIE, ANON_COOKIE_MAX_AGE_S, BOT_AGENT, DEVICES, queryOf, routeOf, safeToken, utmOf } from "@/lib/analytics";
+import { isUuid } from "@/lib/uuid";
 import { recordLater } from "@/server/analytics";
 
 /** A page's events are a few hundred bytes each. */

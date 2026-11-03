@@ -3,6 +3,7 @@ import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { PageShape } from "@/components/app/skeleton";
+import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
 import { autumn } from "@/server/billing";
 import { db } from "@/server/db";
@@ -15,7 +16,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const params = await searchParams;
   const user = await viewer();
   const client = autumn();
-  const row = client && params.org && /^[0-9a-f-]{36}$/.test(params.org) ? await orgForAdmin(db(), user.id, params.org) : undefined;
+  const row = client && isUuid(params.org) ? await orgForAdmin(db(), user.id, params.org) : undefined;
   if (!client || !row) redirect("/dashboard/settings");
 
   const plan = planById(params.plan);

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { PageShape } from "@/components/app/skeleton";
+import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
 import { orgPlans } from "@/server/org-plans";
@@ -11,7 +12,7 @@ import { HISTORY, RepoView } from "./repo-view";
 type Params = { params: Promise<{ id: string }> };
 
 const load = cache(async (id: string) => {
-  if (!/^[0-9a-f-]{36}$/.test(id)) return undefined;
+  if (!isUuid(id)) return undefined;
   const user = await viewer();
   const [repo] = await dashboardRepos(db(), user.id, { repoId: id });
   return repo ? { user, repo } : undefined;

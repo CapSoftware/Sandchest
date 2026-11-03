@@ -7,7 +7,8 @@
 import { recordEvents, type AnalyticsEvent, type EventName, type EventProps } from "@sandchest/db";
 import { cookies } from "next/headers";
 import { after } from "next/server";
-import { ANON_COOKIE, isUuid } from "@/lib/analytics";
+import { ANON_COOKIE } from "@/lib/analytics";
+import { isUuid } from "@/lib/uuid";
 import { analyticsDb } from "./db";
 
 /** Runs a task after the response when there is one, else at once in the background. Never throws. */

@@ -2,6 +2,7 @@ import { isTrial } from "@sandchest/billing/plans";
 import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
 import { track } from "@/server/analytics";
 import { autumn, syncBilling } from "@/server/billing";
@@ -19,7 +20,7 @@ export const metadata: Metadata = { title: "Billing · Sandchest" };
 export default async function BillingReturn({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const { org: orgId } = await searchParams;
   const user = await viewer();
-  const row = autumn() && orgId && /^[0-9a-f-]{36}$/.test(orgId) ? await orgForAdmin(db(), user.id, orgId) : undefined;
+  const row = autumn() && isUuid(orgId) ? await orgForAdmin(db(), user.id, orgId) : undefined;
   if (!row) redirect("/dashboard/settings");
 
   const hadPlan = !!row.billing?.planId;
