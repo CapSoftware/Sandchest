@@ -88,6 +88,16 @@ The only difference between Sandchest and the real thing is where the results go
 - Findings go only to people who can push to the repo
 - Your code is treated as untrusted, so a comment telling it to look away gets reported instead of obeyed
 
+## Use it from your agent
+
+Everything works from Claude Code, Cursor, Codex or any agent: setting up, paying, deep scans, findings, fix prompts and settings. Press **Set up with your agent** on [sandchest.com](https://www.sandchest.com) and paste the prompt into your agent, or add the MCP server yourself:
+
+```sh
+claude mcp add --transport http sandchest https://www.sandchest.com/api/mcp
+```
+
+Agents without MCP use the same tools over HTTP (`/api/v1`, with a device-flow sign-in). You approve the agent once in your browser; a first card payment is the only other step it hands back to you. See [Use it from your agent](https://www.sandchest.com/docs/agents).
+
 ## Self-hosting
 
 Sandchest is open source and runs on your own server with Docker. A self-hosted install has no plans or credits and sends nothing to us. Your code only goes to GitHub and to the model endpoint you choose.

@@ -1,4 +1,14 @@
 {
   "title": "Sandchest docs",
-  "pages": ["index", "pricing", "scans", "findings", "fixing", "self-hosting", "security", "acceptable-use"]
+  "pages": [
+    "index",
+    "agents",
+    "pricing",
+    "scans",
+    "findings",
+    "fixing",
+    "self-hosting",
+    "security",
+    "acceptable-use"
+  ]
 }

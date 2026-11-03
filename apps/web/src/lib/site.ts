@@ -26,6 +26,7 @@ export const site = {
     scans: "/docs/scans",
     findings: "/docs/findings",
     pricing: "/docs/pricing",
+    agents: "/docs/agents",
     security: "/docs/security",
     selfHosting: "/docs/self-hosting",
     llms: "/llms.txt",

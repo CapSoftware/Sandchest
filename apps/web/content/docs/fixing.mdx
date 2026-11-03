@@ -73,6 +73,10 @@ SANDCHEST
 
 The quoted heredoc passes the prompt to the agent exactly as written: quotes, backticks and dollar signs in it are not touched by your shell.
 
+## From your agent
+
+With Sandchest connected to your agent ([Use it from your agent](/docs/agents)), ask it to fix your open findings. It calls `list_findings`, then `get_fix_prompt` for each one, and works from the prompt in your checkout. `get_finding` has the same evidence broken into fields: the attack path, the proof of concept, what the fix must guarantee and the regression test. Once the fix is merged, it can call `update_finding` to dismiss what you decide not to fix, with a reason.
+
 ## From a pull request
 
 On private repositories, each finding is posted as a review comment on the last step of its attack path that is inside the diff (or in the review's summary, if none is), and ends with a collapsed **Fix prompt for your coding agent**. Expand it, copy the prompt, and give it to your agent on the pull request's branch. When you push the fix, the pull request is reviewed again.

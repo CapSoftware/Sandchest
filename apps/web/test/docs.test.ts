@@ -90,7 +90,7 @@ describe("pricing matches the billing package", () => {
 describe("structure", () => {
   test("the sidebar lists every docs page once, in the spec's order", () => {
     const meta = JSON.parse(read(join(docsDir, "meta.json"))) as { pages: string[] };
-    expect(meta.pages).toEqual(["index", "pricing", "scans", "findings", "fixing", "self-hosting", "security", "acceptable-use"]);
+    expect(meta.pages).toEqual(["index", "agents", "pricing", "scans", "findings", "fixing", "self-hosting", "security", "acceptable-use"]);
     expect([...meta.pages].sort()).toEqual(mdx(docsDir).map((file) => file.replace(/\.mdx$/, "")).sort());
   });
 

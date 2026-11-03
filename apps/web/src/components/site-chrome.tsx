@@ -19,6 +19,7 @@ const FOOTER = [
       { id: "scans", label: "How scans work", href: site.links.scans },
       { id: "findings", label: "Findings", href: site.links.findings },
       { id: "pricing", label: "Pricing", href: site.links.pricing },
+      { id: "agents", label: "Use it from your agent", href: site.links.agents },
     ],
   },
   {

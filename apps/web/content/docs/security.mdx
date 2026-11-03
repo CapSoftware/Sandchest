@@ -32,6 +32,7 @@ Sandchest adds no account, repository, organization or user identifiers to promp
 | Your account: GitHub user ID, username, display name, email address and avatar | To sign you in and send notifications |
 | Each sign-in session, with your browser's user agent | To keep you signed in |
 | Your GitHub sign-in token, encrypted | To check which repositories you can access |
+| API keys and agents' OAuth tokens, as SHA-256 hashes only, with each one's name and when it was last used | To let your agents act as you, and show them in Settings |
 | Billing state: plan, credits and auto top-up settings | To run your plan |
 
 Your email address is the primary one on your GitHub account, even if it is private on GitHub, because the App may read email addresses. A no-reply placeholder is used only when GitHub returns no address at all.
@@ -53,6 +54,7 @@ The findings themselves stay, without code, so your history survives. Uninstalli
 - A person can see a repository's findings only if GitHub says they have push access or higher to it. Sandchest checks with GitHub using their own sign-in, and re-checks at least every five minutes.
 - On public repositories, nothing about a finding is posted to GitHub beyond a count by severity, because Checks and comments there are public. See [PR reviews](/docs/scans#public-repositories).
 - Billing and settings can only be changed by admins of the GitHub organization, or the owner of a personal account.
+- Agents act as the person who connected them, with the same access, re-checked with GitHub the same way. Connecting always needs that person's approval in their browser, signed in with GitHub: an MCP client's OAuth consent (with PKCE), or a device code they confirm. A first card payment is always made by the person on Stripe; agents never see card details. Revoke any agent in **Settings → Agents**. See [Use it from your agent](/docs/agents).
 
 ## GitHub App permissions
 
