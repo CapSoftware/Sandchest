@@ -4,7 +4,9 @@ import { dayMonth, plural, SEVERITIES, SEVERITY_LABEL, type Severity } from "@/l
 /**
  * Charts in the house style: square pixel columns on the dark ground, drawn
  * with plain elements on the server. Heights snap to whole pixel rows, so a
- * bar is always a stack of whole blocks, like the heat meter.
+ * bar is always a stack of whole blocks, like the heat meter. In a loading
+ * state each plot is drawn as one block (`skullet-block`), not as columns of
+ * sample data that would jump when the real numbers arrive.
  */
 
 /** How many rows of `rows` a value fills: at least one when it is above zero. */
@@ -17,7 +19,7 @@ function fill(value: number, max: number, rows: number): number {
 export function Spark({ values, label }: { values: number[]; label: string }) {
   const max = Math.max(...values, 1);
   return (
-    <span className="spark" role="img" aria-label={label}>
+    <span className="spark" role="img" aria-label={label} skullet-block="">
       {values.map((value, i) => (
         <i key={i} style={{ "--h": fill(value, max, 7) } as CSSProperties} data-zero={value === 0 || undefined} />
       ))}
@@ -39,7 +41,7 @@ export function ActivityChart({ days }: { days: ActivityDay[] }) {
   const middle = Math.floor((days.length - 1) / 2);
   return (
     <figure className="activity">
-      <div className="activity-plot" role="img" aria-label={`${plural(reviews, "pull request review")} and ${plural(deep, "deep scan")} over ${days.length} days, at most ${max} in a day.`}>
+      <div className="activity-plot" skullet-block="" role="img" aria-label={`${plural(reviews, "pull request review")} and ${plural(deep, "deep scan")} over ${days.length} days, at most ${max} in a day.`}>
         <span className="activity-max" aria-hidden="true">
           {max}
         </span>
@@ -86,7 +88,7 @@ export function SeverityStrip({ open, cells = 48 }: { open: Record<Severity, num
   }
   const used = counts.reduce((sum, c) => sum + c.n, 0);
   return (
-    <span className="strip" role="img" aria-label={SEVERITIES.filter((s) => open[s] > 0).map((s) => `${open[s]} ${SEVERITY_LABEL[s].toLowerCase()}`).join(", ") || "Nothing open"}>
+    <span className="strip" skullet-block="" role="img" aria-label={SEVERITIES.filter((s) => open[s] > 0).map((s) => `${open[s]} ${SEVERITY_LABEL[s].toLowerCase()}`).join(", ") || "Nothing open"}>
       {counts.flatMap(({ severity, n }) => Array.from({ length: n }, (_, i) => <i key={`${severity}-${i}`} data-severity={severity} />))}
       {Array.from({ length: cells - used }, (_, i) => (
         <i key={`empty-${i}`} />

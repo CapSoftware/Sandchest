@@ -2021,6 +2021,11 @@ a.watch-name:focus-visible {
   background: #000;
 }
 
+/* In a loading state too: skullet hides empty elements there, and this black stage is what the view starts as. */
+[skullet-loading] div.watch-placeholder.watch-placeholder {
+  visibility: visible !important;
+}
+
 @media (max-width: 52rem) {
   .watch-placeholder {
     aspect-ratio: 4 / 3.4;

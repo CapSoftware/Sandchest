@@ -1,22 +1,18 @@
 import { PageSkeleton } from "@/components/app/skeleton";
+import { SAMPLE_ORG_ID } from "@/lib/samples";
+import { ConfirmView } from "./confirm-view";
 
-/** Shown while billing prices the change, which can take a moment. */
+/** Shown while billing prices the change, which can take a moment: the page's own view, of a sample top-up. */
 export default function Loading() {
   return (
     <PageSkeleton id="confirm" label="Pricing the change">
-      <div className="confirm">
-        <h1 className="page-title">Switch acme to Team</h1>
-        <dl className="stats confirm-stats">
-          <div className="stat">
-            <dt>Charged now</dt>
-            <dd>$49.00</dd>
-          </div>
-        </dl>
-        <p className="field-help">Team starts now with 400 credits a month. You pay the difference for the rest of this period.</p>
-        <span className="key key-primary">
-          <span className="key-face">Pay $49.00</span>
-        </span>
-      </div>
+      <ConfirmView
+        orgId={SAMPLE_ORG_ID}
+        title="Buy 100 credits for acme"
+        preview={{ dueToday: 49, nextCycle: null }}
+        help="Charged to the card on file. Bought credits never expire."
+        fields={{ kind: "top_up", credits: "100" }}
+      />
     </PageSkeleton>
   );
 }

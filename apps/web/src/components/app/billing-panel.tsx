@@ -1,6 +1,6 @@
 import { autoTopUpSize, DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, PLAN, planById } from "@sandchest/billing/plans";
 import type { OrgBillingRow, OrgSettings } from "@sandchest/db";
-import Link from "next/link";
+import { Link } from "@/components/app/hover-link";
 import { plural, shortDate, usd } from "@/lib/format";
 import { PRICE_NOTE, PRICES } from "@/lib/pricing";
 import { openPortal } from "@/server/billing-actions";

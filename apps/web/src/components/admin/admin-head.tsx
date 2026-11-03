@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Link } from "@/components/app/hover-link";
 import type { AdminRange } from "@sandchest/db";
 import { ADMIN_RANGES, lastDays } from "@/lib/admin-metrics";
 import { dayLabel } from "@/lib/admin-format";

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
+import { createContext, useContext, type ComponentProps, type ReactNode } from "react";
 import { forgetShapes, type SkulletTheme } from "skullet";
 import { Skeleton, SkulletProvider } from "skullet/react";
 
@@ -9,9 +9,10 @@ import { Skeleton, SkulletProvider } from "skullet/react";
  * layout measured into bars, so nothing moves when the data arrives.
  *
  * A page wraps what it renders in `PageShape`, which remembers its shape under
- * an id. Its `loading.tsx` renders `PageSkeleton` with the same id and a
- * sample of the page: the first visit is drawn from the sample, every later
- * one from the page as it last stood (layout only, never its text).
+ * an id. Its `loading.tsx` renders `PageSkeleton` with the same id and the
+ * page's own view drawn from sample data, so the two can't drift apart: the
+ * first visit is drawn from the sample, every later one from the page as it
+ * last stood (layout only, never its text).
  */
 
 /** The seam colour the chest is drawn with, pulsing like the rest of the site. Square, as every edge here is. */
@@ -36,12 +37,21 @@ export function PageShape({ id, children }: { id: string; children: ReactNode })
   return <Skeleton id={id}>{children}</Skeleton>;
 }
 
-/** A page's loading state: the shape last remembered under `id`, or `children` (a sample of the page) measured into one. */
+const InSkeleton = createContext(false);
+
+/** True inside a loading state's sample: live parts (a 3D scene, a feed) draw only their outline there, and start nothing. */
+export function useInSkeleton(): boolean {
+  return useContext(InSkeleton);
+}
+
+/** A page's loading state: the shape last remembered under `id`, or `children` (the page's view of sample data) measured into one. */
 export function PageSkeleton({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
-    <Skeleton loading id={id} label={label}>
-      {children}
-    </Skeleton>
+    <InSkeleton.Provider value>
+      <Skeleton loading id={id} label={label}>
+        {children}
+      </Skeleton>
+    </InSkeleton.Provider>
   );
 }
 

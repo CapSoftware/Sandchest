@@ -3,7 +3,8 @@
  * server, no client JavaScript. Each bar names its value on hover (title)
  * and every chart has its numbers in a table underneath for keyboard and
  * screen-reader use. One hue per chart (gold); kinds are small multiples,
- * not a stack of colours.
+ * not a stack of colours. In a loading state each plot is drawn as one
+ * block (`skullet-block`), not as bars of sample data.
  */
 import { dayLabel, niceCountMax, niceMax } from "@/lib/admin-format";
 
@@ -31,7 +32,7 @@ export function ColumnChart({ title, note, days, values, format, compact = false
         <span className="chart-title">{title}</span>
         {note && <span className="chart-note">{note}</span>}
       </figcaption>
-      <div className="chart-plot" role="img" aria-label={label}>
+      <div className="chart-plot" skullet-block="" role="img" aria-label={label}>
         {ticks.map((tick) => (
           <span key={tick} className="chart-grid" style={{ bottom: `${(tick / top) * 100}%` }}>
             <span className="chart-tick">{format(tick)}</span>
@@ -76,7 +77,7 @@ export function ColumnChart({ title, note, days, values, format, compact = false
 export function Meter({ value, max, label }: { value: number; max: number; label: string }) {
   const share = max > 0 ? Math.min(1, value / max) : 0;
   return (
-    <span className="meter admin-meter" role="img" aria-label={label}>
+    <span className="meter admin-meter" skullet-block="" role="img" aria-label={label}>
       <span style={{ width: `${share * 100}%` }} />
     </span>
   );

@@ -12,6 +12,7 @@ import { PHOSPHORS, swatch, type HackerProfile } from "@/lib/hacker";
 import { TRACKS, trackStates } from "@/lib/scan-progress";
 import { HoverLink } from "./hover-link";
 import { useLive } from "./scan-live";
+import { useInSkeleton } from "./skeleton";
 
 const ACTIVE = new Set(["queued", "running", "publishing"]);
 const HIDDEN_KEY = "sandchest:watch";
@@ -23,7 +24,12 @@ const HIDDEN_KEY = "sandchest:watch";
  * screen, H hides it (and it stays hidden on this browser). The hacker's
  * name opens their page, where they're customized.
  */
-export function ScanWatch({ profile, repo, findings, hackerHref }: { profile: HackerProfile; repo: string; findings: number; hackerHref: string | null }) {
+export function ScanWatch(props: { profile: HackerProfile; repo: string; findings: number; hackerHref: string | null }) {
+  // A loading state holds the view's space, dark as the scene starts, without starting it.
+  return useInSkeleton() ? <div className="watch-placeholder" /> : <Watch {...props} />;
+}
+
+function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile; repo: string; findings: number; hackerHref: string | null }) {
   const live = useLive();
   const [hidden, setHidden] = useState<boolean | null>(null);
   const [shot, setShot] = useState<ShotName>("watch");

@@ -2849,3 +2849,16 @@ html:not([data-js]) .no-js-submit {
 .agent-list .tag {
   margin-left: 0.5rem;
 }
+
+/* Skullet gives empty text elements a line of filler inside a skeleton, so a sample with blanks still draws bars.
+   Loading states here render the page's own view of sample data, where an empty element is empty in the page too:
+   the filler would only move things (the heat meter's pixels shift every row's baseline; an empty column grows). */
+[skullet-loading] :empty::before {
+  content: none !important;
+}
+
+/* A closed <details> still lays out what it hides, and skullet would draw bars for it (a menu, a table of numbers)
+   where the page shows nothing. */
+[skullet-loading] details:not([open]) > :not(summary) {
+  display: none !important;
+}

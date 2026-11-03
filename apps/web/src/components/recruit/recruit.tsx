@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { trackStep } from "@/components/analytics";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
@@ -38,6 +38,7 @@ import type { LiveStats } from "@/server/stats";
 import { CardForm, type CardHandle } from "./card-form";
 import { LiveLines } from "./live-lines";
 import { AgentPromptButton } from "../agent-prompt-button";
+import { PageSkeleton, useInSkeleton } from "@/components/app/skeleton";
 
 type StepId = RecruitStepId;
 
@@ -67,6 +68,8 @@ const ROOM_LIGHT: Record<StepId, number> = { connect: 0.55, company: 0.55, hacke
 const GOLD = "#fec242";
 /** Repositories listed before "Show all". */
 const REPOS_SHOWN = 8;
+/** An image that loads nothing, for pictures in a loading state's sample. */
+const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface Props {
@@ -712,6 +715,7 @@ function Connect({
   viewer: string;
   claim: ClaimIntent | null;
 }) {
+  const skeleton = useInSkeleton();
   const gift = claim && <FreeCreditsBadge credits={claim.credits} />;
   // Nothing connected yet: the way there in three short lines, ticked off as they're done.
   if (accounts.length === 0) {
@@ -750,7 +754,7 @@ function Connect({
             <li key={account.id}>
               <label className="onboard-option onboard-account" data-on={chosen === account.id || undefined}>
                 <input type="radio" name="account" checked={chosen === account.id} onChange={() => choose(account)} />
-                <img src={`https://github.com/${encodeURIComponent(account.login)}.png?size=80`} alt="" width={36} height={36} />
+                <img src={skeleton ? BLANK : `https://github.com/${encodeURIComponent(account.login)}.png?size=80`} alt="" width={36} height={36} />
                 <span className="onboard-option-name">{account.login}</span>
                 <span className="onboard-option-note">
                   {account.type === "Organization" ? "Organization" : "Personal account"}
@@ -794,11 +798,12 @@ function Company({
   const [all, setAll] = useState(false);
   const shown = all ? brief.repos : brief.repos.slice(0, REPOS_SHOWN);
   const { profile } = brief;
+  const skeleton = useInSkeleton();
   return (
     <>
       <Title heading={heading}>Your company</Title>
       <div className="onboard-card">
-        <img src={profile.avatar} alt="" width={52} height={52} />
+        <img src={skeleton ? BLANK : profile.avatar} alt="" width={52} height={52} />
         <div>
           <p className="onboard-card-name">{profile.name}</p>
           <p className="onboard-card-login">github.com/{brief.login}</p>
@@ -1378,5 +1383,87 @@ function GitHubMark() {
         d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
       />
     </svg>
+  );
+}
+
+// ---- Loading state ---------------------------------------------------------------
+
+const noop = () => {};
+const SAMPLE_REPOS = ["api", "web", "billing", "worker", "docs", "mobile"].map((name, i) => ({
+  id: `sample-${i}`,
+  fullName: `acme/${name}`,
+  private: name !== "docs",
+  loc: 48_000 + i * 9_000,
+  language: "TypeScript",
+  description: null,
+}));
+const SAMPLE_BRIEF: Briefing = {
+  orgId: "sample",
+  login: "acme",
+  type: "Organization",
+  profile: { name: "Acme", about: "Billing for teams that ship every day.", website: "https://acme.example.com", location: null, avatar: BLANK },
+  repos: SAMPLE_REPOS,
+  company: { name: "Acme", email: "billing@example.com" },
+  firstTarget: SAMPLE_REPOS[0]!.id,
+  hacker: null,
+  currentPlan: null,
+};
+
+/**
+ * Recruiting's loading state, while GitHub is read: the dark room and the
+ * page's own header and panel, at once, with the step that opens (GitHub, or
+ * Company when `?org=` names an account) drawn from sample data and measured
+ * into a skeleton. The room's 3D scene starts with the page.
+ */
+export function RecruitSkeleton({ billing, payOnPage, install }: { billing: boolean; payOnPage: boolean; install: boolean }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const company = !!useSearchParams().get("org");
+  const steps: StepId[] = billing && payOnPage ? ["connect", "company", "hacker", "plan", "pay"] : ["connect", "company", "hacker", "plan"];
+  const step = company ? 1 : 0;
+  const account: RecruitAccount = { id: SAMPLE_BRIEF.orgId, login: SAMPLE_BRIEF.login, type: "Organization", planId: null, handle: null };
+  return (
+    <div className="onboard" aria-busy="true">
+      <div className="onboard-shade" aria-hidden="true" />
+      <header className="onboard-top">
+        <Link href="/dashboard?later=1" prefetch={false} className="onboard-mark" aria-label="Sandchest dashboard">
+          <img src="/sandchest-logo-dark.svg" alt="" width={120} height={22} />
+        </Link>
+        <Progress steps={steps} step={step} canEnter={() => false} go={noop} />
+        <Link href="/dashboard?later=1" prefetch={false} className="onboard-leave">
+          Finish later
+        </Link>
+      </header>
+      <div className="onboard-hud">
+        <section className="onboard-panel" aria-label="Loading">
+          <div className="onboard-body">
+            <PageSkeleton id="recruit" label="Loading">
+              {company ? (
+                <Company heading={heading} brief={SAMPLE_BRIEF} company={SAMPLE_BRIEF.company} setCompany={noop} target={SAMPLE_BRIEF.firstTarget} setTarget={noop} billing={billing} claiming={false} nudge={noop} />
+              ) : (
+                <Connect heading={heading} accounts={[account]} chosen={account.id} switching={false} choose={noop} installUrl={install ? "#" : null} signedOut={false} viewer="" claim={null} />
+              )}
+            </PageSkeleton>
+          </div>
+          {/* Inert, not disabled: the keys look as they will once the step is ready. */}
+          <footer className="onboard-foot" inert>
+            {step > 0 && (
+              <button type="button" className="onboard-back">
+                <span className="onboard-face">
+                  <Key>Esc</Key>
+                  Back
+                </span>
+              </button>
+            )}
+            <button type="button" className="onboard-go">
+              <span className="onboard-face">
+                <span className="onboard-go-label">Continue</span>
+                <Key>Enter</Key>
+              </span>
+            </button>
+          </footer>
+        </section>
+      </div>
+      <Hints current={steps[step]!} choices />
+    </div>
   );
 }

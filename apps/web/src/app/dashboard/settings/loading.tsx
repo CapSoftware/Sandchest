@@ -1,38 +1,15 @@
 import { PageSkeleton } from "@/components/app/skeleton";
+import { sampleSettings } from "@/lib/samples";
+import { billingEnabled } from "@/server/billing";
+import { config } from "@/server/config";
+import { SettingsView } from "./settings-view";
 
-/** Shown the instant a link is followed, until the settings arrive. */
+/** Shown the instant a link is followed, until the settings arrive: the page's own view, of a sample account. */
 export default function Loading() {
+  const { orgs, billing } = sampleSettings();
   return (
     <PageSkeleton id="settings" label="Loading settings">
-      <div className="page-head">
-        <h1 className="page-title">Settings</h1>
-        <span className="key key-secondary">
-          <span className="key-face">Add repositories</span>
-        </span>
-      </div>
-      <section className="account">
-        <div>
-          <h2 className="account-name">acme</h2>
-          <p className="account-role">You’re an admin</p>
-        </div>
-        <div className="settings-form">
-          {["Checks", "Hacker", "Repositories"].map((legend) => (
-            <div key={legend}>
-              <p className="field-legend">{legend}</p>
-              <p className="field-help">Which pull requests are reviewed, and who hears about what is found.</p>
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="account">
-        <div>
-          <h2 className="account-name">octocat</h2>
-          <p className="account-role">Signed in with GitHub</p>
-        </div>
-        <span className="key key-secondary">
-          <span className="key-face">Sign out</span>
-        </span>
-      </section>
+      <SettingsView user={{ image: null, login: "you", name: "You" }} orgs={orgs} billing={billingEnabled() ? [billing] : null} access={[]} appUrl={config().SANDCHEST_APP_URL.replace(/\/$/, "")} />
     </PageSkeleton>
   );
 }

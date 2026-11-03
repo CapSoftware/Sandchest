@@ -2,12 +2,11 @@ import { isTrial, MAX_PURCHASE_CREDITS, planById, TOP_UP } from "@sandchest/bill
 import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { ConfirmPurchase } from "@/components/app/confirm-purchase";
 import { PageShape } from "@/components/app/skeleton";
-import { shortDate, usd } from "@/lib/format";
 import { viewer } from "@/server/access";
 import { autumn } from "@/server/billing";
 import { db } from "@/server/db";
+import { ConfirmView } from "./confirm-view";
 
 export const metadata: Metadata = { title: "Confirm · Sandchest" };
 
@@ -35,37 +34,14 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const fields: Record<string, string> = plan ? { kind: "plan", plan: plan.id, ...(credits ? { credits: String(credits) } : {}) } : { kind: "top_up", credits: String(credits) };
   const monthly = (p: { credits: number }) => (p.credits > 0 ? ` with ${p.credits.toLocaleString("en-US")} credits a month` : "");
 
+  const help = plan
+    ? downgrade
+      ? `${current.name} stays until the end of this period, then ${plan.name} starts${monthly(plan)}. Credits you bought stay yours.`
+      : `${plan.name} starts now${monthly(plan)}. You pay the difference for the rest of this period.`
+    : "Charged to the card on file. Bought credits never expire.";
   return (
     <PageShape id="confirm">
-      <div className="confirm">
-        <h1 className="page-title">{title}</h1>
-        {preview ? (
-          <dl className="stats confirm-stats">
-            <div className="stat">
-              <dt>Charged now</dt>
-              <dd>{usd(preview.dueToday)}</dd>
-            </div>
-            {plan && preview.nextCycle !== null && (
-              <div className="stat">
-                <dt>Then{preview.nextCycleAt ? ` from ${shortDate(preview.nextCycleAt)}` : ""}</dt>
-                <dd>{usd(preview.nextCycle)} a month</dd>
-              </div>
-            )}
-          </dl>
-        ) : (
-          <p className="form-error" role="alert">
-            Billing couldn’t price this right now. Try again in a minute.
-          </p>
-        )}
-        <p className="field-help">
-          {plan
-            ? downgrade
-              ? `${current.name} stays until the end of this period, then ${plan.name} starts${monthly(plan)}. Credits you bought stay yours.`
-              : `${plan.name} starts now${monthly(plan)}. You pay the difference for the rest of this period.`
-            : "Charged to the card on file. Bought credits never expire."}
-        </p>
-        {preview && <ConfirmPurchase orgId={row.org.id} fields={fields} label={preview.dueToday > 0 ? `Pay ${usd(preview.dueToday)}` : "Confirm"} />}
-      </div>
+      <ConfirmView orgId={row.org.id} title={title} preview={preview && { ...preview, nextCycle: plan ? preview.nextCycle : null }} help={help} fields={fields} />
     </PageShape>
   );
 }
