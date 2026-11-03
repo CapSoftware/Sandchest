@@ -24,7 +24,8 @@ export function agentTool<Args>(tool: Tool<Args>, run: (args: Args, signal?: Abo
 export type Wrap = (text: string) => string;
 
 export function createWrap(tag: string): Wrap {
-  return (text) => `<${tag}>\n${text}\n</${tag}>`;
+  // Repository content cannot know the tag, but model-written summaries can echo it from earlier tool results.
+  return (text) => `<${tag}>\n${text.replaceAll(`<${tag}>`, "<repo-data>").replaceAll(`</${tag}>`, "</repo-data>")}\n</${tag}>`;
 }
 
 export interface RepoToolContext {

@@ -263,7 +263,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     signals.leads = [...signals.leads, ...authz];
     emit({ type: "progress", message: `Flagged ${authz.length} handler${authz.length === 1 ? "" : "s"} that skip an authorization check their peers apply.` });
   }
-  const threatModelText = renderThreatModel(threatModel);
+  const threatModelText = renderThreatModel(threatModel, wrap);
   // Deep scans: investigate how this app enforces authorization (any framework, from the code) to
   // ground access-control reviews. Run it CONCURRENTLY with the hunt — only the skeptic needs it, and
   // reviews start later as candidates stream — so it is off the critical path. PR reviews skip it.
@@ -272,7 +272,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     change || signal.aborted
       ? Promise.resolve(undefined)
       : investigateAuthModel({ ...base, threatModelText })
-          .then((model) => (model ? renderAuthModel(model) : undefined))
+          .then((model) => (model ? renderAuthModel(model, wrap) : undefined))
           .catch(() => undefined);
   const ctx: ScanContext = {
     ...base,
@@ -583,11 +583,11 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
     wrap,
     counters: { rejected: 0, duplicates: 0 },
     emit: () => {},
-    threatModelText: renderThreatModel(options.threatModel),
+    threatModelText: renderThreatModel(options.threatModel, wrap),
   };
   if (options.investigateAuth) {
     const authModel = await investigateAuthModel(ctx);
-    if (authModel) ctx.authModelText = renderAuthModel(authModel);
+    if (authModel) ctx.authModelText = renderAuthModel(authModel, wrap);
   }
 
   const results = await Promise.all(

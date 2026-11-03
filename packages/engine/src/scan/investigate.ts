@@ -49,7 +49,7 @@ export async function investigateAuthModel(ctx: ScanContext): Promise<AuthModel 
           system,
           {
             role: "user",
-            content: `${ctx.threatModelText}\n\nInvestigation notes:\n${exploration.content || "(none)"}\n\nWrite the authorization model. Every enforcement point and gap must cite a real file:line you read.`,
+            content: `${ctx.threatModelText}\n\nInvestigation notes:\n${ctx.wrap(exploration.content || "(none)")}\n\nWrite the authorization model. Every enforcement point and gap must cite a real file:line you read.`,
           },
         ],
         signal: ctx.signal,
