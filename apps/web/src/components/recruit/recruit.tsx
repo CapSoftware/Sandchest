@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
 import { CREDIT_AMOUNTS, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { linesLabel, restCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
+import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
 import {
   aside,
   DEFAULT_HACKER,
@@ -34,7 +35,7 @@ import type { LiveStats } from "@/server/stats";
 import { CardForm, type CardHandle } from "./card-form";
 import { LiveLines } from "./live-lines";
 
-type StepId = "connect" | "company" | "hacker" | "plan" | "pay";
+type StepId = RecruitStepId;
 
 /** Each step's name in the progress bar, and where the camera stands for it. */
 const STEP_INFO: Record<StepId, { name: string; shot: ShotName }> = {
@@ -234,6 +235,58 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     });
   };
 
+  // Recruiting in progress is kept in the browser, per org, so a reload picks up where it left off. It's read
+  // back before the first paint, then kept up to date; once the org has joined there's nothing to keep.
+  const restored = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (demo || !brief || restored.current === brief.orgId) return;
+    const first = restored.current === null;
+    restored.current = brief.orgId;
+    const key = draftKey(brief.orgId);
+    try {
+      if (brief.currentPlan) return localStorage.removeItem(key);
+      const draft = readDraft(localStorage.getItem(key), brief.repos.map((repo) => repo.id));
+      if (!draft) return;
+      setProfile(draft.hacker);
+      setCompany(draft.company);
+      setTarget(draft.firstTarget ?? brief.firstTarget);
+      setCredits(draft.credits);
+      setAutoTopUp(draft.autoTopUp);
+      // The step it was left on, on first load only (choosing another account stays on the first step), and no
+      // further than what's filled in allows.
+      if (first) setStep(reachable(draft));
+    } catch {
+      // Storage can be off (private windows, blocked cookies): recruiting works as before, without memory.
+    }
+  }, [brief]);
+  useEffect(() => {
+    if (demo || !brief || brief.currentPlan || restored.current !== brief.orgId || signed) return;
+    const draft: RecruitDraft = { step: current, hacker: profile, company, firstTarget: target, credits, autoTopUp };
+    try {
+      localStorage.setItem(draftKey(brief.orgId), JSON.stringify(draft));
+    } catch {
+      // Full or off: nothing to remember with.
+    }
+  }, [demo, brief, current, profile, company, target, credits, autoTopUp, signed]);
+  const forget = () => {
+    try {
+      if (brief) localStorage.removeItem(draftKey(brief.orgId));
+    } catch {}
+  };
+  /** The step a draft was left on, or the furthest before it that its answers allow. */
+  const reachable = (draft: RecruitDraft) => {
+    const at = steps.indexOf(draft.step);
+    const to = at < 0 ? steps.indexOf("plan") : at;
+    const filled = (id: StepId) =>
+      id === "company"
+        ? draft.company.name.trim().length > 0 && (EMAIL.test(draft.company.email.trim()) || (!billing && draft.company.email.trim() === ""))
+        : id === "hacker"
+          ? validHandle(draft.hacker.handle)
+          : true;
+    const stop = steps.slice(0, to).findIndex((id) => !filled(id));
+    return stop < 0 ? to : stop;
+  };
+
   const recruitment = (): RecruitInput => ({ hacker: profile, company: { name: company.name.trim(), email: company.email.trim() }, firstTarget: target });
   const order: RecruitOrder = { credits, autoTopUp };
 
@@ -349,6 +402,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       return;
     }
     // The contract signs itself on screen, then it's off to work.
+    forget();
     setSigned(true);
     setTimeout(() => (outcome.next.startsWith("/") ? router.push(outcome.next) : window.location.assign(outcome.next)), 1_600);
   };
@@ -357,6 +411,8 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (busy) return event.preventDefault();
     if (current === "plan" && !payOnPage) {
       // The last step without a card form: the server saves it all and joins the plan (on Stripe Checkout).
+      // Without billing that's the end; with it, a draft stays until the plan is active, should they come back.
+      if (!billing) forget();
       nudge(3);
       return;
     }
