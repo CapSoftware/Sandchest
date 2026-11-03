@@ -13,6 +13,8 @@ import {
   dashboardRepos,
   dashboardScans,
   findingForUser,
+  findingsForExport,
+  recordPromptsCopied,
   hackerRecord,
   userHackers,
   notificationRecipients,
@@ -415,6 +417,22 @@ describe("findings", () => {
     expect((await dashboardFindings(database, ids.alice, { severities: ["high"] })).map((f) => f.title)).toEqual(["Finding f2"]);
     // acme/secret's critical is invisible: read-only access.
     expect(list.some((f) => f.title === "Finding s1")).toBe(false);
+  });
+
+  test("an export copies what the list shows, and records copies only of findings the user can see", async () => {
+    if (!available) return;
+    const rows = await findingsForExport(database, ids.alice, { severities: ["critical", "high"], repoId: ids.api });
+    expect(rows.map((f) => f.title)).toEqual(["Finding f1", "Finding f2"]);
+    expect(rows[0]).toMatchObject({ repoFullName: "acme/api", defaultBranch: "main", stale: false, cwe: "CWE-639" });
+    expect((await findingsForExport(database, ids.alice, { includeLowConfidence: true })).map((f) => f.title)).toEqual(["Finding f1", "Finding f2", "Finding f3"]);
+    expect(await findingsForExport(database, ids.alice, { status: "fixed" })).toEqual([]);
+    // acme/secret is read-only for Alice: neither listed nor counted as copied.
+    expect(await findingsForExport(database, ids.alice, { repoId: ids.secret })).toEqual([]);
+    const [secret] = await database.$client<Array<{ id: string }>>`select id from findings where repo_id = ${ids.secret}`;
+    await recordPromptsCopied(database, ids.alice, [...rows.map((f) => f.id), secret!.id]);
+    const copied = await database.$client<Array<{ finding_id: string }>>`select finding_id from finding_events where type = 'prompt_copied' and user_id = ${ids.alice}`;
+    expect(copied.map((row) => row.finding_id).sort()).toEqual(rows.map((f) => f.id).sort());
+    await database.$client`delete from finding_events where type = 'prompt_copied'`;
   });
 
   test("dismissing records who and why, and deletes the code excerpts and prompt", async () => {

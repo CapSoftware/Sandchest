@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { HoverLink } from "@/components/app/hover-link";
 import { AutoSubmitSelect } from "@/components/app/auto-submit";
+import { CopyFindings } from "@/components/app/copy-findings";
 import { Heat } from "@/components/app/heat";
 import { When } from "@/components/app/when";
 import { PageShape } from "@/components/app/skeleton";
@@ -56,6 +57,7 @@ export default async function FindingsPage({ searchParams }: { searchParams: Pro
     <PageShape id="findings">
       <div className="page-head">
         <h1 className="page-title">Findings</h1>
+        {list.length > 0 && <CopyFindings count={list.length} filters={{ status: current.status, severities: current.severities, repo: current.repo, low: current.low }} />}
       </div>
 
       <div className="filters">

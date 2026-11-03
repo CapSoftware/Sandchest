@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { agentCommand } from "@/lib/findings-export";
 import { promptTaken } from "@/server/actions";
 
 type Target = "prompt" | "claude" | "codex";
@@ -13,15 +14,10 @@ const TABS: Array<{ id: Target; label: string }> = [
 /** Cursor accepts prompts by link up to about 8,000 characters. */
 const CURSOR_LIMIT = 8_000;
 
-/** A quoted heredoc passes the prompt to the agent's CLI byte for byte, whatever it contains. */
-function oneLiner(command: string, prompt: string): string {
-  return `${command} "$(cat <<'SANDCHEST'\n${prompt}\nSANDCHEST\n)"`;
-}
-
 export function FixPrompt({ findingId, prompt }: { findingId: string; prompt: string }) {
   const [target, setTarget] = useState<Target>("prompt");
   const [copied, setCopied] = useState<Target | undefined>();
-  const text = target === "prompt" ? prompt : oneLiner(target, prompt);
+  const text = target === "prompt" ? prompt : agentCommand(target, prompt);
   const cursor = `https://cursor.com/link/prompt?text=${encodeURIComponent(prompt)}`;
 
   async function copy() {

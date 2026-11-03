@@ -3,13 +3,16 @@
  * Everything a person can change from the dashboard. Each action checks
  * access itself: the database writes are scoped to what the viewer may see.
  */
-import { applyFindingAction, recordPromptCopied, updateOrgSettings, type FindingAction } from "@sandchest/db";
+import { applyFindingAction, findingsForExport, recordPromptCopied, recordPromptsCopied, updateOrgSettings, type FindingAction } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser, viewer } from "./access";
 import { routeOf } from "@/lib/analytics";
+import { AGENT_FORMATS, EXPORT_FORMATS, exportFindings, type ExportFormat } from "@/lib/findings-export";
+import { SEVERITIES } from "@/lib/format";
+import { site } from "@/lib/site";
 import { track } from "./analytics";
 import { auth } from "./auth";
 import { db } from "./db";
@@ -52,6 +55,42 @@ export async function changeFinding(findingId: string, form: FormData): Promise<
 export async function promptTaken(findingId: string): Promise<void> {
   const user = await viewer();
   if (Id.safeParse(findingId).success) await recordPromptCopied(db(), user.id, findingId);
+}
+
+const ExportFilters = z.object({
+  status: z.enum(["open", "fixed", "dismissed"]),
+  severities: z.array(z.enum(SEVERITIES as ["critical", "high", "medium", "low"])).max(SEVERITIES.length),
+  repo: z.uuid().optional(),
+  low: z.boolean(),
+});
+
+export type ExportFiltersInput = z.infer<typeof ExportFilters>;
+
+/**
+ * The findings list as the viewer filtered it, in one of the copy formats.
+ * The same query as the page, so what is copied is what was on screen.
+ */
+/** Linux refuses a single command-line argument over 128 KiB (MAX_ARG_STRLEN); leave room for the command around it. */
+const COMMAND_ARGUMENT_LIMIT = 120_000;
+
+export async function copyFindings(input: ExportFiltersInput, format: ExportFormat): Promise<{ text: string; count: number; note?: string } | { error: string }> {
+  const user = await viewer();
+  const filters = ExportFilters.safeParse(input);
+  if (!filters.success || !EXPORT_FORMATS.includes(format)) return { error: "Those filters aren’t valid." };
+  const { status, severities, repo, low } = filters.data;
+  // Fixed and dismissed findings have nothing left for an agent to do.
+  if (AGENT_FORMATS.includes(format) && status !== "open") return { error: "Only open findings can be handed to an agent." };
+  const rows = await findingsForExport(db(), user.id, { status, severities, repoId: repo, includeLowConfidence: low });
+  const text = exportFindings(rows, format, { baseUrl: site.url, filters: { status, severities, repo, includeLowConfidence: low } });
+  await Promise.all([
+    AGENT_FORMATS.includes(format) ? recordPromptsCopied(db(), user.id, rows.map((row) => row.id)) : undefined,
+    track("findings_copied", {
+      userId: user.id,
+      props: { format, status, findings: rows.length, repos: new Set(rows.map((row) => row.repoFullName)).size, filtered: severities.length > 0 || repo !== undefined, low_confidence: low },
+    }),
+  ]);
+  const tooLong = (format === "claude" || format === "codex") && text.length > COMMAND_ARGUMENT_LIMIT;
+  return { text, count: rows.length, note: tooLong ? "That command may be too long for a Linux shell. Filter by repository, or copy the Prompt and paste it in." : undefined };
 }
 
 const SettingsForm = z.object({

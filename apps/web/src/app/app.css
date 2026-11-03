@@ -1156,6 +1156,75 @@ html:not([data-js]) .no-js-submit {
   color: var(--color-dust);
 }
 
+/* Copy the findings list out, from the findings page head. */
+.copy-findings {
+  position: relative;
+}
+
+.copy-findings summary {
+  list-style: none;
+}
+
+.copy-findings summary::-webkit-details-marker {
+  display: none;
+}
+
+.copy-findings-caret {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+  transition: transform 160ms;
+}
+
+.copy-findings[open] .copy-findings-caret {
+  transform: rotate(180deg);
+}
+
+.copy-findings-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.125rem;
+  width: min(20rem, calc(100vw - 2rem));
+  padding: 0.5rem;
+  border: 1px solid var(--color-seam);
+  background: var(--color-soot);
+}
+
+.copy-findings-menu p {
+  padding: 0.5rem 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.copy-findings-menu p:not(:first-child) {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--color-seam);
+  padding-top: 0.75rem;
+}
+
+.copy-findings-item {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.copy-findings-hint {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.copy-findings-menu .copy-findings-error {
+  border-top: 0;
+  color: var(--color-ember);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copy-findings-caret {
+    transition: none;
+  }
+}
+
 .resolved-note {
   font-size: 0.8125rem;
   color: var(--color-dust);

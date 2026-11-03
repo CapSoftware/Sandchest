@@ -234,11 +234,21 @@ export interface FindingListItem {
 
 const SEVERITY_ORDER = sql`case ${findings.severity} when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end`;
 
-export async function dashboardFindings(database: Db, userId: string, filters: FindingFilters = {}, limit = 300): Promise<FindingListItem[]> {
-  const where: SQL[] = [canSee(userId), eq(repos.enabled, true), eq(findings.status, filters.status ?? "open")];
+/** The findings list's filters as conditions; the status only when one is given. */
+function findingConditions(userId: string, filters: FindingFilters): SQL[] {
+  const where: SQL[] = [canSee(userId), eq(repos.enabled, true)];
+  if (filters.status) where.push(eq(findings.status, filters.status));
   if (filters.repoId) where.push(eq(findings.repoId, filters.repoId));
   if (filters.severities?.length) where.push(inArray(findings.severity, filters.severities));
   if (!filters.includeLowConfidence) where.push(sql`${findings.confidence} <> 'low'`);
+  return where;
+}
+
+/** The most findings the list shows, and the most an export copies. */
+export const FINDING_LIST_LIMIT = 300;
+
+export async function dashboardFindings(database: Db, userId: string, filters: FindingFilters = {}, limit = FINDING_LIST_LIMIT): Promise<FindingListItem[]> {
+  const where = findingConditions(userId, { ...filters, status: filters.status ?? "open" });
   const rows = await database
     .select({
       id: findings.id,
@@ -265,10 +275,7 @@ export async function dashboardFindings(database: Db, userId: string, filters: F
 
 /** Counts per status for the user's findings, for the filter tabs. */
 export async function findingStatusCounts(database: Db, userId: string, filters: Omit<FindingFilters, "status"> = {}): Promise<Record<"open" | "fixed" | "dismissed", number>> {
-  const where: SQL[] = [canSee(userId), eq(repos.enabled, true)];
-  if (filters.repoId) where.push(eq(findings.repoId, filters.repoId));
-  if (filters.severities?.length) where.push(inArray(findings.severity, filters.severities));
-  if (!filters.includeLowConfidence) where.push(sql`${findings.confidence} <> 'low'`);
+  const where = findingConditions(userId, { ...filters, status: undefined });
   const rows = await database
     .select({ status: findings.status, n: sql<number>`count(*)::int` })
     .from(findings)
@@ -279,6 +286,49 @@ export async function findingStatusCounts(database: Db, userId: string, filters:
   for (const row of rows) if (row.status in counts) counts[row.status as keyof typeof counts] = row.n;
   return counts;
 }
+
+/**
+ * The findings the list shows for these filters, in the same order, with
+ * everything needed to copy them out as a report or a prompt.
+ */
+export async function findingsForExport(database: Db, userId: string, filters: FindingFilters = {}, limit = FINDING_LIST_LIMIT) {
+  return database
+    .select({
+      id: findings.id,
+      repoFullName: repos.fullName,
+      defaultBranch: repos.defaultBranch,
+      title: findings.title,
+      severity: findings.severity,
+      confidence: findings.confidence,
+      category: findings.category,
+      cwe: findings.cwe,
+      status: findings.status,
+      dismissReason: findings.dismissReason,
+      impact: findings.impact,
+      mitigations: findings.mitigations,
+      entryPoint: findings.entryPoint,
+      attackPath: findings.attackPath,
+      attacker: findings.attacker,
+      preconditions: findings.preconditions,
+      proofOfConcept: findings.proofOfConcept,
+      fixGuidance: findings.fixGuidance,
+      guarantees: findings.guarantees,
+      mustNotBreak: findings.mustNotBreak,
+      regressionTest: findings.regressionTest,
+      prNumber: findings.prNumber,
+      firstSeenAt: findings.firstSeenAt,
+      lastSeenAt: findings.lastSeenAt,
+      fixedAt: findings.fixedAt,
+      stale: sql<boolean>`${findings.staleAt} is not null`,
+    })
+    .from(findings)
+    .innerJoin(repos, eq(repos.id, findings.repoId))
+    .where(and(...findingConditions(userId, { ...filters, status: filters.status ?? "open" })))
+    .orderBy(SEVERITY_ORDER, desc(findings.lastSeenAt))
+    .limit(limit);
+}
+
+export type ExportedFinding = Awaited<ReturnType<typeof findingsForExport>>[number];
 
 // ---- Finding screen --------------------------------------------------------
 
@@ -341,6 +391,20 @@ export async function recordPromptCopied(database: Db, userId: string, findingId
     insert into ${findingEvents} (finding_id, user_id, type)
     select ${findingId}, ${userId}, 'prompt_copied'
     where exists (select 1 from ${findings} f join ${permissionCache} pc on pc.repo_id = f.repo_id and pc.user_id = ${userId} where f.id = ${findingId})
+  `);
+}
+
+/** `recordPromptCopied` for many findings at once, in one statement. */
+export async function recordPromptsCopied(database: Db, userId: string, findingIds: string[]): Promise<void> {
+  if (findingIds.length === 0) return;
+  await database.execute(sql`
+    insert into ${findingEvents} (finding_id, user_id, type)
+    select f.id, ${userId}, 'prompt_copied'
+    from ${findings} f join ${permissionCache} pc on pc.repo_id = f.repo_id and pc.user_id = ${userId}
+    where f.id in (${sql.join(
+      findingIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
   `);
 }
 
