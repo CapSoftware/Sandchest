@@ -43,7 +43,7 @@ import {
   type ScanEvent,
   type ThreatModel,
 } from "@sandchest/engine/scan";
-import { checkResult, notReviewed, parsePatch, reviewBody, reviewComment, shown, type PullFile, type ReviewComment } from "@sandchest/github";
+import { checkResult, notReviewed, parsePatch, reviewBody, reviewComment, shown, type Installation, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { IndexerBinary, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
@@ -82,7 +82,11 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
   if (!(await claimScanSlot(db(), scan.id, scan.orgId, ORG_CONCURRENCY))) {
     // Said once (a repeat of the last line is skipped), so the feed explains the wait.
     const what = scan.kind === "recon" ? "repositories are being mapped" : "scans are already running";
-    await noteScanEvent(db(), scan.id, "queue", `Waiting for a free slot: ${ORG_CONCURRENCY} ${what} for ${scan.repo.org.githubLogin}. This starts as soon as one finishes.`);
+    const message =
+      scan.kind === "fix_check"
+        ? `Waiting for a free slot: a repository's fix checks run one at a time, at most one a minute, with up to ${ORG_CONCURRENCY} scans at once for ${scan.repo.org.githubLogin}. Later pushes are checked in this one.`
+        : `Waiting for a free slot: ${ORG_CONCURRENCY} ${what} for ${scan.repo.org.githubLogin}. This starts as soon as one finishes.`;
+    await noteScanEvent(db(), scan.id, "queue", message);
     return { state: "queued" };
   }
   if (scan.kind === "pr_review" && !scan.checkRunId && scan.repo.org.installationId) {
@@ -132,6 +136,9 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
   if (!installationId || !scan.repo.enabled) throw new ScanFinished("Repository is no longer installed");
 
   const installation = githubApp().installation(installationId);
+  // A fix check settles what it has to re-check before any sandbox or clone, so a push that touches no cited file costs one API call.
+  const affected = scan.kind === "fix_check" ? await affectedFindings(scan, installation) : [];
+  if (scan.kind === "fix_check" && affected.length === 0) return { findings: 0 };
   const events = new EventWriter(db(), scan.id);
   // A stage's name travels with it ("stage:hunt"), so the page can light its step on the track.
   const onEvent = (event: ScanEvent) =>
@@ -165,10 +172,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     }
 
     if (scan.kind === "fix_check") {
-      const open = await openFindings(db(), scan.repo.id);
-      const changed = new Set((await installation.compare(scan.repo.fullName, scan.baseSha ?? `${headSha}~1`, headSha)).map((f) => f.filename));
-      const affected = open.filter((f) => citedFiles(f).some((file) => changed.has(file)));
-      if (affected.length === 0 || !model) return { findings: 0 };
+      if (!model) return { findings: 0 };
       onEvent({ type: "progress", message: `Re-checking ${affected.length} open ${affected.length === 1 ? "finding" : "findings"} on the new code…` });
       const checkStarted = Date.now();
       const { results, usage, costUsd } = await checkFixes({ ...common, threatModel: model, findings: affected.map(toEngineFinding) });
@@ -414,6 +418,14 @@ function toEngineFinding(row: FindingRow): Finding & { id: string } {
     sources: row.sources ?? [],
     validation: (row.validation as Finding["validation"]) ?? undefined,
   };
+}
+
+/** Open findings citing a file the push changed. A fix check's head is the pushed commit, never "HEAD". */
+async function affectedFindings(scan: LoadedScan, installation: Installation): Promise<FindingRow[]> {
+  const open = await openFindings(db(), scan.repo.id);
+  if (open.length === 0) return [];
+  const changed = new Set((await installation.compare(scan.repo.fullName, scan.baseSha ?? `${scan.headSha}~1`, scan.headSha)).map((f) => f.filename));
+  return open.filter((f) => citedFiles(f).some((file) => changed.has(file)));
 }
 
 function citedFiles(finding: FindingRow): string[] {

@@ -162,6 +162,31 @@ export async function createScan(database: Db, input: NewScan): Promise<{ scan: 
   return { scan: existing, created: false };
 }
 
+/**
+ * Queues the free scan a push asks for, folding a burst of pushes into one.
+ * A fix check still waiting takes the newest head and keeps its base, so it
+ * checks every push since. A recon waiting or running, or one that ran in the
+ * last day (SPEC §4), stands for this push too. Returns the scan already
+ * there with `created: false`. Serialised per repo, so racing pushes agree.
+ */
+export async function queuePushScan(database: Db, input: NewScan & { kind: "recon" | "fix_check" }): Promise<{ scan: Scan; created: boolean }> {
+  return database.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.repoId}, 2))`);
+    const same = and(eq(scans.repoId, input.repoId), eq(scans.kind, input.kind));
+    const [existing] =
+      input.kind === "fix_check"
+        ? await tx.update(scans).set({ headSha: input.headSha }).where(and(same, eq(scans.status, "queued"))).returning()
+        : await tx
+            .select()
+            .from(scans)
+            .where(and(same, sql`(${scans.status} in ('queued', 'running', 'publishing') or (${scans.status} in ('completed', 'failed') and ${scans.createdAt} > now() - interval '1 day'))`))
+            .limit(1);
+    if (existing) return { scan: existing, created: false };
+    const [created] = await tx.insert(scans).values(input).returning();
+    return { scan: created!, created: true };
+  });
+}
+
 /** Removes a scan that never started (a Dig whose credits were refused), freeing its slot. */
 export async function deleteUnstartedScan(database: Db, scanId: string): Promise<void> {
   await database.delete(scans).where(and(eq(scans.id, scanId), eq(scans.status, "queued"), isNull(scans.workflowRunId)));
@@ -176,14 +201,31 @@ export async function scanById(database: Db, id: string): Promise<(Scan & { repo
  * lane. Recon, which runs by itself for every repository when a plan starts,
  * has a lane of its own, so a Dig, a PR review or a fix check never waits
  * behind it. Serialised per org with an advisory lock, so two scans cannot
- * both take the last slot. Returns true if the scan is running (now, or already).
+ * both take the last slot. A repo's fix checks, which are free, run one at a
+ * time and start at most once a minute, so one repo's pushes never hold both slots.
+ * Returns true if the scan is running (now, or already).
  */
 export async function claimScanSlot(database: Db, scanId: string, orgId: string, limit: number): Promise<boolean> {
   return database.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${orgId}, 0))`);
-    const [scan] = await tx.select({ status: scans.status, kind: scans.kind }).from(scans).where(eq(scans.id, scanId));
+    const [scan] = await tx.select({ status: scans.status, kind: scans.kind, repoId: scans.repoId }).from(scans).where(eq(scans.id, scanId));
     if (!scan) throw new Error(`Scan ${scanId} not found`);
     if (scan.status !== "queued") return scan.status === "running";
+    if (scan.kind === "fix_check") {
+      const [previous] = await tx
+        .select({ id: scans.id })
+        .from(scans)
+        .where(
+          and(
+            eq(scans.repoId, scan.repoId),
+            eq(scans.kind, "fix_check"),
+            ne(scans.id, scanId),
+            sql`(${scans.status} in ('running', 'publishing') or ${scans.startedAt} > now() - interval '1 minute')`,
+          ),
+        )
+        .limit(1);
+      if (previous) return false;
+    }
     const lane = scan.kind === "recon" ? eq(scans.kind, "recon") : ne(scans.kind, "recon");
     const [{ running }] = (await tx
       .select({ running: sql<number>`count(*)::int` })

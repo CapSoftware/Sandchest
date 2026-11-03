@@ -9,6 +9,7 @@ import {
   hasOpenFindings,
   orgByInstallation,
   queuePendingRecons,
+  queuePushScan,
   recordEvent,
   removeInstallation,
   repoByGithubId,
@@ -198,13 +199,16 @@ async function onIssueComment(deps: WebhookDeps, payload: IssueCommentEvent): Pr
 /**
  * Creates a scan and starts its workflow. A PR head already under review is
  * not started twice, but one whose workflow never started (a failed start
- * before a redelivery) is started now.
+ * before a redelivery) is started now. Free scans fold into one already on
+ * the way (`queuePushScan`): they cost nothing, so pushes must not multiply them.
  */
 async function newScan(
   deps: WebhookDeps,
   input: { repoId: string; orgId: string; kind: ScanKind; headSha: string; baseSha?: string; prNumber?: number; trigger?: "webhook" | "manual" },
 ): Promise<string> {
-  const { scan, created } = await createScan(deps.db, { trigger: "webhook", ...input });
+  const values = { trigger: "webhook" as const, ...input };
+  const { scan, created } =
+    values.kind === "recon" || values.kind === "fix_check" ? await queuePushScan(deps.db, { ...values, kind: values.kind }) : await createScan(deps.db, values);
   const orphaned = !created && scan.status === "queued" && !scan.workflowRunId;
   if (!created && !orphaned) return "";
   await deps.startScan(scan.id);
