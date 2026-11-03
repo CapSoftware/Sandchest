@@ -7,7 +7,7 @@ import { RigView } from "@/components/rig/rig-view";
 import type { Painter } from "@/components/rig/screen";
 import type { ShotName } from "@/components/rig/shots";
 import { newSignals } from "@/components/rig/signals";
-import { aside, PHOSPHORS, swatch, validHandle, type HackerProfile } from "@/lib/hacker";
+import { PHOSPHORS, swatch, validHandle, type HackerProfile } from "@/lib/hacker";
 import { saveHacker } from "@/server/hacker-actions";
 import { HandleField } from "./handle-field";
 import { Keycap } from "./keycap";
@@ -124,7 +124,6 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
   // At rest: side on against the screen's glow where there's width for it; face to face on a tall phone screen.
   const shot: ShotName = editing && look >= 0 ? LOOKS[look]!.shot : wide ? "preview" : "hood";
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
-  const line = aside(profile.voice, job ? "hunt" : "done", profile.handle.length);
 
   return (
     <section className="hq-stage" data-editing={editing || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
@@ -175,7 +174,6 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
           <h1 id="hq-name" className="hq-name">
             {profile.handle}
           </h1>
-          <p className="hq-line">“{line}”</p>
           <div className="hq-actions">
             {job ? (
               <HoverLink href={job.href} className="cap-key cap-key-gold">
