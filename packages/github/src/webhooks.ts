@@ -48,6 +48,7 @@ export interface PullRequestEvent {
     draft?: boolean;
     head: { sha: string; ref: string; repo: { id: number; full_name: string; fork?: boolean } | null };
     base: { sha: string; ref: string; repo: { id: number } };
+    user: { login: string };
     author_association: string;
   };
 }

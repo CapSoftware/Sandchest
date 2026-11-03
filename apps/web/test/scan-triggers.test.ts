@@ -1,7 +1,8 @@
 /**
  * What a push or a PR may start, against a real Postgres with GitHub faked:
  * free scans (recon, fix checks) stay free but bounded, so a burst of pushes
- * costs one scan, not one per push.
+ * costs one scan, not one per push, and fork PRs on private repos only run
+ * a paid review when their author could push to the repo anyway.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
@@ -188,5 +189,35 @@ describe("free scans from pushes", () => {
     const before = clones;
     expect(await executeScan(check!.id)).toEqual({ findings: 0 });
     expect(clones).toBe(before);
+  });
+});
+
+describe("fork PRs on private repos", () => {
+  const forkPr = (author: string, head: string, delivery: string) =>
+    handleWebhook(deps(), "pull_request", delivery, {
+      action: "synchronize",
+      number: 3,
+      installation: { id: 801 },
+      repository: repoList[0],
+      sender: { login: author },
+      pull_request: {
+        number: 3,
+        draft: false,
+        user: { login: author },
+        head: { sha: head, ref: "feature", repo: { id: 9999, full_name: `${author}/api`, fork: true } },
+        base: { sha: "base", ref: "main", repo: { id: 81 } },
+        author_association: "MEMBER",
+      },
+    });
+
+  it("are reviewed automatically only when the author could push to the repo", async () => {
+    const reader = await forkPr("reader", "r1", "fork-read");
+    expect(reader.status).toBe("ignored");
+    expect(reader.detail).toContain("/sandchest review");
+    expect((await scansOf(81, "pr_review")).filter((s) => s.prNumber === 3)).toHaveLength(0);
+
+    const writer = await forkPr("writer", "w1", "fork-write");
+    expect(writer.status).toBe("handled");
+    expect(writer.scans).toHaveLength(1);
   });
 });

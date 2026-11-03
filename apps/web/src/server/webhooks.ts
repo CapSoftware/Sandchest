@@ -154,10 +154,14 @@ async function onPullRequest(deps: WebhookDeps, payload: PullRequestEvent): Prom
   const repo = await repoByGithubId(deps.db, payload.repository.id);
   if (!repo?.enabled || !repo.org.installationId) return { status: "ignored", detail: "repo not enabled" };
 
-  // Fork PRs on public repos need a maintainer's `/sandchest review`; elsewhere, trusted authors are reviewed automatically.
+  // Fork PRs on public repos need a maintainer's `/sandchest review`. On a private repo anyone who can read it can fork it,
+  // so a fork's PR is reviewed (and paid for) automatically only if its author could push the branch to the repo itself.
   const fork = pr.head.repo?.id !== payload.repository.id;
   if (fork && !repo.private) return { status: "ignored", detail: "public fork PR: waiting for /sandchest review" };
   if (fork && !TRUSTED_AUTHORS.has(pr.author_association)) return { status: "ignored", detail: "fork PR from an untrusted author" };
+  if (fork && !WRITE_ROLES.has(await deps.github.installation(repo.org.installationId).permission(repo.fullName, pr.user.login))) {
+    return { status: "ignored", detail: "fork PR from an author without write access: waiting for /sandchest review" };
+  }
 
   const scanId = await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "pr_review", headSha: pr.head.sha, baseSha: pr.base.sha, prNumber: pr.number });
   return { status: "handled", scans: scanId ? [scanId] : [] };
