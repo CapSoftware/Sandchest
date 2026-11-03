@@ -349,6 +349,89 @@ export const verifications = pgTable(
   (table) => [index("verifications_identifier_idx").on(table.identifier)],
 );
 
+// ---- Agents ----------------------------------------------------------------
+// Agents act as the person who connected them: through an API key, or OAuth
+// tokens an MCP client was given. Only SHA-256 hashes of secrets are stored.
+
+/**
+ * A secret an agent presents as `Authorization: Bearer …`: an API key (from
+ * the device flow or Settings; no expiry), or an OAuth access or refresh
+ * token. Refresh tokens rotate: every use spends one and issues the next in
+ * the same family, and a spent one shown again revokes the whole family.
+ */
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["key", "access", "refresh"] }).notNull(),
+    /** What the person or the agent called it: shown in Settings. */
+    name: text("name").notNull(),
+    /** SHA-256 of the secret, hex. */
+    tokenHash: text("token_hash").notNull().unique(),
+    /** The secret's first characters, to tell keys apart. */
+    prefix: text("prefix").notNull(),
+    /** The OAuth client it was issued to; null for API keys. */
+    clientId: text("client_id").references(() => oauthClients.id, { onDelete: "cascade" }),
+    /** One sign-in's access and refresh tokens share it, so revoking one revokes them all. */
+    family: uuid("family"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index("api_tokens_user_idx").on(table.userId), index("api_tokens_family_idx").on(table.family).where(sql`${table.family} is not null`)],
+);
+
+/** An MCP client, registered by itself (RFC 7591). Public clients only: PKCE stands in for a secret. */
+export const oauthClients = pgTable("oauth_clients", {
+  /** `scc_…`. */
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  redirectUris: jsonb("redirect_uris").$type<string[]>().notNull(),
+  createdAt: createdAt(),
+});
+
+/** A code from the consent page, spent once at the token endpoint within minutes. */
+export const oauthCodes = pgTable("oauth_codes", {
+  /** SHA-256 of the code, hex. */
+  codeHash: text("code_hash").primaryKey(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => oauthClients.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  redirectUri: text("redirect_uri").notNull(),
+  /** PKCE S256 challenge. */
+  codeChallenge: text("code_challenge").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * An agent asking to connect through the device flow (RFC 8628): it shows
+ * the person a short code, they approve it in the browser, and the agent's
+ * next poll collects an API key, once.
+ */
+export const deviceGrants = pgTable("device_grants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** SHA-256 of the device code the agent polls with, hex. */
+  deviceCodeHash: text("device_code_hash").notNull().unique(),
+  /** What the person types or sees: eight letters, stored without the dash. */
+  userCode: text("user_code").notNull().unique(),
+  /** The agent's own name for itself. */
+  clientName: text("client_name").notNull(),
+  status: text("status", { enum: ["pending", "approved", "denied", "issued"] }).notNull().default("pending"),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  /** When the agent last polled, to slow down one polling too fast. */
+  polledAt: timestamp("polled_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+});
+
 /**
  * Repositories a user may see: GitHub reports push access or higher. Replaced
  * as a whole each time access is read from GitHub (at most every 5 minutes).
@@ -547,6 +630,15 @@ export const EVENT_NAMES = [
   "org_settings_saved",
   /** The findings list was copied out or opened in a coding agent. props: format ("prompt" | "claude" | "codex" copied for an agent; "open_t3" | "open_claude" | "open_codex" | "open_cursor" opened in one; "markdown" | "json"), status, findings (how many), repos (how many; documents only), filtered (a severity or repository filter was on), low_confidence. */
   "findings_copied",
+
+  // ---- Agents ----
+  /** An agent was connected: a device code or an MCP client's consent was approved (or denied). props: method ("device" | "oauth"), outcome ("ok" | "denied" | "expired" | "invalid"). */
+  "agent_authorized",
+  /** An API key was created or revoked, or an agent's tokens were revoked. props: via ("settings" | "api"), kind ("key" | "oauth"), outcome. */
+  "api_key_created",
+  "api_key_revoked",
+  /** An agent changed something through the API or MCP. props: operation (the tool's name), surface ("api" | "mcp"), status (HTTP status). */
+  "agent_call",
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];
 export type EventProps = Record<string, string | number | boolean | null>;

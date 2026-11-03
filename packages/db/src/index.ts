@@ -8,3 +8,4 @@ export * from "./billing";
 export * from "./recruit";
 export * from "./admin";
 export * from "./learning";
+export * from "./agents";
