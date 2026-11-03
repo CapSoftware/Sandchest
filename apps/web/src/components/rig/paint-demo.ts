@@ -87,7 +87,15 @@ export function demoPainter(profile: HackerProfile, signals: { current: Signals 
   let chestFrom = -Infinity;
   let showing = false;
 
+  let last = 0;
+
   return (kit, t) => {
+    // A remounted scene's clock starts again from 0: keep the loop where it was.
+    if (t < last) {
+      start += t - last;
+      chestFrom += t - last;
+    }
+    last = t;
     if (start < 0) {
       // The first paint shows the lines already "done" at once, then the rest type out.
       start = t - JOIN_AT;

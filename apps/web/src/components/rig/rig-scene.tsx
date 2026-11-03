@@ -10,6 +10,7 @@ import { loadFonts, pageFonts } from "./art";
 import { DitherEffect } from "./dither";
 import { Figure, loadHacker } from "./figure";
 import { Laptop } from "./laptop";
+import { keepOut, orbit, orbitPosition } from "./camera-bounds";
 import { Room } from "./room";
 import { Kit, type Painter } from "./screen";
 import { SHOTS, type Shot, type ShotName } from "./shots";
@@ -34,8 +35,13 @@ export interface RigSceneProps {
   tier: Tier;
   /** The camera follows the pointer a little. */
   parallax?: boolean;
-  /** Dragging swings the camera around the desk, within limits, and it drifts back to the shot a moment after letting go. */
-  drag?: boolean;
+  /**
+   * Dragging swings the camera around the desk, within limits. `true`: it
+   * drifts back to the shot a moment after letting go. `"look"`: free look,
+   * further round and over the desk, held where it's left (a double click or
+   * a new shot brings it back), and pinch or ctrl + scroll moves it in and out.
+   */
+  drag?: boolean | "look";
   /** Animation off: the camera cuts, nothing sways. */
   still?: boolean;
   /** Moves the picture right by this share of the width (left, if negative), to clear something on the other side. */
@@ -387,7 +393,7 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, fram
 
   return (
     <>
-      <CameraRig shot={shot} parallax={!!parallax && !still} drag={!!drag} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} />
+      <CameraRig shot={shot} parallax={!!parallax && !still} drag={drag ?? false} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} />
       <ambientLight intensity={0.01} color={room.rim} />
       <hemisphereLight args={[room.rim, "#000000", 0.015]} />
       {/* Key: the room's one real light, over the left shoulder. */}
@@ -434,22 +440,6 @@ function follow(value: number, goal: number, velocity: number[], i: number, time
   return goal + (change + temp) * decay;
 }
 
-/**
- * The camera orbits this point between shots rather than cutting straight
- * across the room, so a move from behind the laptop to the hacker's side
- * swings around the desk instead of passing through it.
- */
-const PIVOT = new Vector3(0, 0.25, 0.2);
-
-/** A shot as the orbit sees it: distance, angle around, angle up, then where it looks and its field of view. */
-function orbit(shot: Shot): number[] {
-  const dx = shot.position[0] - PIVOT.x;
-  const dy = shot.position[1] - PIVOT.y;
-  const dz = shot.position[2] - PIVOT.z;
-  const radius = Math.hypot(dx, dy, dz);
-  return [radius, Math.atan2(dx, dz), Math.asin(dy / radius), ...shot.target, shot.fov];
-}
-
 /** How long a move between shots takes to mostly settle, in seconds. */
 const MOVE_TIME = 0.7;
 
@@ -465,15 +455,20 @@ const near = (offBy: number, speed: number, tolerance: number) => Math.abs(offBy
 
 /**
  * How far a drag can swing the camera from the shot, in radians around the
- * desk and up over it: enough to see the room from the side and from above,
- * never far enough to go through the wall or under the desk.
+ * desk and up over it: enough to see the room from the side and from above.
+ * Free look goes further; the keep-out below stops it at the walls, the desk
+ * and the hacker.
  */
-const DRAG_AROUND = 0.7;
-const DRAG_UP: [number, number] = [-0.14, 0.42];
+const DRAG_RANGE = {
+  nudge: { around: 0.7, up: [-0.14, 0.42] as const },
+  look: { around: 1.35, up: [-0.16, 0.8] as const },
+};
 /** Radians per pixel dragged. */
 const DRAG_RATE = 0.006;
-/** How long after letting go the camera starts back to the shot, in seconds. */
+/** How long after letting go the camera starts back to the shot, in seconds (not in free look). */
 const DRAG_HOLD = 3.5;
+/** How far free look's zoom moves the camera in and out, as a share of the shot's distance. */
+const ZOOM: [number, number] = [0.55, 1.4];
 
 interface Drag {
   /** Where the drag has put the camera, as offsets from the shot: around, then up. */
@@ -487,24 +482,32 @@ interface Drag {
   y: number;
   /** When the last drag ended (performance.now(), in ms). */
   releasedAt: number;
+  /** Free look's zoom, as a share of the shot's distance: the goal, the eased value and its speed. */
+  zoom: number;
+  zoomNow: number;
+  zoomVelocity: number[];
 }
 
 /**
  * Lets a drag on the canvas swing the camera. Vertical swipes on touch
  * screens still scroll the page; only sideways ones turn the camera.
  */
-function useDrag(enabled: boolean, shot: ShotName, pace: RefObject<Pace>): RefObject<Drag> {
+function useDrag(mode: boolean | "look", shot: ShotName, pace: RefObject<Pace>): RefObject<Drag> {
   const element = useThree((state) => state.gl.domElement);
-  const drag = useRef<Drag>({ goal: [0, 0], now: [0, 0], velocity: [0, 0], pointer: null, x: 0, y: 0, releasedAt: 0 });
+  const drag = useRef<Drag>({ goal: [0, 0], now: [0, 0], velocity: [0, 0], pointer: null, x: 0, y: 0, releasedAt: 0, zoom: 1, zoomNow: 1, zoomVelocity: [0] });
 
   // A new shot is the page asking to show something: let it, unless someone is mid-drag.
   useEffect(() => {
-    if (drag.current.pointer === null) drag.current.goal.fill(0);
+    if (drag.current.pointer !== null) return;
+    drag.current.goal.fill(0);
+    drag.current.zoom = 1;
   }, [shot]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!mode) return;
     const state = drag.current;
+    const range = DRAG_RANGE[mode === "look" ? "look" : "nudge"];
+    const busy = () => (pace.current.busyUntil = performance.now() + 400);
     element.style.cursor = "grab";
     element.style.touchAction = "pan-y";
     const down = (event: PointerEvent) => {
@@ -522,12 +525,12 @@ function useDrag(enabled: boolean, shot: ShotName, pace: RefObject<Pace>): RefOb
       if (event.pointerId !== state.pointer) return;
       const [around, up] = state.goal;
       state.goal = [
-        MathUtils.clamp(around - (event.clientX - state.x) * DRAG_RATE, -DRAG_AROUND, DRAG_AROUND),
-        MathUtils.clamp(up + (event.clientY - state.y) * DRAG_RATE, DRAG_UP[0], DRAG_UP[1]),
+        MathUtils.clamp(around - (event.clientX - state.x) * DRAG_RATE, -range.around, range.around),
+        MathUtils.clamp(up + (event.clientY - state.y) * DRAG_RATE, range.up[0], range.up[1]),
       ];
       state.x = event.clientX;
       state.y = event.clientY;
-      pace.current.busyUntil = performance.now() + 400;
+      busy();
     };
     const up = (event: PointerEvent) => {
       if (event.pointerId !== state.pointer) return;
@@ -535,29 +538,48 @@ function useDrag(enabled: boolean, shot: ShotName, pace: RefObject<Pace>): RefOb
       state.releasedAt = performance.now();
       element.style.cursor = "grab";
     };
+    // Free look: a double click goes back to the shot; a pinch (ctrl + scroll, as trackpads send it) moves in and out.
+    const reset = () => {
+      state.goal.fill(0);
+      state.zoom = 1;
+      busy();
+    };
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      state.zoom = MathUtils.clamp(state.zoom * Math.exp(event.deltaY * 0.01), ZOOM[0], ZOOM[1]);
+      busy();
+    };
     element.addEventListener("pointerdown", down);
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
     element.addEventListener("pointercancel", up);
     element.addEventListener("lostpointercapture", up);
+    if (mode === "look") {
+      element.addEventListener("dblclick", reset);
+      element.addEventListener("wheel", wheel, { passive: false });
+    }
     return () => {
       element.removeEventListener("pointerdown", down);
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", up);
       element.removeEventListener("pointercancel", up);
       element.removeEventListener("lostpointercapture", up);
+      element.removeEventListener("dblclick", reset);
+      element.removeEventListener("wheel", wheel);
       element.style.cursor = "";
       element.style.touchAction = "";
       state.pointer = null;
       state.goal = [0, 0];
+      state.zoom = 1;
     };
-  }, [enabled, element, pace]);
+  }, [mode, element, pace]);
 
   return drag;
 }
 
 /** Glides between shots, drifts a little, follows the pointer, turns when dragged and flinches at a find. Says when it is moving, so the scene draws at the full rate. */
-function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace }: { shot: ShotName; parallax: boolean; drag: boolean; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace> }) {
+function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace }: { shot: ShotName; parallax: boolean; drag: boolean | "look"; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace> }) {
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
   const pointer = useThree((state) => state.pointer);
   const size = useThree((state) => state.size);
@@ -569,6 +591,7 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
   const shiftVelocity = useRef([0]);
   const offset = useMemo(() => new Vector3(), []);
   const aim = useMemo(() => new Vector3(), []);
+  const scratch = useMemo(() => [new Vector3(), new Vector3()] as const, []);
 
   useFrame((state, delta) => {
     const goal = orbit(SHOTS[shot]);
@@ -589,15 +612,19 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
 
     // The drag, on top of the shot: it follows the hand closely, and a while after letting go eases back.
     const turn = drag.current;
-    if (turn.pointer === null && performance.now() - turn.releasedAt > DRAG_HOLD * 1000) turn.goal.fill(0);
+    if (draggable !== "look" && turn.pointer === null && performance.now() - turn.releasedAt > DRAG_HOLD * 1000) turn.goal.fill(0);
     for (let i = 0; i < 2; i++) {
       const settling = turn.pointer === null && turn.goal[i] === 0;
       if (still) turn.now[i] = turn.goal[i]!;
       else turn.now[i] = follow(turn.now[i]!, turn.goal[i]!, turn.velocity, i, settling ? MOVE_TIME * 1.6 : 0.18, step);
       if (!near(turn.now[i]! - turn.goal[i]!, turn.velocity[i]!, 3e-4)) pace.current.busyUntil = performance.now() + 400;
     }
+    turn.zoomNow = still ? turn.zoom : follow(turn.zoomNow, turn.zoom, turn.zoomVelocity, 0, 0.25, step);
+    if (!near(turn.zoomNow - turn.zoom, turn.zoomVelocity[0]!, 3e-4)) pace.current.busyUntil = performance.now() + 400;
     const around = shotAround + turn.now[0];
-    const up = shotUp + turn.now[1];
+    // Never so far down that the camera looks up from under the desk's edge.
+    const up = Math.max(-0.05, shotUp + turn.now[1]);
+    const distance = radius * turn.zoomNow;
 
     offset.set(0, 0, 0);
     if (!still) {
@@ -629,12 +656,8 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
       camera.clearViewOffset();
       camera.aspect = size.width / size.height;
     }
-    camera.position.set(
-      PIVOT.x + radius * Math.cos(up) * Math.sin(around),
-      PIVOT.y + radius * Math.sin(up),
-      PIVOT.z + radius * Math.cos(up) * Math.cos(around),
-    );
-    camera.position.add(offset);
+    orbitPosition(distance, around, up, camera.position).add(offset);
+    keepOut(camera.position, scratch[0], scratch[1]);
     camera.lookAt(aim.set(tx, ty, tz));
     camera.updateProjectionMatrix();
   });

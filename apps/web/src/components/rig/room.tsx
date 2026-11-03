@@ -17,12 +17,10 @@ import {
 import type { HackerProfile, Room as RoomPreset } from "@/lib/hacker";
 import { PHOSPHORS, ROOMS, swatch } from "@/lib/hacker";
 import { cityTexture, hash, puffTexture, rackTexture, seeded } from "./art";
+import { DESK, WALL_Z } from "./dimensions";
 import { useSurface } from "./textures";
 import { useBadgeTexture, useNoteTextures } from "./use-art";
 
-/** The desk's top is at y = 0. It runs from the wall side to just past the hacker's chest. */
-export const DESK = { w: 1.9, d: 1.02, z: -0.12, t: 0.045 };
-export const WALL_Z = -0.98;
 const DESK_TILE: [number, number] = [1.6, 0.9];
 const WALL_TILE: [number, number] = [3, 2];
 

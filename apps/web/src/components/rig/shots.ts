@@ -15,9 +15,9 @@ export const SHOTS = {
   /** From behind the laptop: the stickers, and the hood facing you. */
   rig: { position: [0.56, 0.3, -0.8], target: [0.02, 0.18, 0.1], fov: 38 },
   /** Down on the desk: the badge and the notes. */
-  desk: { position: [-0.12, 0.62, 0.42], target: [-0.2, 0, -0.04], fov: 36 },
-  /** Into the screen. */
-  screen: { position: [0, 0.16, 0.36], target: [0, 0.115, -0.11], fov: 34 },
+  desk: { position: [-0.16, 0.66, 0.44], target: [-0.2, 0, -0.04], fov: 36 },
+  /** Close on the screen, over the right shoulder and past the hood: never through the hacker (who sits between the desk's edge and the chair). */
+  screen: { position: [0.36, 0.38, 0.24], target: [0.0, 0.12, -0.11], fov: 30 },
   /** The onboarding's resting shot: side on from behind, the hood against the screen's glow. */
   preview: { position: [1.55, 0.55, 1.15], target: [-0.08, 0.2, 0.12], fov: 30 },
   /** Leaning in from the resting shot, past the hacker's arm, onto the screen: for the moment something is found. */

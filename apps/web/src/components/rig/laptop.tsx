@@ -135,7 +135,8 @@ export function Laptop({ profile, org, kit, signals }: { profile: HackerProfile;
           <circleGeometry args={[0.0011, 16]} />
           <meshBasicMaterial color="#1a2a1a" />
         </mesh>
-        <rectAreaLight ref={light} args={[phosphor, 5, SCREEN.w, SCREEN.h]} position={[0, LID.h / 2, 0.01]} rotation={[0, Math.PI, 0]} />
+        {/* The colour is set in place, not as a constructor argument: a new light would stall the frame while shaders recompile. */}
+        <rectAreaLight ref={light} args={[undefined, 5, SCREEN.w, SCREEN.h]} color={phosphor} position={[0, LID.h / 2, 0.01]} rotation={[0, Math.PI, 0]} />
         <Stickers profile={profile} org={org} />
       </group>
     </group>

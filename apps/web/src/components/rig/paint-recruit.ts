@@ -44,8 +44,13 @@ const PX = 21;
 export function recruitPainter(model: { current: RecruitModel }): Painter {
   let step: RecruitStep | null = null;
   let stepAt = 0;
+  let last = 0;
   return (kit, t) => {
     const m = model.current;
+    // The scene's clock starts again from 0 when the scene is remounted (a lower tier, say): start the screen again too,
+    // or it would wait for a moment on the old clock that never comes.
+    if (t < last) step = null;
+    last = t;
     if (m.step !== step) {
       // The first screen types out a moment after the scene appears, from an empty terminal: the page's still
       // shows that empty terminal, since it can't know whose name and accounts would be on it.

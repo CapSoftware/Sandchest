@@ -50,8 +50,20 @@ export function livePainter(model: { current: LiveModel }, signals: { current: S
   let activity: number[] = Array(48).fill(0);
   let lastBeat = 0;
   let readySince = -1;
+  let last = 0;
 
   return (kit, t) => {
+    // The scene's clock starts again from 0 when the scene is remounted (a lower tier, say): move every time
+    // kept here back with it, so what was on screen stays and what was coming still comes.
+    if (t < last) {
+      const by = t - last;
+      readySince += by;
+      queueAt += by;
+      lastBeat += by;
+      if (alert) alert.from += by;
+      for (const line of shown) line.from += by;
+    }
+    last = t;
     const m = model.current;
     const user = shellUser(m.profile.handle);
     const live = ACTIVE.has(m.status);
