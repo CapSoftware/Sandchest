@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, FREE_CREDITS, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
+import { setupPrompt } from "@/lib/agent-prompt";
 import { site } from "@/lib/site";
 
 const root = join(import.meta.dir, "..");
@@ -100,6 +101,12 @@ describe("structure", () => {
       expect(front, file).toMatch(/^title: \S/m);
       expect(front, file).toMatch(/^description: \S/m);
     }
+  });
+
+  test("the agent setup prompt leads Getting started and matches the copy button's", () => {
+    const prompt = `\`\`\`text\n${setupPrompt("https://www.sandchest.com")}\n\`\`\``;
+    for (const name of ["index", "agents"]) expect(doc(name), name).toContain(prompt);
+    expect(doc("index").match(/^## .+$/m)?.[0]).toBe("## Set up with your agent");
   });
 
   test("docs pages are plain Markdown, so their Markdown copies are complete", () => {

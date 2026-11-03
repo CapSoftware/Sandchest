@@ -11,7 +11,7 @@ import type { DocsPage } from "@/lib/docs";
 
 /** Sidebar sections, by page URL. A page not listed here lands in the last section. */
 const SECTIONS: Array<{ title: string; urls: string[] }> = [
-  { title: "Start here", urls: ["/docs", "/docs/pricing"] },
+  { title: "Start here", urls: ["/docs", "/docs/agents", "/docs/pricing"] },
   { title: "Using Sandchest", urls: ["/docs/scans", "/docs/findings", "/docs/fixing"] },
   { title: "Running it", urls: ["/docs/self-hosting", "/docs/security", "/docs/acceptable-use"] },
 ];

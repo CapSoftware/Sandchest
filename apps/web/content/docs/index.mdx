@@ -1,15 +1,25 @@
 ---
 title: Getting started
-description: Install Sandchest on GitHub, join the plan, and get your first findings.
+description: Have your coding agent set Sandchest up, or install it on GitHub yourself, and get your first findings.
 ---
 
 Sandchest is a GitHub App that reads your code the way an attacker would. It reviews your pull requests, scans whole repositories when you ask, and reports only vulnerabilities it can back with evidence: the way in, the path through your code, a proof of concept, and a fix prompt for your coding agent.
 
 It only ever scans repositories where you have installed it.
 
-## Set up in five steps
+## Set up with your agent
 
-Or let your coding agent do it: press **Set up with your agent** on the home page and paste the prompt into Claude Code, Cursor, Codex or any agent. It connects, sets everything up and only asks you for what needs you. See [Use it from your agent](/docs/agents).
+The quickest way in. Paste this into Claude Code, Cursor, Codex or any other agent (or press **Set up with your agent** on the home page to copy it):
+
+```text
+Set up Sandchest for me: it finds exploitable vulnerabilities in my GitHub repositories (https://www.sandchest.com).
+Read https://www.sandchest.com/docs/agents.md and follow it. Connect to its MCP server (https://www.sandchest.com/api/mcp) if you can add one, otherwise use its HTTP API with the device flow.
+Then call get_me and work through next_steps. Only ask me for what needs me: approving the connection, installing the GitHub App, and paying on Stripe if there are no free credits.
+```
+
+Your agent connects, sets everything up, starts the first deep scan and fixes what it finds in your checkout. You step in three times at most: approving the connection in your browser, choosing repositories on GitHub, and paying on Stripe if there are no free credits. Once connected, it can do anything the dashboard does: see [Use it from your agent](/docs/agents).
+
+## Or set it up yourself
 
 1. **Sign in with GitHub.** Go to [Get started](/get-started) and press **Continue with GitHub**. Sandchest uses your GitHub sign-in to see which repositories you can access.
 2. **Install the GitHub App.** From [Repos](/dashboard/repos), choose **Add repositories**, pick the account (yours or an organization) and the repositories Sandchest may read. You come back to Sandchest when GitHub is done.
@@ -31,8 +41,8 @@ Sandchest follows GitHub. You can see a repository's findings, and deep scan it,
 
 ## Next steps
 
+- [Use it from your agent](/docs/agents): set up, pay, scan and fix from Claude Code, Cursor or Codex, over MCP or HTTP.
 - [How scans work](/docs/scans): what each scan does, and when it runs.
 - [Findings & severity](/docs/findings): how findings are rated and what to do with them.
-- [Use it from your agent](/docs/agents): set up, pay, scan and fix from Claude Code, Cursor or Codex, over MCP or HTTP.
 - [Fixing with your agent](/docs/fixing): hand a finding to Cursor, Claude Code or Codex.
 - [Self-hosting](/docs/self-hosting): run Sandchest on your own infrastructure.
