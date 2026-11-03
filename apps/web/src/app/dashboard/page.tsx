@@ -29,7 +29,7 @@ export const metadata: Metadata = { title: "Repos · Sandchest" };
 /** What billing allows for an org on this page. Undefined when billing is off. */
 type OrgPlan = { planId: string | null; credits: number } | undefined;
 
-export default async function ReposPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; state?: string; plan?: string; recruited?: string }> }) {
+export default async function ReposPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; state?: string; plan?: string; recruited?: string; later?: string }> }) {
   const user = await viewer();
   const params = await searchParams;
   // Back from installing on GitHub: read access again so new repos show at once.
@@ -41,6 +41,9 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
     redirect(org ? `/dashboard/recruit?org=${org.id}` : "/dashboard/recruit");
   }
   const repos = await dashboardRepos(db(), user.id);
+  // Not set up yet: go straight to recruiting, unless they chose to finish it later.
+  const later = params.later === "1";
+  if (repos.length === 0 && !later) redirect("/dashboard/recruit");
 
   // Each org's billing, read from Autumn only where the stored copy is missing or old.
   const orgs = [...new Map(repos.map((repo) => [repo.orgId, repo])).values()];
@@ -50,6 +53,11 @@ export default async function ReposPage({ searchParams }: { searchParams: Promis
     orgs.forEach((repo, i) => plans.set(repo.orgId, { planId: rows[i]?.planId ?? null, credits: rows[i]?.credits ?? 0 }));
   }
   const unpaid = orgs.filter((repo) => plans.get(repo.orgId) && !plans.get(repo.orgId)!.planId);
+  // No account has joined yet: recruiting is unfinished, so pick it up there. Not
+  // straight back from paying (the plan may not show yet) or when they left it for later.
+  const joined = orgs.some((repo) => plans.get(repo.orgId)?.planId);
+  const recruitable = unpaid.find((repo) => repo.orgAdmin);
+  if (!joined && recruitable && !later && !params.plan && !params.recruited) redirect(`/dashboard/recruit?org=${recruitable.orgId}`);
 
   if (repos.length === 0) {
     return (

@@ -405,11 +405,11 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       <div className="onboard-shade" aria-hidden="true" />
 
       <header className="onboard-top">
-        <Link href="/dashboard" className="onboard-mark" aria-label="Sandchest dashboard">
+        <Link href="/dashboard?later=1" className="onboard-mark" aria-label="Sandchest dashboard">
           <img src="/sandchest-logo-dark.svg" alt="" width={120} height={22} />
         </Link>
         <Progress steps={steps} step={step} canEnter={canEnter} go={go} />
-        <Link href="/dashboard" className="onboard-leave">
+        <Link href="/dashboard?later=1" className="onboard-leave">
           {brief?.hacker ? "Back to the dashboard" : "Finish later"}
         </Link>
       </header>
