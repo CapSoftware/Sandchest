@@ -140,6 +140,21 @@ export async function registerOAuthClient(database: Db, client: { id: string; na
   return row!;
 }
 
+/**
+ * How many rows the anonymous endpoints added in the last `seconds`, counted
+ * no further than `upTo`: the overall ceiling on registrations and device
+ * codes, the same across every server instance.
+ */
+export async function recentlyAdded(database: Db, table: "oauth_clients" | "device_grants", seconds: number, upTo: number): Promise<number> {
+  const source = table === "oauth_clients" ? oauthClients : deviceGrants;
+  const [row] = await database.execute<{ n: number }>(sql`
+    select count(*)::int as n from (
+      select 1 from ${source} where ${source.createdAt} > now() - ${seconds}::int * interval '1 second' limit ${upTo}
+    ) recent
+  `);
+  return row?.n ?? 0;
+}
+
 export async function oauthClient(database: Db, clientId: string) {
   return database.query.oauthClients.findFirst({ where: eq(oauthClients.id, clientId) });
 }

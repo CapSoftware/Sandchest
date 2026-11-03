@@ -5,9 +5,10 @@
  * end at the token endpoint here.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
-import { createDeviceGrant, deviceGrantStatus, oauthClient, pollDeviceGrant, registerOAuthClient, revokeTokenByHash, saveOAuthCode, spendRefreshToken, takeOAuthCode } from "@sandchest/db";
+import { createDeviceGrant, deviceGrantStatus, type DevicePoll, oauthClient, pollDeviceGrant, recentlyAdded, registerOAuthClient, revokeTokenByHash, saveOAuthCode, spendRefreshToken, takeOAuthCode } from "@sandchest/db";
 import { track } from "../analytics";
 import { db } from "../db";
+import { admit, clientAddress, hold } from "../rate-limit";
 import { appUrl } from "./run";
 import { cleanName, CODE_TTL_S, DEVICE_INTERVAL_S, DEVICE_TTL_S, displayPrefix, formatUserCode, issueOAuthPair, PREFIX, secret, sha256, userCode } from "./tokens";
 
@@ -16,13 +17,29 @@ const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 /** The longest the token endpoint holds a device poll open. */
 const MAX_WAIT_S = 50;
 
+/**
+ * Registration and the device flow need no account, so one address gets 20
+ * clients and 20 device codes per 10 minutes, 60 device polls a minute and 5
+ * polls held open at once (per server instance: see rate-limit.ts). Across
+ * everyone, at most PER_HOUR new clients and device codes an hour: far above
+ * real use, it bounds what scripts spread over many addresses can add.
+ */
+const PER_ADDRESS = { clients: 20, deviceCodes: 20, polls: 60, waits: 5 };
+const WINDOW_MS = 10 * 60_000;
+const PER_HOUR = 1_000;
+
 const HEADERS = { "cache-control": "no-store", pragma: "no-cache", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type" };
 
-export function oauthJson(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", ...HEADERS } });
+export function oauthJson(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", ...HEADERS, ...headers } });
 }
 
 export const oauthError = (error: string, description: string, status = 400) => oauthJson({ error, error_description: description }, status);
+
+const tooMany = (error: string, description: string, retryS: number) => oauthJson({ error, error_description: description }, 429, { "retry-after": String(retryS) });
+
+/** Whether the last hour's new rows, across every instance, are at the ceiling. */
+const atCeiling = async (table: "oauth_clients" | "device_grants") => (await recentlyAdded(db(), table, 3_600, PER_HOUR)) >= PER_HOUR;
 
 export function corsPreflight(): Response {
   return new Response(null, { status: 204, headers: { ...HEADERS, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-max-age": "86400" } });
@@ -101,6 +118,7 @@ export function allowedRedirect(uri: string): boolean {
 }
 
 export async function register(request: Request): Promise<Response> {
+  if (!admit(`register ${clientAddress(request)}`, PER_ADDRESS.clients, WINDOW_MS)) return tooMany("too_many_requests", "Too many registrations from this address. Register once and reuse the client_id.", 600);
   const params = await readParams(request);
   const uris = params.redirect_uris;
   if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10 || !uris.every((uri) => typeof uri === "string" && allowedRedirect(uri))) {
@@ -110,6 +128,7 @@ export async function register(request: Request): Promise<Response> {
   if (method && method !== "none") return oauthError("invalid_client_metadata", "Only public clients are supported: token_endpoint_auth_method must be \"none\" (PKCE is required).");
   const id = secret(PREFIX.client).slice(0, 4 + 22);
   const name = cleanName(str(params.client_name), "MCP client");
+  if (await atCeiling("oauth_clients")) return tooMany("too_many_requests", "Too many registrations right now. Try again later.", 600);
   const row = await registerOAuthClient(db(), { id, name, redirectUris: uris as string[] });
   return oauthJson(
     {
@@ -199,21 +218,31 @@ export async function token(request: Request): Promise<Response> {
   if (grant === DEVICE_GRANT) {
     const deviceCode = str(params.device_code);
     if (!deviceCode || !deviceCode.startsWith(PREFIX.device)) return oauthError("invalid_request", "device_code is required.");
+    const address = clientAddress(request);
+    if (!admit(`poll ${address}`, PER_ADDRESS.polls, 60_000)) return tooMany("slow_down", `Too many polls from this address: wait at least ${DEVICE_INTERVAL_S} seconds between polls.`, DEVICE_INTERVAL_S);
+    // `wait`: hold the request until the person decides (up to 50 s), so an agent that can't loop needs one call.
+    // Only a poll that wasn't too soon may wait (so waits can't be stacked on one code), and waiting only reads.
+    // One address holds only a few open at once, so many device codes can't each pin a worker.
+    const wait = Math.min(Math.max(Number(params.wait) || 0, 0), MAX_WAIT_S);
+    const release = wait > 0 ? hold(`wait ${address}`, PER_ADDRESS.waits) : undefined;
+    if (wait > 0 && !release) return tooMany("slow_down", `Too many polls waiting from this address: poll without wait, every ${DEVICE_INTERVAL_S} seconds.`, DEVICE_INTERVAL_S);
     const key = secret(PREFIX.key);
     const issue = { tokenHash: sha256(key), prefix: displayPrefix(key) };
     const hash = sha256(deviceCode);
-    let poll = await pollDeviceGrant(db(), hash, DEVICE_INTERVAL_S, issue);
-    // `wait`: hold the request until the person decides (up to 50 s), so an agent that can't loop needs one call.
-    // Only a poll that wasn't too soon may wait (so waits can't be stacked on one code), and waiting only reads.
-    const wait = Math.min(Math.max(Number(params.wait) || 0, 0), MAX_WAIT_S);
-    const until = Date.now() + wait * 1_000;
-    while (wait > 0 && poll.state === "pending" && Date.now() < until) {
-      await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, until - Date.now())));
-      const now = await deviceGrantStatus(db(), hash);
-      if (!now || now.expired || now.status !== "pending") {
-        poll = await pollDeviceGrant(db(), hash, 0, issue);
-        break;
+    let poll: DevicePoll;
+    try {
+      poll = await pollDeviceGrant(db(), hash, DEVICE_INTERVAL_S, issue);
+      const until = Date.now() + wait * 1_000;
+      while (wait > 0 && poll.state === "pending" && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, until - Date.now())));
+        const now = await deviceGrantStatus(db(), hash);
+        if (!now || now.expired || now.status !== "pending") {
+          poll = await pollDeviceGrant(db(), hash, 0, issue);
+          break;
+        }
       }
+    } finally {
+      release?.();
     }
     switch (poll.state) {
       case "pending":
@@ -248,6 +277,8 @@ export async function revoke(request: Request): Promise<Response> {
 // ---- Device authorization ----------------------------------------------------
 
 export async function startDevice(request: Request): Promise<Response> {
+  if (!admit(`device ${clientAddress(request)}`, PER_ADDRESS.deviceCodes, WINDOW_MS)) return tooMany("too_many_requests", "Too many device codes from this address. Finish connecting with the last one, or try again in a few minutes.", 600);
+  if (await atCeiling("device_grants")) return tooMany("too_many_requests", "Too many device codes right now. Try again in a few minutes.", 600);
   const params = await readParams(request);
   const name = cleanName(str(params.client_name) ?? str(params.name) ?? request.headers.get("user-agent")?.split(/[\s/]/)[0], "Agent");
   const deviceCode = secret(PREFIX.device);

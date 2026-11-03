@@ -479,6 +479,87 @@ describe.skipIf(!available)("MCP", () => {
   });
 });
 
+describe.skipIf(!available)("anonymous endpoints are limited", () => {
+  // Each test sends from its own address, so their limits don't meet.
+  const from = (ip: string, body: unknown, form = false) => {
+    const request = post(body, form);
+    request.headers.set("x-forwarded-for", ip);
+    return request;
+  };
+  const count = async (table: typeof schema.oauthClients | typeof schema.deviceGrants) => (await database.select({ id: table.id }).from(table)).length;
+  const devicePoll = (ip: string, deviceCode: string, wait?: string) => tokenPost(from(ip, { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, ...(wait ? { wait } : {}) }, true));
+
+  test("registration: one address gets 20 clients, the 21st is refused before anything is stored", async () => {
+    const before = await count(schema.oauthClients);
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) statuses.push((await registerPost(from("203.0.113.1", { client_name: `Burst ${i}`, redirect_uris: ["https://client.example/cb"] }))).status);
+    expect(statuses.slice(0, 20).every((status) => status === 201)).toBe(true);
+    expect(statuses[20]).toBe(429);
+    expect((await count(schema.oauthClients)) - before).toBe(20);
+    // Someone else registering at the same moment is unaffected, with the full 1-10 redirect URIs.
+    const uris = Array.from({ length: 10 }, (_, i) => `http://127.0.0.1:${40_000 + i}/callback`);
+    expect((await registerPost(from("203.0.113.9", { client_name: "Cursor", redirect_uris: uris }))).status).toBe(201);
+  });
+
+  test("device codes: one address gets 20, the 21st is refused before anything is stored", async () => {
+    const before = await count(schema.deviceGrants);
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) statuses.push((await devicePost(from("203.0.113.2", { client_name: `Burst ${i}` }))).status);
+    expect(statuses.slice(0, 20).every((status) => status === 200)).toBe(true);
+    expect(statuses[20]).toBe(429);
+    expect((await count(schema.deviceGrants)) - before).toBe(20);
+  });
+
+  test("device polls: one address gets 60 a minute", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 61; i++) statuses.push((await devicePoll("203.0.113.3", `scd_${randomBytes(16).toString("hex")}`)).status);
+    expect(statuses.slice(0, 60).every((status) => status === 400)).toBe(true);
+    expect(statuses[60]).toBe(429);
+  });
+
+  test("waiting polls: one address holds at most 5 open, and a sixth is answered at once", async () => {
+    const starts: Array<Record<string, any>> = [];
+    for (let i = 0; i < 6; i++) starts.push((await (await devicePost(from("203.0.113.4", { client_name: `Waiter ${i}` }))).json()) as Record<string, any>);
+    const held = starts.slice(0, 5).map((start) => devicePoll("203.0.113.5", start.device_code, "50"));
+    await Bun.sleep(100);
+    const begun = Date.now();
+    const sixth = await Promise.race([devicePoll("203.0.113.5", starts[5]!.device_code, "50"), Bun.sleep(1_500).then(() => "held" as const)]);
+    expect(sixth).not.toBe("held");
+    expect(Date.now() - begun).toBeLessThan(1_500);
+    expect((sixth as Response).status).toBe(429);
+    expect(((await (sixth as Response).json()) as Record<string, any>).error).toBe("slow_down");
+    // The held ones still end the moment the person decides.
+    for (const start of starts.slice(0, 5)) await decideDeviceGrant(database, start.user_code.replace("-", ""), ids.alice, false);
+    for (const response of await Promise.all(held)) expect(((await response.json()) as Record<string, any>).error).toBe("access_denied");
+    // With them closed, the address may wait again.
+    const again = (await (await devicePost(from("203.0.113.4", {}))).json()) as Record<string, any>;
+    const waiting = devicePoll("203.0.113.5", again.device_code, "50");
+    setTimeout(() => void decideDeviceGrant(database, again.user_code.replace("-", ""), ids.alice, false), 500);
+    expect(((await (await waiting).json()) as Record<string, any>).error).toBe("access_denied");
+  });
+
+  test("across every address and server instance, at most 1,000 clients and device codes an hour", async () => {
+    const noise = Array.from({ length: 1_000 }, (_, i) => i);
+    await database.insert(schema.oauthClients).values(noise.map((i) => ({ id: `scc_noise${i}`, name: "noise", redirectUris: ["https://noise.example/cb"] })));
+    await database.insert(schema.deviceGrants).values(noise.map((i) => ({ deviceCodeHash: `noise${i}`, userCode: `NOISE${String(i).padStart(4, "0")}`, clientName: "noise", expiresAt: new Date(Date.now() + 60_000) })));
+    try {
+      const clients = await count(schema.oauthClients);
+      expect((await registerPost(from("198.51.100.1", { redirect_uris: ["https://client.example/cb"] }))).status).toBe(429);
+      expect(await count(schema.oauthClients)).toBe(clients);
+      const grants = await count(schema.deviceGrants);
+      expect((await devicePost(from("198.51.100.1", {}))).status).toBe(429);
+      expect(await count(schema.deviceGrants)).toBe(grants);
+    } finally {
+      await database.$client`delete from oauth_clients where name = 'noise'`;
+      await database.$client`delete from device_grants where client_name = 'noise'`;
+    }
+    // Rows older than the hour don't count against it.
+    await database.insert(schema.oauthClients).values(noise.map((i) => ({ id: `scc_old${i}`, name: "old", redirectUris: ["https://noise.example/cb"], createdAt: new Date(Date.now() - 2 * 3_600_000) })));
+    expect((await registerPost(from("198.51.100.2", { redirect_uris: ["https://client.example/cb"] }))).status).toBe(201);
+    await database.$client`delete from oauth_clients where name = 'old'`;
+  });
+});
+
 describe("routing and docs", () => {
   test("paths: ids, owner/name in two segments, literals", () => {
     expect(matchPath("/repos/{repo}", ["repos", "acme", "api"])).toEqual({ repo: "acme/api" });
