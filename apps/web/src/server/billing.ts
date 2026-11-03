@@ -15,7 +15,7 @@
  * This module stays light: pages import it, and the workflow runtime is
  * loaded only when an org's first plan starts its recon.
  */
-import { autoTopUpControl, createAutumn, createStripe, DEFAULT_CREDITS, isTrial, planById, type Autumn, type BillingState, type Stripe } from "@sandchest/billing";
+import { autoTopUpControl, createAutumn, createStripe, DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, planById, type Autumn, type BillingState, type Stripe } from "@sandchest/billing";
 import {
   markScanReserved,
   orgBillingRow,
@@ -26,6 +26,7 @@ import {
   type OrgBillingInput,
   type OrgBillingRow,
   type OrgSettings,
+  updateOrgSettings,
 } from "@sandchest/db";
 import { after } from "next/server";
 import { config } from "./config";
@@ -198,6 +199,27 @@ export async function applyAutoTopUp(orgId: string, planId: string | null, choic
   const off = { enabled: false, threshold: 0, quantity: 0, perMonth: 1 };
   await autumn()!.setAutoTopUp(orgId, control ?? off);
   return control ?? off;
+}
+
+/**
+ * An admin's auto top-up choice: kept with the org's settings, then pushed to
+ * Autumn and read back. `quantity` defaults to the last choice, then
+ * DEFAULT_CREDITS; the limit to five top-ups' worth. Throws if Autumn
+ * refuses, after the choice is saved.
+ */
+export async function saveAutoTopUpChoice(
+  userId: string,
+  row: { org: { id: string; githubLogin: string; settings: OrgSettings }; billing: { planId: string | null } | null },
+  input: { enabled: boolean; quantity?: number; monthlyLimitUsd?: number },
+): Promise<{ ok: true; choice: NonNullable<OrgSettings["autoTopUp"]> } | { ok: false; reason: "no_plan" | "not_admin" }> {
+  const plan = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
+  if (!plan) return { ok: false, reason: "no_plan" };
+  const quantity = input.quantity ?? row.org.settings.autoTopUp?.quantity ?? DEFAULT_CREDITS;
+  const choice = { enabled: input.enabled, quantity, monthlyLimitUsd: input.monthlyLimitUsd || defaultAutoTopUpLimit(quantity) };
+  if (!(await updateOrgSettings(db(), userId, row.org.id, { autoTopUp: choice }))) return { ok: false, reason: "not_admin" };
+  await applyAutoTopUp(row.org.id, plan.id, choice);
+  await syncBilling(row.org);
+  return { ok: true, choice };
 }
 
 /** After a plan change: size auto top-up for the new plan's packs, or turn it off without one. */

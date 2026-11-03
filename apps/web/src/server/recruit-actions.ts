@@ -10,7 +10,7 @@
  * charges it for the plan and the credits. Anything that needs Stripe's own
  * pages (a card step on the charge, or no keys) falls back to them.
  */
-import { AutumnError, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, StripeError, taxIdTypeFor } from "@sandchest/billing";
+import { AutumnError, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, StripeError } from "@sandchest/billing";
 import { orgForAdmin, orgRepos, updateOrgSettings, userById } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -27,6 +27,7 @@ import { db } from "./db";
 import { CLAIM_COOKIE, closedMessage } from "@/lib/free-credits";
 import { claimFreeCredits, codeOffer } from "./free-credits";
 import { HackerSchema } from "./hacker-schema";
+import { applyInvoiceDetails, InvoiceDetails, type InvoiceDetailsInput } from "./invoice-details";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 
@@ -181,26 +182,6 @@ export async function preparePayment(orgId: string, raw: RecruitInput): Promise<
   }
 }
 
-/**
- * A business's details for its invoices: the name and address they show,
- * and a tax ID if it has one. They go to the Stripe customer, not to
- * Sandchest's database: Stripe puts them on every invoice it makes.
- */
-const InvoiceDetails = z
-  .object({
-    name: z.string().trim().min(1).max(256),
-    address: z.object({
-      line1: z.string().trim().min(1).max(200),
-      line2: z.string().trim().max(200).nullish(),
-      city: z.string().trim().max(200),
-      state: z.string().trim().max(200).nullish(),
-      postal_code: z.string().trim().max(40),
-      country: z.string().regex(/^[A-Z]{2}$/),
-    }),
-    taxId: z.object({ type: z.string().max(20), value: z.string().trim().min(1).max(64) }).nullable(),
-  })
-  .refine((details) => !details.taxId || taxIdTypeFor(details.address.country, details.taxId.type));
-export type InvoiceDetailsInput = z.input<typeof InvoiceDetails>;
 
 /** Puts the business's details on the Stripe customer, before the card is saved, so the first invoice carries them. */
 export async function saveInvoiceDetails(orgId: string, raw: InvoiceDetailsInput): Promise<RecruitOutcome> {
@@ -212,9 +193,7 @@ export async function saveInvoiceDetails(orgId: string, raw: InvoiceDetailsInput
   if (!row) return { error: NOT_ADMIN };
   const record = (outcome: string) => track("invoice_details_saved", { userId: user.id, orgId, props: { has_tax_id: !!details.data.taxId, country: details.data.address.country, outcome } });
   try {
-    const customer = await autumn()!.stripeCustomer(row.org.id, row.org.githubLogin);
-    await client.updateCustomer(customer, { name: details.data.name, address: details.data.address });
-    await client.setTaxId(customer, details.data.taxId);
+    await applyInvoiceDetails(row.org, details.data);
     await record("ok");
     return {};
   } catch (error) {

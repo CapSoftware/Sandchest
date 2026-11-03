@@ -8,14 +8,14 @@
  * through Stripe Checkout. Once the org has one, every charge is shown on a
  * confirm page first, then charged at once.
  */
-import { DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, MAX_PURCHASE_CREDITS, planById, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
-import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
+import { isTrial, MAX_PURCHASE_CREDITS, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
+import { orgForAdmin } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser, viewer } from "./access";
 import { track } from "./analytics";
-import { applyAutoTopUp, autumn, syncBilling } from "./billing";
+import { autumn, saveAutoTopUpChoice, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
@@ -162,24 +162,25 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
   if (!parsed.success) return { error: "The monthly limit must be at least $1." };
   const row = await adminOrg(orgId);
   if (!row) return { error: NOT_ADMIN };
-  const plan = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
-  if (!plan) return { error: "Auto top-up needs a plan with a card: join Standard first." };
-  const quantity = parsed.data.quantity ?? row.org.settings.autoTopUp?.quantity ?? DEFAULT_CREDITS;
-  const choice = { enabled: parsed.data.enabled === "on", quantity, monthlyLimitUsd: parsed.data.limit || defaultAutoTopUpLimit(quantity) };
   const user = await viewer();
-  const record = (outcome: string) =>
-    track("auto_top_up_saved", { userId: user.id, orgId, props: { enabled: choice.enabled, quantity: choice.quantity, monthly_limit_usd: choice.monthlyLimitUsd, outcome } });
-  if (!(await updateOrgSettings(db(), user.id, orgId, { autoTopUp: choice }))) return { error: NOT_ADMIN };
+  const input = { enabled: parsed.data.enabled === "on", quantity: parsed.data.quantity, monthlyLimitUsd: parsed.data.limit };
+  const record = (outcome: string, choice?: { enabled: boolean; quantity?: number; monthlyLimitUsd: number }) =>
+    track("auto_top_up_saved", {
+      userId: user.id,
+      orgId,
+      props: { enabled: input.enabled, quantity: choice?.quantity ?? input.quantity ?? null, monthly_limit_usd: choice?.monthlyLimitUsd ?? input.monthlyLimitUsd, outcome },
+    });
+  let result: Awaited<ReturnType<typeof saveAutoTopUpChoice>>;
   try {
-    await applyAutoTopUp(orgId, plan.id, choice);
-    await syncBilling(row.org);
+    result = await saveAutoTopUpChoice(user.id, row, input);
   } catch (error) {
     console.error(`Auto top-up for org ${orgId} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "auto_top_up" }, handled: true });
     await record("error");
     return { error: "Saved here, but billing didn’t take the change. Try again in a minute." };
   }
-  await record("ok");
+  if (!result.ok) return { error: result.reason === "no_plan" ? "Auto top-up needs a plan with a card: join Standard first." : NOT_ADMIN };
+  await record("ok", result.choice);
   revalidatePath("/dashboard/settings");
   return { saved: true };
 }
