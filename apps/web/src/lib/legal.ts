@@ -19,7 +19,7 @@ export const legal = {
   /** One address for general, privacy, security and legal questions. */
   email: "hello@cap.so",
   /** Shown on all three pages. Change it whenever a policy changes. */
-  lastUpdated: "November 2, 2026",
+  lastUpdated: "November 3, 2026",
 } as const;
 
 /** A value that hasn't been filled in yet. */

@@ -72,7 +72,7 @@ Sandchest never writes to your code and never opens issues.
 
 ## Analytics, email and payments
 
-- **Analytics are first-party only.** There are no third-party analytics or tracking scripts. Usage events record opaque IDs, counts and categories, never code, finding contents, names or email addresses.
+- **Analytics are first-party.** Usage events (page views with IDs removed from the address, clicks, sign-up steps and actions) go to Sandchest's own database. A random ID in a cookie ties them to a browser, and to an account after sign-in. They record opaque IDs, counts and categories, never code, finding contents, repository names, names, email addresses or IP addresses. The hosting provider's cookieless web analytics count page views and measure page speed. There are no advertising or tracking scripts.
 - **Finding emails** cover new critical findings and finished deep scans. They go to people who have signed in and had push access to the repository when Sandchest last checked, within the past 30 days. An admin can turn these emails off for the account in [Settings](/dashboard/settings).
 - **Billing emails** go to the account's admins and can't be turned off: credits running low or out (only while auto top-up is off), an auto top-up that went through or failed, and a scan stopped because the model provider refused it. Admins are people GitHub confirmed as admins in the last 30 days; if there are none, Sandchest asks GitHub before sending. The scan-stopped email names the repository, so it follows the account's email setting and only goes to admins confirmed in the last 30 days.
 - There is no marketing email.

@@ -25,13 +25,15 @@ A self-hosted Sandchest sends nothing to us, so this policy doesn't apply to it.
 
 **From billing**: your plan, credit balance and auto top-up settings. Payments are made to Stripe through our billing provider, Autumn. We never see or store your card number.
 
-**From using the dashboard**: first-party usage events, such as a fix prompt being copied. They hold opaque IDs, counts and categories only: never code, finding contents, names or email addresses.
+**From using the site and the dashboard**: first-party usage events, which we store ourselves. They record the pages you view, with any IDs removed from the address. They also record the links and tracked buttons you click, the steps of signing up you reach, and actions such as starting a scan, buying credits or copying a fix prompt, with whether each one went through. A page view also records the site that sent you (its domain only), any campaign tags in the link, your device type (phone, tablet or desktop) and your country. Events are tied to a random ID kept in a cookie, and to your account once you sign in, so we can see how people find and use Sandchest. They hold opaque IDs, counts and categories only: never code, finding contents, repository names, names, email addresses or IP addresses.
+
+**Web analytics from our hosting provider**: page view counts and page-speed measurements, collected without cookies and without storing IP addresses.
 
 ## What we don't collect
 
 - **Your source code.** Each scan clones the one commit it needs into a temporary workspace, and destroys the workspace when the scan ends, whether it succeeded or failed. We keep no copies, snapshots or diffs.
 - **IP addresses** with your account. Sign-in doesn't record them.
-- **Third-party tracking.** There are no advertising or third-party analytics scripts, and the only cookies are the ones that keep you signed in.
+- **Advertising tracking.** There are no advertising scripts or tracking pixels, and nothing is shared with advertisers. Our cookies keep you signed in, hold the random ID for our own usage events (for a year), and, if you came to claim free credits, remember that while you sign up.
 
 ## How code is processed
 
