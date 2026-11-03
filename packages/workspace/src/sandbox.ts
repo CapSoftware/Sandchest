@@ -86,8 +86,9 @@ export class SandboxWorkspace implements Workspace {
     const [file, ...args] = cmd;
     if (!file) throw new WorkspaceError("Empty command");
     // Detached, like the indexer: the process keeps running on the microVM
-    // until the VM stops, and `destroy()` deletes the VM.
-    await this.sandbox.runCommand({ cmd: file, args, env: options.env, detached: true });
+    // until the VM stops, and `destroy()` deletes the VM. Same cwd and base
+    // environment as `exec`, so `npm run start` finds the checkout's package.json.
+    await this.sandbox.runCommand({ cmd: file, args, cwd: this.root, env: { ...BASE_ENV, ...options.env }, detached: true });
   }
 
   async readFile(path: string): Promise<string> {
