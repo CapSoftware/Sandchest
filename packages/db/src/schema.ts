@@ -461,8 +461,14 @@ export const orgNotices = pgTable(
  */
 export const EVENT_NAMES = [
   // ---- Browser (recorded by the beacon at /api/e) ----
-  /** A page was shown. props: path (ids replaced by :id), referrer (host, external only), utm_source/medium/campaign/term/content, device, country. */
+  /**
+   * A page was shown, or its query changed (filters). props: path (ids replaced by :id), referrer (host, external
+   * only, first page of a visit), utm_source/medium/campaign/term/content, q_<key> for known status and filter
+   * parameters (q_error, q_plan, q_recruited, q_severity, q_next, …; see QUERY_KEYS), device, country.
+   */
   "page_view",
+  /** A page stopped being looked at (navigation, tab hidden or closed). props: path, visible_ms. Sum per page view; a page hidden and shown again sends more than one. */
+  "page_left",
   /** A link or tracked control was clicked. props: path, target (a `data-track` id, an internal path, or an external host). */
   "clicked",
   /** A step of a multi-step flow was shown. props: path, flow ("recruit"), step. */
@@ -487,6 +493,8 @@ export const EVENT_NAMES = [
   "app_uninstalled",
   /** Repositories were added to or removed from an installation. org_id set. props: added, removed. */
   "repos_changed",
+  /** Someone came back from installing the App on GitHub. org_id set once the installation is known. props: setup_action, state ("recruit" when it started from recruiting), outcome ("ok" | "unknown_installation"). */
+  "app_install_returned",
 
   // ---- Onboarding (recruit) ----
   /** Someone opened "claim free credits" (anonymous until they sign in). */
@@ -513,10 +521,14 @@ export const EVENT_NAMES = [
   "billing_portal_opened",
   /** Auto top-up was changed. props: enabled, quantity, monthly_limit_usd, outcome ("ok" | "error"). */
   "auto_top_up_saved",
+  /** Someone came back from Stripe (Checkout, a card step or the portal). props: had_plan, had_paid_plan, plan_now (enum), outcome ("first_plan" | "paid" | "unchanged" | "pending"). */
+  "billing_returned",
+  /** Auto top-up charged a card (or failed to), from the billing webhook. props: credits_added, amount_minor, currency, outcome ("ok" | "card" | "limit"). */
+  "auto_top_up_charged",
 
   // ---- Product ----
-  /** Dig was pressed. props: repo_id, scan_id, credits, outcome ("ok" | "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "error" | "no_access"). */
-  "dig_requested",
+  /** "Deep scan" or "Scan again" was pressed. props: repo_id, scan_id, credits, scan_again, outcome ("ok" | "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "error" | "no_access"). */
+  "deep_scan_requested",
   /** The hacker's look was saved. props: outcome. */
   "hacker_saved",
   /** An account's settings were saved. props: check_threshold, email_notifications, outcome ("ok" | "not_admin"). */

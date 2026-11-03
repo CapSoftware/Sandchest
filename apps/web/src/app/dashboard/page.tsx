@@ -1,4 +1,4 @@
-import { adminOrgs, dashboardFindings, dashboardOverview, dashboardRepos, dashboardScans, type DashboardRepo, type OverviewWindow } from "@sandchest/db";
+import { adminOrgs, orgByInstallation, dashboardFindings, dashboardOverview, dashboardRepos, dashboardScans, type DashboardRepo, type OverviewWindow } from "@sandchest/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -11,7 +11,9 @@ import { Tally } from "@/components/app/tally";
 import { PageShape } from "@/components/app/skeleton";
 import { compactNumber, plural, SEVERITIES, SEVERITY_LABEL } from "@/lib/format";
 import { PRICES } from "@/lib/pricing";
+import { safeToken } from "@/lib/analytics";
 import { ensureAccess, viewer } from "@/server/access";
+import { track } from "@/server/analytics";
 import { db } from "@/server/db";
 import { orgPlans } from "@/server/org-plans";
 import "../rig.css";
@@ -21,11 +23,21 @@ export const metadata: Metadata = { title: "Overview · Sandchest" };
 /** The overview's window, in days. */
 const DAYS = 30;
 
-export default async function OverviewPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; state?: string; plan?: string; recruited?: string; later?: string }> }) {
+export default async function OverviewPage({ searchParams }: { searchParams: Promise<{ installation_id?: string; setup_action?: string; state?: string; plan?: string; recruited?: string; later?: string }> }) {
   const user = await viewer();
   const params = await searchParams;
   // Back from installing on GitHub: read access again so new repos show at once.
-  if (params.installation_id) await ensureAccess(user.id, { force: true });
+  if (params.installation_id) {
+    await ensureAccess(user.id, { force: true });
+    // The install happened on GitHub; this is where the person and their browser rejoin it.
+    const id = Number(params.installation_id);
+    const installed = Number.isSafeInteger(id) ? await orgByInstallation(db(), id).catch(() => undefined) : undefined;
+    await track("app_install_returned", {
+      userId: user.id,
+      orgId: installed?.id,
+      props: { setup_action: safeToken(params.setup_action, 20) ?? null, state: safeToken(params.state, 20) ?? null, outcome: installed ? "ok" : "unknown_installation" },
+    });
+  }
   // Installed from recruiting: carry on there, on the account just connected.
   if (params.state === "recruit") {
     const installed = Number(params.installation_id);
@@ -286,7 +298,7 @@ function Paywall({ repo }: { repo: DashboardRepo }) {
         </Link>
       )}
       <details className="recruit-skip">
-        <summary>Join without recruiting</summary>
+        <summary data-track="recruit-skip-open">Join without recruiting</summary>
         <PlanPicker orgId={repo.orgId} current={null} admin={repo.orgAdmin} />
       </details>
     </section>

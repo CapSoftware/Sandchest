@@ -3,6 +3,7 @@ import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { viewer } from "@/server/access";
+import { track } from "@/server/analytics";
 import { autumn, syncBilling } from "@/server/billing";
 import { db } from "@/server/db";
 
@@ -30,6 +31,11 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     state = await syncBilling(row.org).catch(() => state);
   }
+  const planNow = state?.planId ? (isTrial(state.planId) ? "free" : "paid") : "none";
+  // A first plan; a paid plan where there was none (free credits before); still no paid plan (abandoned, or slower
+  // than the wait); or a change on a paid plan (credits, the portal).
+  const outcome = !hadPlan && state?.planId ? "first_plan" : hadPaid ? "unchanged" : paying(state?.planId) ? "paid" : "pending";
+  await track("billing_returned", { userId: user.id, orgId: row.org.id, props: { had_plan: hadPlan, had_paid_plan: hadPaid, plan_now: planNow, outcome } });
   if (!hadPlan && state?.planId) {
     // A first plan: the hacker starts on the repository chosen while recruiting, if there was one.
     const { startFirstTarget } = await import("@/server/first-target");

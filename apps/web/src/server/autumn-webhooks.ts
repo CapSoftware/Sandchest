@@ -16,7 +16,7 @@
  * ignored, so Autumn does not retry them.
  */
 import { CREDITS } from "@sandchest/billing/plans";
-import { staleOrgBilling } from "@sandchest/db";
+import { recordEvent, staleOrgBilling } from "@sandchest/db";
 import { z } from "zod";
 import { billingEnabled, syncBilling } from "./billing";
 import { db } from "./db";
@@ -73,6 +73,10 @@ export async function handleAutumnEvent(payload: unknown): Promise<AutumnWebhook
     if (!event.success || event.data.feature_id !== CREDITS) return { ignored: "not credits" };
     const { quantity_granted: added, balance_after: credits, invoice } = event.data;
     const outcome = await noticeAutoTopUp(org, { invoiceId: invoice.stripe_id, added, credits, charged: money(invoice.total, invoice.currency) });
+    if (outcome !== "duplicate") {
+      const props = { credits_added: added, amount_minor: invoice.total, currency: invoice.currency.toLowerCase(), outcome: "ok" };
+      await recordEvent(db(), { name: "auto_top_up_charged", orgId: org.id, props }).catch(() => {});
+    }
     // Credits are back. Read the org from Autumn again, which re-arms the low and exhausted emails from the
     // balance as it is now. A repeat delivery of the same invoice changes nothing.
     if (outcome !== "duplicate") await refresh(org);
@@ -84,7 +88,9 @@ export async function handleAutumnEvent(payload: unknown): Promise<AutumnWebhook
   const reason = FAILURE[event.data.reason];
   if (!reason) return { ignored: `auto top-up failed: ${event.data.reason}` };
   const at = new Date(envelope.data.occurred_at ?? Date.now());
-  return { handled: label(type, await noticeAutoTopUpFailed(org, { reason, credits: event.data.balance ?? null }, at)) };
+  const notice = await noticeAutoTopUpFailed(org, { reason, credits: event.data.balance ?? null }, at);
+  if (notice !== "duplicate") await recordEvent(db(), { name: "auto_top_up_charged", orgId: org.id, props: { credits_added: 0, outcome: reason } }).catch(() => {});
+  return { handled: label(type, notice) };
 }
 
 function label(type: string, outcome: NoticeOutcome): string {

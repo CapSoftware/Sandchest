@@ -19,11 +19,15 @@ export async function dig(repoId: string): Promise<DigOutcome> {
   const user = await viewer();
   const row = z.uuid().safeParse(repoId).success ? await repoForUser(db(), user.id, repoId) : undefined;
   if (!row) {
-    await track("dig_requested", { userId: user.id, props: { outcome: "no_access" } });
+    await track("deep_scan_requested", { userId: user.id, props: { outcome: "no_access" } });
     return { error: "You don’t have access to this repository." };
   }
   const record = (outcome: string, extra: { credits?: number; scanId?: string } = {}) =>
-    track("dig_requested", { userId: user.id, orgId: row.org.id, props: { repo_id: row.repo.id, outcome, credits: extra.credits ?? null, scan_id: extra.scanId ?? null } });
+    track("deep_scan_requested", {
+      userId: user.id,
+      orgId: row.org.id,
+      props: { repo_id: row.repo.id, scan_again: !!row.repo.lastDeepScanAt, outcome, credits: extra.credits ?? null, scan_id: extra.scanId ?? null },
+    });
   // Loaded on demand: the workflow runtime stays out of every page that merely shows a Dig button.
   const { requestDeepScan } = await import("./dig");
   let result: Awaited<ReturnType<typeof requestDeepScan>>;
