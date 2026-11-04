@@ -14,6 +14,8 @@ the commands below stop with instructions.
 
 ```sh
 bun run indexer:build                   # once, and after indexer changes
+bun run gate                            # every engine change first: coverage + reverify + fpcheck vs a baseline (dollars)
+bun run coverage [name|tag]             # does each bug's handler reach a hunter? no hunt (free with the classifier cache)
 bun run evals                           # benchmarks tagged `core`
 bun run evals cve --repeat 2 --note "…" # by tag or name; `all` for everything
 bun run evals --rescore <run>           # re-score saved scans, e.g. after judging
@@ -24,6 +26,14 @@ bun run restage <run>                   # replay the final merge of repeat repor
 bun run validate --fetch                # every cited line exists at its commit
 bun run prod                            # production quality, from the read replica
 ```
+
+Run `bun run gate` before a full benchmark run: most changes sit after the
+hunt (skeptic, severity, merging) or before it (which entry points the hunters
+see), and both are measured there for a few dollars. A full run costs
+20–30 times as much; save it for validating what the gate passed, then `bun run gate
+--accept` to make that the new baseline. Classifier answers are cached in
+`cache/classifier/` in the data, so entry-point recovery is billed once per
+pinned benchmark and no longer varies between runs.
 
 The model is configured with `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`
 in `.env.local`. Set `LLM_PRICE_*` to report cost (see `.env.example`).

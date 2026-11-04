@@ -27,7 +27,7 @@ import { FIXPAIRS_DIR, requireData } from "./data";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repeat: { type: "string", default: "3" }, ground: { type: "boolean", default: false }, pairs: { type: "string" } },
+  options: { repeat: { type: "string", default: "3" }, ground: { type: "boolean", default: false }, pairs: { type: "string" }, summary: { type: "string" } },
 });
 
 interface Pair {
@@ -138,3 +138,7 @@ console.log(`\nPairs: ${pairs.length} (${clean.length} clean fixes), repeat ${re
 console.log(`Recall on the real bug (confirmed on vulnerable): ${pct(mean(rows.map((r) => r.vuln)))}  (want high)`);
 console.log(`False positives (confirmed on fixed code):        ${pct(mean(clean.map((r) => r.patched)))}  (want 0: re-flagging a fixed bug)`);
 console.log(`Cost: $${cost.toFixed(2)}`);
+if (values.summary) {
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(values.summary, `${JSON.stringify({ pairs: pairs.length, recall: mean(rows.map((r) => r.vuln)), falsePositives: mean(clean.map((r) => r.patched)), costUsd: cost })}\n`);
+}

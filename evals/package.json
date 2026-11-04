@@ -16,7 +16,9 @@
     "prod": "bun --env-file=../.env.local src/prod.ts",
     "scorecard": "bun src/scorecard.ts",
     "replay:prod": "bun --env-file=../.env.local src/replay-prod.ts",
-    "restage": "bun --env-file=../.env.local src/restage.ts"
+    "restage": "bun --env-file=../.env.local src/restage.ts",
+    "coverage": "bun --env-file=../.env.local src/coverage.ts",
+    "gate": "bun --env-file=../.env.local src/gate.ts"
   },
   "dependencies": {
     "@sandchest/db": "workspace:*",
