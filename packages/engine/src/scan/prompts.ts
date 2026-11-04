@@ -9,10 +9,11 @@ import type { AuthModel, PriorFinding, RepoHistory, ThreatModel } from "./schema
 import type { Wrap } from "./tools";
 
 const RUBRIC = `Severity = who can exploit it × what they get:
-- critical: unauthenticated remote code execution, takeover of any account, full access to a data store, or taking money or paid service at will
-- high: any authenticated user can read or change other users' data, escalate privileges, obtain secrets, or get paid features or credits for free; or one cheap request forces the owner into orders of magnitude more work or spend (amplification)
+- critical: unauthenticated remote code execution, takeover of any account, full access to a data store, or taking money or paid service at will. This includes an unauthenticated caller changing instance-wide configuration that controls login, tokens or outbound mail (identity providers, signing secrets, mail servers), since that leads to account takeover
+- high: any authenticated user can read or change other users' data, escalate privileges, obtain secrets, or get paid features or credits for free; or one cheap request forces the owner into orders of magnitude more work or spend (amplification). This includes a user changing someone else's role or permissions, up or down (a guest demoting an admin); a limited or delegated admin granting itself or others full admin; a member changing organisation-wide settings or billing details their role does not allow; and injection into a database query that can read other users' or tenants' data, blind or not
 - medium: exploitable, but with limited impact or uncommon preconditions; or an endpoint meant to be public lacks throttling in the application (it is often enforced at the edge, which you cannot see)
-- low: defence in depth`;
+- low: defence in depth
+Rate the attack as it lands, not how easily it is cleaned up: do not lower severity because an admin can undo the damage, because the attacker first needs an ordinary account or a lesser role the app hands out, or because the attack is blind, slow or needs a well-formed request.`;
 
 /**
  * The engine runs on an abliterated model: refusal behaviour removed, so it
@@ -84,7 +85,8 @@ Name the attacker and what they deliberately send or do to set it off. If nobody
 - Read every cited line, then everything that could stop the attack: middleware and guards on the route, validation and type coercion, sanitisation and encoding, ORM and framework defaults, configuration, and whether the code is reachable at all.
 - Check that the proof of concept would actually work against this code.
 - If the attack depends on how a third-party library behaves (what a function returns, a default, whether it validates, escapes or verifies), read that library's source at the installed version with library_source instead of relying on memory: APIs change between versions, and a misremembered return type is a common false positive. Its file:line counts as a citation.
-- Check the claimed attacker: does the route require authentication or a role the report ignores?
+- Check the claimed attacker: does the route require authentication or a role the report ignores? When the framework derives the permission from the request (HTTP method to verb, route to resource, decorator or annotation to role), read the code that does the mapping and work out the exact permission this request needs before judging whether the attacker holds it.
+- A login or identity feature that is off by default, has to be switched on by the operator, and is documented as trusting a proxy or network in front of the app (a header the proxy sets or strips) works as designed when it trusts that input: rule "not_a_vulnerability", unless the defaults or documentation make the unsafe setup the normal one.
 - Abuse of intended features counts. Do not dismiss business-logic abuse, fraud, brute force or cost abuse as "working as designed" unless the behaviour is clearly intended and harmless to the owner and its users.
 - Ask who is harmed. If the only victim is the attacker (they overcharge or break their own account), rule it disproved, citing the code that limits the effect to the caller's own data.
 
