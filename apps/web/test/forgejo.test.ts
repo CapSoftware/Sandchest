@@ -18,6 +18,7 @@ import { migrate } from "@sandchest/db/migrate";
 import type { ChatRequest, ChatResult, LlmClient, ToolCall } from "@sandchest/engine/llm";
 import { Forgejo, loadForgejoConfig } from "@sandchest/forgejo";
 import { POST } from "@/app/api/forgejo/webhooks/route";
+import { POST as startScanRoute } from "@/app/api/scans/route";
 import { storeForgejoAccess } from "@/server/access";
 import { setAutumn } from "@/server/billing";
 import { resetConfig } from "@/server/config";
@@ -31,6 +32,7 @@ const INDEXER = resolve(import.meta.dirname, "../../../target/release/sandchest-
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
 const NAME = `sandchest_forgejo_test_${process.pid}`;
 const SECRET = "forgejo-webhook-secret";
+const ADMIN_TOKEN = "operator-token-for-the-forgejo-test";
 
 let admin: postgres.Sql | undefined;
 let database: Db;
@@ -141,6 +143,8 @@ const fakeFetch = (async (input: string, init: RequestInit = {}) => {
   if (match) return new Response(DIFF);
   match = /^\/repos\/(acme\/[\w-]+)\/pulls\/(\d+)$/.exec(path);
   if (match) return json({ number: Number(match[2]), head: { sha: "HEAD", repo_id: 11 }, base: { sha: "base", ref: "main" }, user: { login: "dev" } });
+  match = /^\/repos\/(acme\/[\w-]+)\/branches\/main$/.exec(path);
+  if (match) return json({ name: "main", commit: { id: "0123abc" } });
   match = /^\/repos\/(acme\/[\w-]+)\/compare\/.+$/.exec(path);
   if (match) return json({ files: [{ filename: "app.js", status: "modified" }] });
   match = /^\/repos\/(acme\/[\w-]+)\/statuses\/(\w+)$/.exec(path);
@@ -261,6 +265,7 @@ beforeAll(async () => {
     SANDCHEST_APP_URL: "https://sandchest.test",
     SANDCHEST_WORKSPACE: "local",
     SANDCHEST_INDEXER_BIN: INDEXER,
+    SANDCHEST_ADMIN_TOKEN: ADMIN_TOKEN,
     ...FORGEJO_ENV,
     FORGEJO_GIT_URL: `file://${gitRoot}`,
   });
@@ -276,7 +281,7 @@ beforeAll(async () => {
 afterAll(async () => {
   setScanStarter(undefined);
   setForgejoClient(undefined);
-  for (const name of [...Object.keys(FORGEJO_ENV), "FORGEJO_GIT_URL"]) delete process.env[name];
+  for (const name of [...Object.keys(FORGEJO_ENV), "FORGEJO_GIT_URL", "SANDCHEST_ADMIN_TOKEN"]) delete process.env[name];
   resetConfig();
   rmSync(gitRoot, { recursive: true, force: true });
   if (!available || !admin) return;
@@ -423,6 +428,17 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     const reviewed = await command("/sandchest review", "d-c3");
     expect(reviewed.outcome.status).toBe("handled");
     expect(reviewed.outcome.scans).toHaveLength(1);
+  });
+
+  test("an operator's deep scan finds the repository on the forge it names, GitHub unless told", async () => {
+    const start = (body: unknown) =>
+      startScanRoute(new Request("https://sandchest.test/api/scans", { method: "POST", headers: { authorization: `Bearer ${ADMIN_TOKEN}` }, body: JSON.stringify(body) }));
+    expect((await start({ repo: "acme/private-app" })).status).toBe(404);
+    expect((await start({ repo: "acme/private-app", provider: "gitlab" })).status).toBe(400);
+    const started = await start({ repo: "acme/private-app", provider: "forgejo" });
+    expect(started.status).toBe(202);
+    const { scanId } = (await started.json()) as { scanId: string };
+    expect(await scanById(database, scanId)).toMatchObject({ kind: "deep", repoId: (await repoByGithubId(database, 11, "forgejo"))!.id });
   });
 
   test("people signed in with Forgejo see the repos they can push to, and admins the owner's settings", async () => {

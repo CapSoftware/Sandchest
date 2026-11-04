@@ -169,7 +169,7 @@ Sandchest creates no issues and no security advisories, on GitHub or on Forgejo.
 |---|---|
 | `SMTP_URL`, `EMAIL_FROM` | Email about critical findings and finished deep scans, for example `smtps://user:password@smtp.example.com:465`. |
 | `SENTRY_DSN` | Error reports go to your own Sentry project. |
-| `SANDCHEST_ADMIN_TOKEN` | Enables `POST /api/scans` with `Authorization: Bearer <token>` and `{"repo": "owner/name"}`, which starts a deep scan. People can also start one with the Deep scan button in the dashboard. 24 or more characters: `openssl rand -hex 24`. |
+| `SANDCHEST_ADMIN_TOKEN` | Enables `POST /api/scans` with `Authorization: Bearer <token>` and `{"repo": "owner/name"}`, which starts a deep scan. For a repository on Forgejo, add `"provider": "forgejo"` (the default is `"github"`). People can also start one with the Deep scan button in the dashboard. 24 or more characters: `openssl rand -hex 24`. |
 | `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT` | The model's prices in USD per million tokens, so each scan records what it cost. |
 | `SANDCHEST_SETUP_TOKEN` | Your own setup token (24 or more characters), instead of the one derived from `BETTER_AUTH_SECRET`. |
 | `SANDCHEST_IMAGE` | Run a prebuilt image instead of building from this checkout. |

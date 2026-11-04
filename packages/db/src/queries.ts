@@ -117,8 +117,8 @@ export async function repoByGithubId(database: Db, githubRepoId: number, provide
   return database.query.repos.findFirst({ where: and(eq(repos.provider, provider), eq(repos.githubRepoId, githubRepoId)), with: { org: true } });
 }
 
-export async function repoByFullName(database: Db, fullName: string): Promise<(Repo & { org: Org }) | undefined> {
-  return database.query.repos.findFirst({ where: eq(repos.fullName, fullName), with: { org: true } });
+export async function repoByFullName(database: Db, fullName: string, provider: Forge = "github"): Promise<(Repo & { org: Org }) | undefined> {
+  return database.query.repos.findFirst({ where: and(eq(repos.provider, provider), eq(repos.fullName, fullName)), with: { org: true } });
 }
 
 // ---- Threat models ---------------------------------------------------------

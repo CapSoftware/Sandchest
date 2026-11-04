@@ -1,5 +1,5 @@
 /** Manual deep scans for operators (`Authorization: Bearer <SANDCHEST_ADMIN_TOKEN>`). People use the dashboard's Deep scan button. */
-import { repoByFullName } from "@sandchest/db";
+import { FORGES, repoByFullName } from "@sandchest/db";
 import { z } from "zod";
 import { isOperator } from "@/server/auth";
 import { requestDeepScan } from "@/server/dig";
@@ -7,14 +7,15 @@ import { db } from "@/server/services";
 
 export const dynamic = "force-dynamic";
 
-const Body = z.object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/) });
+/** `provider` says which forge the repository is on, when a deployment uses Forgejo too. */
+const Body = z.object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), provider: z.enum(FORGES).default("github") });
 
 export async function POST(request: Request): Promise<Response> {
   if (!isOperator(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
   const parsed = Body.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return Response.json({ error: "expected { repo: 'owner/name' }" }, { status: 400 });
+  if (!parsed.success) return Response.json({ error: "expected { repo: 'owner/name', provider?: 'github' | 'forgejo' }" }, { status: 400 });
 
-  const repo = await repoByFullName(db(), parsed.data.repo);
+  const repo = await repoByFullName(db(), parsed.data.repo, parsed.data.provider);
   if (!repo) return Response.json({ error: "repository not installed" }, { status: 404 });
   const result = await requestDeepScan(repo, "manual", { operator: true });
   if (result.ok) return Response.json({ scanId: result.scanId }, { status: 202 });

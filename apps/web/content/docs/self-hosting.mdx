@@ -56,7 +56,7 @@ All of them go in `docker/.env`.
 | `SANDCHEST_BIND`, `SANDCHEST_PORT` | Optional. Where `web` listens on the machine. The default is `127.0.0.1:3000`: loopback only, for a tunnel or reverse proxy in front. `0.0.0.0` listens on every interface |
 | `SMTP_URL`, `EMAIL_FROM` | Optional. Email about critical findings and finished deep scans. Without them, no email is sent |
 | `SENTRY_DSN` | Optional. Error reports to your own Sentry project |
-| `SANDCHEST_ADMIN_TOKEN` | Optional. 24 or more characters. Lets you start a deep scan with `POST /api/scans` |
+| `SANDCHEST_ADMIN_TOKEN` | Optional. 24 or more characters. Lets you start a deep scan with `POST /api/scans`. Add `"provider": "forgejo"` to the body for a repository on Forgejo |
 | `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT` | Optional. Your model's prices, in US dollars per million tokens, so each scan records what it cost |
 
 There is no billing key: billing stays off.
