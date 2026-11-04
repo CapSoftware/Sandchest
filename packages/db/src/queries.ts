@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, gt, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, like, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries, type Forge } from "./schema";
 
@@ -102,6 +102,11 @@ export async function removeInstallation(database: Db, installationId: number, p
     await tx.update(findings).set(forgetCode).where(sql`${findings.repoId} in (select id from ${repos} where org_id = ${org.id})`);
     return org;
   });
+}
+
+/** The orgs of one forge that are installed (on Forgejo: covered by the bot). */
+export async function installedOrgs(database: Db, provider: Forge): Promise<Org[]> {
+  return database.query.orgs.findMany({ where: and(eq(orgs.provider, provider), isNotNull(orgs.installationId)) });
 }
 
 export async function orgByInstallation(database: Db, installationId: number, provider: Forge = "github"): Promise<Org | undefined> {

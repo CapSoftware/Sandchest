@@ -196,13 +196,13 @@ describe("api", () => {
     expect((await forgejo.compare("acme/app", "1", "2")).map((f) => [f.filename, f.status])).toEqual([["a.js", "modified"], ["b.js", "removed"]]);
   });
 
-  test("finds organisations and users, and their repositories without archives and mirrors", async () => {
+  test("finds organisations and users, and their repositories without archives, mirrors and empty ones", async () => {
     const repo = (id: number, extra = {}) => ({ id, full_name: `acme/r${id}`, private: true, default_branch: "main", ...extra });
     const { fetch, requests } = scripted(
       json({ id: 3, name: "acme", username: "acme" }),
       json({ message: "Not Found" }, { status: 404 }),
       json({ id: 4, login: "someone" }),
-      json([repo(1), repo(2, { archived: true }), repo(3, { mirror: true })]),
+      json([repo(1), repo(2, { archived: true }), repo(3, { mirror: true }), repo(4, { empty: true })]),
     );
     const forgejo = new Forgejo(config, { fetch, ...quick });
     expect(await forgejo.owner("acme")).toEqual({ id: 3, login: "acme", type: "Organization" });

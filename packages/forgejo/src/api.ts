@@ -40,6 +40,8 @@ interface ApiRepository {
   default_branch: string;
   archived?: boolean;
   mirror?: boolean;
+  /** No commits yet: nothing to clone. */
+  empty?: boolean;
   description?: string | null;
   language?: string | null;
   updated_at?: string | null;
@@ -79,16 +81,16 @@ export class Forgejo {
     return { id: user.id, login: user.login, type: "User" };
   }
 
-  /** The owner's repositories the bot can read, except archived ones and mirrors (nobody pushes to them here). */
+  /** The owner's repositories the bot can read, except archived ones and mirrors (nobody pushes to them here) and empty ones. */
   async repositories(owner: Owner): Promise<InstalledRepository[]> {
     const path = `/${owner.type === "Organization" ? "orgs" : "users"}/${encodeURIComponent(owner.login)}/repos?limit=${LIMIT}`;
     const repos = await githubPaginate(this.auth, path, (page: ApiRepository[]) => page, {}, this.http);
-    return repos.filter((repo) => !repo.archived && !repo.mirror).map(toInstalled);
+    return repos.filter((repo) => !repo.archived && !repo.mirror && !repo.empty).map(toInstalled);
   }
 
-  async repository(fullName: string): Promise<InstalledRepository & { archived: boolean; mirror: boolean }> {
+  async repository(fullName: string): Promise<InstalledRepository & { empty: boolean }> {
     const repo = await this.get<ApiRepository>(`/repos/${fullName}`);
-    return { ...toInstalled(repo), archived: !!repo.archived, mirror: !!repo.mirror };
+    return { ...toInstalled(repo), empty: !!repo.empty };
   }
 
   pull(repo: string, number: number): Promise<{ number: number; draft?: boolean; head: { sha: string; repo_id: number }; base: { sha: string; ref: string }; user: { login: string } }> {
