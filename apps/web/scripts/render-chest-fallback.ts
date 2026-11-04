@@ -1,6 +1,7 @@
 /**
- * Renders the static, open-chest frame used when JavaScript is unavailable or
- * the visitor prefers reduced motion. Run after changing the renderer:
+ * Renders the static, finished frame (the chest in its dune of sand) used
+ * when JavaScript is unavailable or the visitor prefers reduced motion. Run
+ * after changing the renderer:
  *
  *   bun run chest:fallback
  */
@@ -29,7 +30,7 @@ const scene = createChestScene(
 
 const png = new PNG({ width: FALLBACK_W, height: FALLBACK_H });
 const frame = new Uint8ClampedArray(FALLBACK_W * FALLBACK_H * 4);
-// The settled, open chest.
+// The sand has run out and settled.
 scene.render(frame, 2.4, STEADY_AT + 2);
 png.data = Buffer.from(frame);
 

@@ -1,23 +1,24 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createChestScene, SPRITE_H, SPRITE_W, STEADY_AT } from "@/lib/chest-dither";
+import { CALM_AT, createChestScene, SPRITE_H, SPRITE_W, STEADY_AT } from "@/lib/chest-dither";
 
 /** Pause between the chest coming into view and the hack starting. */
 const WAIT_S = 0.4;
 const SEQUENCE_FRAME_MS = 1000 / 60;
-/** The fire loop after the chest opens doesn't need full frame rate. */
-const STEADY_FRAME_MS = 1000 / 30;
+/** Once only the sand moves, it doesn't need full frame rate. */
+const CALM_FRAME_MS = 1000 / 30;
 
 type Scene = ReturnType<typeof createChestScene>;
 
 /**
- * The dithered chest in its panel. Once on screen the chest is hacked open
- * and fire keeps burning inside it. The loop pauses whenever the panel is off
- * screen.
+ * The dithered chest in its panel. Once on screen the lock is picked and
+ * sand runs out of the keyhole, filling the floor until the pile is full;
+ * after that the stream keeps running into it. It pauses whenever the panel
+ * is off screen.
  *
- * Without JavaScript a static image of the burning chest is shown. With
- * reduced motion the open chest is drawn once.
+ * Without JavaScript a static image of the finished scene is shown. With
+ * reduced motion that frame is drawn once.
  */
 export function ChestStage() {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -85,7 +86,7 @@ export function ChestStage() {
       if (disposed || !visible || startAt === Number.POSITIVE_INFINITY) return;
       raf = requestAnimationFrame(tick);
       const since = (now - epoch) / 1000 - startAt;
-      const budget = since < STEADY_AT ? SEQUENCE_FRAME_MS : STEADY_FRAME_MS;
+      const budget = since < CALM_AT ? SEQUENCE_FRAME_MS : CALM_FRAME_MS;
       if (since < 0 || now - lastDraw < budget - 1) return;
       lastDraw = now;
       draw(now);
