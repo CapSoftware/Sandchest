@@ -39,6 +39,7 @@ import {
   adoptKnownFingerprints,
   changedLines,
   checkFixes,
+  isDependencyManifest,
   relevantChanges,
   runRecon,
   runScan,
@@ -157,7 +158,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
 
   const installation = githubApp().installation(installationId);
   // A fix check settles what it has to re-check before any sandbox or clone, so a push that touches no cited file costs one API call.
-  const affected = scan.kind === "fix_check" ? await affectedFindings(scan, installation) : [];
+  const { findings: affected, changes } = scan.kind === "fix_check" ? await affectedFindings(scan, installation) : { findings: [], changes: [] };
   if (scan.kind === "fix_check" && affected.length === 0) return { findings: 0 };
   const events = new EventWriter(db(), scan.id);
   // A stage's name travels with it ("stage:hunt"), so the page can light its step on the track.
@@ -195,7 +196,8 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       if (!model) return { findings: 0 };
       onEvent({ type: "progress", message: `Re-checking ${affected.length} open ${affected.length === 1 ? "finding" : "findings"} on the new code…` });
       const checkStarted = Date.now();
-      const { results, usage, costUsd } = await checkFixes({ ...common, threatModel: model, findings: affected.map(toEngineFinding) });
+      // The push's diff goes to the reviewer, so it can tell the fix from a refactor of the same lines.
+      const { results, usage, costUsd } = await checkFixes({ ...common, threatModel: model, findings: affected.map(toEngineFinding), changes: changes.map(toChangedFile) });
       const count = (outcome: string) => results.filter((r) => r.outcome === outcome).length;
       await markFixed(db(), results.filter((r) => r.outcome === "fixed").map((r) => r.id), scan.id);
       await markStale(db(), results.filter((r) => r.outcome === "stale").map((r) => r.id), scan.id);
@@ -512,12 +514,15 @@ function toEngineFinding(row: FindingRow): Finding & { id: string } {
   };
 }
 
-/** Open findings citing a file the push changed. A fix check's head is the pushed commit, never "HEAD". */
-async function affectedFindings(scan: LoadedScan, installation: Installation): Promise<FindingRow[]> {
+/** Open findings citing a file the push changed (dependency findings when a manifest changed), and what it changed. A fix check's head is the pushed commit, never "HEAD". */
+async function affectedFindings(scan: LoadedScan, installation: Installation): Promise<{ findings: FindingRow[]; changes: PullFile[] }> {
   const open = await openFindings(db(), scan.repo.id);
-  if (open.length === 0) return [];
-  const changed = new Set((await installation.compare(scan.repo.fullName, scan.baseSha ?? `${scan.headSha}~1`, scan.headSha)).map((f) => f.filename));
-  return open.filter((f) => citedFiles(f).some((file) => changed.has(file)));
+  if (open.length === 0) return { findings: [], changes: [] };
+  const changes = await installation.compare(scan.repo.fullName, scan.baseSha ?? `${scan.headSha}~1`, scan.headSha);
+  const changed = new Set(changes.map((f) => f.filename));
+  // A dependency is fixed in a lockfile or manifest, not in the import the finding cites.
+  const manifests = changes.some((f) => isDependencyManifest(f.filename));
+  return { findings: open.filter((f) => citedFiles(f).some((file) => changed.has(file)) || (manifests && f.category === "vulnerable_dependency")), changes };
 }
 
 function citedFiles(finding: FindingRow): string[] {
