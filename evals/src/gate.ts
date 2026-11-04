@@ -30,7 +30,7 @@ const id = new Date().toISOString().replace(/[:.]/g, "-");
 const tmp = (name: string) => join(GATE_DIR, `.${id}-${name}.json`);
 
 interface Coverage { bugs: number; reached: number; candidates: number; detected: number; classified: boolean }
-interface Reverify { real: number; realKept: number; realKeepRate?: number; falseKeepRate?: number; false: number; falseRemoved: number; unstable: number; severityExact: number | null; costUsd: number }
+interface Reverify { real: number; realKept: number; realKeepRate?: number; falseKeepRate?: number; false: number; falseRemoved: number; unstable: number; severityExact: number | null; costUsd: number; details?: string }
 interface FpCheck { pairs: number; recall: number; falsePositives: number; costUsd: number }
 interface Result { id: string; coverage: Coverage; reverify: Reverify; fpcheck: FpCheck }
 
@@ -80,9 +80,46 @@ line("Severity exactly right (real findings)", pct(reverify.severityExact), b &&
 line("Skeptic disagrees with itself", String(reverify.unstable), b && String(b.reverify.unstable), false);
 line("Known bugs confirmed on vulnerable code", pct(fpcheck.recall), b && pct(b.fpcheck.recall), !!b && fpcheck.pairs === b.fpcheck.pairs && fpcheck.recall < b.fpcheck.recall - 0.1);
 line("Known bugs confirmed on fixed code (FP)", pct(fpcheck.falsePositives), b && pct(b.fpcheck.falsePositives), !!b && fpcheck.pairs === b.fpcheck.pairs && fpcheck.falsePositives > b.fpcheck.falsePositives + 0.1);
-console.log(`\nCost: $${(reverify.costUsd + fpcheck.costUsd).toFixed(2)}${coverage.classified ? "" : " (coverage ran without the classifier)"}. Result: gate/${id}.json`);
+// A finding that moved the wrong way since the baseline is re-checked on its own with more repeats, so a
+// sampling wobble is told apart from a real change (a few cents for the handful that move).
+const moved = await recheckMoved();
+const recheckCost = moved?.costUsd ?? 0;
+console.log(`\nCost: $${(reverify.costUsd + fpcheck.costUsd + recheckCost).toFixed(2)}${coverage.classified ? "" : " (coverage ran without the classifier)"}. Result: gate/${id}.json`);
 if (!b && !sameSet) console.log("No comparable baseline: run with --accept to save one.");
 if (sameSet === false) console.log(`The replayed findings changed (reverifyRun or labels), so the skeptic rows are not compared.`);
+
+async function recheckMoved(): Promise<{ costUsd: number } | undefined> {
+  if (!b?.reverify.details || !reverify.details || !existsSync(join(DATA_DIR, b.reverify.details))) return undefined;
+  type Row = { group: string; label: "real" | "false"; title: string; keepRate: number };
+  const load = async (file: string) => new Map((JSON.parse(await readFile(join(DATA_DIR, file), "utf8")) as Row[]).map((r) => [`${r.group}|${r.title}`, r]));
+  const [before, now] = await Promise.all([load(b.reverify.details), load(reverify.details)]);
+  const worse = [...now.entries()].filter(([key, r]) => {
+    const was = before.get(key);
+    return was && (r.label === "real" ? r.keepRate <= was.keepRate - 0.5 : r.keepRate >= was.keepRate + 0.5);
+  });
+  if (worse.length === 0) {
+    console.log("\nNo finding moved the wrong way since the baseline.");
+    return { costUsd: 0 };
+  }
+  const keys = tmp("recheck-keys");
+  await writeFile(keys, JSON.stringify(worse.map(([key]) => key)));
+  const again = await step<Reverify>("reverify", ["--run", config.reverifyRun, "--severities", "critical,high,medium,low", "--repeat", "4", "--only", keys]);
+  await Bun.file(keys).delete();
+  const rechecked = again.details ? await load(again.details) : new Map<string, Row>();
+  console.log(`\nFindings that moved the wrong way, re-checked 4 more times (baseline → this run → re-check):`);
+  let confirmed = 0;
+  for (const [key, r] of worse) {
+    const was = before.get(key)!.keepRate;
+    const check = rechecked.get(key)?.keepRate;
+    // Kept-rate over all six reviews of this engine, against the baseline's.
+    const overall = check === undefined ? r.keepRate : (2 * r.keepRate + 4 * check) / 6;
+    const real = r.label === "real" ? overall <= was - 0.5 : overall >= was + 0.5;
+    if (real) confirmed++;
+    console.log(`  ${r.label.padEnd(5)} ${pct(was).padStart(4)} → ${pct(r.keepRate).padStart(4)} → ${check === undefined ? "  —" : pct(check).padStart(4)}  ${real ? "CHANGED" : "noise  "}  ${r.title.slice(0, 70)}`);
+  }
+  console.log(`${confirmed} of ${worse.length} held up on re-check.`);
+  return { costUsd: again.costUsd };
+}
 
 if (values.accept) {
   await writeFile(basePath, `${JSON.stringify(result, null, 2)}\n`);

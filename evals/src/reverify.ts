@@ -21,7 +21,7 @@
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { createLlmClient, loadLlmConfig, startLocalIndexer } from "@sandchest/engine";
 import { loadPricing, SEVERITIES, verifyFindings, type Finding, type ScanReport, type Severity, type Verification } from "@sandchest/engine/scan";
@@ -41,6 +41,8 @@ const { values } = parseArgs({
     repeat: { type: "string", default: "1" },
     /** Also write the headline numbers as JSON here (for `bun run gate`). */
     summary: { type: "string" },
+    /** Replay only these findings: a JSON file of `group|title` keys (the gate's re-check of findings that moved). */
+    only: { type: "string" },
   },
 });
 
@@ -57,6 +59,7 @@ interface Group {
 const severities = new Set(values.severities!.split(","));
 requireData();
 const groups: Group[] = [];
+const only = values.only ? new Set(JSON.parse(await readFile(values.only, "utf8")) as string[]) : undefined;
 
 if (values.run) {
   const dir = runDir(values.run);
@@ -79,7 +82,8 @@ if (values.run) {
       if (judged && (judged.verdict === "false_positive" || judged.verdict === "not_security")) return [{ finding, label: "false" }];
       return [];
     });
-    if (items.length > 0) groups.push({ name: benchmark.name, root: await checkout(benchmark), report, items });
+    const picked = only ? items.filter((item) => only.has(`${benchmark.name}|${item.finding.title}`)) : items;
+    if (picked.length > 0) groups.push({ name: benchmark.name, root: await checkout(benchmark), report, items: picked });
   }
 }
 
@@ -174,6 +178,11 @@ const rated = (key: "was" | "now") => {
 console.log(`Severity of real findings, before: ${rated("was")}`);
 console.log(`Severity of real findings, now:    ${rated("now")}`);
 console.log(`Cost: $${cost.toFixed(2)}`);
+const outDir = join(DATA_DIR, "replays");
+await mkdir(outDir, { recursive: true });
+const out = join(outDir, `reverify-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+await writeFile(out, `${JSON.stringify(rows, null, 2)}\n`);
+console.log(`Details: ${out}`);
 if (values.summary) {
   const exact = reals.filter((r) => r.should && r.now && r.now === r.should).length;
   const ratedNow = reals.filter((r) => r.should && r.now).length;
@@ -189,12 +198,8 @@ if (values.summary) {
       unstable: rows.filter(unstable).length,
       severityExact: ratedNow ? exact / ratedNow : null,
       costUsd: cost,
+      details: relative(DATA_DIR, out),
     })}\n`,
   );
 }
 
-const outDir = join(DATA_DIR, "replays");
-await mkdir(outDir, { recursive: true });
-const out = join(outDir, `reverify-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-await writeFile(out, `${JSON.stringify(rows, null, 2)}\n`);
-console.log(`Details: ${out}`);
