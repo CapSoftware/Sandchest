@@ -53,11 +53,15 @@ async function linkGithub(tx: Tx, userId: string, github: { id: number; login?: 
     .where(eq(users.id, userId));
 }
 
-/** Replaces everything a user may see with what GitHub just reported, including who they are on GitHub. */
+/**
+ * Replaces everything a user may see with what GitHub just reported, including
+ * who they are on GitHub. Someone signed in with Forgejo has no GitHub
+ * identity: only their Forgejo `login` is kept.
+ */
 export async function replaceAccess(
   database: Db,
   userId: string,
-  access: { repos: Array<{ repoId: string; permission: RepoPermission }>; adminOrgIds: string[]; github: { id: number; login: string } },
+  access: { repos: Array<{ repoId: string; permission: RepoPermission }>; adminOrgIds: string[]; github?: { id: number; login: string }; login?: string },
   at = new Date(),
 ): Promise<void> {
   await database.transaction(async (tx) => {
@@ -65,7 +69,8 @@ export async function replaceAccess(
     await tx.delete(orgAdmins).where(eq(orgAdmins.userId, userId));
     if (access.repos.length > 0) await tx.insert(permissionCache).values(access.repos.map((repo) => ({ userId, ...repo, checkedAt: at })));
     if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, checkedAt: at })));
-    await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
+    if (access.github) await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
+    else await tx.update(users).set({ accessCheckedAt: at, ...(access.login ? { login: access.login } : {}) }).where(eq(users.id, userId));
   });
 }
 
@@ -79,10 +84,14 @@ export async function sessionUser(database: Db, token: string): Promise<{ id: st
   return row;
 }
 
-/** The id of the user's GitHub account row, which better-auth needs to hand out its token. */
-export async function githubAccountRowId(database: Db, userId: string): Promise<string | undefined> {
-  const [row] = await database.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, userId), eq(accounts.providerId, "github"))).limit(1);
-  return row?.id;
+/** The user's sign-in account row (GitHub or Forgejo), which better-auth needs to hand out its token. */
+export async function signInAccount(database: Db, userId: string): Promise<{ id: string; providerId: Forge } | undefined> {
+  const [row] = await database
+    .select({ id: accounts.id, providerId: accounts.providerId })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), inArray(accounts.providerId, ["github", "forgejo"])))
+    .limit(1);
+  return row as { id: string; providerId: Forge } | undefined;
 }
 
 const canSee = (userId: string) => sql`exists (select 1 from ${permissionCache} pc where pc.user_id = ${userId} and pc.repo_id = ${repos.id})`;

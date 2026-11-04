@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/server/access";
-import { authConfigured } from "@/server/auth";
-import { signIn } from "@/server/actions";
+import { signInProviders } from "@/server/auth";
+import { signIn, signInWithForgejo } from "@/server/actions";
 import { setupNeeded } from "@/server/setup";
 import "../app.css";
 
@@ -13,7 +13,9 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   const destination = safeNext(next);
   // A new self-hosted server has no GitHub App yet, and nothing to sign in with.
   const connected = !setupNeeded();
-  const configured = connected && authConfigured();
+  const providers = connected ? signInProviders() : [];
+  const configured = providers.length > 0;
+  const forge = providers.length === 2 ? "GitHub or Forgejo" : providers[0] === "forgejo" ? "Forgejo" : "GitHub";
   // After an expired grant the old session can live on in its cookie cache for a few minutes: stay here.
   if (connected && !expired && (await currentUser())) redirect(destination);
   return (
@@ -24,17 +26,19 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         </a>
         <h1 className="sign-in-title">Sign in to Sandchest.</h1>
         <p className="sign-in-body">
-          Use your GitHub account. You’ll see findings for the repositories you can push to, nothing else.
+          Use your {forge} account. You’ll see findings for the repositories you can push to, nothing else.
         </p>
-        {expired && <p className="notice">Your GitHub sign-in expired. Sign in again to carry on.</p>}
-        {error && !expired && <p className="notice">GitHub didn’t complete the sign-in. Try again.</p>}
+        {expired && <p className="notice">Your {forge} sign-in expired. Sign in again to carry on.</p>}
+        {error && !expired && <p className="notice">{forge} didn’t complete the sign-in. Try again.</p>}
         {!connected && (
           <p className="notice">
             This server isn’t connected to GitHub yet. Whoever runs it finishes that at <a href="/setup">/setup</a>.
           </p>
         )}
-        {connected && !configured && <p className="notice">Sign-in isn’t set up on this deployment yet. Set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and BETTER_AUTH_SECRET.</p>}
-        <form action={signIn.bind(null, destination)} hidden={!configured}>
+        {connected && !configured && (
+          <p className="notice">Sign-in isn’t set up on this deployment yet. Set BETTER_AUTH_SECRET, and GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET or FORGEJO_CLIENT_ID and FORGEJO_CLIENT_SECRET.</p>
+        )}
+        <form action={signIn.bind(null, destination)} hidden={!providers.includes("github")}>
           <button type="submit" className="key key-primary key-large key-glow" data-track="sign-in-github">
             <span className="key-face">
               <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -44,6 +48,13 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
             </span>
           </button>
         </form>
+        {providers.includes("forgejo") && (
+          <form action={signInWithForgejo.bind(null, destination)}>
+            <button type="submit" className={`key ${providers.includes("github") ? "key-secondary" : "key-primary key-glow"} key-large`} data-track="sign-in-forgejo">
+              <span className="key-face">Continue with Forgejo</span>
+            </button>
+          </form>
+        )}
         <p className="sign-in-note">
           Sandchest reads code only in a temporary workspace during a scan and never stores it.
         </p>

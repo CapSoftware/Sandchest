@@ -20,11 +20,19 @@ import { db } from "./db";
 const Id = z.uuid();
 
 export async function signIn(next: string): Promise<void> {
+  return signInWith("github", next);
+}
+
+export async function signInWithForgejo(next: string): Promise<void> {
+  return signInWith("forgejo", next);
+}
+
+async function signInWith(provider: "github" | "forgejo", next: string): Promise<void> {
   // Checked again here: a bound argument can be changed by the client.
   const callbackURL = /^\/(?![/\\])/.test(next) ? next : "/dashboard";
   await track("sign_in_started", { props: { next: routeOf(callbackURL) } });
-  const result = await auth().api.signInSocial({ body: { provider: "github", callbackURL, errorCallbackURL: "/sign-in?error=1" }, headers: await headers() });
-  if (!result.url) throw new Error("GitHub sign-in did not return a URL");
+  const result = await auth().api.signInSocial({ body: { provider, callbackURL, errorCallbackURL: "/sign-in?error=1" }, headers: await headers() });
+  if (!result.url) throw new Error(`Sign-in with ${provider} did not return a URL`);
   redirect(result.url);
 }
 

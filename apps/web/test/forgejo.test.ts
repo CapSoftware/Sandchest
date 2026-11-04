@@ -13,11 +13,12 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import postgres from "postgres";
-import { createDb, openFindings, repoByGithubId, scanById, threatModel, type Db } from "@sandchest/db";
+import { createDb, dashboardRepos, openFindings, repoByGithubId, scanById, schema, settingsOrgs, threatModel, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { ChatRequest, ChatResult, LlmClient, ToolCall } from "@sandchest/engine/llm";
 import { Forgejo, loadForgejoConfig } from "@sandchest/forgejo";
 import { POST } from "@/app/api/forgejo/webhooks/route";
+import { storeForgejoAccess } from "@/server/access";
 import { setAutumn } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { setForgejoClient } from "@/server/forgejo";
@@ -102,6 +103,10 @@ interface Posted {
   hooks: Array<{ target: string; url: string; secret: string; events: string[] }>;
 }
 const posted: Posted = { statuses: [], reviews: [], comments: [], hooks: [] };
+const people: Record<string, { id: number; login: string; owner: boolean; repos: Array<{ id: number; permissions: { admin: boolean; push: boolean; pull: boolean } }> }> = {
+  "alice-token": { id: 501, login: "alice", owner: true, repos: [{ id: 11, permissions: { admin: true, push: true, pull: true } }, { id: 12, permissions: { admin: false, push: true, pull: true } }, { id: 99, permissions: { admin: true, push: true, pull: true } }] },
+  "bob-token": { id: 502, login: "bob", owner: false, repos: [{ id: 11, permissions: { admin: false, push: false, pull: true } }, { id: 12, permissions: { admin: false, push: true, pull: true } }] },
+};
 /** Collaborators' permissions on every repo. */
 const permissions: Record<string, string> = { maintainer: "write", outsider: "read" };
 
@@ -111,7 +116,16 @@ const fakeFetch = (async (input: string, init: RequestInit = {}) => {
   const method = init.method ?? "GET";
   const body = init.body ? JSON.parse(init.body as string) : undefined;
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
-  if ((init.headers as Record<string, string>).authorization !== "Bearer bot-token") return json({ message: "unauthorized" }, 401);
+  const token = (init.headers as Record<string, string>).authorization?.replace(/^Bearer /, "");
+  // People, with their own tokens: who they are, what they can reach, and whether they run acme.
+  const person = people[token ?? ""];
+  if (person) {
+    if (path === "/user") return json({ id: person.id, login: person.login });
+    if (path === "/user/repos") return json(person.repos);
+    if (path === `/users/${person.login}/orgs/acme/permissions`) return json({ is_owner: person.owner, is_admin: false, can_write: true, can_read: true });
+    return json({ message: "Not Found" }, 404);
+  }
+  if (token !== "bot-token") return json({ message: "unauthorized" }, 401);
 
   if (path === "/orgs/acme") return json({ id: owner.id, name: "acme", username: "acme" });
   if (path === "/orgs/acme/repos") return json(repos);
@@ -404,6 +418,27 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     const reviewed = await command("/sandchest review", "d-c3");
     expect(reviewed.outcome.status).toBe("handled");
     expect(reviewed.outcome.scans).toHaveLength(1);
+  });
+
+  test("people signed in with Forgejo see the repos they can push to, and admins the owner's settings", async () => {
+    const [alice, bob] = await database
+      .insert(schema.users)
+      .values([
+        { name: "Alice", email: "alice@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ])
+      .returning();
+    const forgejo = forgejoDeps()!.forgejo;
+    await storeForgejoAccess(alice!.id, forgejo.asUser("alice-token"));
+    await storeForgejoAccess(bob!.id, forgejo.asUser("bob-token"));
+
+    // Repo 99 is not covered, so it never shows.
+    expect((await dashboardRepos(database, alice!.id)).map((r) => r.fullName).sort()).toEqual(["acme/private-app", "acme/public-app"]);
+    expect((await dashboardRepos(database, bob!.id)).map((r) => r.fullName)).toEqual(["acme/public-app"]);
+    expect((await settingsOrgs(database, alice!.id)).map((o) => [o.login, o.admin])).toEqual([["acme", true]]);
+    expect((await settingsOrgs(database, bob!.id)).map((o) => [o.login, o.admin])).toEqual([["acme", false]]);
+    // A Forgejo login is kept; no GitHub identity is claimed.
+    expect(await database.query.users.findFirst({ where: (users, { eq }) => eq(users.id, alice!.id) })).toMatchObject({ login: "alice", githubUserId: null });
   });
 
   test("a deleted repository is disabled, and an owner taken off FORGEJO_OWNERS is forgotten", async () => {

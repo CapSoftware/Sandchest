@@ -63,10 +63,36 @@ export class Forgejo {
 
   constructor(
     readonly config: ForgejoConfig,
-    http: HttpOptions = {},
+    private readonly options: HttpOptions = {},
   ) {
     this.auth = async () => config.token;
-    this.http = { ...http, baseUrl: config.apiUrl, name: "Forgejo" };
+    this.http = { ...options, baseUrl: config.apiUrl, name: "Forgejo" };
+  }
+
+  /** The same instance as a signed-in person, with their own token: for reading what they may see. */
+  asUser(token: string): Forgejo {
+    return new Forgejo({ ...this.config, token }, this.options);
+  }
+
+  /** Who the token belongs to. */
+  currentUser(): Promise<{ id: number; login: string }> {
+    return this.get("/user");
+  }
+
+  /** Every repository the token's owner can reach (their own, collaborations, teams), with their permission on each. */
+  myRepositories(): Promise<Array<{ id: number; permissions?: { admin?: boolean; push?: boolean; pull?: boolean } }>> {
+    return githubPaginate(this.auth, `/user/repos?limit=${LIMIT}`, (page: Array<{ id: number; permissions?: { admin?: boolean; push?: boolean; pull?: boolean } }>) => page, {}, this.http);
+  }
+
+  /** Whether a user owns or administers an organisation; false when they are not in it. */
+  async orgAdmin(username: string, org: string): Promise<boolean> {
+    try {
+      const result = await this.get<{ is_owner?: boolean; is_admin?: boolean }>(`/users/${encodeURIComponent(username)}/orgs/${encodeURIComponent(org)}/permissions`);
+      return !!(result.is_owner || result.is_admin);
+    } catch (error) {
+      if (error instanceof GitHubError && (error.status === 403 || error.status === 404)) return false;
+      throw error;
+    }
   }
 
   /** An organisation, or else a user, by name. */
