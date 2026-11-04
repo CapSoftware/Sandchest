@@ -35,6 +35,8 @@ export async function checkoutAt(repo: string, commit: string, name: string, tok
     await rename(temp, dir);
   } catch (error) {
     await rm(temp, { recursive: true, force: true });
+    // Two jobs fetched the same checkout at once (fpcheck's pairs, parallel runs): the other one won.
+    if (existsSync(join(dir, ".git"))) return dir;
     throw error;
   }
   return dir;
