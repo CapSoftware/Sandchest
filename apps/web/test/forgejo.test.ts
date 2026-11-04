@@ -463,6 +463,16 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     expect(started.status).toBe(202);
     const { scanId } = (await started.json()) as { scanId: string };
     expect(await scanById(database, scanId)).toMatchObject({ kind: "deep", repoId: (await repoByGithubId(database, 11, "forgejo"))!.id });
+
+    // A GitHub repository of the same name is the one found without `provider`. Too large to scan, so it is refused before GitHub is called.
+    const [org] = await database.insert(schema.orgs).values({ provider: "github", githubAccountId: 900, githubLogin: "acme", type: "Organization", installationId: 900 }).returning();
+    try {
+      await database.insert(schema.repos).values({ orgId: org!.id, provider: "github", githubRepoId: 900, fullName: "acme/private-app", private: true, defaultBranch: "main", loc: 2_000_000 });
+      expect((await start({ repo: "acme/private-app" })).status).toBe(422);
+      expect((await start({ repo: "acme/private-app", provider: "github" })).status).toBe(422);
+    } finally {
+      await database.$client`delete from orgs where id = ${org!.id}`;
+    }
   });
 
   test("people signed in with Forgejo see the repos they can push to, and admins the owner's settings", async () => {
