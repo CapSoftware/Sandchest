@@ -6,6 +6,7 @@ import { FindingStrip } from "@/components/finding-strip";
 import { HackerAtWork } from "@/components/hacker-at-work";
 import { HeroKey } from "@/components/hero-key";
 import { HowItWorks } from "@/components/how-it-works";
+import { Safety } from "@/components/safety";
 import { LiveLines } from "@/components/recruit/live-lines";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
 
@@ -97,6 +98,8 @@ export default function ClaimPage() {
             <li>A ready-to-run prompt for your coding agent, with a regression test</li>
           </ul>
         </section>
+
+        <Safety />
 
         <HowItWorks />
 

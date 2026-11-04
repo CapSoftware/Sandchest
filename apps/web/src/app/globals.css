@@ -847,6 +847,118 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   color: var(--color-dust);
 }
 
+.safety-more {
+  margin-top: 1.25rem;
+}
+
+.safety-more a {
+  color: var(--color-sand);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/*
+ * The sandbox: one scan's VM as a dithered box of sand the model keeps
+ * kicking at the walls (cage-dither.ts). The labels sit outside the walls at
+ * the same fractions as CAGE there, and light up ember when a grain hits
+ * their wall.
+ */
+.cage-stage {
+  --cell: 2px;
+  /* Must match CAGE_ROWS in cage-dither.ts. */
+  --cage-rows: 120;
+  margin-block: 2rem 0.5rem;
+}
+
+@media (min-width: 48rem) {
+  .cage-stage {
+    --cell: 3px;
+  }
+}
+
+.cage-scene {
+  position: relative;
+  height: calc(var(--cage-rows) * var(--cell) + 2px);
+  overflow: hidden;
+  border: 1px solid var(--color-seam);
+  background: var(--color-void);
+}
+
+.cage-canvas {
+  position: absolute;
+  top: 0;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.cage-label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-dust);
+  transition: color 90ms steps(2), text-shadow 90ms steps(2);
+}
+
+/* A small pixel cross before each wall's label; the floor's has none. */
+.cage-x {
+  width: 5px;
+  height: 5px;
+  background:
+    linear-gradient(45deg, transparent 40%, currentColor 40% 60%, transparent 60%),
+    linear-gradient(-45deg, transparent 40%, currentColor 40% 60%, transparent 60%);
+}
+
+@media (max-width: 30rem) {
+  .cage-label {
+    font-size: 0.625rem;
+    letter-spacing: 0.03em;
+  }
+}
+
+.cage-label[data-hit] {
+  color: var(--color-ember);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--color-ember) 70%, transparent);
+}
+
+/* CAGE: left 0.36, right 0.64, top 0.2, bottom 0.86, depth 0.03 × -0.08. */
+.cage-top {
+  left: 50%;
+  top: calc((0.2 - 0.08) * 100%);
+  transform: translate(-50%, calc(-100% - 0.5rem));
+}
+
+.cage-left {
+  right: calc(64% + 1rem);
+  top: 53%;
+  transform: translateY(-50%);
+}
+
+.cage-right {
+  left: calc(67% + 1rem);
+  top: 47%;
+  transform: translateY(-50%);
+}
+
+.cage-floor {
+  left: 50%;
+  top: calc(86% + 0.5rem);
+  transform: translateX(-50%);
+  color: var(--color-gold);
+}
+
+/* The bullets under the cage, two by two on wide screens. */
+@media (min-width: 44rem) {
+  .safety-list {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 2rem;
+  }
+}
+
 /* /claim: the landing page as an offer of free credits. */
 
 .claim-eyebrow {
