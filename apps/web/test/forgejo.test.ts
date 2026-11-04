@@ -112,6 +112,8 @@ const people: Record<string, { id: number; login: string; owner: boolean; repos:
 };
 /** Collaborators' permissions on every repo. */
 const permissions: Record<string, string> = { dev: "write", maintainer: "write", outsider: "read" };
+/** Forgejo tells only a repository admin about someone else's permission. */
+let botIsAdmin = true;
 
 const fakeFetch = (async (input: string, init: RequestInit = {}) => {
   const url = new URL(input);
@@ -163,6 +165,7 @@ const fakeFetch = (async (input: string, init: RequestInit = {}) => {
     return json({ id: posted.comments.length }, 201);
   }
   match = /^\/repos\/(acme\/[\w-]+)\/collaborators\/([\w-]+)\/permission$/.exec(path);
+  if (match && !botIsAdmin) return json({ message: "Only admins can query all permissions" }, 403);
   if (match) return permissions[match[2]!] ? json({ permission: permissions[match[2]!] }) : json({ message: "Not Found" }, 404);
   return json({ message: `fake: unexpected ${method} ${path}` }, 404);
 }) as unknown as typeof fetch;
@@ -428,6 +431,27 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     const reviewed = await command("/sandchest review", "d-c3");
     expect(reviewed.outcome.status).toBe("handled");
     expect(reviewed.outcome.scans).toHaveLength(1);
+  });
+
+  test("a bot without admin access says so, rather than ignoring every PR as from an outsider", async () => {
+    const errors: string[] = [];
+    const original = console.error;
+    console.error = (message: string) => void errors.push(message);
+    botIsAdmin = false;
+    try {
+      expect((await deliver("pull_request", "d-not-admin", prEvent(repos[0]!, "abc", { author: "dev", number: 11 }))).outcome).toEqual({
+        status: "ignored",
+        detail: "the bot lacks admin access to the repository",
+      });
+      const comment = { action: "created", is_pull: true, repository: repos[1], issue: { number: 5, pull_request: {} }, comment: { body: "/sandchest review", user: { id: 2, login: "maintainer" } }, sender: { id: 2, login: "maintainer" } };
+      expect((await deliver("issue_comment", "d-not-admin-c", comment)).outcome.detail).toBe("the bot lacks admin access to the repository");
+    } finally {
+      botIsAdmin = true;
+      console.error = original;
+    }
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain("needs admin access");
+    expect(errors.join("\n")).not.toContain("acme");
   });
 
   test("an operator's deep scan finds the repository on the forge it names, GitHub unless told", async () => {

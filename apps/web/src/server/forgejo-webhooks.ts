@@ -70,7 +70,9 @@ async function onPullRequest(deps: ForgejoDeps, payload: PullRequestEvent): Prom
   // (`git push origin HEAD:refs/for/main/topic`) needs just read access, and its head is the base repository.
   const fork = pr.head.repo_id !== pr.base.repo_id;
   if (fork && !repo.private) return { status: "ignored", detail: "public fork PR: waiting for /sandchest review" };
-  if (!WRITE_ROLES.has(await deps.forgejo.permission(repo.fullName, pr.user.login))) {
+  const role = await deps.forgejo.permission(repo.fullName, pr.user.login);
+  if (role === undefined) return botNotAdmin(repo);
+  if (!WRITE_ROLES.has(role)) {
     return { status: "ignored", detail: repo.private ? "PR from an author without write access" : "PR from an author without write access: waiting for /sandchest review" };
   }
 
@@ -104,10 +106,17 @@ async function onIssueComment(deps: ForgejoDeps, payload: IssueCommentEvent): Pr
   if (!repo) return { status: "ignored", detail: "repo not enabled" };
 
   const role = await deps.forgejo.permission(repo.fullName, payload.comment.user.login);
+  if (role === undefined) return botNotAdmin(repo);
   if (!WRITE_ROLES.has(role)) return { status: "ignored", detail: "commenter lacks write access" };
   const pr = await deps.forgejo.pull(repo.fullName, payload.issue.number);
   const scanId = await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "pr_review", headSha: pr.head.sha, baseSha: pr.base.sha, prNumber: pr.number, trigger: "manual" });
   return { status: "handled", scans: scanId ? [scanId] : [] };
+}
+
+/** Forgejo answers who may be reviewed only to a repository admin. Without that, nothing is reviewed, so it is logged. */
+function botNotAdmin(repo: Repo): WebhookOutcome {
+  console.error(`Forgejo repo ${repo.id}: the bot needs admin access to check who may be reviewed; nothing is reviewed until it has it`);
+  return { status: "ignored", detail: "the bot lacks admin access to the repository" };
 }
 
 async function onRepository(deps: ForgejoDeps, payload: RepositoryEvent): Promise<WebhookOutcome> {

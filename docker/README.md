@@ -104,7 +104,7 @@ It is tested against Forgejo 17 (Gitea API 1.22). It uses the API that Gitea and
 ### 1. A bot account and its token
 
 1. **Create a user for Sandchest**, such as `sandchest-bot`. Its name is what people see on statuses, reviews and comments.
-2. **Give it access to the repositories** to review. Statuses, reviews and comments need write access. Checking who may run `/sandchest review` needs admin access. So add the bot to a team with admin access to those repositories, or as an admin collaborator. To let Sandchest add an organisation's webhook itself, add the bot to the organisation's Owners team instead.
+2. **Give it access to the repositories** to review. Statuses, reviews and comments need write access, but the bot needs admin access: Forgejo tells only a repository admin whether a pull request's author, or whoever comments `/sandchest review`, has write access, and Sandchest asks that for every pull request. With write access alone, no pull request is reviewed, and the log says the bot lacks admin access. So add the bot to a team with admin access to those repositories, or as an admin collaborator. To let Sandchest add an organisation's webhook itself, add the bot to the organisation's Owners team instead.
 3. **Create a token for the bot**: sign in as the bot, open Settings, Applications, and generate a token with these scopes:
 
    | Scope | Why |

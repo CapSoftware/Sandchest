@@ -230,12 +230,18 @@ describe("api", () => {
     for (const name of ["acme/r2", "acme/r3", "acme/r4"]) expect(await forgejo.repository(name)).toBeUndefined();
   });
 
-  test("reads permissions in GitHub's words; strangers have none", async () => {
-    const { fetch } = scripted(json({ permission: "owner" }), json({ permission: "write" }), json({ message: "forbidden" }, { status: 403 }));
+  test("reads permissions in GitHub's words; unknown users have none, and a bot that isn't admin can't tell", async () => {
+    const { fetch } = scripted(
+      json({ permission: "owner" }),
+      json({ permission: "write" }),
+      json({ message: "user does not exist" }, { status: 404 }),
+      json({ message: "Only admins can query all permissions" }, { status: 403 }),
+    );
     const forgejo = new Forgejo(config, { fetch, ...quick });
     expect(await forgejo.permission("acme/app", "a")).toBe("admin");
     expect(await forgejo.permission("acme/app", "b")).toBe("write");
     expect(await forgejo.permission("acme/app", "c")).toBe("none");
+    expect(await forgejo.permission("acme/app", "d")).toBeUndefined();
   });
 
   test("adds the webhook once", async () => {

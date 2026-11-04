@@ -173,14 +173,19 @@ export class Forgejo {
     await githubRequest(this.auth, `/repos/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: { body } }, this.http);
   }
 
-  /** The user's permission on the repo, in GitHub's words: admin, write, read or none. */
-  async permission(repo: string, username: string): Promise<string> {
+  /**
+   * The user's permission on the repo, in GitHub's words: admin, write, read
+   * or none. Undefined when the bot may not ask: Forgejo tells only a
+   * repository admin about someone else.
+   */
+  async permission(repo: string, username: string): Promise<string | undefined> {
     try {
       const result = await this.get<{ permission: string }>(`/repos/${repo}/collaborators/${encodeURIComponent(username)}/permission`);
       return result.permission === "owner" ? "admin" : result.permission;
     } catch (error) {
-      // Forgejo answers 403 or 404 for someone who is not a collaborator.
-      if (error instanceof GitHubError && (error.status === 403 || error.status === 404)) return "none";
+      // 404: no such user. 403: the bot is not an admin of the repo (unless it is a rate limit).
+      if (error instanceof GitHubError && error.status === 404) return "none";
+      if (error instanceof GitHubError && error.status === 403 && !error.retryable) return undefined;
       throw error;
     }
   }
