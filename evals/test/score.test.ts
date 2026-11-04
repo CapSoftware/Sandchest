@@ -120,6 +120,14 @@ describe("score", () => {
     expect(result.precision).toEqual({ lower: 0.5, known: 0.5 });
   });
 
+  test("a judgement carries over to the same bug under a new fingerprint", () => {
+    const judgements = { old: { verdict: "false_positive" as const, where: { category: "sql_injection", entry: "routes.ts:1", path: ["q.ts:40"] } } };
+    const result = score(benchmark, report([finding({ sink: ["q.ts", 42] }), finding({ sink: ["q.ts", 90] })]), judgements);
+    expect(result.findings.map((f) => f.outcome)).toEqual(["false_positive", "false_positive"]);
+    const elsewhere = score(benchmark, report([{ ...finding({ sink: ["q.ts", 90] }), entryPoint: { file: "other.ts", line: 3, description: "" } }]), judgements);
+    expect(elsewhere.findings[0]!.outcome).toBe("unjudged");
+  });
+
   test("flags findings whose whole path is test code, and severity against expected", () => {
     const result = score(
       benchmark,

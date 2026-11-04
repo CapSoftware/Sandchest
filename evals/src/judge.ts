@@ -10,14 +10,14 @@
  * verdict carries over to every later run that reports the same finding.
  */
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { SEVERITIES, type Finding } from "@sandchest/engine/scan";
 import { loadBenchmarks } from "./benchmark";
-import { JUDGEMENTS_DIR, requireData } from "./data";
+import { JUDGEMENTS_DIR, requireData, RUNS_DIR } from "./data";
 import { readRun, scoreRun } from "./runs";
-import { VERDICTS, type JudgementRecord, type Judgements, type Verdict } from "./score";
+import { VERDICTS, whereOf, type JudgementRecord, type Judgements, type Verdict } from "./score";
 import { runDir } from "./scorecard";
 
 requireData();
@@ -44,6 +44,20 @@ function check(record: JudgementRecord, where: string): void {
 }
 
 const today = new Date().toISOString().slice(0, 10);
+
+/** Where a fingerprint pointed, from the newest run that reported it, so the verdict survives fingerprint changes. */
+async function locate(name: string, fingerprint: string): Promise<JudgementRecord["where"]> {
+  for (const run of (await readdir(RUNS_DIR)).sort().reverse()) {
+    const dir = join(RUNS_DIR, run);
+    const files = existsSync(dir) ? (await readdir(dir)).filter((f) => f.startsWith(`${name}.`) && f.endsWith(".scan.json")) : [];
+    for (const file of files) {
+      const report = JSON.parse(await readFile(join(dir, file), "utf8")) as { findings: Finding[] };
+      const finding = report.findings.find((f) => f.fingerprint === fingerprint);
+      if (finding) return whereOf(finding);
+    }
+  }
+  return undefined;
+}
 const [command, ...rest] = positionals;
 
 if (command === "set") {
@@ -58,6 +72,7 @@ if (command === "set") {
     at: today,
   };
   check(record, fingerprint);
+  record.where = await locate(name, fingerprint);
   const judgements = await read(name);
   judgements[fingerprint] = record;
   await save(name, judgements);
@@ -68,7 +83,7 @@ if (command === "set") {
     const judgements = await read(name);
     for (const [fingerprint, record] of Object.entries(records)) {
       check(record, `${name}/${fingerprint}`);
-      judgements[fingerprint] = { at: today, ...record };
+      judgements[fingerprint] = { at: today, ...record, where: record.where ?? (await locate(name, fingerprint)) };
     }
     await save(name, judgements);
     console.log(`${name}: ${Object.keys(records).length} judgement(s)`);

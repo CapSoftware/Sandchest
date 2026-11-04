@@ -18,7 +18,7 @@
  * wait for judgement, and precision is a range: unjudged counted as false
  * (strict) and left out (known). The strict figure is the one we hold to.
  */
-import type { Finding, Lead, ScanReport } from "@sandchest/engine/scan";
+import { sameBug, type Finding, type Lead, type ScanReport } from "@sandchest/engine/scan";
 import type { Benchmark, CodeRange, ExpectedFinding } from "./benchmark";
 
 /** Lines of slack either side of an expected location. */
@@ -36,6 +36,12 @@ export type Verdict = (typeof VERDICTS)[number];
 
 export interface JudgementRecord {
   verdict: Verdict;
+  /**
+   * Where the judged finding pointed (class and cited lines, no code), so the
+   * verdict also applies when a later run reports the same bug under another
+   * fingerprint.
+   */
+  where?: { category: string; entry: string; path: string[] };
   /** Fingerprint of the canonical finding, for duplicates. */
   duplicateOf?: string;
   /** The severity a reviewer would give it, when it differs. */
@@ -50,6 +56,28 @@ export type Judgements = Record<string, Verdict | JudgementRecord>;
 export function judgementOf(judgements: Judgements, fingerprint: string): JudgementRecord | undefined {
   const value = judgements[fingerprint];
   return typeof value === "string" ? { verdict: value } : value;
+}
+
+const at = (spot: string) => {
+  const split = spot.lastIndexOf(":");
+  return { file: spot.slice(0, split), line: Number(spot.slice(split + 1)) };
+};
+
+/** A finding's judgement: by fingerprint, or else by a judged finding that is the same bug (same rule as rescans). */
+export function judgementFor(judgements: Judgements, finding: Pick<Finding, "fingerprint" | "category" | "entryPoint" | "attackPath">): JudgementRecord | undefined {
+  const exact = judgementOf(judgements, finding.fingerprint);
+  if (exact) return exact;
+  for (const [print, value] of Object.entries(judgements)) {
+    if (typeof value === "string" || !value.where) continue;
+    const judged = { fingerprint: print, category: value.where.category, entryPoint: at(value.where.entry), attackPath: value.where.path.map(at) };
+    if (sameBug(judged, finding)) return value;
+  }
+  return undefined;
+}
+
+/** The location part of a judgement, from the finding being judged. */
+export function whereOf(finding: Pick<Finding, "category" | "entryPoint" | "attackPath">): NonNullable<JudgementRecord["where"]> {
+  return { category: finding.category, entry: `${finding.entryPoint.file}:${finding.entryPoint.line}`, path: finding.attackPath.map((s) => `${s.file}:${s.line}`) };
 }
 
 export type Outcome = "true_positive" | "false_positive" | "duplicate" | "unjudged";
@@ -125,7 +153,7 @@ export function score(benchmark: Benchmark, report: ScanReport, judgements: Judg
     const sink = finding.attackPath.at(-1)!;
     const cited = [finding.entryPoint, ...finding.attackPath];
     const decoy = benchmark.decoys.some((range) => within(range, sink.file, sink.line, 0));
-    const judged = judgementOf(judgements, finding.fingerprint);
+    const judged = judgementFor(judgements, finding);
     const fresh = hits.filter((h) => !claimed.has(h.spot));
     let outcome: Outcome = "unjudged";
     let reason: FindingScore["reason"];
