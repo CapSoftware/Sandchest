@@ -1,7 +1,7 @@
 /**
  * The Forgejo (and Gitea) API calls Sandchest makes, as the bot account.
  * Requests go through the GitHub client: the same retries, timeouts and
- * `Link` pagination, which Forgejo sends too.
+ * `Link` pagination, which Forgejo sends too (followed on FORGEJO_API_URL).
  */
 import { githubPaginate, githubRequest, githubText, GitHubError, type CheckConclusion, type HttpOptions, type InstalledRepository, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { ForgejoConfig } from "./config";
@@ -66,7 +66,7 @@ export class Forgejo {
     private readonly options: HttpOptions = {},
   ) {
     this.auth = async () => config.token;
-    this.http = { ...options, baseUrl: config.apiUrl, name: "Forgejo" };
+    this.http = { ...options, baseUrl: config.apiUrl, name: "Forgejo", rebaseLinks: true };
   }
 
   /** The same instance as a signed-in person, with their own token: for reading what they may see. */

@@ -211,6 +211,17 @@ describe("api", () => {
     expect(requests[3]!.url).toBe("https://git.example.com/api/v1/orgs/acme/repos?limit=50&per_page=100");
   });
 
+  test("follows pagination links to FORGEJO_API_URL, whatever address the instance builds them from", async () => {
+    const repo = (id: number) => ({ id, full_name: `acme/r${id}`, private: true, default_branch: "main" });
+    const { fetch, requests } = scripted(
+      json([repo(1)], { headers: { link: '<http://git.internal/api/v1/orgs/acme/repos?limit=50&page=2>; rel="next", <http://git.internal/api/v1/orgs/acme/repos?limit=50&page=2>; rel="last"' } }),
+      json([repo(2)]),
+    );
+    const forgejo = new Forgejo({ ...config, apiUrl: "http://forgejo:3000/api/v1" }, { fetch, ...quick });
+    expect((await forgejo.repositories({ id: 3, login: "acme", type: "Organization" })).map((r) => r.id)).toEqual([1, 2]);
+    expect(requests[1]!.url).toBe("http://forgejo:3000/api/v1/orgs/acme/repos?limit=50&page=2");
+  });
+
   test("reads one repository, and leaves out archives, mirrors and empty ones as the listing does", async () => {
     const repo = (id: number, extra = {}) => ({ id, full_name: `acme/r${id}`, private: true, default_branch: "main", ...extra });
     const { fetch } = scripted(json(repo(1)), json(repo(2, { archived: true })), json(repo(3, { mirror: true })), json(repo(4, { empty: true })));
