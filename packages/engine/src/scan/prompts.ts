@@ -239,3 +239,11 @@ ${wrap(priorLines(rejected))}
 
 If the candidate has the same root cause as one of these, it is likely a false positive for the same reason: find what makes the earlier one safe (a guard, a constraint, an invariant) and check whether it covers this candidate. Confirm only if you can cite code showing this candidate differs in a way that makes it exploitable.`;
 }
+
+/**
+ * What the skeptic checks for a dependency advisory the sweep matched by
+ * version alone. Given only to those candidates: as a rule for every finding it
+ * made the skeptic drop real findings that involve a dependency.
+ */
+export const DEPENDENCY_CHECKS =
+  "A known advisory in a dependency is a vulnerability only if all of these hold, so check each in the code: the version actually installed is affected (read the lockfile, for the workspace package that imports it, not the range in package.json); the importing code ships (not tests, stories, dev tooling or example apps); and the application uses the function, option or component the advisory is about, in the configuration it needs, with attacker input reaching it (a sanitizer bypass that needs a non-default option, a proxy-server flaw in an app that only uses the client, a tunnel route that isn't configured). Rule \"disproved\" citing the lockfile, configuration or call sites that show it does not apply. When it depends on a setting that is off by default, say so and lower the confidence.";

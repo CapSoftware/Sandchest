@@ -136,8 +136,10 @@ export function persistentLeads(leads: Lead[]): Lead[] {
  *   - never a dev/build/test dependency (`dep.dev`);
  *   - must have at least one *product* import site (not a test, dot-directory or config file);
  *   - one finding per package, and none a hunter already reported.
- * These are software-composition facts, so they are `corroborated` by
- * construction and skip the gate and skeptic.
+ * An advisory applying to the installed version is not yet a vulnerability:
+ * most need an option, function or component the app may not use (judged on
+ * real apps, 3 of 38 emitted this way were exploitable). So each one is
+ * reviewed by the skeptic before it is shown, like a hunter's candidate.
  */
 export function dependencyFindings(vulns: DependencyVulns[], already: Finding[]): Finding[] {
   const covered = new Set(already.filter((f) => f.category === "vulnerable_dependency").map((f) => f.title.split(/[@\s]/)[0]!.toLowerCase()));
@@ -169,7 +171,7 @@ export function dependencyFindings(vulns: DependencyVulns[], already: Finding[])
       entryPoint: { file, line, description: `${dep.name}@${dep.version} imported here` },
       attackPath: [{ file, line, note: `Vulnerable dependency ${dep.name}@${dep.version} is imported and reachable here`, excerpt: "" }],
       attacker: "unauthenticated",
-      preconditions: `The project depends on ${dep.name}@${dep.version}, which is imported into shipped code.`,
+      preconditions: `The project depends on ${dep.name}@${dep.version}, imported at ${sites(dep)}. Advisories: ${dep.advisories.slice(0, 6).map((a) => `${a.id} (${a.severity}): ${a.summary}`).join("; ")}.`,
       proofOfConcept: `${dep.name}@${dep.version} is affected by ${ids}: ${top[0]?.summary ?? "see the advisory"}. Consult the advisory for a working exploit against this version.`,
       fixGuidance: fixedIn ? `Upgrade ${dep.name} to ${fixedIn} or later.` : `Upgrade ${dep.name} to a patched version, or remove the dependency.`,
       guarantees: [`The project no longer depends on a version of ${dep.name} affected by ${ids}.`],
@@ -182,6 +184,12 @@ export function dependencyFindings(vulns: DependencyVulns[], already: Finding[])
     findings.push({ ...base, fixPrompt: fixPrompt(base) });
   }
   return findings;
+}
+
+/** Where a dependency is imported in shipped code, for the reviewer to check how it is used. */
+function sites(dep: DependencyVulns): string {
+  const product = (dep.importedAt ?? []).filter((s) => !isNonProductAt(s));
+  return `${product.slice(0, 8).join(", ")}${product.length > 8 ? ` and ${product.length - 8} more` : ""}`;
 }
 
 function reachRank(dep: DependencyVulns): number {

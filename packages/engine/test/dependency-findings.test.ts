@@ -36,6 +36,8 @@ describe("dependencyFindings", () => {
   test("skips a dependency imported only from tooling, tests or config", () => {
     expect(dependencyFindings([dep("next-auth", [advisory("x", "critical")], { importedAt: [".agents/skills/scripts/db.mjs:1"] })], [])).toHaveLength(0);
     expect(dependencyFindings([dep("vite", [advisory("x", "critical")], { importedAt: ["apps/web/vite.config.ts:2"] })], [])).toHaveLength(0);
+    for (const site of ["apps/web/modules/test-setup.ts:4", "src/Button.stories.tsx:1", "src/a.test.ts:1", "pkg/x_test.go:3", "example-apps/sync/app.ts:1"])
+      expect(dependencyFindings([dep("vitest", [advisory("x", "critical")], { importedAt: [site] })], [])).toHaveLength(0);
     // …but a product import site elsewhere keeps it, located at the product site.
     const [f] = dependencyFindings([dep("next", [advisory("x", "critical")], { importedAt: ["apps/web/next.config.mjs:1", "apps/web/app/layout.tsx:3"] })], []);
     expect(f!.entryPoint.file).toBe("apps/web/app/layout.tsx");

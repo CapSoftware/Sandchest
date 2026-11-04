@@ -23,7 +23,7 @@ import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assig
 import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
-import { renderAuthModel, renderHistoryForHunt, renderHistoryForSkeptic, renderThreatModel } from "./prompts";
+import { DEPENDENCY_CHECKS, renderAuthModel, renderHistoryForHunt, renderHistoryForSkeptic, renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
 import { investigateAuthModel } from "./investigate";
 import { severityRank, type Candidate, type Finding, type Lead, type RepoHistory, type ThreatModel } from "./schema";
@@ -392,13 +392,34 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     });
   }
 
-  // Deep scans: guarantee the highest-severity known-vulnerable imported dependencies are reported
-  // every run (killing hunter variance). PR reviews skip this — their findings must touch the change.
+  // Deep scans: every critical advisory in an imported dependency is considered every run (killing hunter
+  // variance), and shown only if the skeptic finds the app exposed to it. PR reviews skip this: their
+  // findings must touch the change.
   if (!change) {
     const deps = dependencyFindings(signals.vulns, findings);
-    for (const finding of deps) {
-      findings.push(finding);
-      emit({ type: "finding", finding });
+    if (deps.length) emit({ type: "progress", message: `Checking whether ${deps.length} known-vulnerable ${deps.length === 1 ? "dependency is" : "dependencies are"} exploitable here…` });
+    const rulings = await Promise.all(
+      deps.map(async (finding, i) => {
+        const gated = dependencyCandidate(finding, `D${i + 1}`);
+        try {
+          return { finding, gated, ruling: await review(ctx, gated, at(0.95)) };
+        } catch (error) {
+          return { finding, gated, ruling: unreviewed(gated, `Review failed (${contain(error, `Review of ${gated.id} failed`)})`) };
+        }
+      }),
+    );
+    // Set by a review that hit a fatal error (the closures above assign it).
+    const stopped = fatal as { error: unknown } | undefined;
+    if (stopped) throw stopped.error;
+    for (const { finding, gated, ruling } of rulings) {
+      const { verdict } = ruling;
+      if (verdict.verdict !== "confirmed") {
+        dismissed.push({ id: gated.id, title: finding.title, category: finding.category, at: `${finding.entryPoint.file}:${finding.entryPoint.line}`, reasoning: verdict.reasoning, disproof: verdict.disproof.map((d) => `${d.file}:${d.line} — ${d.explanation}`) });
+        continue;
+      }
+      const kept: Finding = { ...finding, severity: verdict.severity, confidence: verdict.confidence, skeptic: { confidence: verdict.confidence, reasoning: verdict.reasoning } };
+      findings.push(kept);
+      emit({ type: "finding", finding: kept });
     }
   }
 
@@ -614,7 +635,8 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
 
   const results = await Promise.all(
     options.findings.map(async (input, i): Promise<Verification> => {
-      const candidate = toCandidate(input);
+      // A dependency advisory matched by version is reviewed as the scan reviews it, with the dependency checks.
+      const candidate = isSweptDependency(input) ? dependencyCandidate(input, `C${i + 1}`).candidate : toCandidate(input);
       try {
         const gate = await checkEvidence(ctx.indexer, candidate, signal);
         if (!gate.ok) return { candidate, rejected: gate.problems };
@@ -634,6 +656,21 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
     }),
   );
   return { results, usage: ctx.meter.total(), costUsd: options.pricing ? ctx.meter.cost(options.pricing) : undefined };
+}
+
+/** A finding the dependency sweep made from a version match alone (not one a hunter reported). */
+function isSweptDependency(input: Finding | Candidate): input is Finding {
+  return "sources" in input && input.sources?.length === 1 && input.sources[0] === "vulnerable_dependency";
+}
+
+/** A dependency finding as a candidate for the skeptic, cited at its import site. */
+function dependencyCandidate(finding: Finding, id: string): GatedCandidate {
+  const at = { file: finding.entryPoint.file, line: finding.entryPoint.line, text: "", symbol: null };
+  const candidate: Candidate = {
+    ...toCandidate(finding),
+    preconditions: { attacker: finding.attacker, trigger: DEPENDENCY_CHECKS, details: finding.preconditions },
+  };
+  return { id, candidate, entry: at, path: [at], fingerprint: finding.fingerprint, hunter: "dependency sweep" };
 }
 
 /** A finding back into the shape hunters report. */

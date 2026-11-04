@@ -22,10 +22,13 @@ export function isFixtureAt(at: string | undefined): boolean {
 // A dot-directory segment (.agents/, .storybook/, .github/) or a build/test config file.
 const DOTDIR_SEGMENT = /(^|\/)\.[^/]+\//;
 const CONFIG_FILE = /\.config\.[cm]?[jt]sx?$/;
+// Test files and test setup outside a test directory (a.test.ts, Button.stories.tsx, test-setup.ts, x_test.go), and example apps.
+const TEST_FILE = /(^|\/)([^/]+\.(test|spec|stories)\.[cm]?[jt]sx?|(test-?setup|setup-?tests?|vitest\.setup|jest\.setup)\.[cm]?[jt]sx?|[^/]+_test\.go|test_[^/]+\.py|[^/]+_test\.py)$/i;
+const EXAMPLE_SEGMENT = /(^|\/)example-apps?\//i;
 
-/** Not shipped as product: test/fixture dirs, dot-directories (tooling), or build/test config files. */
+/** Not shipped as product: test/fixture dirs and files, example apps, dot-directories (tooling), or build/test config files. */
 export function isNonProductFile(file: string): boolean {
-  return isFixtureFile(file) || DOTDIR_SEGMENT.test(file) || CONFIG_FILE.test(file);
+  return isFixtureFile(file) || DOTDIR_SEGMENT.test(file) || CONFIG_FILE.test(file) || TEST_FILE.test(file) || EXAMPLE_SEGMENT.test(file);
 }
 
 /** Same, for a `file:line` citation (or a bare path). */
