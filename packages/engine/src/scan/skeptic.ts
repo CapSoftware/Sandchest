@@ -60,7 +60,7 @@ export async function review(ctx: ScanContext, gated: GatedCandidate, deadline?:
     meter: ctx.meter,
     maxTurns: ctx.options.skepticTurns,
     done: () => verdict !== undefined,
-    deadline,
+    deadline: deadline ?? ctx.deadline,
     priority: "urgent",
     signal: ctx.signal,
   });

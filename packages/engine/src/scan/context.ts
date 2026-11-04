@@ -77,6 +77,12 @@ export interface ScanContext {
   meter: UsageMeter;
   options: ScanLimits;
   signal?: AbortSignal;
+  /**
+   * When the scan's time budget runs out (epoch ms). Every model call stops by then, even one in flight:
+   * agents return what they have, write-ups fall back to the hunter's report, reviews keep the candidate
+   * at low confidence. Unset means no limit.
+   */
+  deadline?: number;
   /** Untrusted-data tag, unique to this scan. */
   tag: string;
   wrap: Wrap;

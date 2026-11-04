@@ -14,7 +14,7 @@
 import { generateObject } from "../llm";
 import { runAgent } from "./agent";
 import type { ScanContext } from "./context";
-import { errorMessage, isFatal } from "./errors";
+import { errorMessage, isFatal, untilDeadline } from "./errors";
 import { authInvestigationSystemPrompt } from "./prompts";
 import { AuthModelSchema, type AuthModel } from "./schema";
 
@@ -36,6 +36,7 @@ export async function investigateAuthModel(ctx: ScanContext): Promise<AuthModel 
       meter: ctx.meter,
       maxTurns: Math.max(ctx.options.reconTurns, 12),
       maxTokens: 4_000,
+      deadline: ctx.deadline,
       signal: ctx.signal,
     });
 
@@ -52,7 +53,7 @@ export async function investigateAuthModel(ctx: ScanContext): Promise<AuthModel 
             content: `${ctx.threatModelText}\n\nInvestigation notes:\n${ctx.wrap(exploration.content || "(none)")}\n\nWrite the authorization model. Every enforcement point and gap must cite a real file:line you read.`,
           },
         ],
-        signal: ctx.signal,
+        signal: untilDeadline(ctx.signal, ctx.deadline),
       }),
     );
     ctx.meter.add("skeptic", result.usage, result.attempts, result.retries);

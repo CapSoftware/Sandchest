@@ -272,6 +272,76 @@ describe("agent budget", () => {
     });
     expect(result.turns).toBe(3);
   });
+
+  /** A model that answers the first turn, then hangs until its request is aborted. */
+  function hangingAfter(turns: number): LlmClient & { aborted: number } {
+    let calls = 0;
+    const client = {
+      aborted: 0,
+      config: looping.config,
+      async chat(request: Parameters<LlmClient["chat"]>[0]) {
+        if (calls++ < turns) return looping.chat(request);
+        return new Promise<never>((_, reject) =>
+          request.signal?.addEventListener("abort", () => {
+            client.aborted++;
+            reject(request.signal!.reason);
+          }),
+        );
+      },
+    };
+    return client;
+  }
+  const ping = agentTool(defineTool({ name: "ping", description: "", args: z.object({}) }), async () => "pong");
+
+  test("the deadline cuts off a model call already in flight", async () => {
+    const client = hangingAfter(1);
+    const started = Date.now();
+    const result = await runAgent({
+      client,
+      role: "skeptic",
+      messages: [{ role: "user", content: "go" }],
+      tools: [ping],
+      limiter: new Limiter(1),
+      meter: new UsageMeter(),
+      maxTurns: 10,
+      deadline: Date.now() + 150,
+    });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(client.aborted).toBe(1);
+    expect(result.turns).toBe(1);
+    expect(result.toolCalls).toBe(1);
+  });
+
+  test("a turn that waited for a slot past the deadline is never sent", async () => {
+    const client = hangingAfter(0);
+    const limiter = new Limiter(1);
+    let release!: () => void;
+    const busy = limiter.run(() => new Promise<void>((resolve) => (release = resolve)));
+    const pending = runAgent({ client, role: "hunt", messages: [{ role: "user", content: "go" }], tools: [ping], limiter, meter: new UsageMeter(), maxTurns: 5, deadline: Date.now() + 50 });
+    await Bun.sleep(100);
+    release();
+    await busy;
+    const result = await pending;
+    expect(result.turns).toBe(0);
+    expect(client.aborted).toBe(0);
+  });
+
+  test("cancelling the scan still throws, deadline or not", async () => {
+    const controller = new AbortController();
+    const pending = runAgent({
+      client: hangingAfter(0),
+      role: "hunt",
+      messages: [{ role: "user", content: "go" }],
+      tools: [ping],
+      limiter: new Limiter(1),
+      meter: new UsageMeter(),
+      maxTurns: 5,
+      deadline: Date.now() + 60_000,
+      signal: controller.signal,
+    });
+    controller.abort(new Error("cancelled"));
+    await expect(pending).rejects.toThrow("cancelled");
+  });
 });
 
 describe("coverage pass", () => {

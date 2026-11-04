@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { LlmClient } from "../llm";
 import { generateObject } from "../llm";
 import type { Usage } from "../llm/types";
-import { isFatal } from "./errors";
+import { isFatal, untilDeadline } from "./errors";
 import type { Confidence, Finding, Severity, ValidationStatus } from "./schema";
 
 export interface MergedFinding {
@@ -34,6 +34,8 @@ export interface ConsolidateOptions {
   /** Marks untrusted text (finding write-ups quote the scanned code). */
   wrap?: (text: string) => string;
   signal?: AbortSignal;
+  /** When to stop merging (epoch ms): findings not reviewed by then are returned unmerged. */
+  deadline?: number;
   /** Runs the model call (a scan passes its limiter). */
   run?: <T>(task: () => Promise<T>) => Promise<T>;
 }
@@ -145,6 +147,7 @@ export async function consolidateFindings(options: ConsolidateOptions): Promise<
 
   for (const batch of batches(findings)) {
     if (batch.length < 2) continue;
+    if (options.deadline !== undefined && Date.now() >= options.deadline) break;
     const ids = new Map<string, Finding>(batch.map((f, i) => [`F${i + 1}`, f]));
     let groups: z.infer<typeof GroupsSchema>["groups"];
     try {
@@ -157,7 +160,7 @@ export async function consolidateFindings(options: ConsolidateOptions): Promise<
             { role: "system", content: CONSOLIDATE_SYSTEM_PROMPT },
             { role: "user", content: `${wrap([...ids].map(([id, f]) => render(f, id)).join("\n\n"))}\n\nWhich of these findings are the same issue?` },
           ],
-          signal,
+          signal: untilDeadline(signal, options.deadline),
         }),
       );
       for (const key of Object.keys(usage) as Array<keyof Usage>) usage[key] += result.usage[key];

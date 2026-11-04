@@ -249,6 +249,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     meter: new UsageMeter(),
     options: limits,
     signal,
+    deadline: at(1),
     tag,
     wrap,
     counters: { rejected: 0, duplicates: 0 },
@@ -427,7 +428,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   let merged: MergedFinding[] = [];
   if (findings.length > 1 && !signal.aborted) {
     emit({ type: "stage", stage: "verify", message: "Merging repeat reports of the same issue…" });
-    const result = await consolidateFindings({ client: ctx.client, findings, wrap: ctx.wrap, signal, run: (task) => ctx.limiter.run(task, "urgent") });
+    const result = await consolidateFindings({ client: ctx.client, findings, wrap: ctx.wrap, signal, deadline: at(1), run: (task) => ctx.limiter.run(task, "urgent") });
     if (result.usage) ctx.meter.add("skeptic", result.usage.usage, result.usage.attempts, result.usage.retries);
     if (result.merged.length) emit({ type: "progress", message: `Merged ${result.merged.length} repeat report${result.merged.length === 1 ? "" : "s"} into the findings they repeat.` });
     findings.splice(0, findings.length, ...result.findings);
@@ -522,6 +523,7 @@ export async function runRecon(options: Omit<ScanOptions, "threatModel" | "pullR
       meter,
       options: limits,
       signal,
+      deadline: started + limits.timeBudgetMs,
       tag,
       wrap,
       counters: { rejected: 0, duplicates: 0 },
@@ -622,6 +624,7 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
     meter: new UsageMeter(),
     options: limits,
     signal,
+    deadline: Date.now() + limits.timeBudgetMs,
     tag,
     wrap,
     counters: { rejected: 0, duplicates: 0 },

@@ -8,6 +8,7 @@
 import { isIndexerDown } from "../indexer/client";
 import { parseToolCall, type LlmClient, type Message, type Role, type Tool, type ToolCall } from "../llm";
 import type { Limiter, UsageMeter } from "./metrics";
+import { untilDeadline } from "./errors";
 import type { AgentTool } from "./tools";
 
 export interface AgentOptions {
@@ -69,10 +70,20 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     if (Date.now() >= deadline) {
       return { messages, content: "", turns: turn - 1, toolCalls };
     }
-    const result = await limiter.run(
-      () => client.chat({ role, messages, tools: specs, toolChoice: "auto", maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal }),
-      options.priority,
-    );
+    // The deadline also cuts off a request already in flight (and its retries): a slow or stalled endpoint must
+    // never hold a stage past its budget. The scan's own signal still means cancelled, and is rethrown.
+    const turnSignal = untilDeadline(signal, deadline);
+    let result: Awaited<ReturnType<LlmClient["chat"]>> | undefined;
+    try {
+      result = await limiter.run(
+        // A turn that waited for a slot until the deadline isn't sent at all.
+        async () => (Date.now() >= deadline ? undefined : client.chat({ role, messages, tools: specs, toolChoice: "auto", maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal: turnSignal })),
+        options.priority,
+      );
+    } catch (error) {
+      if (signal?.aborted || !turnSignal?.aborted) throw error;
+    }
+    if (!result) return { messages, content: "", turns: turn - 1, toolCalls };
     meter.add(role, result.usage, 1, result.retries);
     messages.push(result.message);
     size += messageSize(result.message);
@@ -81,7 +92,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       return { messages, content: result.content, turns: turn, toolCalls };
     }
 
-    const outputs = await Promise.all(result.toolCalls.map((call) => execute(call)));
+    const outputs = await Promise.all(result.toolCalls.map((call) => execute(call, turnSignal)));
     toolCalls += result.toolCalls.length;
     for (const [i, call] of result.toolCalls.entries()) {
       const message: Message = { role: "tool", tool_call_id: call.id, content: outputs[i]! };
@@ -109,12 +120,12 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   }
   return { messages, content: "", turns: turn - 1, toolCalls };
 
-  async function execute(call: ToolCall): Promise<string> {
+  async function execute(call: ToolCall, toolSignal: AbortSignal | undefined): Promise<string> {
     const parsed = parseToolCall(toolMap, call);
     if (!parsed.ok) return parsed.error;
     options.onToolCall?.(parsed.tool.name, parsed.args);
     try {
-      const output = await tools.get(parsed.tool.name)!.run(parsed.args, signal);
+      const output = await tools.get(parsed.tool.name)!.run(parsed.args, toolSignal);
       return output.length > MAX_TOOL_RESULT ? `${output.slice(0, MAX_TOOL_RESULT)}\n… (output truncated; narrow the request)` : output;
     } catch (error) {
       // A failed call is the model's to work around; a dead indexer or a cancelled scan is not.

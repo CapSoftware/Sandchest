@@ -5,7 +5,7 @@
  */
 import { generateObject } from "../llm";
 import type { ScanContext } from "./context";
-import { isFatal } from "./errors";
+import { isFatal, untilDeadline } from "./errors";
 import { fixPrompt } from "./fix-prompt";
 import type { GatedCandidate } from "./gate";
 import { STRUCTURE_SYSTEM_PROMPT } from "./prompts";
@@ -56,7 +56,7 @@ async function writeUpFor(ctx: ScanContext, gated: GatedCandidate, review: Revie
             content: `${renderCandidate(gated)}\n\n## Reviewer's notes (severity ${v.severity}, confidence ${v.confidence})\n${v.reasoning}\n\nCited code:\n${code}\n\nWrite up this finding. Use the reviewer's severity unless the evidence clearly supports another.`,
           },
         ],
-        signal: ctx.signal,
+        signal: untilDeadline(ctx.signal, ctx.deadline),
       }),
       "urgent",
     );

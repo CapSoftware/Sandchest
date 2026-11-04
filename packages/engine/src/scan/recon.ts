@@ -5,7 +5,7 @@
 import { generateObject } from "../llm";
 import { runAgent } from "./agent";
 import type { ScanContext } from "./context";
-import { errorMessage, isFatal } from "./errors";
+import { errorMessage, isFatal, untilDeadline } from "./errors";
 import { reconSystemPrompt } from "./prompts";
 import { ThreatModelSchema, type Lead, type ThreatModel } from "./schema";
 import { formatLead, type RouteInfo } from "./tools";
@@ -56,6 +56,7 @@ export async function recon(
       maxTurns: ctx.options.reconTurns,
       // Notes, not an essay: the structured pass below does the writing.
       maxTokens: 4_000,
+      deadline: ctx.deadline,
       signal: ctx.signal,
     });
     notes = exploration.content;
@@ -74,7 +75,7 @@ export async function recon(
             content: `${inventory}\n\nExploration notes:\n${notes || "(none)"}\n\nWrite the threat model. Subsystems must use real directory or file paths from the inventory, and together cover the code an attacker can reach.`,
           },
         ],
-        signal: ctx.signal,
+        signal: untilDeadline(ctx.signal, ctx.deadline),
       }),
     );
     ctx.meter.add("recon", result.usage, result.attempts, result.retries);
