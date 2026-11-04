@@ -15,82 +15,19 @@
  * e.g. from `bun run harvest`). Partial fixes are reported but kept out of
  * the false-positive rate.
  */
-import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { createLlmClient, loadLlmConfig, startLocalIndexer } from "@sandchest/engine";
-import { loadPricing, verifyFindings, type Candidate, type ThreatModel } from "@sandchest/engine/scan";
-import { loadBenchmarks, select } from "./benchmark";
-import { checkout } from "./checkout";
-import { FIXPAIRS_DIR, requireData } from "./data";
+import { loadPricing, verifyFindings } from "@sandchest/engine/scan";
+import { requireData } from "./data";
+import { loadPairs, type Pair } from "./pairs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: { repeat: { type: "string", default: "3" }, ground: { type: "boolean", default: false }, pairs: { type: "string" }, summary: { type: "string" } },
 });
 
-interface Pair {
-  name: string;
-  vulnerableDir: string;
-  patchedDir: string;
-  candidate: Candidate;
-  threatModel: ThreatModel;
-  partialFix?: boolean;
-}
-
-/** Enough context for the skeptic when no recon ran: it reads the code itself. */
-const UNKNOWN_APP: ThreatModel = {
-  summary: "A web application under review.",
-  stack: [],
-  entryPoints: [],
-  authModel: "Unknown: read the code.",
-  trustBoundaries: [],
-  sensitiveAssets: [],
-  dangerousSinks: [],
-  frameworkProtections: [],
-  abuseSurfaces: [],
-  subsystems: [],
-} as unknown as ThreatModel;
-
 requireData();
-const pairs: Pair[] = [];
-const benchmarks = (await loadBenchmarks()).filter((b) => b.patched && b.expected.some((e) => e.replay));
-for (const benchmark of positionals.length ? select(benchmarks, positionals) : benchmarks) {
-  const [vulnerableDir, patchedDir] = await Promise.all([checkout(benchmark), checkout(benchmark, "patched")]);
-  for (const expected of benchmark.expected.filter((e) => e.replay)) {
-    const r = expected.replay!;
-    pairs.push({
-      name: `${benchmark.name}/${expected.id}`,
-      vulnerableDir,
-      patchedDir,
-      partialFix: expected.partialFix,
-      threatModel: UNKNOWN_APP,
-      candidate: {
-        title: r.title,
-        category: expected.category,
-        severity: expected.severity,
-        entryPoint: r.entryPoint,
-        path: r.path,
-        preconditions: { attacker: r.attacker, trigger: r.trigger, details: "none" },
-        proofOfConcept: r.proofOfConcept,
-        impact: r.impact,
-      },
-    });
-  }
-}
-const files = values.pairs ? [values.pairs] : existsSync(FIXPAIRS_DIR) && !positionals.length ? (await readdir(FIXPAIRS_DIR)).filter((f) => f.endsWith(".json")).map((f) => join(FIXPAIRS_DIR, f)) : [];
-for (const file of files) {
-  const list = JSON.parse(await readFile(file, "utf8")) as Array<Partial<Pair>>;
-  for (const pair of list) {
-    if (!pair.vulnerableDir || !pair.candidate) continue;
-    if (!existsSync(pair.vulnerableDir) || !existsSync(pair.patchedDir!)) {
-      console.error(`skip ${pair.name}: checkout missing (${pair.vulnerableDir}); regenerate it with \`bun run harvest\``);
-      continue;
-    }
-    pairs.push({ threatModel: UNKNOWN_APP, ...pair } as Pair);
-  }
-}
+const pairs = await loadPairs(positionals, values.pairs);
 if (pairs.length === 0) {
   console.error("No pairs: add `patched` + `replay` to a benchmark, or a pairs file to fixpairs/.");
   process.exit(2);

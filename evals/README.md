@@ -22,6 +22,7 @@ bun run evals --rescore <run>           # re-score saved scans, e.g. after judgi
 bun run scorecard <run> --baseline <run>
 bun run judge <run>                     # the findings still needing a verdict
 bun run fpcheck                         # skeptic on vulnerable vs fixed code (cents)
+bun run fixeval                         # does a push close fixed findings, and only those? (cents)
 bun run restage <run>                   # replay the final merge of repeat reports on saved scans (cents)
 bun run validate --fetch                # every cited line exists at its commit
 bun run prod                            # production quality, from the read replica

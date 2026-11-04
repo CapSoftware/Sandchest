@@ -5,7 +5,9 @@
  *   classifier answers cached, so it is free after the first run);
  * - reverify: the skeptic replayed on a saved run's labelled findings — real
  *   ones it keeps, false ones it removes, severity it gets right;
- * - fpcheck: known bugs replayed on their vulnerable and their fixed code.
+ * - fpcheck: known bugs replayed on their vulnerable and their fixed code;
+ * - fixeval: the push fix check on the same pairs: fixes it closes, and any
+ *   finding it closes that was not fixed (a false fix fails the gate).
  *
  *   bun run gate [--accept] [--repeat 2] [--no-classify]
  *
@@ -32,7 +34,8 @@ const tmp = (name: string) => join(GATE_DIR, `.${id}-${name}.json`);
 interface Coverage { bugs: number; reached: number; candidates: number; detected: number; classified: boolean }
 interface Reverify { real: number; realKept: number; realKeepRate?: number; falseKeepRate?: number; false: number; falseRemoved: number; unstable: number; severityExact: number | null; costUsd: number; details?: string }
 interface FpCheck { pairs: number; recall: number; falsePositives: number; costUsd: number }
-interface Result { id: string; coverage: Coverage; reverify: Reverify; fpcheck: FpCheck }
+interface FixEval { pairs: number; closed: number; falseFix: number; falseFixEdit: number; costUsd: number }
+interface Result { id: string; coverage: Coverage; reverify: Reverify; fpcheck: FpCheck; fixeval?: FixEval }
 
 async function step<T>(name: string, args: string[]): Promise<T> {
   const out = tmp(name);
@@ -46,12 +49,14 @@ async function step<T>(name: string, args: string[]): Promise<T> {
 }
 
 console.error("Running coverage, reverify and fpcheck…");
-const [coverage, reverify, fpcheck] = await Promise.all([
+const [coverage, reverify, fpcheck, fixeval] = await Promise.all([
   step<Coverage>("coverage", values["no-classify"] ? ["--no-classify"] : []),
   step<Reverify>("reverify", ["--run", config.reverifyRun, "--severities", "critical,high,medium,low", "--repeat", values.repeat!]),
   step<FpCheck>("fpcheck", ["--repeat", values.repeat!]),
+  // Closing a finding on a push: one pass, since a single false fix already fails the gate.
+  step<FixEval>("fixeval", ["--repeat", "1"]),
 ]);
-const result: Result = { id, coverage, reverify, fpcheck };
+const result: Result = { id, coverage, reverify, fpcheck, fixeval };
 await writeFile(join(GATE_DIR, `${id}.json`), `${JSON.stringify(result, null, 2)}\n`);
 
 const pct = (x: number | null) => (x === null ? "—" : `${Math.round(100 * x)}%`);
@@ -84,7 +89,10 @@ line("Known bugs confirmed on fixed code (FP)", pct(fpcheck.falsePositives), b &
 // sampling wobble is told apart from a real change (a few cents for the handful that move).
 const moved = await recheckMoved();
 const recheckCost = moved?.costUsd ?? 0;
-console.log(`\nCost: $${(reverify.costUsd + fpcheck.costUsd + recheckCost).toFixed(2)}${coverage.classified ? "" : " (coverage ran without the classifier)"}. Result: gate/${id}.json`);
+// A false fix hides a real bug from the dashboard: none is acceptable.
+line("Fixes a push closes automatically", pct(fixeval.closed), b?.fixeval && pct(b.fixeval.closed), !!b?.fixeval && fixeval.pairs === b.fixeval.pairs && fixeval.closed < b.fixeval.closed - 0.1);
+line("False fixes (unchanged or harmlessly edited)", pct(Math.max(fixeval.falseFix, fixeval.falseFixEdit)), b?.fixeval && pct(Math.max(b.fixeval.falseFix, b.fixeval.falseFixEdit)), fixeval.falseFix > 0 || fixeval.falseFixEdit > 0);
+console.log(`\nCost: $${(reverify.costUsd + fpcheck.costUsd + fixeval.costUsd + recheckCost).toFixed(2)}${coverage.classified ? "" : " (coverage ran without the classifier)"}. Result: gate/${id}.json`);
 if (!b && !sameSet) console.log("No comparable baseline: run with --accept to save one.");
 if (sameSet === false) console.log(`The replayed findings changed (reverifyRun or labels), so the skeptic rows are not compared.`);
 
