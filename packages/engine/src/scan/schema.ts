@@ -200,6 +200,8 @@ export interface Finding {
    * outcomes (fixed, dismissed) can be attributed to the signal that raised them.
    */
   sources?: string[];
+  /** Other reports of this same issue folded into it (see `consolidate.ts`), with where they pointed. */
+  alsoReportedAs?: Array<{ title: string; category: Category; at: string; entry: string }>;
 }
 
 /** A finding from an earlier scan of the same repository, with the team's verdict on it. */

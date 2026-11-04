@@ -133,6 +133,8 @@ export interface KnownFinding {
   category: string;
   entryPoint: { file: string; line: number };
   attackPath: Array<{ file: string; line: number }>;
+  /** Other reports folded into this finding (`file:line` of their sink and entry). */
+  alsoReportedAs?: Array<{ category: string; at: string; entry: string }>;
 }
 
 /**
@@ -142,6 +144,28 @@ export interface KnownFinding {
  * have no enclosing function, so the sink match is by file and line only.
  */
 export function sameBug(a: KnownFinding, b: KnownFinding): boolean {
+  if (sameReport(a, b)) return true;
+  // A merged finding is also each report it absorbed: match those by sink or entry.
+  const views = (k: KnownFinding) => [
+    { category: k.category, sink: k.attackPath.at(-1), entry: k.entryPoint },
+    ...(k.alsoReportedAs ?? []).map((r) => ({ category: r.category, sink: location(r.at), entry: location(r.entry) })),
+  ];
+  if (!a.alsoReportedAs?.length && !b.alsoReportedAs?.length) return false;
+  return views(a).some((x) =>
+    views(b).some(
+      (y) =>
+        family(x.category as Category) === family(y.category as Category) &&
+        ((!!x.sink && !!y.sink && x.sink.file === y.sink.file && Math.abs(x.sink.line - y.sink.line) <= 3) || (x.entry.file === y.entry.file && x.entry.line === y.entry.line)),
+    ),
+  );
+}
+
+function location(at: string): { file: string; line: number } {
+  const colon = at.lastIndexOf(":");
+  return colon === -1 ? { file: at, line: 0 } : { file: at.slice(0, colon), line: Number(at.slice(colon + 1)) || 0 };
+}
+
+function sameReport(a: KnownFinding, b: KnownFinding): boolean {
   if (family(a.category as Category) !== family(b.category as Category)) return false;
   const sinkA = a.attackPath.at(-1);
   const sinkB = b.attackPath.at(-1);

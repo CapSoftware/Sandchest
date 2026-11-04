@@ -1,3 +1,4 @@
+export { consolidateFindings, CONSOLIDATE_SYSTEM_PROMPT, type ConsolidateResult, type MergedFinding } from "./consolidate";
 export { DEFAULT_LIMITS, type ScanEvent, type ScanLimits } from "./context";
 export { fixPrompt } from "./fix-prompt";
 export { adoptKnownFingerprints, fingerprint, sameBug, type KnownFinding } from "./gate";
