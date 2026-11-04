@@ -127,7 +127,7 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
   const message = gate.reason === "no_plan" ? "Not run: this account has no plan." : `Not run: out of credits (needs ${gate.credits}).`;
   // The Check first: once the scan is marked refused, a retried step would never post it.
   let checkRunId = scan.checkRunId;
-  if (scan.kind === "pr_review" && scan.prNumber && scan.repo.org.installationId) {
+  if (scan.kind === "pr_review" && scan.repo.org.installationId) {
     const forge = forgeFor(scan.repo.org.provider, scan.repo.org.installationId);
     const { conclusion, output } = notReviewed(gate.reason, withUtm(`${appUrl()}/dashboard/settings`, "github", "check"), gate.credits);
     checkRunId ??= await forge.createCheck(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
@@ -325,7 +325,7 @@ export async function failScan(scanId: string, message: string): Promise<void> {
     await captureException(error, { source: "billing", tags: { action: "release", scan_id: scan.id }, handled: true });
   });
   if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
-  if (scan.kind === "pr_review" && scan.checkRunId && scan.prNumber && scan.repo.org.installationId) {
+  if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
     const check = { id: scan.checkRunId, name: CHECK_NAME, headSha: scan.headSha, prNumber: scan.prNumber, detailsUrl: detailsUrl(scan.id, "github", "check") };
     await forgeFor(scan.repo.org.provider, scan.repo.org.installationId).completeCheck(scan.repo.fullName, check, "neutral", {
       title: scan.status === "refused" ? "Not reviewed" : "Review could not finish",

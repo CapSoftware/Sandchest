@@ -22,7 +22,7 @@ export interface RepoForge {
   compare(repo: string, base: string, head: string): Promise<PullFile[]>;
   /** Shows the review as in progress on the PR's head. Returns the id to complete it with. */
   createCheck(repo: string, input: { name: string; headSha: string; externalId: string; detailsUrl?: string; output: CheckOutput }): Promise<number>;
-  completeCheck(repo: string, check: { id: number; name: string; headSha: string; prNumber: number; detailsUrl?: string }, conclusion: CheckConclusion, output: CheckOutput): Promise<void>;
+  completeCheck(repo: string, check: { id: number; name: string; headSha: string; prNumber: number | null; detailsUrl?: string }, conclusion: CheckConclusion, output: CheckOutput): Promise<void>;
   /** One review holding every inline comment. */
   createReview(repo: string, number: number, input: { commitId: string; body: string; comments: ReviewComment[] }): Promise<void>;
 }
@@ -61,7 +61,7 @@ function forgejo(): RepoForge {
     async completeCheck(repo, check, conclusion, output) {
       await client.setStatus(repo, check.headSha, { state: statusState(conclusion), context: check.name, description: output.title, targetUrl: check.detailsUrl });
       // A status holds one line. When it is not a pass, the PR also gets the summary a Check would show.
-      if (conclusion !== "success") await client.comment(repo, check.prNumber, `**Sandchest: ${output.title}**\n\n${output.summary}`);
+      if (conclusion !== "success" && check.prNumber) await client.comment(repo, check.prNumber, `**Sandchest: ${output.title}**\n\n${output.summary}`);
     },
     createReview: (repo, number, input) => client.createReview(repo, number, input),
   };
