@@ -165,6 +165,11 @@ The same as on GitHub, with Forgejo's own tools:
 
 Sandchest creates no issues and no security advisories, on GitHub or on Forgejo. Findings stay in the dashboard, where only people with push access see them. Forgejo has no security advisories, so if that ever changes, a Forgejo equivalent would need a private repository or a confidential issue.
 
+### Limitations
+
+- **Summary comments add up.** Each review that ends in something other than a plain success adds a new comment: every push to a pull request that still has findings, and every review that was refused or could not finish. Sandchest does not edit an earlier comment in place.
+- **One email, one sign-in.** Accounts are not linked. Someone who signed in with GitHub cannot sign in with a Forgejo account that has the same email address: Forgejo's sign-in fails with "account not linked". They keep using the first, or give one of the two accounts a different address.
+
 ## Optional settings
 
 | Setting | Effect |
