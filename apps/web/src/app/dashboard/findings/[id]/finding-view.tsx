@@ -5,7 +5,7 @@ import { CopyPrompt } from "@/components/app/copy-prompt";
 import { FixPrompt } from "@/components/app/fix-prompt";
 import { Heat } from "@/components/app/heat";
 import { Link } from "@/components/app/hover-link";
-import { Submit } from "@/components/app/submit";
+import { ResolveFinding } from "@/components/app/resolve-finding";
 import { When } from "@/components/app/when";
 import { ATTACKER_LABEL, categoryLabel, DISMISS_REASON_LABEL, githubLine, SCAN_KIND_LABEL } from "@/lib/format";
 import { changeFinding } from "@/server/actions";
@@ -34,6 +34,9 @@ export function FindingView({ row }: { row: FindingRow }) {
   const change = changeFinding.bind(null, finding.id);
   // "Found" repeats on every scan that sees it again; the first and the decisions are what matter.
   const timeline = history.filter((event, i) => event.type !== "seen" || history.slice(i + 1).every((later) => later.type !== "seen"));
+  // Who resolved it, if it's resolved: the latest decision.
+  const decision = open ? undefined : [...history].reverse().find((event) => event.type === (finding.status === "fixed" ? "fixed" : "dismissed"));
+  const decided = decision ? { login: decision.login, at: decision.at } : undefined;
 
   return (
     <>
@@ -136,37 +139,7 @@ export function FindingView({ row }: { row: FindingRow }) {
         <aside className="finding-aside">
           <div className="decide">
             {prompt && <CopyPrompt findingId={finding.id} prompt={prompt} />}
-            {open ? (
-              <div className="decide-row">
-                <form action={change}>
-                  <input type="hidden" name="type" value="fix" />
-                  <Submit pending="Marking…" track="finding-mark-fixed">
-                    Mark fixed
-                  </Submit>
-                </form>
-                <details className="dismiss">
-                  <summary className="key key-secondary" data-track="finding-dismiss-open">
-                    <span className="key-face">Dismiss</span>
-                  </summary>
-                  <form action={change} className="dismiss-menu">
-                    <input type="hidden" name="type" value="dismiss" />
-                    <p>Why? It won’t be raised again.</p>
-                    {Object.entries(DISMISS_REASON_LABEL).map(([reason, label]) => (
-                      <Submit key={reason} name="reason" value={reason} className="menu-item" bare track={`finding-dismiss-${reason}`}>
-                        {label}
-                      </Submit>
-                    ))}
-                  </form>
-                </details>
-              </div>
-            ) : (
-              <form action={change} className="decide-row">
-                <input type="hidden" name="type" value="reopen" />
-                <Submit pending="Reopening…" track="finding-reopen">
-                  Reopen
-                </Submit>
-              </form>
-            )}
+            <ResolveFinding status={finding.status} dismissReason={finding.dismissReason} decided={decided} change={change} />
           </div>
 
           <dl className="facts">

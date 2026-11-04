@@ -18,9 +18,12 @@ import {
   noteScanEvent,
   notificationRecipients,
   openFindings,
+  earlierPrFindings,
   pendingRecon,
+  prComment,
   recordMetrics,
   repoHistory,
+  savePrComment,
   saveThreatModel,
   scanById,
   setRepoLoc,
@@ -47,7 +50,7 @@ import {
   type ScanEvent,
   type ThreatModel,
 } from "@sandchest/engine/scan";
-import { checkResult, notReviewed, parsePatch, reviewBody, reviewComment, shown, type Installation, type PullFile, type ReviewComment } from "@sandchest/github";
+import { checkResult, GitHubError, notReviewed, parsePatch, prSummary, prSummaryUnfinished, reviewComment, shown, type Installation, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { IndexerBinary, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
@@ -58,7 +61,7 @@ import { noticeScanPaused } from "./notices";
 import { classifier, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
 
-/** Concurrent scans per org (SPEC §4), in each lane: recon, and everything else (see `claimScanSlot`). */
+/** Concurrent scans per org (SPEC §4), in each lane: recon, PR reviews, and everything else (see `claimScanSlot`). */
 export const ORG_CONCURRENCY = 2;
 /** The engine's wall-clock budget inside a workflow step: under Vercel's 800 s function limit. */
 const SCAN_BUDGET_MS = 12 * 60_000;
@@ -134,6 +137,13 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
     const { conclusion, output } = notReviewed(gate.reason, withUtm(`${appUrl()}/dashboard/settings`, "github", "check"), gate.credits);
     checkRunId ??= await installation.createCheckRun(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
     await installation.completeCheckRun(scan.repo.fullName, checkRunId, conclusion, output);
+    // A PR with an earlier summary must not keep showing it as the latest result. One without gets the Check alone.
+    // Best effort: a retry from here would post a second Check, since the first isn't recorded until below.
+    if (scan.prNumber) {
+      await postSummary(scan, installation, prSummaryUnfinished({ headSha: scan.headSha, detailsUrl: withUtm(`${appUrl()}/dashboard/settings`, "github", "comment"), reason: gate.reason }), { create: false }).catch((error: unknown) =>
+        console.error(`Summary for refused scan ${scan.id} failed: ${describeError(error)}`),
+      );
+    }
   }
   await updateScan(db(), scan.id, { status: "refused", error: message, finishedAt: new Date(), checkRunId });
 }
@@ -247,25 +257,22 @@ export async function publishScan(scanId: string): Promise<void> {
   const installationId = scan.repo.org.installationId;
   if (scan.kind === "pr_review" && scan.checkRunId && scan.prNumber && installationId) {
     const installation = githubApp().installation(installationId);
-    const stats = (scan.stats ?? {}) as { findingIds?: string[] };
+    const stats = (scan.stats ?? {}) as PrReviewStats;
     // A finding someone dismissed stays quiet when a later scan finds it again.
     const findings = (await findingsById(stats.findingIds ?? [])).filter((row) => row.status !== "dismissed").map(toEngineFinding);
-    const visible = shown(findings);
-    let inline = 0;
-    // Private repos get the details inline; public repos only ever get the redacted Check.
-    if (scan.repo.private && visible.length > 0) {
-      const diffs = new Map((await installation.pullFiles(scan.repo.fullName, scan.prNumber)).map((f) => [f.filename, parsePatch(f.filename, f.patch)]));
-      const comments: ReviewComment[] = [];
-      const unplaced: Finding[] = [];
-      for (const finding of visible) {
-        // The sink first, then any other hop that is on a line in the diff.
-        const spot = [...finding.attackPath].reverse().find((step) => diffs.get(step.file)?.commentable.has(step.line));
-        if (spot) comments.push({ path: spot.file, line: spot.line, side: "RIGHT", body: reviewComment(finding) });
-        else unplaced.push(finding);
-      }
-      inline = comments.length;
-      await installation.createReview(scan.repo.fullName, scan.prNumber, { commitId: scan.headSha, body: reviewBody(visible, unplaced, detailsUrl(scan.id, "github", "review")), comments });
+    const visible = shown(findings) as typeof findings;
+    // Every step below can be retried: the review is posted once (recorded in stats), the summary is edited
+    // in place, and completing a Check twice is harmless.
+    let inline = stats.inline ?? 0;
+    // Private repos get findings inline on the diff, unless an earlier review of this PR already reported them:
+    // those stay in the summary, so a PR isn't notified about the same bug on every push. Public repos never get details.
+    const earlier = scan.repo.private ? await earlierPrFindings(db(), { id: scan.id, repoId: scan.repo.id, prNumber: scan.prNumber, createdAt: scan.createdAt }) : new Set<string>();
+    const inlineable = scan.repo.private ? visible.filter((f) => !earlier.has(f.id)) : [];
+    if (inlineable.length > 0 && stats.inline === undefined) {
+      inline = await postInlineReview(scan, installation, inlineable);
+      await updateScan(db(), scan.id, { stats: { ...stats, inline } });
     }
+    await postSummary(scan, installation, prSummary({ findings: findings.map((f) => ({ ...f, url: findingUrl(f.id) })), isPublic: !scan.repo.private, headSha: scan.headSha, detailsUrl: detailsUrl(scan.id, "github", "comment"), credits: scan.credits, inline }), { create: true });
     const threshold = scan.repo.org.settings.checkThreshold;
     const { conclusion, output } = checkResult({ findings, threshold, isPublic: !scan.repo.private, detailsUrl: detailsUrl(scan.id, "github", "check"), credits: scan.credits, inline });
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);
@@ -329,12 +336,20 @@ export async function failScan(scanId: string, message: string): Promise<void> {
   });
   if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
   if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
-    await githubApp()
-      .installation(scan.repo.org.installationId)
-      .completeCheckRun(scan.repo.fullName, scan.checkRunId, "neutral", {
-        title: scan.status === "refused" ? "Not reviewed" : "Review could not finish",
-        summary: scan.status === "refused" ? message : "Sandchest could not finish this review. It does not block merging; push again to retry.",
-      });
+    const installation = githubApp().installation(scan.repo.org.installationId);
+    await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, "neutral", {
+      title: scan.status === "refused" ? "Not reviewed" : "Review could not finish",
+      summary:
+        scan.status === "refused"
+          ? message
+          : "Sandchest could not finish this review, and nothing was charged. It does not block merging. Comment `/sandchest review` on the pull request, or use Review on the repository's page in Sandchest, to try again.",
+    });
+    if (scan.prNumber && scan.status !== "refused") {
+      // Best effort: the Check above is what must never be left spinning.
+      await postSummary(scan, installation, prSummaryUnfinished({ headSha: scan.headSha, detailsUrl: detailsUrl(scan.id, "github", "comment"), reason: "failed" }), { create: false }).catch((error: unknown) =>
+        console.error(`Summary for failed scan ${scan.id} failed: ${describeError(error)}`),
+      );
+    }
   }
 }
 
@@ -353,6 +368,71 @@ function appUrl(): string {
 /** A scan's page, tagged with where the link was put (a Check, a review, an email) so the visit is attributed to it. */
 function detailsUrl(scanId: string, source: "email" | "github", medium: string): string {
   return withUtm(`${appUrl()}/dashboard/scans/${scanId}`, source, medium);
+}
+
+function findingUrl(findingId: string): string {
+  return withUtm(`${appUrl()}/dashboard/findings/${findingId}`, "github", "comment");
+}
+
+/** What a PR review's stats hold, as far as publishing reads them. */
+type PrReviewStats = { findingIds?: string[]; inline?: number } & Record<string, unknown>;
+
+/**
+ * One review with an inline comment per finding that sits on a line of the
+ * diff; returns how many were placed. Findings that don't fit stay in the
+ * summary. If GitHub won't take the comments (the diff moved on under them),
+ * the review is skipped rather than failing the publish: the summary has it all.
+ */
+async function postInlineReview(scan: LoadedScan, installation: Installation, findings: Array<Finding & { id: string }>): Promise<number> {
+  const diffs = new Map((await installation.pullFiles(scan.repo.fullName, scan.prNumber!)).map((f) => [f.filename, parsePatch(f.filename, f.patch)]));
+  const comments: ReviewComment[] = [];
+  for (const finding of findings) {
+    // The sink first, then any other hop that is on a line in the diff.
+    const spot = [...finding.attackPath].reverse().find((step) => diffs.get(step.file)?.commentable.has(step.line));
+    if (spot) comments.push({ path: spot.file, line: spot.line, side: "RIGHT", body: reviewComment(finding) });
+  }
+  if (comments.length === 0) return 0;
+  const body = `Sandchest flagged ${comments.length === 1 ? "this line" : `${comments.length} lines`} in this change. The summary comment lists everything it found. [Full details →](${detailsUrl(scan.id, "github", "review")})`;
+  try {
+    await installation.createReview(scan.repo.fullName, scan.prNumber!, { commitId: scan.headSha, body, comments });
+    return comments.length;
+  } catch (error) {
+    if (!(error instanceof GitHubError) || error.status !== 422) throw error;
+    await captureException(error, { source: "publish", tags: { step: "inline_review", scan_id: scan.id }, handled: true });
+    return 0;
+  }
+}
+
+/**
+ * Writes Sandchest's summary comment on the PR: edits the one it already
+ * posted, or (with `create`) posts it. A summary someone deleted is posted
+ * again. GitHub refusing it for good (permissions, a locked conversation)
+ * is reported and skipped, so the Check still completes; anything transient
+ * is thrown, and the step retries.
+ */
+async function postSummary(scan: LoadedScan, installation: Installation, body: string, options: { create: boolean }): Promise<void> {
+  const prNumber = scan.prNumber!;
+  try {
+    const existing = await prComment(db(), scan.repo.id, prNumber);
+    // Reviews of one PR can finish out of order: an older commit's never replaces a newer one's.
+    if (existing?.describes && existing.describes > scan.createdAt) return;
+    if (existing) {
+      try {
+        await installation.editComment(scan.repo.fullName, existing.commentId, body);
+        await savePrComment(db(), { repoId: scan.repo.id, prNumber, commentId: existing.commentId, scanId: scan.id });
+        return;
+      } catch (error) {
+        if (!(error instanceof GitHubError) || error.status !== 404) throw error;
+      }
+    }
+    if (!options.create) return;
+    const commentId = await installation.comment(scan.repo.fullName, prNumber, body);
+    await savePrComment(db(), { repoId: scan.repo.id, prNumber, commentId, scanId: scan.id });
+  } catch (error) {
+    const permanent = error instanceof GitHubError && error.status >= 400 && error.status < 500 && error.status !== 429;
+    if (!permanent) throw error;
+    await captureException(error, { source: "publish", tags: { step: "summary", scan_id: scan.id }, handled: true });
+  }
 }
 
 function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {

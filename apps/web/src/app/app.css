@@ -2884,3 +2884,368 @@ html:not([data-js]) .no-js-submit {
 [skullet-loading] details:not([open]) > :not(summary) {
   display: none !important;
 }
+
+/* ---- Pull requests (a repo's page) ---------------------------------------- */
+/* Each open PR, Sandchest's latest review of it, and a key to review it now. */
+
+.pull-row {
+  display: grid;
+  grid-template-columns: 0.5rem minmax(0, 1fr) 15rem minmax(7.5rem, auto);
+  grid-template-areas: "dot what result action";
+  align-items: center;
+  gap: 0.35rem 1.25rem;
+  min-height: 4rem;
+  padding: 0.7rem 0;
+  font-size: 0.875rem;
+}
+
+.scan-dot[data-status="none"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+}
+
+.pull-what {
+  grid-area: what;
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.pull-title {
+  overflow: hidden;
+  color: var(--color-bright);
+  font-weight: 500;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 120ms;
+}
+
+.pull-title:hover {
+  color: var(--color-gold-light);
+}
+
+.pull-number {
+  color: var(--color-dust);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.pull-meta {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.pull-draft {
+  color: var(--color-sand);
+}
+
+.pull-result {
+  grid-area: result;
+  white-space: nowrap;
+}
+
+.pull-result-link {
+  color: var(--color-sand);
+  text-decoration: none;
+  transition: color 120ms;
+}
+
+.pull-result-link[data-found] {
+  color: var(--color-bright);
+  font-weight: 500;
+}
+
+.pull-result-link:hover {
+  color: var(--color-gold-light);
+}
+
+.pull-action {
+  grid-area: action;
+  justify-self: end;
+}
+
+.pull-review {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+}
+
+.pull-review .key-face {
+  height: 2rem;
+  padding: 0 0.8rem;
+  font-size: 0.8125rem;
+}
+
+.pull-review-error {
+  max-width: 16rem;
+  font-size: 0.75rem;
+  color: var(--critical);
+  text-align: right;
+}
+
+.pull-review-error a {
+  color: var(--color-sand);
+}
+
+.panel-foot-link {
+  display: inline-block;
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  text-decoration: none;
+}
+
+.panel-foot-link::after {
+  content: " →";
+}
+
+.panel-foot-link:hover {
+  color: var(--color-gold-light);
+}
+
+@media (max-width: 44rem) {
+  .pull-row {
+    grid-template-columns: 0.5rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "dot what what"
+      ". result action";
+  }
+  .pull-result {
+    min-width: 0;
+    white-space: normal;
+  }
+}
+
+/* While GitHub answers: the sample rows as bars, pulsing like every skeleton. */
+.pulls-loading {
+  pointer-events: none;
+}
+
+.pulls-loading :is(.pull-title, .pull-meta, .pull-result-link, .scan-result-quiet, .scan-result-live, .key-face) {
+  color: transparent;
+  background: #2c2219;
+  box-shadow: none;
+}
+
+.pulls-loading :is(.pull-title, .pull-meta) {
+  justify-self: start;
+}
+
+.pulls-loading :is(.blink, .scan-dot) {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pulls-loading .pull-row {
+    animation: pulls-pulse 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes pulls-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---- A repo's review settings --------------------------------------------- */
+
+.repo-settings fieldset {
+  min-width: 0;
+}
+
+.repo-settings .field-legend {
+  margin-bottom: 0.75rem;
+}
+
+.repo-settings-help {
+  max-width: 60ch;
+  margin: 0.75rem 0 0;
+  line-height: 1.55;
+}
+
+.repo-settings-next {
+  color: var(--color-sand);
+}
+
+.repo-settings-status {
+  min-height: 1.25rem;
+  margin-top: -1rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.repo-settings-status [data-error] {
+  color: var(--critical);
+}
+
+
+.repo-line-name .tag {
+  white-space: nowrap;
+}
+
+/* ---- Resolving a finding --------------------------------------------------- */
+/* Mark it fixed, or dismiss it with the reason a person would give. */
+
+.resolve {
+  display: grid;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.resolve-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.resolve-fix {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+}
+
+.resolve-fix-key .key-face {
+  gap: 0.6rem;
+}
+
+/* A pixel tick, drawn like the heat meter: two squares and a run. */
+.resolve-tick {
+  width: 0.75rem;
+  height: 0.5rem;
+  flex: none;
+  background:
+    linear-gradient(var(--fixed), var(--fixed)) 0 50% / 2px 2px no-repeat,
+    linear-gradient(var(--fixed), var(--fixed)) 2px 100% / 2px 2px no-repeat,
+    linear-gradient(var(--fixed), var(--fixed)) 4px 75% / 2px 2px no-repeat,
+    linear-gradient(var(--fixed), var(--fixed)) 6px 50% / 2px 2px no-repeat,
+    linear-gradient(var(--fixed), var(--fixed)) 8px 25% / 2px 2px no-repeat,
+    linear-gradient(var(--fixed), var(--fixed)) 10px 0 / 2px 2px no-repeat;
+}
+
+.resolve-hint {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-dust);
+}
+
+.resolve-dismiss {
+  display: grid;
+  gap: 0.6rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-seam);
+}
+
+.resolve-ask {
+  font-size: 0.875rem;
+  color: var(--color-sand);
+}
+
+.resolve-reasons {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.resolve-reason {
+  position: relative;
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.65rem 0.85rem 0.7rem;
+  border: 0;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--color-seam);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    box-shadow 120ms,
+    background-color 120ms;
+}
+
+/* The gold edge the segments use, drawn on the left as the reason is pointed at. */
+.resolve-reason::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--color-gold);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.resolve-reason:not(:disabled):hover,
+.resolve-reason:focus-visible {
+  background: var(--color-soot);
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+}
+
+.resolve-reason:not(:disabled):hover::before,
+.resolve-reason:focus-visible::before {
+  opacity: 1;
+}
+
+.resolve-reason:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.resolve-reason:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.resolve-reason[aria-busy] {
+  opacity: 1;
+}
+
+.resolve-reason-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-bright);
+}
+
+.resolve-reason-hint {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.resolve-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+}
+
+.resolve-state .status {
+  font-weight: 500;
+  color: var(--color-bright);
+}
+
+.resolve[data-resolved="fixed"] .resolve-state .status {
+  color: var(--fixed);
+}
+
+.resolve-who {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+/* On narrow screens the decision comes straight after the finding's summary, not after the whole write-up. */
+@media (max-width: 59.99rem) {
+  .finding-aside {
+    display: contents;
+  }
+  .finding-aside .decide {
+    order: -1;
+  }
+  .finding-aside .facts {
+    order: 1;
+  }
+}
+
+.decide .resolve {
+  margin-top: 1rem;
+}

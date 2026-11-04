@@ -10,11 +10,11 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import postgres from "postgres";
-import { createDb, openFindings, scanById, schema, threatModel, type Db } from "@sandchest/db";
+import { createDb, openFindings, repoByGithubId, scanById, schema, threatModel, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Email } from "@sandchest/email";
 import { LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient, type ToolCall } from "@sandchest/engine/llm";
-import type { GitHubApp } from "@sandchest/github";
+import { GitHubError, type GitHubApp } from "@sandchest/github";
 import { setAutumn } from "@/server/billing";
 import { setMailer } from "@/server/mailer";
 import { beginScan, executeScan, failScan, publishScan } from "@/server/scans";
@@ -74,8 +74,10 @@ interface Recorded {
   checks: Array<{ repo: string; headSha: string; title: string }>;
   completed: Array<{ repo: string; conclusion: string; title: string; summary: string }>;
   reviews: Array<{ repo: string; number: number; body: string; comments: Array<{ path: string; line: number; body: string }> }>;
+  /** Sandchest's summary comment on each PR, by `repo#number`, as last written; `id` is the comment's. */
+  comments: Map<string, { id: number; body: string; edits: number }>;
 }
-const recorded: Recorded = { checks: [], completed: [], reviews: [] };
+const recorded: Recorded = { checks: [], completed: [], reviews: [], comments: new Map() };
 const repos = [
   { id: 1, full_name: "acme/private-app", private: true, default_branch: "main" },
   { id: 2, full_name: "acme/public-app", private: false, default_branch: "main" },
@@ -97,6 +99,16 @@ const fakeGithub = {
     },
     createReview: async (repo: string, number: number, input: { body: string; comments: Array<{ path: string; line: number; body: string }> }) => {
       recorded.reviews.push({ repo, number, ...input });
+    },
+    comment: async (repo: string, number: number, body: string) => {
+      const id = 1000 + recorded.comments.size;
+      recorded.comments.set(`${repo}#${number}`, { id, body, edits: 0 });
+      return id;
+    },
+    editComment: async (repo: string, commentId: number, body: string) => {
+      const entry = [...recorded.comments.entries()].find(([key, c]) => c.id === commentId && key.startsWith(`${repo}#`));
+      if (!entry) throw new GitHubError("Not Found", 404, false);
+      recorded.comments.set(entry[0], { id: commentId, body, edits: entry[1].edits + 1 });
     },
     permission: async () => "write",
     pull: async () => ({ number: 5, head: { sha: "x" }, base: { sha: "y" } }),
@@ -278,7 +290,62 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(autumn.get(scan!.orgId).credits).toBe(349);
     expect(autumn.get(scan!.orgId).locks.size).toBe(0);
     expect(await openFindings(database, scan!.repoId)).toHaveLength(1);
+    // One summary comment, with the finding in full: the repo is private.
+    const summary = recorded.comments.get("acme/private-app#5")!;
+    expect(summary.body).toContain("found 1 issue in");
+    expect(summary.body).toMatch(/\| High \| \[SQL injection in login[^\]]*\]\(https:\/\/sandchest\.test\/dashboard\/findings\/[^)]+\) \| `app\.js:4` \|/);
+    expect(summary.body).toContain("1 is also commented on the diff.");
   }, 60_000);
+
+  test("a later push edits the same summary, and an already-flagged finding isn't commented inline again", async () => {
+    const reviews = recorded.reviews.length;
+    const event = { ...prEvent(repos[0]!, head), action: "synchronize" };
+    // Same code, new head: GitHub would send a new SHA; the review is keyed by it.
+    const next = pushCommit("private-app", work, `${VULNERABLE}\n// touched\n`);
+    event.pull_request.head.sha = next;
+    const outcome = await handleWebhook(deps(), "pull_request", "d-pr-sync", event);
+    await runWorkflow(outcome.scans![0]!);
+    expect(recorded.reviews.length).toBe(reviews);
+    const summary = recorded.comments.get("acme/private-app#5")!;
+    expect(summary.edits).toBe(1);
+    expect(summary.body).toContain(`\`${next.slice(0, 7)}\``);
+  }, 60_000);
+
+  test("an older commit's review finishing late never replaces the newer summary", async () => {
+    const before = recorded.comments.get("acme/private-app#5")!;
+    const repo = await repoByGithubId(database, repos[0]!.id);
+    const latest = await database.query.scans.findFirst({ where: (scans, { and, eq }) => and(eq(scans.repoId, repo!.id), eq(scans.prNumber, 5)), orderBy: (scans, { desc }) => desc(scans.createdAt) });
+    const [late] = await database
+      .insert(schema.scans)
+      .values({ repoId: repo!.id, orgId: repo!.orgId, kind: "pr_review", trigger: "webhook", status: "running", prNumber: 5, headSha: "0ld0ld0", checkRunId: 99, stats: latest!.stats, createdAt: new Date(latest!.createdAt.getTime() - 60_000) })
+      .returning();
+    await publishScan(late!.id);
+    expect(recorded.comments.get("acme/private-app#5")).toEqual(before);
+  });
+
+  test("a finding the repo already knows is still commented inline on a PR that hasn't reported it", async () => {
+    const reviews = recorded.reviews.length;
+    const event = prEvent(repos[0]!, git(join(gitRoot, "acme", "private-app.git"), "rev-parse", "HEAD"));
+    event.number = event.pull_request.number = 6;
+    const outcome = await handleWebhook(deps(), "pull_request", "d-pr-6", event);
+    await runWorkflow(outcome.scans![0]!);
+    expect(recorded.reviews.length).toBe(reviews + 1);
+    expect(recorded.reviews.at(-1)).toMatchObject({ number: 6 });
+  }, 60_000);
+
+  test("PR reviews set to 'when asked' or 'off' skip pushes; 'off' ignores the command too", async () => {
+    const repo = await repoByGithubId(database, repos[0]!.id);
+    const event = prEvent(repos[0]!, "c0ffee");
+    event.pull_request.number = 21;
+    const setMode = (mode: string) => database.$client`update repos set pr_reviews = ${mode} where id = ${repo!.id}`;
+    await setMode("command");
+    expect(await handleWebhook(deps(), "pull_request", "d-mode-1", event)).toMatchObject({ status: "ignored", detail: "pr reviews: command" });
+    const comment = { action: "created", installation: { id: 77 }, repository: repos[0], issue: { number: 21, pull_request: { url: "x" } }, comment: { body: "/sandchest review", user: { login: "dev", type: "User" } } };
+    expect((await handleWebhook(deps(), "issue_comment", "d-mode-2", comment)).status).toBe("handled");
+    await setMode("off");
+    expect(await handleWebhook(deps(), "issue_comment", "d-mode-3", comment)).toMatchObject({ status: "ignored", detail: "pr reviews: off" });
+    await setMode("auto");
+  });
 
   test("a review whose workflow failed to start is started on redelivery", async () => {
     const event = prEvent(repos[0]!, "feedface");
@@ -315,6 +382,11 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(check.conclusion).toBe("failure");
     expect(check.summary).toContain("Sandchest found 1 high-severity issue.");
     expect(JSON.stringify(check)).not.toContain("app.js");
+    // The summary comment says there's something, and where to look; never what.
+    const summary = recorded.comments.get("acme/public-app#5")!.body;
+    expect(summary).toContain("found 1 issue in");
+    expect(summary).toContain("view them in the Sandchest dashboard");
+    for (const detail of ["app.js", "SQL injection", "OR '1'='1"]) expect(summary).not.toContain(detail);
   }, 60_000);
 
   test("the model provider's quota stops a review: its admins hear once, and nothing is charged", async () => {

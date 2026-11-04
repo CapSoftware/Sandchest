@@ -5,6 +5,7 @@ import { ListFilter } from "@/components/app/list-filter";
 import { Tally } from "@/components/app/tally";
 import { When } from "@/components/app/when";
 import { plural, SCAN_KIND_LABEL, SEVERITIES } from "@/lib/format";
+import { site } from "@/lib/site";
 
 /** Lists longer than this get a filter. */
 const FILTER_FROM = 8;
@@ -32,7 +33,13 @@ export function ReposView({ repos }: { repos: DashboardRepo[] }) {
       {repos.length === 0 ? (
         <div className="empty">
           <h2 className="empty-title">No repositories yet</h2>
-          <p>Choose the repositories Sandchest may read on GitHub. Each shows here once you can push to it.</p>
+          <p>
+            Choose the repositories Sandchest may read on GitHub. Each shows here once you can push to it. Read-only access to the code you choose:{" "}
+            <a className="quiet" href={`${site.links.security}#what-sandchest-can-access`}>
+              what Sandchest can see
+            </a>
+            .
+          </p>
           <Link href="/dashboard/recruit" className="key key-primary">
             <span className="key-face">Get started</span>
           </Link>
@@ -69,6 +76,8 @@ function RepoRow({ repo, org }: { repo: DashboardRepo; org: boolean }) {
         {org && <span className="repo-owner">{owner}/</span>}
         <span className="repo-line-repo">{name}</span>
         {!repo.private && <span className="tag">public</span>}
+        {repo.prReviews !== "auto" && <span className="tag">{repo.prReviews === "off" ? "PR reviews off" : "reviews when asked"}</span>}
+        {repo.deepScanSchedule !== "off" && <span className="tag">{repo.deepScanSchedule} deep scan</span>}
       </span>
       <span role="cell">
         <Tally open={repo.open} />

@@ -3,7 +3,19 @@
  * Everything a person can change from the dashboard. Each action checks
  * access itself: the database writes are scoped to what the viewer may see.
  */
-import { applyFindingAction, FINDING_LIST_LIMIT, findingsForExport, recordPromptCopied, recordPromptsCopied, updateOrgSettings, type FindingAction } from "@sandchest/db";
+import {
+  applyFindingAction,
+  DEEP_SCAN_SCHEDULES,
+  FINDING_LIST_LIMIT,
+  findingsForExport,
+  PR_REVIEW_MODES,
+  recordPromptCopied,
+  recordPromptsCopied,
+  repoForUser,
+  updateOrgSettings,
+  updateRepoSettings,
+  type FindingAction,
+} from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -12,6 +24,7 @@ import { currentUser, viewer } from "./access";
 import { routeOf } from "@/lib/analytics";
 import { agentPrompt, exportFindings } from "@/lib/findings-export";
 import { SEVERITIES } from "@/lib/format";
+import { firstRun } from "@/lib/schedule";
 import { site } from "@/lib/site";
 import { track } from "./analytics";
 import { auth } from "./auth";
@@ -142,4 +155,35 @@ export async function saveOrgSettings(orgId: string, _previous: SettingsOutcome,
   if (!ok) return { error: "Only an admin of this account can change its settings." };
   revalidatePath("/dashboard/settings");
   return { saved: true };
+}
+
+const RepoSettingsForm = z.object({
+  prReviews: z.enum(PR_REVIEW_MODES),
+  deepScanSchedule: z.enum(DEEP_SCAN_SCHEDULES),
+});
+
+export type RepoSettingsOutcome = { saved?: boolean; error?: string; nextDeepScanAt?: string | null };
+
+/**
+ * Saves a repo's review settings: anyone who can push to it, the same people
+ * who can start its deep scans. A schedule that changes sets its first run
+ * from the last deep scan; one that stays the same keeps its next run.
+ */
+export async function saveRepoSettings(repoId: string, _previous: RepoSettingsOutcome, form: FormData): Promise<RepoSettingsOutcome> {
+  const user = await viewer();
+  const parsed = RepoSettingsForm.safeParse(Object.fromEntries(form));
+  const row = parsed.success && Id.safeParse(repoId).success ? await repoForUser(db(), user.id, repoId) : undefined;
+  if (!parsed.success || !row) {
+    await track("repo_settings_saved", { userId: user.id, props: { repo_id: row?.repo.id ?? null, outcome: parsed.success ? "no_access" : "invalid" } });
+    return { error: parsed.success ? "You don’t have access to this repository." : "Those settings aren’t valid." };
+  }
+  const { prReviews, deepScanSchedule } = parsed.data;
+  const scheduleChanged = deepScanSchedule !== row.repo.deepScanSchedule;
+  const nextDeepScanAt = scheduleChanged ? firstRun(deepScanSchedule, row.repo.lastDeepScanAt) : row.repo.nextDeepScanAt;
+  const ok = await updateRepoSettings(db(), user.id, repoId, { prReviews, ...(scheduleChanged && { deepScanSchedule, nextDeepScanAt }) });
+  await track("repo_settings_saved", { userId: user.id, orgId: row.org.id, props: { repo_id: row.repo.id, pr_reviews: prReviews, deep_scan_schedule: deepScanSchedule, outcome: ok ? "ok" : "no_access" } });
+  if (!ok) return { error: "You don’t have access to this repository." };
+  revalidatePath(`/dashboard/repos/${repoId}`);
+  revalidatePath("/dashboard/repos");
+  return { saved: true, nextDeepScanAt: nextDeepScanAt?.toISOString() ?? null };
 }

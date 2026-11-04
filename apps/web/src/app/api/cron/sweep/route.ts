@@ -3,13 +3,15 @@
  * fails scans whose start was lost halfway and scans whose workflow has
  * stopped, so no PR Check spins forever and no Dig stays blocked, and settles
  * credits a finished scan still holds (charging a completed scan whose charge
- * failed, releasing the rest). Also clears out expired agent codes and tokens.
+ * failed, releasing the rest). Also starts scheduled deep scans that are due,
+ * and clears out expired agent codes and tokens.
  */
 import { timingSafeEqual } from "node:crypto";
 import { deleteExpiredAgentGrants, strandedScans, unsettledScans, type Scan } from "@sandchest/db";
 import { settleScan } from "@/server/billing";
 import { failScan } from "@/server/scans";
 import { db } from "@/server/services";
+import { runSchedules } from "@/server/schedule";
 import { startScan, workflowRunning } from "@/server/start";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +33,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const [{ unstarted, unfinishedStarts, stuck }, unsettled] = await Promise.all([strandedScans(db()), unsettledScans(db())]);
   const now = Date.now();
+  const schedules = runSchedules(new Date(now));
   const failing = [...unfinishedStarts.map((scan) => failScan(scan.id, "The scan could not start.").then(() => true)), ...stuck.map((scan) => failIfStopped(scan, now))];
   const results = await Promise.allSettled([
     ...unstarted.map((scan) => startScan(scan.id)),
@@ -38,10 +41,12 @@ export async function GET(request: Request): Promise<Response> {
     ...unsettled.map((scan) => settleScan(scan, scan.status === "completed" ? "charge" : "release", scan.credits)),
     // Device codes, OAuth codes and tokens no one can use any more.
     deleteExpiredAgentGrants(db()),
+    schedules,
   ]);
   const errors = results.filter((r) => r.status === "rejected").length;
   const failed = (await Promise.allSettled(failing)).filter((r) => r.status === "fulfilled" && r.value).length;
-  return Response.json({ started: unstarted.length, failed, settled: unsettled.length, errors });
+  const scheduled = await schedules.then((result) => result.started).catch(() => 0);
+  return Response.json({ started: unstarted.length, failed, settled: unsettled.length, scheduled, errors });
 }
 
 /**

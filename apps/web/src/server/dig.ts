@@ -17,15 +17,19 @@ export type DigResult =
  * held before the scan exists, so a refusal leaves nothing behind and the
  * person hears about it at once.
  */
-/** `operator`: started with the admin token, not by the org. It never uses the org's free first Dig. */
-export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" = "manual", options: { operator?: boolean } = {}): Promise<DigResult> {
+/**
+ * `operator`: started with the admin token, not by the org. It never uses the org's free first Dig, and
+ * neither does a scheduled scan: the free one is for a person's first press. `headSha`: the default branch's
+ * commit when the caller has just read it.
+ */
+export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" | "schedule" = "manual", options: { operator?: boolean; headSha?: string } = {}): Promise<DigResult> {
   if (!repo.enabled || !repo.org.installationId) return { ok: false, reason: "not_installed" };
   const active = await activeDeepScan(db(), repo.id);
   const state = digState({ loc: repo.loc, activeDeepScanId: active?.id ?? null });
   if (state.state === "running") return { ok: false, reason: "running", scanId: state.scanId };
   if (state.state === "too_large") return { ok: false, reason: "too_large" };
 
-  const headSha = await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);
+  const headSha = options.headSha ?? (await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch));
 
   // Claim the repo's one deep-scan slot before holding any credits, so a second
   // Dig that loses the race never reaches Autumn: no hold, no auto top-up, no
@@ -39,7 +43,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     // An org's first Dig is free (it still needs a plan). Otherwise a repo recon has not sized yet holds the
     // most a deep scan can cost, and is charged what the scan measures (never more than it held).
     // Inside the try: a failure here cleans up like any other, and never leaves a scan to be charged later.
-    const free = !options.operator && (await claimFreeDig(db(), repo.orgId, scan.id));
+    const free = trigger === "manual" && !options.operator && (await claimFreeDig(db(), repo.orgId, scan.id));
     credits = free ? 0 : (state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
     gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits);
   } catch (error) {

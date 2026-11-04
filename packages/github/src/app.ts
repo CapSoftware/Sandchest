@@ -104,6 +104,19 @@ export interface PullFile {
   previous_filename?: string;
 }
 
+/** An open pull request, as the dashboard lists it. */
+export interface PullSummary {
+  number: number;
+  title: string;
+  draft: boolean;
+  html_url: string;
+  updated_at: string;
+  user: { login: string; avatar_url?: string } | null;
+  head: { sha: string; ref: string; repo: { id: number } | null };
+  base: { ref: string };
+  author_association: string;
+}
+
 export interface CheckOutput {
   title: string;
   summary: string;
@@ -144,7 +157,7 @@ export class Installation {
     return githubRequest(this.auth, `/${type === "Organization" ? "orgs" : "users"}/${encodeURIComponent(login)}`, {}, this.http);
   }
 
-  pull(repo: string, number: number): Promise<{ number: number; head: { sha: string; repo: { full_name: string } | null }; base: { sha: string; ref: string }; user: { login: string }; draft: boolean }> {
+  pull(repo: string, number: number): Promise<{ number: number; state: "open" | "closed"; head: { sha: string; repo: { full_name: string } | null }; base: { sha: string; ref: string }; user: { login: string }; draft: boolean }> {
     return githubRequest(this.auth, `/repos/${repo}/pulls/${number}`, {}, this.http);
   }
 
@@ -197,8 +210,20 @@ export class Installation {
     return result.commit.sha;
   }
 
-  async comment(repo: string, issueNumber: number, body: string): Promise<void> {
-    await githubRequest(this.auth, `/repos/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: { body } }, this.http);
+  /** Posts a comment on an issue or pull request; returns its id. */
+  async comment(repo: string, issueNumber: number, body: string): Promise<number> {
+    const result = await githubRequest<{ id: number }>(this.auth, `/repos/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: { body } }, this.http);
+    return result.id;
+  }
+
+  /** Replaces a comment's text. A comment someone deleted throws a 404 `GitHubError`. */
+  async editComment(repo: string, commentId: number, body: string): Promise<void> {
+    await githubRequest(this.auth, `/repos/${repo}/issues/comments/${commentId}`, { method: "PATCH", body: { body } }, this.http);
+  }
+
+  /** The most recently updated open pull requests: one page, since each one carries both repositories in full. */
+  pulls(repo: string, limit = 30, signal?: AbortSignal): Promise<PullSummary[]> {
+    return githubRequest(this.auth, `/repos/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=${Math.min(100, limit)}`, { signal }, this.http);
   }
 
   /**

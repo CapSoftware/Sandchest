@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, gt, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, like, lt, ne, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
 
@@ -151,12 +151,20 @@ export interface NewScan {
 export async function createScan(database: Db, input: NewScan): Promise<{ scan: Scan; created: boolean }> {
   const [created] = await database.insert(scans).values(input).onConflictDoNothing().returning();
   if (created) return { scan: created, created: true };
-  // A deep scan conflicts with the repo's active one; a PR review with the review of the same head.
+  // A deep scan conflicts with the repo's active one; a PR review with the live or finished review of the same
+  // head (one that failed or was refused is out of the unique index, so it never conflicts).
   const existing =
     input.kind === "deep"
       ? await activeDeepScan(database, input.repoId)
       : await database.query.scans.findFirst({
-          where: and(eq(scans.repoId, input.repoId), eq(scans.kind, input.kind), eq(scans.headSha, input.headSha), input.prNumber === undefined ? undefined : eq(scans.prNumber, input.prNumber)),
+          where: and(
+            eq(scans.repoId, input.repoId),
+            eq(scans.kind, input.kind),
+            eq(scans.headSha, input.headSha),
+            input.prNumber === undefined ? undefined : eq(scans.prNumber, input.prNumber),
+            input.kind === "pr_review" ? inArray(scans.status, ["queued", "running", "publishing", "completed"]) : undefined,
+          ),
+          orderBy: desc(scans.createdAt),
         });
   if (!existing) throw new Error("Scan insert conflicted but no existing scan was found");
   return { scan: existing, created: false };
@@ -200,7 +208,8 @@ export async function scanById(database: Db, id: string): Promise<(Scan & { repo
  * Moves a queued scan to running if its org has a free slot in the scan's
  * lane. Recon, which runs by itself for every repository when a plan starts,
  * has a lane of its own, so a Dig, a PR review or a fix check never waits
- * behind it. Serialised per org with an advisory lock, so two scans cannot
+ * behind it. PR reviews have their own lane too: someone is waiting on the
+ * PR, so a review never queues behind deep scans (scheduled ones included). Serialised per org with an advisory lock, so two scans cannot
  * both take the last slot. A repo's fix checks, which are free, run one at a
  * time and start at most once a minute, so one repo's pushes never hold both slots.
  * Returns true if the scan is running (now, or already).
@@ -226,7 +235,7 @@ export async function claimScanSlot(database: Db, scanId: string, orgId: string,
         .limit(1);
       if (previous) return false;
     }
-    const lane = scan.kind === "recon" ? eq(scans.kind, "recon") : ne(scans.kind, "recon");
+    const lane = scan.kind === "recon" || scan.kind === "pr_review" ? eq(scans.kind, scan.kind) : notInArray(scans.kind, ["recon", "pr_review"]);
     const [{ running }] = (await tx
       .select({ running: sql<number>`count(*)::int` })
       .from(scans)

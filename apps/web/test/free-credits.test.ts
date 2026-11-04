@@ -44,6 +44,8 @@ const fakeGithub = {
       Object.assign(checks[id - 1]!, { conclusion, title: output.title, summary: output.summary });
     },
     createReview: async () => {},
+    comment: async () => 1,
+    editComment: async () => {},
     branchSha: async () => "deadbeef",
   }),
 } as unknown as GitHubApp;

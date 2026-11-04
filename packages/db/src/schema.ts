@@ -73,6 +73,11 @@ export const orgs = pgTable("orgs", {
   updatedAt: updatedAt(),
 });
 
+export const PR_REVIEW_MODES = ["auto", "command", "off"] as const;
+export type PrReviewMode = (typeof PR_REVIEW_MODES)[number];
+export const DEEP_SCAN_SCHEDULES = ["off", "daily", "weekly", "monthly"] as const;
+export type DeepScanSchedule = (typeof DEEP_SCAN_SCHEDULES)[number];
+
 export const repos = pgTable(
   "repos",
   {
@@ -88,11 +93,25 @@ export const repos = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     loc: integer("loc"),
     lastDeepScanAt: timestamp("last_deep_scan_at", { withTimezone: true }),
+    /**
+     * When pull requests are reviewed: `auto` on every push to a PR, `command` only when someone with write
+     * access comments `/sandchest review` or starts one from the dashboard, `off` never.
+     */
+    prReviews: text("pr_reviews", { enum: PR_REVIEW_MODES }).notNull().default("auto"),
+    /** How often a deep scan runs on its own. Each one is paid like a manual one, and skipped when nothing changed. */
+    deepScanSchedule: text("deep_scan_schedule", { enum: DEEP_SCAN_SCHEDULES }).notNull().default("off"),
+    /** When the next scheduled deep scan is due. Null when the schedule is off. */
+    nextDeepScanAt: timestamp("next_deep_scan_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [index("repos_org_idx").on(table.orgId)],
+  (table) => [
+    index("repos_org_idx").on(table.orgId),
+    // The scheduler's one question: which repos are due. Only scheduled repos are in it.
+    index("repos_next_deep_scan_idx").on(table.nextDeepScanAt).where(sql`${table.nextDeepScanAt} is not null`),
+  ],
 );
+
 
 /** The repo's threat model: summary text only, never source. */
 export const repoMemory = pgTable("repo_memory", {
@@ -149,8 +168,11 @@ export const scans = pgTable(
     index("scans_org_status_idx").on(table.orgId, table.status),
     // Analysis reads scans by when they started.
     index("scans_created_idx").on(table.createdAt),
-    // A PR head is reviewed once, however many times the webhook arrives.
-    uniqueIndex("scans_pr_head_unique").on(table.repoId, table.prNumber, table.headSha).where(sql`${table.kind} = 'pr_review'`),
+    // A PR head is reviewed once, however many times the webhook arrives. One that failed or was refused
+    // (out of credits) leaves the index, so `/sandchest review` or the dashboard can try that head again.
+    uniqueIndex("scans_pr_head_unique")
+      .on(table.repoId, table.prNumber, table.headSha)
+      .where(sql`${table.kind} = 'pr_review' and ${table.status} in ('queued', 'running', 'publishing', 'completed')`),
     // One deep scan at a time per repo, however many Dig clicks race (SPEC §4).
     uniqueIndex("scans_active_deep_unique").on(table.repoId).where(sql`${table.kind} = 'deep' and ${table.status} in ('queued', 'running', 'publishing')`),
     // Few rows: scans holding credits, for the sweep that settles them.
@@ -275,6 +297,25 @@ export const webhookDeliveries = pgTable(
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.id] })],
+);
+
+/**
+ * Sandchest's one summary comment on each pull request, edited in place by
+ * every later review so a PR never collects a comment per push.
+ */
+export const prComments = pgTable(
+  "pr_comments",
+  {
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    commentId: bigint("comment_id", { mode: "number" }).notNull(),
+    /** The review the comment last described. */
+    scanId: uuid("scan_id"),
+    updatedAt: updatedAt(),
+  },
+  (table) => [primaryKey({ columns: [table.repoId, table.prNumber] })],
 );
 
 // ---- People ----------------------------------------------------------------
@@ -628,6 +669,12 @@ export const EVENT_NAMES = [
   "hacker_saved",
   /** An account's settings were saved. props: check_threshold, email_notifications, outcome ("ok" | "not_admin"). */
   "org_settings_saved",
+  /** A repository's review settings were saved. org_id set. props: repo_id, pr_reviews ("auto" | "command" | "off"), deep_scan_schedule ("off" | "daily" | "weekly" | "monthly"), outcome ("ok" | "no_access" | "invalid"). */
+  "repo_settings_saved",
+  /** "Review" was pressed on a pull request in the dashboard. org_id set. props: repo_id, credits, scan_id, step ("quote" | "start"), outcome ("ok" | "no_access" | "reviews_off" | "not_open" | "reviewed" | "no_plan" | "out_of_credits" | "error"). */
+  "pr_review_requested",
+  /** A scheduled deep scan came due. org_id set. props: repo_id, schedule, scan_id, outcome ("ok" | "unchanged": nothing changed since the last deep scan | "running" | "no_plan" | "out_of_credits" | "too_large" | "not_installed" | "error"). */
+  "scheduled_deep_scan",
   /** The findings list was copied out or opened in a coding agent. props: format ("prompt" | "claude" | "codex" copied for an agent; "open_t3" | "open_claude" | "open_codex" | "open_cursor" opened in one; "markdown" | "json"), status, findings (how many), repos (how many; documents only), filtered (a severity or repository filter was on), low_confidence. */
   "findings_copied",
 

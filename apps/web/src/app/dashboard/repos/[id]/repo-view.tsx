@@ -1,20 +1,43 @@
 import type { DashboardRepo, FindingListItem, ScanListItem } from "@sandchest/db";
+import type { ReactNode } from "react";
+import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { Dig } from "@/components/app/dig";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
+import { MODE_NOTE } from "@/components/app/pull-rows";
+import { RepoSettingsForm } from "@/components/app/repo-settings";
 import { ScanRows } from "@/components/app/scan-rows";
 import { When } from "@/components/app/when";
-import { compactNumber, SEVERITIES } from "@/lib/format";
+import { digState } from "@/lib/dig-state";
+import { compactNumber, plural, SEVERITIES } from "@/lib/format";
 import type { OrgPlan } from "@/server/org-plans";
 import "../../../rig.css";
 
 /** Runs shown here; the rest are on the Scans page. */
 export const HISTORY = 25;
 
-/** A repository, drawn from what the page read; its loading state draws it from a sample repo. */
-export function RepoView({ repo, plan, findings, history }: { repo: DashboardRepo; plan: OrgPlan; findings: FindingListItem[]; history: ScanListItem[] }) {
+/**
+ * A repository, drawn from what the page read; its loading state draws it from a sample repo. `pulls` is its
+ * open pull requests panel, which the page streams in (it asks GitHub) and the loading state draws from samples.
+ */
+export function RepoView({
+  repo,
+  plan,
+  findings,
+  history,
+  pulls,
+}: {
+  repo: DashboardRepo;
+  plan: OrgPlan;
+  findings: FindingListItem[];
+  history: ScanListItem[];
+  pulls: ReactNode;
+}) {
   const [owner, name] = repo.fullName.split("/");
   const open = SEVERITIES.reduce((sum, s) => sum + repo.open[s], 0);
+  const dig = digState(repo);
+  // What one scheduled deep scan costs: what Scan again would, or at most the top tier until recon sizes the repo.
+  const price = !plan ? null : dig.state === "ready" ? (dig.credits === undefined ? `up to ${plural(DEEP_SCAN_TIERS.at(-1)!.credits, "credit")}` : plural(dig.credits, "credit")) : null;
 
   return (
     <>
@@ -95,6 +118,25 @@ export function RepoView({ repo, plan, findings, history }: { repo: DashboardRep
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="block" aria-labelledby="pulls-title">
+        <div className="panel-head">
+          <h2 id="pulls-title" className="block-title">
+            Pull requests
+          </h2>
+          <a href="#review-settings" className="panel-link">
+            {MODE_NOTE[repo.prReviews]}
+          </a>
+        </div>
+        {pulls}
+      </section>
+
+      <section id="review-settings" className="block" aria-labelledby="settings-title">
+        <h2 id="settings-title" className="block-title">
+          Reviews and schedule
+        </h2>
+        <RepoSettingsForm repoId={repo.id} branch={repo.defaultBranch} prReviews={repo.prReviews} schedule={repo.deepScanSchedule} nextDeepScanAt={repo.nextDeepScanAt} price={price} />
       </section>
 
       <section className="block" aria-labelledby="history-title">

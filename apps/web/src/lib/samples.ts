@@ -1,5 +1,6 @@
 import type { DashboardRepo, FindingListItem, findingForUser, OrgBillingRow, Overview, scanForUser, ScanListItem, SettingsOrg } from "@sandchest/db";
 import type { Severity } from "./format";
+import type { PullRow } from "@/server/pulls";
 
 /**
  * Made-up data for loading states. Each `loading.tsx` renders its page's own
@@ -10,6 +11,7 @@ import type { Severity } from "./format";
  */
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+const ahead = (minutes: number) => new Date(Date.now() + minutes * 60_000);
 const none = (): Record<Severity, number> => ({ critical: 0, high: 0, medium: 0, low: 0 });
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
@@ -41,6 +43,10 @@ export function sampleRepos(): DashboardRepo[] {
     activeDeepScanId: null,
     activeDeepScanWaitsForRecon: false,
     freeDig: false,
+    defaultBranch: "main",
+    prReviews: "auto",
+    deepScanSchedule: i === 0 ? "weekly" : "off",
+    nextDeepScanAt: i === 0 ? ahead(60 * 24 * 3) : null,
   }));
 }
 
@@ -257,4 +263,39 @@ export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow 
     repos: sampleRepos().map((repo) => ({ id: repo.id, fullName: repo.fullName, private: repo.private })),
   };
   return { orgs: [org], billing };
+}
+
+const PULLS: Array<[title: string, author: string, review: "completed" | "running" | "none" | "older", findings: number]> = [
+  ["Let team admins export member lists", "maya", "completed", 1],
+  ["Move session refresh to the edge", "sam", "running", 0],
+  ["Bump the PDF renderer", "dependabot", "none", 0],
+  ["Rate limit password resets", "jo", "older", 0],
+  ["Add audit log retention setting", "maya", "completed", 0],
+];
+
+/** Open pull requests on a sample repo, each in a different review state. */
+export function samplePulls(count = PULLS.length): PullRow[] {
+  return PULLS.slice(0, count).map(([title, author, review, findings], i) => ({
+    number: 212 - i * 3,
+    title,
+    author,
+    url: "https://github.com/acme/api/pulls",
+    draft: false,
+    updatedAt: ago(30 + i * 95),
+    headSha: `head${i}`,
+    fork: false,
+    review:
+      review === "none"
+        ? null
+        : {
+            scanId: id(400 + i),
+            status: review === "older" ? "completed" : review,
+            headSha: review === "older" ? `old${i}` : `head${i}`,
+            credits: 1,
+            trigger: "webhook",
+            findings,
+            at: ago(30 + i * 95),
+            current: review !== "older",
+          },
+  }));
 }

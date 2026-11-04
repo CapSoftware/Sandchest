@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
+import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type DeepScanSchedule, type OrgSettings, type PrReviewMode } from "./schema";
 
 type Severity = "critical" | "high" | "medium" | "low";
 export type RepoPermission = (typeof permissionCache.$inferSelect)["permission"];
@@ -110,6 +110,11 @@ export interface DashboardRepo {
   activeDeepScanWaitsForRecon: boolean;
   /** Whether the org's next Dig is its free first one. */
   freeDig: boolean;
+  defaultBranch: string;
+  /** When pull requests are reviewed: on every push, on request only, or never. */
+  prReviews: PrReviewMode;
+  deepScanSchedule: DeepScanSchedule;
+  nextDeepScanAt: Date | null;
 }
 
 /** Whether an org's free first Dig is still to come: SQL over `orgs` as `o`. Mirrors `claimFreeDig`. */
@@ -146,8 +151,13 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     deep_waits: boolean;
     free_dig: boolean;
     reviews_30d: number;
+    default_branch: string;
+    pr_reviews: PrReviewMode;
+    deep_scan_schedule: DeepScanSchedule;
+    next_deep_scan_at: string | null;
   }>(sql`
     select r.id, r.full_name, r.private, o.id as org_id, o.github_login as org_login,
+      r.default_branch, r.pr_reviews, r.deep_scan_schedule, r.next_deep_scan_at,
       exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id) as org_admin,
       ob.checked_at as billing_checked_at, ob.plan_id, ob.credits, r.loc, r.last_deep_scan_at,
       coalesce(f.critical, 0)::int as critical, coalesce(f.high, 0)::int as high,
@@ -196,6 +206,10 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     activeDeepScanId: row.active_deep_id,
     activeDeepScanWaitsForRecon: row.deep_waits,
     freeDig: row.free_dig,
+    defaultBranch: row.default_branch,
+    prReviews: row.pr_reviews,
+    deepScanSchedule: row.deep_scan_schedule,
+    nextDeepScanAt: row.next_deep_scan_at ? new Date(row.next_deep_scan_at) : null,
   }));
 }
 

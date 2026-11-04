@@ -2,6 +2,8 @@ import type { DashboardRepo, FindingListItem, findingForUser, HackerRecord, Over
 import type { FeedEvent } from "@/components/app/scan-live";
 import { DEFAULT_HACKER, type HackerProfile } from "./hacker";
 import type { Severity } from "./format";
+import type { PullRow } from "@/server/pulls";
+import { samplePulls } from "./samples";
 
 /**
  * The demo: a made-up account, `acme`, that anyone can click around at /demo
@@ -688,6 +690,10 @@ export function demoRepos(): DashboardRepo[] {
       activeDeepScanId: live ? DEMO_LIVE_SCAN_ID : null,
       activeDeepScanWaitsForRecon: false,
       freeDig: false,
+      defaultBranch: "main",
+      prReviews: repo.privateRepo ? "auto" : "command",
+      deepScanSchedule: live ? "weekly" : "off",
+      nextDeepScanAt: live ? new Date(Date.now() + 3 * 86_400_000) : null,
     };
   });
 }
@@ -756,4 +762,16 @@ export function demoSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow } 
     repos: REPOS.map((repo) => ({ id: id(repo.n), fullName: `${DEMO_LOGIN}/${repo.name}`, private: repo.privateRepo })),
   };
   return { orgs: [org], billing };
+}
+
+/**
+ * The sample open pull requests, on a demo repo: each review links to one of the repo's own demo PR reviews
+ * (a PR without one is shown as not yet reviewed), so every link in the demo opens a page.
+ */
+export function demoPulls(repoId: string): PullRow[] {
+  const reviews = demoScans({ repoId, kind: "pr_review" });
+  return samplePulls().map((pull, i) => {
+    const scan = reviews[i];
+    return { ...pull, review: pull.review && scan ? { ...pull.review, scanId: scan.id } : null };
+  });
 }

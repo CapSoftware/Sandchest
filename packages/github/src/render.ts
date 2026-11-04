@@ -130,3 +130,79 @@ function fence(text: string): string {
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
+
+/** Marks Sandchest's summary comment, so it can be told apart from anything else on the PR. */
+export const SUMMARY_MARKER = "<!-- sandchest:summary -->";
+/** GitHub refuses comments over 65,536 characters; past this the per-finding details are left to the dashboard. */
+const COMMENT_LIMIT = 60_000;
+
+export interface SummaryInput {
+  /** What the review reported, dismissed findings already left out. Each links to its page in the dashboard. */
+  findings: Array<Finding & { url: string }>;
+  isPublic: boolean;
+  /** The commit that was reviewed. */
+  headSha: string;
+  /** The review's page in the dashboard. */
+  detailsUrl: string;
+  credits?: number;
+  /** How many findings were also placed as inline comments on the diff (private repos). */
+  inline?: number;
+}
+
+/**
+ * Sandchest's one comment on a pull request, edited in place after every
+ * review so it always describes the latest commit. Public repositories get
+ * counts and a private link, never what or where; private ones get each
+ * finding with its full write-up folded away.
+ */
+export function prSummary(input: SummaryInput): string {
+  const visible = shown(input.findings) as SummaryInput["findings"];
+  const commit = `\`${input.headSha.slice(0, 7)}\``;
+  const cost = input.credits ? ` · ${input.credits} ${input.credits === 1 ? "credit" : "credits"}` : "";
+  const foot = `<sub>Sandchest reviews every change for vulnerabilities an attacker could use${cost} · [Review details](${input.detailsUrl})</sub>`;
+
+  if (visible.length === 0) {
+    return [SUMMARY_MARKER, `**Sandchest** reviewed ${commit}: nothing exploitable found in this change.`, foot].join("\n\n");
+  }
+  const counts = countBySeverity(visible);
+  const issues = `${visible.length} ${visible.length === 1 ? "issue" : "issues"}`;
+  if (input.isPublic) {
+    return [
+      SUMMARY_MARKER,
+      `**Sandchest** found ${issues} in ${commit} (${counts}).`,
+      `This repository is public, so the details stay private: [view them in the Sandchest dashboard →](${input.detailsUrl})`,
+      `<sub>Only people who can push to this repository can see them.${cost ? ` Reviewed${cost}.` : ""}</sub>`,
+    ].join("\n\n");
+  }
+
+  const rows = visible.map((f) => {
+    const sink = f.attackPath.at(-1)!;
+    return `| ${LABEL[f.severity]} | [${tableCell(f.title)}](${f.url}) | \`${tableCell(`${sink.file}:${sink.line}`)}\` |`;
+  });
+  const inline = input.inline ? ` ${input.inline} ${input.inline === 1 ? "is" : "are"} also commented on the diff.` : "";
+  const head = [SUMMARY_MARKER, `**Sandchest** found ${issues} in ${commit}: ${counts}.${inline}`, ["| Severity | Issue | Where |", "| --- | --- | --- |", ...rows].join("\n")];
+  const details = visible.map((f) => `<details><summary><b>${LABEL[f.severity]}</b> ${escapeHtml(f.title)}</summary>\n\n${reviewComment(f)}\n\n</details>`);
+  const full = [...head, ...details, foot].join("\n\n");
+  if (full.length <= COMMENT_LIMIT) return full;
+  return [...head, `Full write-ups, proof and fix prompts are in the dashboard: [open the review →](${input.detailsUrl})`, foot].join("\n\n");
+}
+
+/**
+ * The summary after a review that couldn't finish, so the PR never shows an
+ * older commit's result as if it were current. Only ever edits an existing
+ * summary: a PR that never had one gets the neutral Check alone.
+ */
+export function prSummaryUnfinished(input: { headSha: string; detailsUrl: string; reason: "failed" | "out_of_credits" | "no_plan" }): string {
+  const commit = `\`${input.headSha.slice(0, 7)}\``;
+  const why = {
+    failed: `Sandchest couldn't finish reviewing ${commit}. Comment \`/sandchest review\` to try again; nothing was charged.`,
+    out_of_credits: `Sandchest didn't review ${commit}: the account is out of credits.`,
+    no_plan: `Sandchest didn't review ${commit}: the account has no plan.`,
+  }[input.reason];
+  return [SUMMARY_MARKER, `**Sandchest** · ${why}`, `<sub>[Details](${input.detailsUrl}) · earlier results on this pull request no longer apply to the latest commit.</sub>`].join("\n\n");
+}
+
+/** Text safe inside a Markdown table cell and link text: no pipes, brackets or line breaks. */
+function tableCell(text: string): string {
+  return escapeHtml(text).replace(/[|[\]]/g, (c) => `\\${c}`).replace(/[\r\n]+/g, " ");
+}

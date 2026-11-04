@@ -153,6 +153,8 @@ async function onPullRequest(deps: WebhookDeps, payload: PullRequestEvent): Prom
   if (pr.draft) return { status: "ignored", detail: "draft" };
   const repo = await repoByGithubId(deps.db, payload.repository.id);
   if (!repo?.enabled || !repo.org.installationId) return { status: "ignored", detail: "repo not enabled" };
+  // The repo's choice: review every push, only when asked (`/sandchest review` or the dashboard), or never.
+  if (repo.prReviews !== "auto") return { status: "ignored", detail: `pr reviews: ${repo.prReviews}` };
 
   // Fork PRs on public repos need a maintainer's `/sandchest review`. On a private repo anyone who can read it can fork it,
   // so a fork's PR is reviewed (and paid for) automatically only if its author could push the branch to the repo itself.
@@ -191,6 +193,7 @@ async function onIssueComment(deps: WebhookDeps, payload: IssueCommentEvent): Pr
   if (payload.comment.user.type === "Bot") return { status: "ignored", detail: "bot comment" };
   const repo = await repoByGithubId(deps.db, payload.repository.id);
   if (!repo?.enabled || !repo.org.installationId) return { status: "ignored", detail: "repo not enabled" };
+  if (repo.prReviews === "off") return { status: "ignored", detail: "pr reviews: off" };
 
   const installation = deps.github.installation(repo.org.installationId);
   const role = await installation.permission(repo.fullName, payload.comment.user.login);

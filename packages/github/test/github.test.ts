@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac, createVerify, generateKeyPairSync } from "node:crypto";
 import type { Finding } from "@sandchest/engine/scan";
-import { appJwt, checkResult, GitHubApp, githubPaginate, githubRequest, parsePatch, reviewBody, reviewComment, verifySignature } from "../src";
+import { appJwt, checkResult, GitHubApp, githubPaginate, githubRequest, parsePatch, prSummary, prSummaryUnfinished, reviewBody, reviewComment, SUMMARY_MARKER, verifySignature } from "../src";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
@@ -186,5 +186,50 @@ describe("render", () => {
     expect(comment).toContain("<details><summary>Fix prompt for your coding agent</summary>");
     expect(comment).toContain("````\nFix this ```weird``` thing\n````");
     expect(reviewBody([finding("high")], [finding("high")], "https://app/x")).toContain("A high bug with &lt;html&gt;");
+  });
+});
+
+describe("PR summary comment", () => {
+  const linked = (severity: Finding["severity"], confidence: Finding["confidence"] = "high") => ({ ...finding(severity, confidence), url: "https://app/f/1" });
+  const base = { headSha: "0123456789abcdef", detailsUrl: "https://app/scans/1", credits: 2 };
+
+  test("says all is well, with the commit it reviewed", () => {
+    const body = prSummary({ ...base, findings: [linked("high", "low")], isPublic: false });
+    expect(body.startsWith(SUMMARY_MARKER)).toBe(true);
+    expect(body).toContain("reviewed `0123456`: nothing exploitable found");
+    expect(body).toContain("2 credits");
+  });
+
+  test("public repos get counts and a private link, never what or where", () => {
+    const body = prSummary({ ...base, findings: [linked("high"), linked("medium")], isPublic: true });
+    expect(body).toContain("found 2 issues in `0123456` (1 high, 1 medium)");
+    expect(body).toContain("https://app/scans/1");
+    for (const secret of ["A high bug", "a.ts", "secret code", "GET /x", "Reads every", "Bind it", "https://app/f/1"]) expect(body).not.toContain(secret);
+  });
+
+  test("private repos list each finding, linked, with its write-up folded away", () => {
+    const body = prSummary({ ...base, findings: [linked("critical"), linked("high")], isPublic: false, inline: 1 });
+    expect(body).toContain("found 2 issues in `0123456`: 1 critical, 1 high. 1 is also commented on the diff.");
+    expect(body).toContain("| Critical | [A critical bug with &lt;html&gt;](https://app/f/1) | `a.ts:3` |");
+    expect(body).toContain("<details><summary><b>Critical</b>");
+    expect(body).toContain("**Proof of concept**");
+  });
+
+  test("table cells can't break the table or the link", () => {
+    const tricky = { ...linked("high"), title: "Pipes | and [brackets]\nnewline" };
+    const body = prSummary({ ...base, findings: [tricky], isPublic: false });
+    expect(body).toContain("[Pipes \\| and \\[brackets\\] newline](https://app/f/1)");
+  });
+
+  test("a very long summary drops the write-ups, not the list", () => {
+    const long = Array.from({ length: 40 }, (_, i) => ({ ...linked("high"), title: `Bug ${i}`, proofOfConcept: "x".repeat(3_000) }));
+    const body = prSummary({ ...base, findings: long, isPublic: false });
+    expect(body.length).toBeLessThan(60_000);
+    expect(body).toContain("| High | [Bug 39]");
+    expect(body).not.toContain("<details>");
+  });
+
+  test("an unfinished review says so instead of leaving an older result standing", () => {
+    expect(prSummaryUnfinished({ headSha: "abcdef0123", detailsUrl: "https://app/scans/2", reason: "failed" })).toContain("couldn't finish reviewing `abcdef0`. Comment `/sandchest review` to try again");
   });
 });

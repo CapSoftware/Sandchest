@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { AgentAbilities } from "@/components/app/agent-consent";
 import { InstallKey } from "@/components/app/install-key";
 import { SetupShell } from "@/components/app/setup-shell";
+import { site } from "@/lib/site";
 import { currentUser } from "@/server/access";
 import { decideDevice } from "@/server/agent-actions";
 import { formatUserCode, normaliseUserCode } from "@/server/agent/tokens";
@@ -35,7 +36,10 @@ export default async function DevicePage({ searchParams }: { searchParams: Promi
         <p className="sign-in-body">Go back to your agent: it takes it from here.</p>
         {accounts.length === 0 && (
           <>
-            <p className="sign-in-body">One thing only you can do: install Sandchest on GitHub and choose the repositories it may read. Your agent sees them as soon as you’re done.</p>
+            <p className="sign-in-body">
+              One thing only you can do: install Sandchest on GitHub and choose the repositories it may read. Your agent sees them as soon as you’re done. Its access to
+              their code is read-only: <a href={`${site.links.security}#what-sandchest-can-access`}>what Sandchest can see</a>.
+            </p>
             <div className="setup-cta">
               <InstallKey />
             </div>
