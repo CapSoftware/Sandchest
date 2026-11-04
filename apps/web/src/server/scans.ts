@@ -81,7 +81,7 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
   const scan = await requireScan(scanId);
   if (["completed", "failed", "cancelled", "refused", "publishing"].includes(scan.status)) return { state: "done" };
   if (scan.status === "queued" && scan.billing === null && billingEnabled()) {
-    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, await scanCredits(scan));
+    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, await scanCredits(scan), true, { evenWhenEmpty: scan.kind === "fix_check" });
     if (!gate.ok) {
       await refuse(scan, gate);
       return { state: "done" };

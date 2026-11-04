@@ -271,13 +271,14 @@ export type Gate = { ok: true } | { ok: false; reason: "no_plan" | "out_of_credi
  * Records the hold on the scan unless `record` is false (the scan row does
  * not exist yet).
  */
-export async function reserveScan(scanId: string, org: BillingOrg, credits: number, record = true): Promise<Gate> {
+export async function reserveScan(scanId: string, org: BillingOrg, credits: number, record = true, options: { evenWhenEmpty?: boolean } = {}): Promise<Gate> {
   const client = autumn();
   if (!client) return { ok: true };
   if (credits === 0) {
     if (!(await hasPlan(org))) return { ok: false, reason: "no_plan", credits };
-    // Free, but only while there are credits: an org that has run out gets nothing until it buys more.
-    if (!(await hasCredits(org))) return { ok: false, reason: "out_of_credits", credits };
+    // Free, but only while there are credits: an org that has run out gets nothing until it buys more. Except
+    // what `evenWhenEmpty` asks for (a fix check): closing a bug the team fixed should never wait on a top-up.
+    if (!options.evenWhenEmpty && !(await hasCredits(org))) return { ok: false, reason: "out_of_credits", credits };
   } else {
     const from = new Date();
     const result = await client.reserve({ customerId: org.id, credits, lockId: scanId, expiresAt: new Date(Date.now() + RESERVATION_MS) });
