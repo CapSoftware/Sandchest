@@ -71,7 +71,7 @@ export async function githubPaginate<T, P = T[]>(
     const { response } = await send(auth, next, { signal: options.signal }, http);
     items.push(...pick((await response.json()) as P));
     next = nextLink(response.headers.get("link"));
-    if (next && http.rebaseLinks) next = rebase(next, (http.baseUrl ?? API).replace(/\/+$/, ""));
+    if (next && http.rebaseLinks) next = rebase(next, (http.baseUrl ?? API).replace(/\/+$/, ""), http.name ?? "GitHub");
   }
   return items.slice(0, limit);
 }
@@ -149,12 +149,13 @@ function nextLink(header: string | null): string | undefined {
   return header?.split(",").find((part) => part.includes('rel="next"'))?.match(/<([^>]+)>/)?.[1];
 }
 
-/** A link's path and query on `base`: what follows the base's own path (`/api/v1`) in the link. Unchanged when that path is not in it. */
-function rebase(link: string, base: string): string {
+/** A link's path and query on `base`: what follows the base's own path (`/api/v1`) in the link. Throws when that path is not in it, as there is no telling where the link's page is on `base`. */
+function rebase(link: string, base: string, name: string): string {
   const basePath = new URL(base).pathname.replace(/\/+$/, "");
   const url = new URL(link);
   const at = url.pathname.indexOf(`${basePath}/`);
-  return at < 0 ? link : `${base}${url.pathname.slice(at + basePath.length)}${url.search}`;
+  if (at < 0) throw new GitHubError(`${name} pagination link is not under the API URL's path (${basePath}): set the API URL to end in the path the instance's own links use`, 0, false);
+  return `${base}${url.pathname.slice(at + basePath.length)}${url.search}`;
 }
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {

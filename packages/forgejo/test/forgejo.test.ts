@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { parsePatch } from "@sandchest/github";
+import { GitHubError, parsePatch } from "@sandchest/github";
 import { deliveryHeaders, Forgejo, loadForgejoConfig, splitDiff, statusState, verifySignature, type ForgejoConfig } from "../src";
 
 const config: ForgejoConfig = {
@@ -220,6 +220,16 @@ describe("api", () => {
     const forgejo = new Forgejo({ ...config, apiUrl: "http://forgejo:3000/api/v1" }, { fetch, ...quick });
     expect((await forgejo.repositories({ id: 3, login: "acme", type: "Organization" })).map((r) => r.id)).toEqual([1, 2]);
     expect(requests[1]!.url).toBe("http://forgejo:3000/api/v1/orgs/acme/repos?limit=50&page=2");
+  });
+
+  test("refuses a pagination link outside FORGEJO_API_URL's path, rather than guessing where it points", async () => {
+    const repo = (id: number) => ({ id, full_name: `acme/r${id}`, private: true, default_branch: "main" });
+    const { fetch, requests } = scripted(json([repo(1)], { headers: { link: '<http://git.internal/api/v1/orgs/acme/repos?limit=50&page=2>; rel="next"' } }));
+    const forgejo = new Forgejo({ ...config, apiUrl: "http://forgejo:3000/sub/api/v1" }, { fetch, ...quick });
+    const error = await forgejo.repositories({ id: 3, login: "acme", type: "Organization" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GitHubError);
+    expect((error as Error).message).toContain("Forgejo pagination link is not under the API URL's path (/sub/api/v1)");
+    expect(requests).toHaveLength(1);
   });
 
   test("reads one repository, and leaves out archives, mirrors and empty ones as the listing does", async () => {
