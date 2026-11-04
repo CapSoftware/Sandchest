@@ -52,7 +52,7 @@ services:
       - "${SANDCHEST_BIND:-127.0.0.1}:${SANDCHEST_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgres://sandchest:${POSTGRES_PASSWORD}@postgres:5432/sandchest
-      SANDCHEST_APP_URL: ${SANDCHEST_APP_URL:?Set SANDCHEST_APP_URL in docker/.env to the public URL GitHub can reach}
+      SANDCHEST_APP_URL: ${SANDCHEST_APP_URL:?Set SANDCHEST_APP_URL in docker/.env to the public URL GitHub (or Forgejo) can reach}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in docker/.env (openssl rand -hex 32)}
       LLM_BASE_URL: ${LLM_BASE_URL:?Set LLM_BASE_URL in docker/.env to your model endpoint}
       LLM_API_KEY: ${LLM_API_KEY:?Set LLM_API_KEY in docker/.env (any value if your endpoint needs none)}
@@ -67,6 +67,14 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      # Forgejo or Gitea, instead of or beside the GitHub App: see README.md, "Forgejo / Gitea".
+      FORGEJO_URL: ${FORGEJO_URL:-}
+      FORGEJO_TOKEN: ${FORGEJO_TOKEN:-}
+      FORGEJO_WEBHOOK_SECRET: ${FORGEJO_WEBHOOK_SECRET:-}
+      FORGEJO_OWNERS: ${FORGEJO_OWNERS:-}
+      FORGEJO_WEBHOOKS: ${FORGEJO_WEBHOOKS:-}
+      FORGEJO_CLIENT_ID: ${FORGEJO_CLIENT_ID:-}
+      FORGEJO_CLIENT_SECRET: ${FORGEJO_CLIENT_SECRET:-}
       SANDCHEST_SETUP_TOKEN: ${SANDCHEST_SETUP_TOKEN:-}
       SANDCHEST_ADMIN_TOKEN: ${SANDCHEST_ADMIN_TOKEN:-}
       SMTP_URL: ${SMTP_URL:-}

@@ -1,0 +1,7 @@
+# Overrides for docker/test/e2e-forgejo.sh, on top of compose.test.yml: Forgejo is the fake's, and the
+# test calls the sweep itself instead of waiting for the server's first one.
+services:
+  web:
+    environment:
+      FORGEJO_GIT_URL: file:///srv/git
+      CRON_SECRET: ${E2E_CRON_SECRET:?}
