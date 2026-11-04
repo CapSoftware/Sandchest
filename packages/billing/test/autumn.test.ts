@@ -101,13 +101,24 @@ test("billing state: active plan, cancellation, scheduled downgrade, auto top-up
   expect(billingState({}).planId).toBeNull();
 });
 
-test("auto top-up: the monthly limit becomes whole top-ups; under one is off", () => {
+test("auto top-up: the monthly limit becomes whole top-ups; under one is off; none means no limit", () => {
   const standard = planById("standard")!;
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 10, monthlyLimitUsd: null })).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: null });
   expect(autoTopUpControl(standard, { enabled: true, quantity: 10, monthlyLimitUsd: 50 })).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: 5 });
   expect(autoTopUpControl(standard, { enabled: true, quantity: 25, monthlyLimitUsd: 60 })).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 2 });
   expect(autoTopUpControl(standard, { enabled: true, quantity: 25, monthlyLimitUsd: 20 }).enabled).toBe(false);
   // Older plans sell credits in packs of 25 for $10: a top-up rounds up to whole packs.
   expect(autoTopUpControl(planById("chest")!, { enabled: true, quantity: 10, monthlyLimitUsd: 40 })).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 4 });
+});
+
+test("auto top-up without a monthly limit sends no purchase limit, which clears one set before", async () => {
+  const { calls, autumn } = fake({ "customers.update": [{ status: 200, body: {} }, { status: 200, body: {} }] });
+  await autumn.setAutoTopUp("o", { enabled: true, threshold: 5, quantity: 10, perMonth: 3 });
+  await autumn.setAutoTopUp("o", { enabled: true, threshold: 5, quantity: 10, perMonth: null });
+  const sent = calls.map((c) => (c.body as { billing_controls: { auto_topups: Record<string, unknown>[] } }).billing_controls.auto_topups[0]);
+  expect(sent[0]).toMatchObject({ purchase_limit: { interval: "month", interval_count: 1, limit: 3 } });
+  expect(sent[1]).toEqual({ feature_id: "credits", enabled: true, threshold: 5, quantity: 10 });
+  expect(billingState({ billing_controls: { auto_topups: [{ feature_id: "credits", enabled: true, threshold: 5, quantity: 10 }] } }).autoTopUp).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: null });
 });
 
 test("with a plan, credits are bought only when asked for", async () => {

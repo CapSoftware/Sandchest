@@ -155,6 +155,6 @@ Card details never pass through an agent. The first payment for an account happe
 - always `quote_credits` first and tell the person what it will cost;
 - pass `max_usd` to `buy_credits`, so nothing dearer than the quote is ever charged;
 - if `buy_credits` fails with `billing_unknown`, check `get_billing` before buying again: the charge may have gone through;
-- set `auto_top_up` with a `monthly_limit_usd` if they'd rather never run out.
+- joining turns auto top-up on, up to $500 a month: tell the person, and pass `auto_top_up: false` to `buy_credits` if they'd rather it didn't. `set_auto_top_up` changes the limit (`monthly_limit_usd`, or `null` for none) or turns it off.
 
 See [Pricing & credits](/docs/pricing) for what each scan costs.

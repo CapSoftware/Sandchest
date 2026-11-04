@@ -417,12 +417,20 @@ describe.skipIf(!available)("REST API", () => {
     expect(tooDear.body.error.code).toBe("over_max_usd");
     const checkout = (await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 25 })).body;
     expect(checkout).toMatchObject({ status: "checkout_required", checkout_url: expect.stringContaining("checkout.test") });
+    // Joining turns auto top-up on unless asked not to, and says so.
+    expect(checkout.message).toContain("Auto top-up is on");
+    const [joined] = await database.$client<Array<{ choice: unknown }>>`select settings->'autoTopUp' as choice from orgs where id = ${ids.acme}`;
+    expect(joined!.choice).toEqual({ enabled: true, quantity: 25, monthlyLimitUsd: 500 });
 
     // With the card on file, credits are charged at once.
     const charged = (await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 10 })).body;
     expect(charged.status).toBe("charged");
     const auto = (await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true, credits: 10, monthly_limit_usd: 60 })).body;
     expect(auto.auto_top_up).toMatchObject({ enabled: true, credits: 10, monthly_limit_usd: 60 });
+    // Left out, the limit stays; null removes it.
+    expect((await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true })).body.auto_top_up).toMatchObject({ monthly_limit_usd: 60 });
+    expect((await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true, monthly_limit_usd: null })).body.auto_top_up).toMatchObject({ monthly_limit_usd: null });
+    expect((await api(aliceKey, "GET", "/accounts/acme/billing")).body.auto_top_up).toMatchObject({ enabled: true, times_per_month_max: null });
     expect((await api(aliceKey, "POST", "/accounts/acme/billing/portal")).body.url).toBeString();
   });
 

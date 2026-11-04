@@ -13,7 +13,7 @@ interface FakeCustomer {
   /** A card on file: purchases charge at once instead of returning a checkout URL. */
   card: boolean;
   locks: Map<string, number>;
-  autoTopUp: { enabled: boolean; threshold: number; quantity: number; perMonth: number } | null;
+  autoTopUp: { enabled: boolean; threshold: number; quantity: number; perMonth: number | null } | null;
   topUpsThisMonth: number;
   charges: Array<{ what: string; usd: number }>;
   /** Balance ids granted (free credits), so a second grant under one does nothing. */
@@ -65,7 +65,7 @@ export class FakeAutumn implements Autumn {
 
   private afterUsage(customer: FakeCustomer): void {
     const rule = customer.autoTopUp;
-    if (!rule?.enabled || !customer.planId || customer.credits >= rule.threshold || customer.topUpsThisMonth >= rule.perMonth) return;
+    if (!rule?.enabled || !customer.planId || customer.credits >= rule.threshold || (rule.perMonth !== null && customer.topUpsThisMonth >= rule.perMonth)) return;
     customer.credits += rule.quantity;
     customer.topUpsThisMonth++;
     const pack = planById(customer.planId)!.pack;
@@ -177,7 +177,7 @@ export class FakeAutumn implements Autumn {
     return `https://billing.test/${customerId}`;
   }
 
-  async setAutoTopUp(customerId: string, control: { enabled: boolean; threshold: number; quantity: number; perMonth: number }) {
+  async setAutoTopUp(customerId: string, control: { enabled: boolean; threshold: number; quantity: number; perMonth: number | null }) {
     this.enter("setAutoTopUp");
     this.get(customerId).autoTopUp = control;
   }

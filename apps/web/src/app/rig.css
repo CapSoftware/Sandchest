@@ -407,30 +407,6 @@ button.onboard-leave {
   font-variant-numeric: tabular-nums;
 }
 
-.onboard-check {
-  display: flex;
-  gap: 0.6rem;
-  align-items: flex-start;
-  margin-top: 0.85rem;
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  color: var(--color-sand);
-  cursor: pointer;
-}
-
-.onboard-check-note {
-  display: block;
-  color: var(--color-dust);
-}
-
-.onboard-check input {
-  flex: none;
-  width: 1rem;
-  height: 1rem;
-  margin-top: 0.15rem;
-  accent-color: var(--phosphor);
-}
-
 /*
  * The bill, on the Pay step: the system's sans, plain rules and Stripe's own
  * fields, like the card forms people already trust. Only the title above it
@@ -490,6 +466,15 @@ button.onboard-leave {
   padding: 0.45rem 0;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
+}
+
+/* Auto top-up on the bill: terms and a quiet link, not a switch, so the row itself isn't clickable. */
+.onboard-bill-auto {
+  cursor: auto;
+}
+
+.onboard-bill-auto .onboard-bill-link {
+  flex: none;
 }
 
 .onboard-bill-toggle-name {

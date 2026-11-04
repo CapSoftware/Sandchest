@@ -10,8 +10,8 @@
  * purchase id the charge is made under, so confirming it again (a second
  * tab, a retry after a timeout) never charges twice.
  */
-import { isTrial, MAX_PURCHASE_CREDITS, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
-import { orgForAdmin } from "@sandchest/db";
+import { DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, MAX_PURCHASE_CREDITS, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
+import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -30,7 +30,13 @@ const Credits = z.coerce.number().int().min(1).max(MAX_PURCHASE_CREDITS);
 /** Plans that can be bought now: the retired ones keep working but aren't sold. */
 const OfferedPlan = z.enum(PLANS.filter((p) => p.offered).map((p) => p.id) as [PlanId, ...PlanId[]]);
 const Purchase = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("plan"), plan: OfferedPlan, credits: z.union([z.literal("").transform(() => undefined), Credits]).optional() }),
+  z.object({
+    kind: z.literal("plan"),
+    plan: OfferedPlan,
+    credits: z.union([z.literal("").transform(() => undefined), Credits]).optional(),
+    /** Joining from the plan picker: whether auto top-up starts on. */
+    autoTopUp: z.enum(["on", "off"]).optional(),
+  }),
   z.object({ kind: z.literal("top_up"), credits: Credits }),
 ]);
 export type PurchaseInput = z.infer<typeof Purchase>;
@@ -56,7 +62,12 @@ function purchaseQuery(input: PurchaseInput): string {
 }
 
 /** What a purchase was, as recorded: its kind, plan and credits. */
-const purchaseProps = (input: PurchaseInput) => ({ kind: input.kind, plan: input.kind === "plan" ? input.plan : null, credits: input.credits ?? null });
+const purchaseProps = (input: PurchaseInput) => ({
+  kind: input.kind,
+  plan: input.kind === "plan" ? input.plan : null,
+  credits: input.credits ?? null,
+  ...(input.kind === "plan" && input.autoTopUp ? { auto_top_up: input.autoTopUp === "on" } : {}),
+});
 
 /** Records a billing step, then hands back its outcome. The org is named only once it was found (it is a foreign key). */
 async function tracked<T extends BillingOutcome>(
@@ -94,6 +105,12 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
   // No plan, or only the free one: no card on file, so the plan (with its credits) is bought on Stripe Checkout.
   if (!planId || isTrial(planId)) {
     if (input.data.kind === "top_up") return tracked("purchase_started", context, { error: "Join the plan first: credits are bought with it." }, "needs_plan");
+    // Kept with the org's settings: Autumn gets it once the plan is active.
+    if (input.data.autoTopUp) {
+      const quantity = input.data.credits ?? DEFAULT_CREDITS;
+      const choice = { enabled: input.data.autoTopUp === "on", quantity, monthlyLimitUsd: DEFAULT_TOP_UP_LIMIT_USD };
+      if (!(await updateOrgSettings(db(), (await viewer()).id, orgId, { autoTopUp: choice }))) return tracked("purchase_started", context, { error: NOT_ADMIN }, "not_admin");
+    }
     return checkout(row.org, input.data, "purchase_started");
   }
   await tracked("purchase_started", { ...context, route: "confirm" }, {}, "ok");
@@ -160,18 +177,19 @@ export async function openPortal(orgId: string): Promise<void> {
 const AutoTopUpForm = z.object({
   enabled: z.literal("on").optional(),
   quantity: Credits.optional(),
-  limit: z.coerce.number().int().min(1).max(100_000),
+  /** Empty: no monthly limit. */
+  limit: z.union([z.literal("").transform(() => null), z.coerce.number().int().min(1).max(100_000)]).optional(),
 });
 
 /** Turns auto top-up on or off: how many credits it buys, and the most it may spend in a month. */
 export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
   const parsed = AutoTopUpForm.safeParse(Object.fromEntries(form));
-  if (!parsed.success) return { error: "The monthly limit must be at least $1." };
+  if (!parsed.success) return { error: "The monthly limit must be at least $1, or empty for no limit." };
   const row = await adminOrg(orgId);
   if (!row) return { error: NOT_ADMIN };
   const user = await viewer();
-  const input = { enabled: parsed.data.enabled === "on", quantity: parsed.data.quantity, monthlyLimitUsd: parsed.data.limit };
-  const record = (outcome: string, choice?: { enabled: boolean; quantity?: number; monthlyLimitUsd: number }) =>
+  const input = { enabled: parsed.data.enabled === "on", quantity: parsed.data.quantity, monthlyLimitUsd: parsed.data.limit ?? null };
+  const record = (outcome: string, choice?: { enabled: boolean; quantity?: number; monthlyLimitUsd: number | null }) =>
     track("auto_top_up_saved", {
       userId: user.id,
       orgId,

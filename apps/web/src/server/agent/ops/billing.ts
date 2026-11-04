@@ -4,7 +4,7 @@
  * card details never pass through an agent), and once a card is on file
  * credits are charged to it directly. Free credits need no card at all.
  */
-import { CREDIT_TIERS, defaultAutoTopUpLimit, FREE_CREDITS, isTrial, MAX_PURCHASE_CREDITS, PLAN, TOP_UP, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_TIERS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, isTrial, MAX_PURCHASE_CREDITS, PLAN, TOP_UP, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { AutumnError, StripeError, type BillingState } from "@sandchest/billing";
 import { updateOrgSettings, type OrgBillingRow } from "@sandchest/db";
@@ -44,7 +44,7 @@ type State = Pick<BillingState, "pastDue" | "endsAt" | "renewsAt" | "autoTopUp">
 
 const fromRow = (row: OrgBillingRow): State => ({ ...row, credits: row.credits, creditsResetAt: row.creditsResetAt });
 
-function billingView(context: Context, org: { id: string; login: string; admin: boolean; autoTopUp?: { quantity?: number; monthlyLimitUsd: number; enabled: boolean } }, state: State | null, offer: { open: boolean; credits?: number; reason?: string } | null) {
+function billingView(context: Context, org: { id: string; login: string; admin: boolean; autoTopUp?: { quantity?: number; monthlyLimitUsd: number | null; enabled: boolean } }, state: State | null, offer: { open: boolean; credits?: number; reason?: string } | null) {
   const paid = !!state?.planId && !isTrial(state.planId);
   return {
     account: { id: org.id, login: org.login, admin: org.admin },
@@ -172,7 +172,9 @@ export const billingOps = [
       credits: Credits,
       promotion_code: PromotionCode.optional(),
       max_usd: z.number().positive().max(100_000).optional().describe("Refuse (charging nothing) if this purchase would cost more than this many USD."),
-      auto_top_up: flag().optional().describe("On a first purchase: also buy this many credits again automatically whenever fewer than 5 are left (up to a monthly limit)."),
+      auto_top_up: flag()
+        .optional()
+        .describe(`On a first purchase: also buy this many credits again on the card whenever fewer than ${TOP_UP_BELOW} are left, so reviews never stop, spending at most $${DEFAULT_TOP_UP_LIMIT_USD} a month until changed (set_auto_top_up, or Settings). On unless false; tell the person it is on.`),
     }),
     openWorld: true,
     async run(context, input) {
@@ -199,8 +201,10 @@ export const billingOps = [
           throw new ApiError(409, "over_max_usd", `This purchase costs $${preview.dueToday.toFixed(2)} now, more than max_usd ($${input.max_usd}). Nothing was charged.`, { due_today_usd: preview.dueToday });
         }
       }
-      if (joining && input.auto_top_up !== undefined) {
-        await updateOrgSettings(db(), user.id, row.org.id, { autoTopUp: { enabled: input.auto_top_up, quantity: input.credits, monthlyLimitUsd: defaultAutoTopUpLimit(input.credits) } });
+      // Joining turns auto top-up on, as recruiting on the web does, unless asked not to.
+      const autoTopUp = input.auto_top_up ?? true;
+      if (joining) {
+        await updateOrgSettings(db(), user.id, row.org.id, { autoTopUp: { enabled: autoTopUp, quantity: input.credits, monthlyLimitUsd: DEFAULT_TOP_UP_LIMIT_USD } });
       }
       let paymentUrl: string | null;
       try {
@@ -231,7 +235,11 @@ export const billingOps = [
           status: joining ? "checkout_required" : "action_required",
           checkout_url: paymentUrl,
           message: joining
-            ? `Give the person this link to pay on Stripe. It joins ${row.org.githubLogin} to the ${PLAN.name} plan ($${PLAN.price}/month) with ${input.credits} credits; the card is then saved for later purchases. Then call get_billing with wait=50 until plan is set.`
+            ? `Give the person this link to pay on Stripe. It joins ${row.org.githubLogin} to the ${PLAN.name} plan ($${PLAN.price}/month) with ${input.credits} credits; the card is then saved for later purchases. ${
+                autoTopUp
+                  ? `Auto top-up is on: ${input.credits} more credits on the card whenever fewer than ${TOP_UP_BELOW} are left, up to $${DEFAULT_TOP_UP_LIMIT_USD} a month (set_auto_top_up changes the limit, or turns it off).`
+                  : "Auto top-up is off, so reviews stop when the credits run out."
+              } Then call get_billing with wait=50 until plan is set.`
             : "The card needs an extra check. Give the person this link to finish the payment, then call get_billing with wait=50.",
         };
       }
@@ -279,14 +287,14 @@ export const billingOps = [
   operation({
     name: "set_auto_top_up",
     title: "Set auto top-up",
-    description: `Turns auto top-up on or off for an account on a paid plan (admins only): when fewer than ${TOP_UP_BELOW} credits are left, buy \`credits\` more on the card on file, spending at most monthly_limit_usd a month.`,
+    description: `Turns auto top-up on or off for an account on a paid plan (admins only): when fewer than ${TOP_UP_BELOW} credits are left, buy \`credits\` more on the card on file, spending at most monthly_limit_usd a month, or without limit.`,
     method: "PUT",
     path: "/accounts/{account}/billing/auto-top-up",
     input: z.object({
       account: AccountRef,
       enabled: flag(),
       credits: Credits.optional().describe("How many credits each top-up buys. Default: the last choice, else 10."),
-      monthly_limit_usd: z.number().int().min(1).max(100_000).optional().describe("The most auto top-up may spend in a month. Default: five top-ups' worth, at least $50."),
+      monthly_limit_usd: z.number().int().min(1).max(100_000).nullable().optional().describe(`The most auto top-up may spend in a month; null for no limit. Left out: the current limit, else $${DEFAULT_TOP_UP_LIMIT_USD}.`),
     }),
     idempotent: true,
     openWorld: true,

@@ -10,7 +10,7 @@
  * charges it for the plan and the credits. Anything that needs Stripe's own
  * pages (a card step on the charge, or no keys) falls back to them.
  */
-import { AutumnError, defaultAutoTopUpLimit, MAX_PURCHASE_CREDITS, PLAN, StripeError } from "@sandchest/billing";
+import { AutumnError, DEFAULT_TOP_UP_LIMIT_USD, MAX_PURCHASE_CREDITS, PLAN, StripeError } from "@sandchest/billing";
 import { orgForAdmin, orgRepos, updateOrgSettings, userById } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -80,9 +80,9 @@ export async function loadBriefing(orgId: string): Promise<Briefing | null> {
   return (await briefing({ id: user.id, email: row?.email ?? null }, orgId)) ?? null;
 }
 
-/** Keeps the auto top-up choice made while joining: Autumn gets it once the plan is active. */
+/** Keeps the auto top-up choice made while joining, with the default monthly limit: Autumn gets it once the plan is active. */
 async function saveOrder(userId: string, orgId: string, order: z.output<typeof Order>): Promise<boolean> {
-  const choice = { enabled: order.autoTopUp, quantity: order.credits, monthlyLimitUsd: defaultAutoTopUpLimit(order.credits) };
+  const choice = { enabled: order.autoTopUp, quantity: order.credits, monthlyLimitUsd: DEFAULT_TOP_UP_LIMIT_USD };
   return updateOrgSettings(db(), userId, orgId, { autoTopUp: choice });
 }
 

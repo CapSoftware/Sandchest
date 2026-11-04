@@ -5,8 +5,8 @@ import { usd } from "@/lib/format";
 import { saveAutoTopUp, type BillingOutcome } from "@/server/billing-actions";
 import { Submit } from "./submit";
 
-/** Auto top-up: on or off, how many credits it buys, and the most it may spend in a month. */
-export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { orgId: string; planId: string; enabled: boolean; quantity: number; limit: number }) {
+/** Auto top-up: on or off, how many credits it buys, and the most it may spend in a month (empty: no limit). */
+export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { orgId: string; planId: string; enabled: boolean; quantity: number; limit: number | null }) {
   // Priced only on the current plan: earlier plans round up to their packs, and the panel says what that buys.
   const plan = planById(planId) ?? PLAN;
   const [state, action] = useActionState<BillingOutcome, FormData>(saveAutoTopUp.bind(null, orgId), {});
@@ -37,9 +37,9 @@ export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { org
         </label>
         <span className="money-input">
           <span aria-hidden="true">$</span>
-          <input id={`limit-${orgId}`} name="limit" type="number" inputMode="numeric" min={1} step={10} defaultValue={limit} />
+          <input id={`limit-${orgId}`} name="limit" type="number" inputMode="numeric" min={1} step={10} defaultValue={limit ?? ""} placeholder="No limit" />
         </span>
-        <span className="field-help">a month</span>
+        <span className="field-help">a month (empty for no limit)</span>
         <Submit className="key key-secondary" pending="Saving…" track="auto-top-up-save">
           Save
         </Submit>

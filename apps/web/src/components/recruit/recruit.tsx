@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
-import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { linesLabel, restCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
 import { closedMessage, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
 import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
@@ -542,6 +542,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
                 setCredits={setCredits}
                 autoTopUp={autoTopUp}
                 setAutoTopUp={setAutoTopUp}
+                payOnPage={payOnPage}
                 claim={claiming ? intent!.credits : null}
                 code={claiming && code ? { code: code.code, remove: () => setCodeClaim(null) } : null}
                 closed={billing && intent && brief && !brief.currentPlan && !claiming ? (offer && !offer.open ? closedMessage(offer, org) : null) : null}
@@ -922,6 +923,24 @@ function Hacker({
   );
 }
 
+/** What auto top-up charges, and when: said in full wherever it can be turned off. */
+function autoTopUpTerms(credits: number): string {
+  return `Auto top-up adds ${credits} credits for ${usd(creditsPrice(credits))} whenever fewer than ${TOP_UP_BELOW} are left, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Change the limit any time in Settings. `;
+}
+const AUTO_TOP_UP_OFF = "Auto top-up is off, so pull request reviews stop when the credits run out. ";
+
+/**
+ * Auto top-up is on unless they turn it off: a quiet link rather than a switch, so it reads as part of the
+ * terms, not a choice to make. Each way is recorded, to see how many turn it off.
+ */
+function AutoTopUpSwitch({ on, set }: { on: boolean; set: (on: boolean) => void }) {
+  return (
+    <button type="button" className="onboard-bill-link" onClick={() => set(!on)} data-track={on ? "recruit-auto-top-up-off" : "recruit-auto-top-up-on"}>
+      {on ? "Turn off" : "Turn back on"}
+    </button>
+  );
+}
+
 function Credits({
   heading,
   brief,
@@ -933,6 +952,7 @@ function Credits({
   setCredits,
   autoTopUp,
   setAutoTopUp,
+  payOnPage,
   claim,
   code,
   closed,
@@ -947,6 +967,8 @@ function Credits({
   setCredits: (credits: number) => void;
   autoTopUp: boolean;
   setAutoTopUp: (on: boolean) => void;
+  /** A Pay step follows, which says what auto top-up charges and has the way to turn it off. */
+  payOnPage: boolean;
   /** Free credits to claim instead of paying. */
   claim: number | null;
   /** The code at checkout that gave them, which can be taken back to pay instead. */
@@ -1055,15 +1077,10 @@ function Credits({
           </p>
         )}
       </fieldset>
-      <label className="onboard-check">
-        <input type="checkbox" checked={autoTopUp} onChange={(event) => setAutoTopUp(event.target.checked)} />
-        <span>
-          Auto top-up
-          <span className="onboard-check-note">
-            Adds {credits} credits for {usd(creditsPrice(credits))} when your balance falls below {TOP_UP_BELOW}.
-          </span>
-        </span>
-      </label>
+      <p className="onboard-help">
+        {autoTopUp ? autoTopUpTerms(credits) : AUTO_TOP_UP_OFF}
+        {!payOnPage && <AutoTopUpSwitch on={autoTopUp} set={setAutoTopUp} />}
+      </p>
     </>
   );
   return (
@@ -1170,15 +1187,13 @@ function Pay({
           </div>
         </dl>
         {!discount && <DiscountCode apply={applyDiscount} />}
-        <label className="onboard-bill-toggle">
+        <div className="onboard-bill-toggle onboard-bill-auto">
           <span>
-            <span className="onboard-bill-toggle-name">Auto top-up</span>
-            <span className="onboard-bill-toggle-note">
-              Adds {credits} credits for {usd(creditsPrice(credits))} when your balance falls below {TOP_UP_BELOW}.
-            </span>
+            <span className="onboard-bill-toggle-name">Then, as you use them</span>
+            <span className="onboard-bill-toggle-note">{autoTopUp ? autoTopUpTerms(credits) : AUTO_TOP_UP_OFF}</span>
           </span>
-          <input type="checkbox" role="switch" checked={autoTopUp} onChange={(event) => setAutoTopUp(event.target.checked)} />
-        </label>
+          <AutoTopUpSwitch on={autoTopUp} set={setAutoTopUp} />
+        </div>
         <label className="onboard-bill-toggle">
           <span className="onboard-bill-toggle-name">Add business details to invoices</span>
           <input type="checkbox" role="switch" checked={business} onChange={(event) => setBusiness(event.target.checked)} />
