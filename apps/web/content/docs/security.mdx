@@ -1,13 +1,47 @@
 ---
 title: Privacy & security
-description: What happens to your code during a scan, what Sandchest keeps, and who can see it.
+description: What Sandchest can access on GitHub and why, what happens to your code during a scan, what it keeps, and how to take access away.
 ---
 
 > Sandchest never stores your source code. Every scan runs in a temporary environment that's deleted when the scan finishes. Model inference runs with zero data retention. We keep only your findings and the minimum code excerpts needed to explain them.
 
-This page explains how that works. The [Privacy policy](/privacy) is the formal version.
+This page explains how that works. You don't have to take our word for it: Sandchest is [open source](#open-source), so you can read the code or run it yourself. The [Privacy policy](/privacy) is the formal version.
+
+## What Sandchest can access
+
+When you install the GitHub App, GitHub asks you which repositories it may see: all of them, or only the ones you pick. Sandchest can't see any others. You can change the list on GitHub at any time.
+
+In those repositories it can read code, and write only its review and its Check on pull requests. Sandchest asks for the least GitHub lets it.
+
+| Permission | Access | Why |
+| --- | --- | --- |
+| Contents | Read | To clone and read the code being scanned. Read-only, so it can't push, create branches or merge |
+| Metadata | Read | To see repository names and basic details. GitHub requires it for every app |
+| Pull requests | Write | To read a pull request's changes, and post the review: comments on the vulnerable lines and a summary |
+| Checks | Write | To report each review as a Check called **Sandchest**, with its result and a link to the details |
+| Issues | Read | To receive the `/sandchest review` command from pull request comments. Read-only, so it can't open, edit or close issues |
+| Members | Read | To know who the organization's admins are, so only they can change billing and settings |
+| Email addresses | Read | To know your sign-in email, for notifications |
+
+GitHub has no narrower permission for posting a review than Pull requests: write. Sandchest uses it only to post reviews and its one summary comment, which it edits after each review: it never approves, requests changes on, edits or closes a pull request. A failing Check only blocks merging if you make it a required check in your branch protection. On public repositories, where reviews and Checks are visible to everyone, Sandchest posts only the Check and the summary comment, with counts by severity and a link to the details in the dashboard. See [PR reviews](/docs/scans#pr-reviews).
+
+It acts on three kinds of GitHub event: a pull request opened or updated, to review it; a push to your default branch, to check whether open findings were fixed; and a `/sandchest review` comment on a pull request. It ignores pushes to other branches and every other comment.
+
+### What Sandchest never does
+
+- Push code, create branches, merge, or write to your default branch or any other. Its access to code is read-only.
+- Open, edit or close issues.
+- Read a repository you didn't give it.
+- Run your code. Scans only read it.
+- Keep your code after a scan, apart from the short excerpts that explain each finding (see [What Sandchest keeps](#what-sandchest-keeps)).
+
+### Your sign-in
+
+Signing in with GitHub gives Sandchest a token that acts as you, but GitHub limits it to the App's permissions above, in repositories where the App is installed and that you can access yourself. Sandchest uses it to check which repositories you can see and push to. It's stored encrypted.
 
 ## During a scan
+
+Your code exists on Sandchest's side only while a scan runs, inside that scan's own temporary workspace, and in what the scan sends to the model.
 
 1. Sandchest clones with a short-lived GitHub token that can only read the contents of the one repository being scanned. Its other GitHub calls during the scan, such as reading a pull request's files and posting the Check, use the installation's own short-lived token.
 2. It makes a shallow clone of that one commit into a temporary workspace: in the hosted service, an isolated virtual machine created for this scan alone.
@@ -49,28 +83,23 @@ A finding's code excerpts, together with the stored fix prompt that quotes them,
 
 The findings themselves stay, without code, so your history survives. Uninstalling stops new scans from starting; a scan already running may still finish.
 
+## Removing access
+
+Everything is on GitHub, under **Settings → Applications → Installed GitHub Apps → Sandchest → Configure**. For an organization, it's the same page in the organization's settings.
+
+- **Choose fewer repositories** under **Repository access**. Sandchest loses access to the ones you remove at once, and their findings' code excerpts are deleted.
+- **Uninstall** at the bottom of the page. No new scans start, Sandchest can no longer read any of your repositories, and every finding's code excerpts are deleted.
+- **Revoke your sign-in** under **Settings → Applications → Authorized GitHub Apps**. The token Sandchest stored for you stops working.
+- **Disconnect an agent** in **Settings → Agents** on Sandchest.
+
+To have your findings, threat models or account deleted too, write to the contact address in the [Privacy policy](/privacy#contact).
+
 ## Who can see findings
 
 - A person can see a repository's findings only if GitHub says they have push access or higher to it. Sandchest checks with GitHub using their own sign-in, and re-checks at least every five minutes.
 - On public repositories, nothing about a finding is posted to GitHub beyond a count by severity, because Checks and comments there are public. See [PR reviews](/docs/scans#public-repositories).
 - Billing and settings can only be changed by admins of the GitHub organization, or the owner of a personal account.
 - Agents act as the person who connected them, with the same access, re-checked with GitHub the same way. Connecting always needs that person's approval in their browser, signed in with GitHub: an MCP client's OAuth consent (with PKCE), or a device code they confirm. A first card payment is always made by the person on Stripe; agents never see card details. Revoke any agent in **Settings → Agents**. See [Use it from your agent](/docs/agents).
-
-## GitHub App permissions
-
-Sandchest asks for the least GitHub lets it.
-
-| Permission | Access | Why |
-| --- | --- | --- |
-| Contents | Read | Clone and read code |
-| Metadata | Read | Required by GitHub for every app |
-| Pull requests | Write | Post review comments |
-| Checks | Write | Report each review as a Check |
-| Issues | Read | Receive the `/sandchest review` command from pull request comments |
-| Members | Read | Know who the organization's admins are, for billing and settings |
-| Email addresses | Read | Your sign-in email, for notifications |
-
-Sandchest never writes to your code and never opens issues.
 
 ## Analytics, email and payments
 
@@ -82,9 +111,11 @@ Sandchest never writes to your code and never opens issues.
 
 The list of subprocessors that handle data for the hosted service is available on request from the contact address in the [Privacy policy](/privacy#contact).
 
-## Self-hosted
+## Open source
 
-A self-hosted Sandchest sends nothing to us: no telemetry, no usage data. It talks only to GitHub, your own model endpoint, and the OSV vulnerability database (package names and versions only). See [Self-hosting](/docs/self-hosting#privacy).
+Sandchest is open source under the AGPL-3.0. The GitHub App, the scanner and the dashboard are all in the [repository on GitHub](https://github.com/CapSoftware/Sandchest), and the hosted service runs that code. You can check anything on this page there: the permissions the App asks for are in `packages/github/src/manifest.ts`, and the one-repository, read-only token each scan clones with is in `packages/github/src/app.ts`.
+
+Or run it yourself. A self-hosted Sandchest uses your own GitHub App and your own model endpoint, and sends nothing to us: no telemetry, no usage data. It talks only to GitHub, your model endpoint, and the OSV vulnerability database (package names and versions only). Your code, findings and threat models stay on your machine. See [Self-hosting](/docs/self-hosting).
 
 ## Reporting a vulnerability in Sandchest
 

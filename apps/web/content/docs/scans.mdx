@@ -30,7 +30,17 @@ The result is the repository's **threat model**: a structured summary, not a cop
 
 ## PR reviews
 
-A pull request is reviewed when it is opened, gets new commits, is reopened, or is marked ready for review. Some aren't reviewed automatically:
+A pull request is reviewed when it is opened, gets new commits, is reopened, or is marked ready for review. Each repository chooses how, under **Reviews and schedule** on its page in [Repos](/dashboard/repos):
+
+| Pull request reviews | What runs |
+| --- | --- |
+| Every push (the default) | Every push to an open pull request is reviewed |
+| When asked | Only when someone with write access comments `/sandchest review` on the pull request, or presses **Review** on it in the repository's **Pull requests** list |
+| Off | Nothing, and `/sandchest review` is ignored |
+
+The repository's page lists its open pull requests with Sandchest's latest review of each. Press **Review** on one whose latest commit hasn't been reviewed: the button names the price, and a second press starts it. A commit whose review failed or ran out of credits can be reviewed again the same way, or with `/sandchest review`.
+
+Even on Every push, some aren't reviewed automatically:
 
 - drafts, until they are marked ready for review
 - pull requests from forks of public repositories, and from outside contributors' forks of private ones (see [below](#pull-requests-from-forks))
@@ -38,7 +48,9 @@ A pull request is reviewed when it is opened, gets new commits, is reopened, or 
 
 1. Sandchest posts a **Sandchest** Check straight away, showing "Scanning…".
 2. It reviews the change in the context of the threat model. A finding has to touch the lines the pull request changed: issues that were already there are left for deep scans.
-3. It completes the Check, and on private repositories posts the findings as review comments.
+3. It completes the Check and writes its summary comment on the pull request. On private repositories, findings new to the pull request are also posted as review comments on the vulnerable lines.
+
+PR reviews never wait behind deep scans: each kind of scan has its own place in the account's queue.
 
 Each commit is reviewed once. Reviews are priced by the number of security-relevant changed lines; see [Pricing & credits](/docs/pricing#pr-reviews).
 
@@ -52,15 +64,23 @@ Each commit is reviewed once. Reviews are priced by the number of security-relev
 
 Set the threshold in [Settings](/dashboard/settings): Critical, High, Medium or Any. Low-confidence findings never fail a Check. A Check only blocks merging if you make it a required status check in GitHub's branch protection. A neutral Check never blocks.
 
+### The summary comment
+
+Sandchest keeps one comment on each pull request it reviews, and edits it after every review so it always describes the latest commit:
+
+- **Nothing found:** "Sandchest reviewed `a1b2c3d`: nothing exploitable found in this change."
+- **Findings:** how many, by severity, with a link to them in the dashboard. On private repositories it also lists each finding with its full write-up folded away; on public ones it says only how many (see below).
+- **A review that couldn't finish, or wasn't run** (out of credits): the comment says so, so an earlier result never stands in for the latest commit. A pull request that never had a summary just gets the neutral Check.
+
 ### Private repositories
 
-Each finding is posted as a review comment on the last step of its attack path that is inside the diff, with its severity, what the attacker gets, who can exploit it, the attack path, a proof of concept, the fix, and a collapsed fix prompt for your coding agent. A finding whose lines are outside the diff goes in the review's summary instead. The Check lists every finding and what the review cost, for example "Reviewed · 2 credits".
+Each finding new to the pull request is posted as a review comment on the last step of its attack path that is inside the diff, with its severity, what the attacker gets, who can exploit it, the attack path, a proof of concept, the fix, and a collapsed fix prompt for your coding agent. A finding already flagged on an earlier push isn't commented again: it stays in the summary comment, which holds every finding, including those whose lines are outside the diff. The Check lists every finding and what the review cost, for example "Reviewed · 2 credits".
 
 ### Public repositories
 
-On a public repository, Checks and review comments are visible to everyone. So Sandchest posts no review comments and no details: only the Check, with counts by severity and a link to the dashboard.
+On a public repository, Checks and comments are visible to everyone. So Sandchest posts no review comments and no details: the Check and the summary comment say how many findings there are, by severity, with a link to the dashboard. Never what they are or where.
 
-> Sandchest found 1 high-severity issue. View privately →
+> Sandchest found 2 issues in `a1b2c3d` (1 high, 1 medium). This repository is public, so the details stay private: view them in the Sandchest dashboard →
 
 The details are only in the dashboard, for people with push access.
 
@@ -75,11 +95,20 @@ Sandchest never opens GitHub issues.
 
 ## Deep scans
 
-A deep scan hunts across the whole repository. It only runs when someone presses **Deep scan** on the repository's page (open it from [Repos](/dashboard/repos)), or **Scan again** on a finished deep scan. Anyone who can push to the repository can start one. The button shows the cost, and a second press confirms it.
+A deep scan hunts across the whole repository. It runs when someone presses **Deep scan** on the repository's page (open it from [Repos](/dashboard/repos)), or **Scan again** on a finished deep scan, or on the repository's schedule. Anyone who can push to the repository can start one. The button shows the cost, and a second press confirms it.
 
 - One deep scan runs at a time per repository. Once it finishes you can start another whenever you like: each one costs credits, shown on the button before you confirm.
 - The scan's page shows a live feed of what Sandchest is doing, and findings appear as they survive verification.
 - When it finishes, people with access get an email with what it found, unless an admin has turned emails off.
+
+### Scheduled deep scans
+
+Under **Reviews and schedule** on a repository's page, choose Daily, Weekly or Monthly to keep it scanned without anyone pressing anything. Each scheduled scan costs what **Scan again** would.
+
+- The first one is due an interval after the last deep scan, or within ten minutes if there was none or it's overdue. The page shows when the next one is.
+- A scheduled scan is skipped when the default branch hasn't changed since the last deep scan, so the same code is never paid for twice.
+- It's skipped if a deep scan is already running, or the account is out of credits. The next one is still due on time.
+- Anyone who can push to the repository can change the schedule.
 
 ## Fix checks
 
