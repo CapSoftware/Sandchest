@@ -7,7 +7,7 @@ export { createOsvClient, type OsvClient } from "./osv";
 export { runRecon, runScan, ScanRefusedError, verifyFindings, type ReconResult, type DismissedCandidate, type ScanOptions, type ScanReport, type Verification, type VerifyOptions } from "./pipeline";
 export * from "./schema";
 export { capChanges, changedLines, isSecurityRelevant, relevantChanges, touchesChange, type ChangedFile } from "./changes";
-export { checkFixes, reanchor, type FixCheckOptions, type FixCheckResult } from "./fixcheck";
+export { checkFixes, isDependencyManifest, reanchor, renderChanges, sweptDependency, type FixCheckOptions, type FixCheckResult } from "./fixcheck";
 export { storableLeads } from "./leads";
 export { proveFinding, proveFindings, type ProveOptions } from "./prove";
 export { trustTier, trustRank } from "./trust";

@@ -248,3 +248,14 @@ If the candidate has the same root cause as one of these, it is likely a false p
  */
 export const DEPENDENCY_CHECKS =
   "A known advisory in a dependency is a vulnerability only if all of these hold, so check each in the code: the version actually installed is affected (read the lockfile, for the workspace package that imports it, not the range in package.json); the importing code ships (not tests, stories, dev tooling or example apps); and the application uses the function, option or component the advisory is about, in the configuration it needs, with attacker input reaching it (a sanitizer bypass that needs a non-default option, a proxy-server flaw in an app that only uses the client, a tunnel route that isn't configured). Rule \"disproved\" citing the lockfile, configuration or call sites that show it does not apply. When it depends on a setting that is off by default, say so and lower the confidence.";
+
+/**
+ * Told to the skeptic when it re-checks an open finding after a push, with the
+ * push's diff. A fix often makes the report read as wrong (the handler "does"
+ * check now), so the reviewer is asked about the code as it is now, and to
+ * cite the new code that blocks the attack.
+ */
+export const RECHECK_INSTRUCTIONS = `This is a re-check of an open finding after a push. The report and its cited lines were written about the code before the push; the code you read now is after it, and the diff below shows what changed. Decide whether the attack still works on the code as it is now.
+- If code the push added or changed now blocks the attack (a new check, guard, validation, escaping or a removed sink), rule "disproved" and cite those lines, even if the report no longer matches the code.
+- If the attack still works, including when the push only moved, renamed or reformatted the code, or fixed one path while another still reaches the sink, rule "confirmed".
+- A change elsewhere is a fix only when you can show it is on the attack's path. Do not assume a fix because the file changed.`;

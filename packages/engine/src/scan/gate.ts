@@ -24,6 +24,8 @@ export interface GatedCandidate {
   fingerprint: string;
   /** Which hunter reported it. */
   hunter: string;
+  /** On a re-check after a push: what the push changed (unified diff), so the reviewer can see whether it is the fix. */
+  recheck?: string;
 }
 
 interface LocateResult {

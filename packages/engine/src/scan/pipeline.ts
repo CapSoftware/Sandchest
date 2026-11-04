@@ -596,6 +596,8 @@ export interface VerifyOptions {
   signal?: AbortSignal;
   /** Investigate the app's authorization model first and ground the skeptic in it (as a deep scan does). */
   investigateAuth?: boolean;
+  /** Per finding (same order): what a push changed, when this is a re-check after it. */
+  rechecks?: Array<string | undefined>;
 }
 
 export interface Verification {
@@ -650,6 +652,7 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
           path: gate.path,
           fingerprint: fingerprint(candidate.category, gate.path.at(-1)!),
           hunter: "verify",
+          recheck: options.rechecks?.[i],
         };
         return { candidate, review: await review(ctx, gated) };
       } catch (error) {

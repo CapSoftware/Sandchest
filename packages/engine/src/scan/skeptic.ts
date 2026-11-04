@@ -9,7 +9,7 @@ import { defineTool } from "../llm";
 import { runAgent } from "./agent";
 import type { ScanContext } from "./context";
 import type { GatedCandidate } from "./gate";
-import { skepticSystemPrompt } from "./prompts";
+import { RECHECK_INSTRUCTIONS, skepticSystemPrompt } from "./prompts";
 import { VerdictSchema, type Verdict } from "./schema";
 import { agentTool, numberLines, type ReadResult } from "./tools";
 
@@ -49,7 +49,10 @@ export async function review(ctx: ScanContext, gated: GatedCandidate, deadline?:
   const grounding = `${ctx.authModelText ? `\n\n${ctx.authModelText}` : ""}${ctx.historySkepticText ? `\n\n${ctx.historySkepticText}` : ""}`;
   const messages: Message[] = [
     { role: "system", content: `${skepticSystemPrompt(ctx.tag)}\n\n${ctx.threatModelText}${grounding}` },
-    { role: "user", content: `${ctx.wrap(renderCandidate(gated))}\n\nCited code:\n${ctx.wrap(await citedCode(ctx, gated))}` },
+    {
+      role: "user",
+      content: `${ctx.wrap(renderCandidate(gated))}\n\nCited code:\n${ctx.wrap(await citedCode(ctx, gated))}${gated.recheck ? `\n\n${RECHECK_INSTRUCTIONS}\n\nWhat the push changed:\n${ctx.wrap(gated.recheck)}` : ""}`,
+    },
   ];
   await runAgent({
     client: ctx.client,
