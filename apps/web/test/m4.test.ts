@@ -197,6 +197,23 @@ describe.skipIf(!available)("billing", () => {
     expect((await orgBillingRow(database, acme.id))?.credits).toBe(0);
   });
 
+  test("a PR refused for credits isn't reviewed again on every push, until the org can pay", async () => {
+    const push = (head: string) => handleWebhook(deps(), "pull_request", `pr-3-${head}`, { ...prEvent(repoList[0]!, 3, head), action: "synchronize" });
+    expect(await push("head3b")).toMatchObject({ status: "ignored", detail: expect.stringContaining("already refused") });
+    // Credits bought: the next push is reviewed.
+    autumn.get(acme.id).credits = 5;
+    await syncBilling(acme);
+    expect(await push("head3c")).toMatchObject({ status: "handled" });
+    autumn.get(acme.id).credits = 0;
+    await syncBilling(acme);
+  });
+
+  test("a fix check still runs with no credits left: it costs none, and closing a fixed bug never waits on a top-up", async () => {
+    expect(autumn.get(acme.id).credits).toBe(0);
+    expect(await reserveScan("00000000-0000-4000-8000-00000000f1c0", acme, 0, false)).toEqual({ ok: false, reason: "out_of_credits", credits: 0 });
+    expect(await reserveScan("00000000-0000-4000-8000-00000000f1c1", acme, 0, false, { evenWhenEmpty: true })).toEqual({ ok: true });
+  });
+
   test("out of credits while Autumn can't be read: still 'out of credits', not 'no plan'", async () => {
     // Before, a failed re-read after a refusal was taken to mean the org had no plan.
     autumn.failNext.add("customer");

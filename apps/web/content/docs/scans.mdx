@@ -44,7 +44,7 @@ Even on Every push, some aren't reviewed automatically:
 
 - drafts, until they are marked ready for review
 - pull requests from forks of public repositories, and from outside contributors' forks of private ones (see [below](#pull-requests-from-forks))
-- pull requests on an account with no plan, or out of credits: these get a neutral Check instead
+- pull requests on an account with no plan, or out of credits: these get a neutral Check instead, once per pull request until the account can pay again
 
 1. Sandchest posts a **Sandchest** Check straight away, showing "Scanning…".
 2. It reviews the change in the context of the threat model. A finding has to touch the lines the pull request changed: issues that were already there are left for deep scans.
@@ -112,13 +112,14 @@ Under **Reviews and schedule** on a repository's page, choose Daily, Weekly or M
 
 ## Fix checks
 
-When you push to the default branch, Sandchest checks the repository's open findings whose cited files that push changed. Other open findings aren't touched. Each one is checked again on the new code:
+When you push to the default branch, Sandchest checks the repository's open findings whose cited files that push changed, and its vulnerable-dependency findings when the push changes a lockfile or manifest. Other open findings aren't touched. Each one is checked again on the new code:
 
-- Each step of the attack path is found again by its code, so findings follow code that moved.
-- If the attack path is gone, the finding is marked **fixed**, and its code excerpts are deleted.
-- If the cited code can no longer be found, the finding stays open and is marked **Code moved**. The mark clears when a later scan finds the same finding again. Sandchest never closes a finding just because it lost track of the code.
+- Each step of the attack path is found again by its code, so findings follow code that moved. If the fix rewrote the vulnerable line itself, the finding is checked from the rest of its path.
+- The reviewer sees what the push changed and judges the code as it is after it. The finding is marked **fixed** only when it can point to code that now blocks the attack. Moving, renaming or reformatting the code, or fixing one path while another still reaches it, leaves it open. A fixed finding's code excerpts are deleted.
+- A vulnerable dependency is marked **fixed** when the package is gone or every installed version is clear of the advisories the finding names. It stays open while the reported version is still installed.
+- If none of the cited code can be found any more, the finding stays open and is marked **Code moved**. The mark clears when a later scan finds the same finding again. Sandchest never closes a finding just because it lost track of the code.
 
-Fix checks are free, while the account has at least one credit left.
+Fix checks are free, and run even when the account has no credits left.
 
 ## How Sandchest finds vulnerabilities
 
