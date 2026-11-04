@@ -507,6 +507,19 @@ export async function hasOpenFindings(database: Db, repoId: string): Promise<boo
   return row !== undefined;
 }
 
+/**
+ * Every finding stored for a repository, in the shape the engine needs to
+ * recognise one again: open ones first, then the rest, most recently seen first.
+ */
+export async function knownFindings(database: Db, repoId: string): Promise<Array<{ fingerprint: string; category: string; entryPoint: { file: string; line: number }; attackPath: Array<{ file: string; line: number }> }>> {
+  const rows = await database
+    .select({ fingerprint: findings.fingerprint, category: findings.category, entryPoint: findings.entryPoint, attackPath: findings.attackPath })
+    .from(findings)
+    .where(eq(findings.repoId, repoId))
+    .orderBy(sql`${findings.status} <> 'open'`, desc(findings.lastSeenAt));
+  return rows.map((row) => ({ ...row, entryPoint: row.entryPoint as { file: string; line: number }, attackPath: row.attackPath as Array<{ file: string; line: number }> }));
+}
+
 export async function openFindings(database: Db, repoId: string): Promise<FindingRow[]> {
   return database.select().from(findings).where(and(eq(findings.repoId, repoId), eq(findings.status, "open"))).orderBy(desc(findings.lastSeenAt));
 }

@@ -11,6 +11,7 @@ import {
   claimNotification,
   claimScanSlot,
   EventWriter,
+  knownFindings,
   markDeepScanned,
   markFixed,
   markStale,
@@ -32,6 +33,7 @@ import {
 import { createIndexerClient } from "@sandchest/engine/indexer";
 import { LlmQuotaError } from "@sandchest/engine/llm";
 import {
+  adoptKnownFingerprints,
   changedLines,
   checkFixes,
   relevantChanges,
@@ -203,7 +205,9 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       onEvent,
     });
     if (!model) await saveThreatModel(db(), scan.repo.id, report.threatModel, headSha);
-    const { ids, newIds } = await upsertFindings(db(), scan.repo.id, scan, report.findings.map(toFindingInput));
+    // A rescan's report of a bug already stored updates it (and keeps the team's verdict) rather than filing it again.
+    const recognised = adoptKnownFingerprints(report.findings, await knownFindings(db(), scan.repo.id));
+    const { ids, newIds } = await upsertFindings(db(), scan.repo.id, scan, recognised.map(toFindingInput));
     const credits = scan.kind === "pr_review" ? (report.review?.files ? prReviewCredits(report.review.changedLines) : 0) : (deepScanCredits(report.repo.loc) ?? 0);
     await recordMetrics(db(), scan.id, {
       ...usageOf(report.usage.total),

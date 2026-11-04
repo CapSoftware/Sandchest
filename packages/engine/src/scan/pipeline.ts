@@ -32,6 +32,7 @@ import { createWrap, repoTools, type RouteInfo } from "./tools";
 import type { Runtime } from "./runtime";
 import { validateFindings, type ValidateOptions } from "./validate";
 import { proveFindings } from "./prove";
+import { isFixtureFile } from "./paths";
 import { trustRank, trustTier } from "./trust";
 import { authzConsistencyLeads, authzScoreLeads } from "./consistency";
 import { classifyEntryPoints } from "./classify";
@@ -398,6 +399,12 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     }
   }
 
+  // Code that doesn't ship (tests, fixtures, examples) isn't reachable by an attacker: still reported, hidden by default.
+  for (const finding of findings) {
+    if (!isFixtureFile(finding.entryPoint.file) || !finding.attackPath.every((step) => isFixtureFile(step.file))) continue;
+    finding.confidence = "low";
+    finding.mitigations = [finding.mitigations, "Every cited line is in test, fixture or example code, which doesn't ship."].filter(Boolean).join(" ");
+  }
   // Trust is set from the evidence each finding now carries (validation, origin).
   for (const finding of findings) finding.trust = trustTier(finding);
   // Attribute each finding to the signals that raised it, so outcomes can be traced back to them.
