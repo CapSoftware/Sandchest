@@ -9,6 +9,7 @@
   --high: var(--color-ember);
   --medium: var(--color-honey);
   --low: var(--color-dust);
+  --fixed: #9cc46b;
   --shell: 68rem;
   --gutter: clamp(1rem, 4vw, 2rem);
 }
@@ -858,7 +859,28 @@ html:not([data-js]) .no-js-submit {
 }
 
 .status[data-status="fixed"]::before {
-  background: #9cc46b;
+  background: var(--fixed);
+}
+
+/* A status on a finding row: boxed, so a fixed finding stands out of a list of open ones. */
+.status-badge {
+  gap: 0.4rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--color-edge);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.status-badge::before {
+  width: 0.375rem;
+  height: 0.375rem;
+}
+
+.status-badge[data-status="fixed"] {
+  border-color: color-mix(in srgb, var(--fixed) 50%, transparent);
+  background: color-mix(in srgb, var(--fixed) 10%, transparent);
+  color: var(--fixed);
 }
 
 .finding-title {

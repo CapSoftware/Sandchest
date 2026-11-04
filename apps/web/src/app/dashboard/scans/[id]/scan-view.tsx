@@ -129,11 +129,14 @@ export function ScanView({ row, again, next, waitingOn }: { row: ScanRow; again?
                 <li key={finding.id} className="row finding-row">
                   <HoverLink href={`/dashboard/findings/${finding.id}`}>
                     <Heat severity={finding.severity} label />
-                    <span className="finding-row-title">
-                      {finding.title}
-                      {finding.status !== "open" && <span className="flag">{finding.status}</span>}
+                    <span className="finding-row-title">{finding.title}</span>
+                    <span className="finding-row-when">
+                      {(finding.status === "fixed" || finding.status === "dismissed") && (
+                        <span className="status status-badge" data-status={finding.status}>
+                          {finding.status === "fixed" ? "Fixed" : "Dismissed"}
+                        </span>
+                      )}
                     </span>
-                    <span className="finding-row-when" />
                     {finding.sink && (
                       <span className="finding-row-where">
                         <code>
