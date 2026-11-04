@@ -20,17 +20,17 @@ export async function checkout(benchmark: Benchmark, at: "vulnerable" | "patched
   return checkoutAt(benchmark.source.repo, commit, at === "patched" ? `${benchmark.name}-patched` : benchmark.name);
 }
 
-/** A cached depth-1 checkout of `repo` at `commit`. */
-export async function checkoutAt(repo: string, commit: string, name: string): Promise<string> {
+/** A cached depth-1 checkout of `repo` at `commit`. A token, if given, is sent as a header and never written to disk. */
+export async function checkoutAt(repo: string, commit: string, name: string, token?: string): Promise<string> {
   const dir = join(CACHE, `${name}-${commit.slice(0, 12)}`);
   if (existsSync(join(dir, ".git"))) return dir;
 
   await mkdir(CACHE, { recursive: true });
   const temp = await mkdtemp(join(CACHE, `.${name}-`));
   try {
-    await git(temp, "init", "--quiet");
-    await git(temp, "fetch", "--quiet", "--depth=1", repo, commit);
-    await git(temp, "checkout", "--quiet", "--detach", "FETCH_HEAD");
+    await git(temp, ["init", "--quiet"]);
+    await git(temp, ["fetch", "--quiet", "--depth=1", repo, commit], token);
+    await git(temp, ["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
     // Atomic: a half-finished fetch never looks like a cached checkout.
     await rename(temp, dir);
   } catch (error) {
@@ -40,8 +40,12 @@ export async function checkoutAt(repo: string, commit: string, name: string): Pr
   return dir;
 }
 
-async function git(cwd: string, ...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "ignore", stderr: "pipe", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+async function git(cwd: string, args: string[], token?: string): Promise<void> {
+  // A token goes in a per-process header, so it is never in argv, the URL or FETCH_HEAD.
+  const auth = token
+    ? { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}` }
+    : {};
+  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "ignore", stderr: "pipe", env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...auth } });
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   if (code !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim()}`);
 }

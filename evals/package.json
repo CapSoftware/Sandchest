@@ -13,8 +13,9 @@
     "harvest": "bun --env-file=../.env.local src/harvest.ts",
     "validate": "bun src/validate.ts",
     "judge": "bun src/judge.ts",
-    "prod": "bun src/prod.ts",
-    "scorecard": "bun src/scorecard.ts"
+    "prod": "bun --env-file=../.env.local src/prod.ts",
+    "scorecard": "bun src/scorecard.ts",
+    "replay:prod": "bun --env-file=../.env.local src/replay-prod.ts"
   },
   "dependencies": {
     "@sandchest/db": "workspace:*",
