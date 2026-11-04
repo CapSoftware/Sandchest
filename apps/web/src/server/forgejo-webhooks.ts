@@ -66,10 +66,13 @@ async function onPullRequest(deps: ForgejoDeps, payload: PullRequestEvent): Prom
   if (!repo) return { status: "ignored", detail: "repo not enabled" };
 
   // Fork PRs on public repos need a maintainer's `/sandchest review`. Elsewhere, authors with write access are
-  // reviewed automatically: Forgejo has no author association, so it is asked.
+  // reviewed automatically: Forgejo has no author association, so it is asked. Not only for forks: an AGit PR
+  // (`git push origin HEAD:refs/for/main/topic`) needs just read access, and its head is the base repository.
   const fork = pr.head.repo_id !== pr.base.repo_id;
   if (fork && !repo.private) return { status: "ignored", detail: "public fork PR: waiting for /sandchest review" };
-  if (fork && !WRITE_ROLES.has(await deps.forgejo.permission(repo.fullName, pr.user.login))) return { status: "ignored", detail: "fork PR from an untrusted author" };
+  if (!WRITE_ROLES.has(await deps.forgejo.permission(repo.fullName, pr.user.login))) {
+    return { status: "ignored", detail: repo.private ? "PR from an author without write access" : "PR from an author without write access: waiting for /sandchest review" };
+  }
 
   const scanId = await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "pr_review", headSha: pr.head.sha, baseSha: pr.base.sha, prNumber: pr.number });
   return { status: "handled", scans: scanId ? [scanId] : [] };

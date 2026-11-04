@@ -108,7 +108,7 @@ const people: Record<string, { id: number; login: string; owner: boolean; repos:
   "bob-token": { id: 502, login: "bob", owner: false, repos: [{ id: 11, permissions: { admin: false, push: false, pull: true } }, { id: 12, permissions: { admin: false, push: true, pull: true } }] },
 };
 /** Collaborators' permissions on every repo. */
-const permissions: Record<string, string> = { maintainer: "write", outsider: "read" };
+const permissions: Record<string, string> = { dev: "write", maintainer: "write", outsider: "read" };
 
 const fakeFetch = (async (input: string, init: RequestInit = {}) => {
   const url = new URL(input);
@@ -404,8 +404,12 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     expect((await deliver("pull_request", "d-closed", { ...prEvent(repos[0]!, "abc"), action: "closed" })).outcome.status).toBe("ignored");
 
     expect((await deliver("pull_request", "d-fork", prEvent(repos[1]!, "abc", { fork: true }))).outcome.detail).toContain("waiting for /sandchest review");
-    expect((await deliver("pull_request", "d-fork-private", prEvent(repos[0]!, "abc", { fork: true, author: "outsider", number: 6 }))).outcome.detail).toBe("fork PR from an untrusted author");
+    expect((await deliver("pull_request", "d-fork-private", prEvent(repos[0]!, "abc", { fork: true, author: "outsider", number: 6 }))).outcome.detail).toBe("PR from an author without write access");
     expect((await deliver("pull_request", "d-fork-member", prEvent(repos[0]!, "abcd", { fork: true, author: "maintainer", number: 7 }))).outcome.scans).toHaveLength(1);
+    // AGit (`git push origin HEAD:refs/for/main/topic`) needs only read access, and its head is the base repository itself.
+    expect((await deliver("pull_request", "d-agit-public", prEvent(repos[1]!, "abc", { author: "outsider", number: 8 }))).outcome.detail).toContain("waiting for /sandchest review");
+    expect((await deliver("pull_request", "d-agit-private", prEvent(repos[0]!, "abc", { author: "outsider", number: 9 }))).outcome.detail).toBe("PR from an author without write access");
+    expect((await deliver("pull_request", "d-agit-member", prEvent(repos[1]!, "abcde", { author: "maintainer", number: 10 }))).outcome.scans).toHaveLength(1);
 
     expect((await deliver("push", "d-branch", { ref: "refs/heads/feature", before: "a", after: "b", repository: repos[0] })).outcome.detail).toBe("not the default branch");
     const stranger = { id: 77, full_name: "someone/else", private: true, default_branch: "main", owner: { id: 5, login: "someone" } };
