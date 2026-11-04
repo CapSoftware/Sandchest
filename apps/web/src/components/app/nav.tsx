@@ -1,6 +1,6 @@
 "use client";
 import { HoverLink } from "./hover-link";
-import { usePathname } from "next/navigation";
+import { useDashboardPath } from "./demo";
 import { NavIcon } from "./nav-icons";
 
 /** The hacker's own page: lit by the hacker's name in the header, not by a section. */
@@ -11,7 +11,7 @@ export const HACKER_PATH = "/dashboard/hacker";
  * A row of words in the header on wide screens; on a phone, a tab bar along the foot of the screen, each with its icon.
  */
 export function AppNav({ links }: { links: ReadonlyArray<{ href: string; label: string }> }) {
-  const path = usePathname();
+  const path = useDashboardPath();
   const current = path === HACKER_PATH || path.startsWith(`${HACKER_PATH}/`) ? undefined : currentSection(path, links);
   return (
     <nav className="app-nav" aria-label="Main">

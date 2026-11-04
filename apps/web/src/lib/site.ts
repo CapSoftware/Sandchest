@@ -22,6 +22,7 @@ export const site = {
     getStarted: "/get-started",
     signIn: "/sign-in",
     dashboard: "/dashboard",
+    demo: "/demo",
     docs: "/docs",
     scans: "/docs/scans",
     findings: "/docs/findings",

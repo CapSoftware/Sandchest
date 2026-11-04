@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useDemo } from "@/components/app/demo";
 import { HoverLink } from "@/components/app/hover-link";
 import { recruitPainter, type RecruitModel } from "@/components/rig/paint-recruit";
 import { RigView } from "@/components/rig/rig-view";
@@ -8,7 +9,7 @@ import type { Painter } from "@/components/rig/screen";
 import type { ShotName } from "@/components/rig/shots";
 import { newSignals } from "@/components/rig/signals";
 import { PHOSPHORS, swatch, validHandle, type HackerProfile } from "@/lib/hacker";
-import { saveHacker } from "@/server/hacker-actions";
+import { saveHacker, type SaveHackerOutcome } from "@/server/hacker-actions";
 import { HandleField } from "./handle-field";
 import { Keycap } from "./keycap";
 import { LookMenu, LOOKS } from "./look-menu";
@@ -35,6 +36,7 @@ interface Props {
  */
 export function HackerStage({ orgId, login, profile: saved, admin, job }: Props) {
   const router = useRouter();
+  const demo = useDemo();
   const [editing, setEditing] = useState(false);
   const [profile, setProfile] = useState(saved);
   const [look, setLook] = useState(-1);
@@ -86,13 +88,14 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
     if (!changed) return close();
     if (!handleOk || saving) return;
     startSave(async () => {
-      const outcome = await saveHacker(orgId, profile);
+      // The demo's hacker changes for this visit only: there's no account to save it to.
+      const outcome: SaveHackerOutcome = demo ? { ok: true } : await saveHacker(orgId, profile);
       if ("error" in outcome) return setError(outcome.error);
       setBase(profile);
       setEditing(false);
       setLook(-1);
       signals.current.joltUntil = signals.current.now + 0.4;
-      router.refresh();
+      if (!demo) router.refresh();
       requestAnimationFrame(() => edit.current?.focus());
     });
   };

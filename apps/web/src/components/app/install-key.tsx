@@ -1,8 +1,17 @@
 import { config } from "@/server/config";
 
+/** The App's URL name. The demo draws this key too, and may run with no server settings at all: then there's no key. */
+function appSlug(): string | undefined {
+  try {
+    return config().GITHUB_APP_SLUG;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Install (or add repositories to) the GitHub App. */
 export function InstallKey({ secondary = false }: { secondary?: boolean }) {
-  const slug = config().GITHUB_APP_SLUG;
+  const slug = appSlug();
   if (!slug) return null;
   const href = `https://github.com/apps/${slug}/installations/new`;
   return secondary ? (

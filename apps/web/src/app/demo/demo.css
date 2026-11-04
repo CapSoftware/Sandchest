@@ -1,0 +1,99 @@
+/* The demo's own frame: a strip saying what this is, and a note when something can't happen here. */
+
+.demo-bar {
+  border-bottom: 1px solid var(--color-seam);
+  background: color-mix(in oklab, var(--color-gold) 9%, var(--color-void));
+  color: var(--color-sand);
+  font-size: 0.8125rem;
+}
+
+.demo-bar .shell {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 2.25rem;
+  padding-block: 0.4rem;
+}
+
+.demo-bar p {
+  margin: 0;
+}
+
+.demo-bar strong {
+  color: var(--color-gold);
+  font-weight: 600;
+}
+
+.demo-bar-home {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--color-dust);
+}
+
+.demo-bar-home:hover {
+  color: var(--color-bright);
+}
+
+.demo-start {
+  margin-left: 0.25rem;
+}
+
+.demo-bar-short {
+  display: none;
+}
+
+@media (max-width: 44rem) {
+  .demo-bar-more {
+    display: none;
+  }
+  .demo-bar-short {
+    display: inline;
+  }
+}
+
+.demo-note-slot {
+  position: fixed;
+  inset: auto 0 calc(1.5rem + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding-inline: var(--gutter, 1rem);
+  pointer-events: none;
+}
+
+.demo-note {
+  max-width: 34rem;
+  margin: 0;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--color-edge);
+  box-shadow: inset 3px 0 0 var(--color-gold);
+  background: var(--color-soot);
+  color: var(--color-sand);
+  font-size: 0.875rem;
+  pointer-events: auto;
+}
+
+.demo-note a {
+  color: var(--color-gold);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .demo-note {
+    animation: demo-note-in 0.18s ease-out;
+  }
+}
+
+@keyframes demo-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+
+/* Above the phone's tab bar. */
+@media (max-width: 44rem) {
+  .demo-note-slot {
+    bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+}

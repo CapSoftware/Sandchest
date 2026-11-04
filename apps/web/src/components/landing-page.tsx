@@ -70,7 +70,9 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
             What a finding looks like
           </h2>
           <FindingStrip />
-          <p className="strip-caption">An example. Identifying details are redacted.</p>
+          <p className="strip-caption">
+            An example. Identifying details are redacted. <a href={site.links.demo}>Click around the demo</a> to see whole findings, and a scan as it runs.
+          </p>
         </section>
       </main>
 

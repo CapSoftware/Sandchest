@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AGENT_APPS, AGENT_NAME, agentCommand, agentOpening, openAgent, pasteNote } from "@/lib/agent-links";
 import { promptTaken } from "@/server/actions";
 import { AgentLogo } from "./agent-logo";
+import { useDemo } from "./demo";
 
 type Target = "prompt" | "claude" | "codex";
 
@@ -15,6 +16,7 @@ const TABS: Array<{ id: Target; label: string }> = [
 /** The fix prompt: open it in a coding agent, or copy it as a prompt or a terminal command. */
 export function FixPrompt({ findingId, prompt, repo }: { findingId: string; prompt: string; repo: string }) {
   const [target, setTarget] = useState<Target>("prompt");
+  const demo = useDemo();
   const [copied, setCopied] = useState<Target | undefined>();
   const text = target === "prompt" ? prompt : agentCommand(target, prompt);
   const [note, setNote] = useState<string | undefined>();
@@ -24,7 +26,7 @@ export function FixPrompt({ findingId, prompt, repo }: { findingId: string; prom
     await navigator.clipboard.writeText(text);
     setCopied(target);
     setTimeout(() => setCopied((current) => (current === target ? undefined : current)), 1_800);
-    void promptTaken(findingId);
+    if (!demo) void promptTaken(findingId);
   }
 
   return (
@@ -56,7 +58,7 @@ export function FixPrompt({ findingId, prompt, repo }: { findingId: string; prom
             href={opening.href}
             title={opening.paste ? `Too long for a link: copies the prompt, then opens ${AGENT_NAME[app]} to paste it in` : undefined}
             onClick={(event) => {
-              void promptTaken(findingId);
+              if (!demo) void promptTaken(findingId);
               setNote(undefined);
               // A prompt that fits goes in the link; one that doesn't goes on the clipboard first.
               if (!opening.paste) return;

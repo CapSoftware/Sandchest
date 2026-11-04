@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { AGENT_APPS, AGENT_NAME, agentCommand, agentOpening, COMMAND_ARGUMENT_LIMIT, openAgent, pasteNote, type AgentApp, type AgentOpening } from "@/lib/agent-links";
 import { copyFindings, findingsPrompt, findingsTaken, type ExportFiltersInput } from "@/server/actions";
 import { AgentLogo } from "./agent-logo";
+import { useDemo } from "./demo";
 
 type CopyFormat = "prompt" | "claude" | "codex" | "markdown" | "json";
 
@@ -31,7 +32,12 @@ type State = { phase: "idle" } | { phase: "copying"; format: CopyFormat } | { ph
  * them as a document. The agent prompt is prepared when the menu opens, so an
  * "Open in" link is a plain link by the time it's clicked.
  */
-export function CopyFindings({ filters, count }: { filters: ExportFiltersInput; count: number }) {
+export function CopyFindings(props: { filters: ExportFiltersInput; count: number }) {
+  // The demo's findings aren't anyone's to hand over: the server has none of them.
+  return useDemo() ? null : <CopyMenu {...props} />;
+}
+
+function CopyMenu({ filters, count }: { filters: ExportFiltersInput; count: number }) {
   const menu = useRef<HTMLDetailsElement>(null);
   const [state, setState] = useState<State>({ phase: "idle" });
   const [prepared, setPrepared] = useState<Prepared | "failed" | undefined>();
