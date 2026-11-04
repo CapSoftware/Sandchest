@@ -129,7 +129,7 @@ Add these to `docker/.env`:
 | `FORGEJO_WEBHOOKS` | Optional. `auto` (the default) adds the webhooks itself; `manual` leaves them to you. |
 | `FORGEJO_CLIENT_ID`, `FORGEJO_CLIENT_SECRET` | Optional, for signing in with Forgejo (step 4). |
 
-Then restart with `docker compose up -d`. Archived repositories, mirrors and empty repositories are skipped. Every ten minutes Sandchest reads the covered repositories again: new ones are recorded and get their threat model, and removed ones are disabled, as on GitHub. A repository that sends a webhook first is recorded right away. Take an owner off `FORGEJO_OWNERS` and Sandchest forgets it, as if the App had been uninstalled.
+Then restart with `docker compose up -d`. Archived repositories, mirrors and empty repositories are skipped. Every ten minutes Sandchest reads the covered repositories again: new ones are recorded and get their threat model, and removed ones are disabled, as on GitHub. A threat model that fails to build is not retried by this sweep; the next push to the default branch tries again. A repository that sends a webhook first is recorded right away. Take an owner off `FORGEJO_OWNERS` and Sandchest forgets it, as if the App had been uninstalled.
 
 ### 3. Webhooks
 

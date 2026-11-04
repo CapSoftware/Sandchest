@@ -445,6 +445,21 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     expect(await database.query.users.findFirst({ where: (users, { eq }) => eq(users.id, alice!.id) })).toMatchObject({ login: "alice", githubUserId: null });
   });
 
+  test("the sweep leaves a failed recon alone, and starts one for a repository that comes back", async () => {
+    started.splice(0);
+    const repo = (await repoByGithubId(database, 12, "forgejo"))!;
+    await database.$client`delete from repo_memory where repo_id = ${repo.id}`;
+    await database.$client`update scans set status = 'failed' where repo_id = ${repo.id} and kind = 'recon'`;
+    await syncForgejo(forgejoDeps()!);
+    expect(started).toHaveLength(0);
+
+    await deliver("repository", "d-repo-gone", { action: "deleted", repository: repos[1] });
+    await syncForgejo(forgejoDeps()!);
+    expect((await repoByGithubId(database, 12, "forgejo"))?.enabled).toBe(true);
+    expect(started).toHaveLength(1);
+    expect((await scanById(database, started.splice(0)[0]!))).toMatchObject({ repoId: repo.id, kind: "recon" });
+  });
+
   test("a deleted repository is disabled, and an owner taken off FORGEJO_OWNERS is forgotten", async () => {
     await deliver("repository", "d-repo-deleted", { action: "deleted", repository: repos[1] });
     expect((await repoByGithubId(database, 12, "forgejo"))?.enabled).toBe(false);

@@ -6,7 +6,7 @@
  * Forgejo id. Run by the sweep, so a new repository is picked up within ten
  * minutes, and by a webhook from a repository not seen before.
  */
-import { disableRepos, installedOrgs, orgRepos, removeInstallation, upsertInstallation, type Org } from "@sandchest/db";
+import { disableRepos, installedOrgs, orgByInstallation, orgRepos, removeInstallation, upsertInstallation, type Org } from "@sandchest/db";
 import type { Forgejo, ForgejoConfig } from "@sandchest/forgejo";
 import type { InstalledRepository } from "@sandchest/github";
 import { billingEnabled, canScan } from "./billing";
@@ -83,9 +83,10 @@ export async function recordForgejoRepo(deps: ForgejoDeps, fullName: string): Pr
 }
 
 /**
- * Records an owner's covered repositories. Unless `partial`, its other
- * repositories are disabled (gone, archived, or no longer listed), like
- * repositories removed from a GitHub installation.
+ * Records an owner's covered repositories, and starts recon when any of them
+ * is new or enabled again. Unless `partial`, its other repositories are
+ * disabled (gone, archived, or no longer listed), like repositories removed
+ * from a GitHub installation.
  */
 async function syncOwner(deps: ForgejoDeps, name: string, only: string[] | undefined, options: { partial: boolean }): Promise<Org> {
   const { forgejo, db } = deps;
@@ -93,6 +94,9 @@ async function syncOwner(deps: ForgejoDeps, name: string, only: string[] | undef
   const repos: InstalledRepository[] = only
     ? (await Promise.all(only.map((repo) => forgejo.repository(`${owner.login}/${repo}`)))).filter((repo) => !repo.empty)
     : await forgejo.repositories(owner);
+  // An owner's "installation id" is its own Forgejo id.
+  const known = await orgByInstallation(db, owner.id, "forgejo");
+  const enabled = new Set(known ? (await orgRepos(db, known.id)).map((repo) => repo.githubRepoId) : []);
   const { org } = await upsertInstallation(
     db,
     owner.id,
@@ -104,7 +108,8 @@ async function syncOwner(deps: ForgejoDeps, name: string, only: string[] | undef
     await disableRepos(db, (await orgRepos(db, org.id)).filter((repo) => !listed.has(repo.githubRepoId)).map((repo) => repo.githubRepoId), "forgejo");
     if (forgejo.config.manageWebhooks) await addWebhooks(deps, !only && owner.type === "Organization" ? [{ org: owner.login }] : repos.map((repo) => ({ repo: repo.full_name })), org.id);
   }
-  await startRecon(deps, org);
+  // Only for repositories new or back since the last sync: the sweep runs every ten minutes, and would otherwise retry a failed recon each time.
+  if (repos.some((repo) => !enabled.has(repo.id))) await startRecon(deps, org);
   return org;
 }
 
