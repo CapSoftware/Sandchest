@@ -6,10 +6,17 @@
  * a few lines, and it names the same class (category or CWE). Committed
  * secrets also count when a secret lead lands on the location.
  *
- * Precision is over the findings the product shows by default: high and
+ * Findings are taken in report order. The first to land on an expected
+ * bug's location is its true positive; later ones on the same location are
+ * duplicates (a bug with three vulnerable copies, listed as three locations,
+ * can be reported three times without duplicates). A duplicate is noise to the reader, so it is
+ * counted apart from precision and reported as the duplicate rate.
+ *
+ * Precision is over unique findings the product shows by default: high and
  * critical, excluding low confidence. Findings that match nothing are false
- * positives if they land on a decoy or a human judged them so; otherwise
- * they wait for judgement, and precision is reported as a range.
+ * positives if they land on a decoy or a human judged them so; otherwise they
+ * wait for judgement, and precision is a range: unjudged counted as false
+ * (strict) and left out (known). The strict figure is the one we hold to.
  */
 import type { Finding, Lead, ScanReport } from "@sandchest/engine/scan";
 import type { Benchmark, CodeRange, ExpectedFinding } from "./benchmark";
@@ -17,97 +24,214 @@ import type { Benchmark, CodeRange, ExpectedFinding } from "./benchmark";
 /** Lines of slack either side of an expected location. */
 export const TOLERANCE = 5;
 
-export type Judgement = "real" | "false_positive";
-/** Human judgements by finding fingerprint. Fingerprints are stable across scans, so judgements carry over. */
-export type Judgements = Record<string, Judgement>;
+/**
+ * - `real`: an exploitable bug the benchmark doesn't list.
+ * - `false_positive`: the attack doesn't work.
+ * - `not_security`: true, but nobody but the attacker is harmed (reliability, self-harm, admin-only).
+ * - `test_code`: in tests, fixtures or examples that don't ship.
+ * - `duplicate`: the same bug as `duplicateOf`.
+ */
+export const VERDICTS = ["real", "false_positive", "not_security", "test_code", "duplicate"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+export interface JudgementRecord {
+  verdict: Verdict;
+  /** Fingerprint of the canonical finding, for duplicates. */
+  duplicateOf?: string;
+  /** The severity a reviewer would give it, when it differs. */
+  severity?: Finding["severity"];
+  note?: string;
+  by?: string;
+  at?: string;
+}
+/** Human judgements by finding fingerprint. A bare string is shorthand for `{ verdict }` (older files). */
+export type Judgements = Record<string, Verdict | JudgementRecord>;
+
+export function judgementOf(judgements: Judgements, fingerprint: string): JudgementRecord | undefined {
+  const value = judgements[fingerprint];
+  return typeof value === "string" ? { verdict: value } : value;
+}
+
+export type Outcome = "true_positive" | "false_positive" | "duplicate" | "unjudged";
 
 export interface FindingScore {
   fingerprint: string;
   title: string;
+  category: Finding["category"];
   severity: Finding["severity"];
   confidence: Finding["confidence"];
   at: string;
+  /** Shown by default: critical or high, not low confidence. */
+  shown: boolean;
+  /** Every cited line is in test, fixture or example code. */
+  testCode: boolean;
   /** Expected ids this finding matches. */
   matches: string[];
-  verdict: "true_positive" | "false_positive" | "unjudged";
-  /** Why it was ruled a false positive, if it was. */
-  reason?: "decoy" | "judged";
+  outcome: Outcome;
+  /** Why it was ruled a false positive or duplicate. */
+  reason?: "decoy" | "judged" | "same_expected" | Exclude<Verdict, "real" | "duplicate">;
 }
 
 export interface BenchmarkScore {
   name: string;
   kind: Benchmark["kind"];
   expected: { total: number; serious: number };
-  found: { total: number; serious: number };
+  found: { total: number; serious: number; seriousShown: number };
   missed: Array<Pick<ExpectedFinding, "id" | "title" | "severity">>;
   /** Shown findings: high or critical, not low confidence. */
-  shown: { total: number; truePositives: number; falsePositives: number; unjudged: number };
+  shown: { total: number; truePositives: number; falsePositives: number; duplicates: number; unjudged: number; testCode: number };
+  /** Every finding, whatever its severity. */
+  all: { total: number; truePositives: number; falsePositives: number; duplicates: number; unjudged: number };
   /** Recall over critical and high expected findings. */
   recall: number | null;
+  /** Recall counting only expected critical/high bugs that a shown finding matched: what a user sees by default. */
+  recallShown: number | null;
   recallAll: number | null;
-  /** Precision with unjudged findings counted as false (lower bound) and left out (known). */
   precision: { lower: number | null; known: number | null };
+  /** Over every finding, any severity. */
+  precisionAll: { lower: number | null; known: number | null };
+  /** Severity of the best match for each found expected bug, against the benchmark's. */
+  severity: { exact: number; under: number; over: number };
+  /** Expected id → the fingerprint that matched it first (for stability across runs). */
+  matchedBy: Record<string, string>;
   findings: FindingScore[];
 }
 
 const SERIOUS = new Set(["critical", "high"]);
+const RANK = { critical: 0, high: 1, medium: 2, low: 3 } as const;
+
+/** Test, fixture, example and benchmark directories. Kept independent of the engine's own list so the harness measures it. */
+const TEST_SEGMENT = /(^|\/)(tests?|__tests__|__mocks__|fixtures?|testdata|mocks?|specs?|examples?|e2e|stories|cypress|playwright|evals?|benchmarks?|demo|samples?)(\/|$)/i;
+
+export function isTestPath(file: string): boolean {
+  return TEST_SEGMENT.test(file) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(file) || /(^|\/)test_[^/]+\.py$/.test(file);
+}
+
+export function isShown(finding: Pick<Finding, "severity" | "confidence">): boolean {
+  return SERIOUS.has(finding.severity) && finding.confidence !== "low";
+}
 
 export function score(benchmark: Benchmark, report: ScanReport, judgements: Judgements = {}): BenchmarkScore {
-  const found = new Set<string>();
+  const firstMatch = new Map<string, string>();
+  /** `expected id#location` already reported: a later finding on the same spot is a duplicate. */
+  const claimed = new Set<string>();
+  const severityByExpected = new Map<string, Finding["severity"]>();
   const findings: FindingScore[] = report.findings.map((finding) => {
-    const matches = benchmark.expected.filter((expected) => matchesFinding(expected, finding)).map((expected) => expected.id);
-    matches.forEach((id) => found.add(id));
+    const hits = benchmark.expected.flatMap((expected) => {
+      const range = matchRange(expected, finding);
+      return range === null ? [] : [{ id: expected.id, spot: `${expected.id}#${range}` }];
+    });
+    const matches = hits.map((h) => h.id);
     const sink = finding.attackPath.at(-1)!;
+    const cited = [finding.entryPoint, ...finding.attackPath];
     const decoy = benchmark.decoys.some((range) => within(range, sink.file, sink.line, 0));
-    const judged = judgements[finding.fingerprint];
-    let verdict: FindingScore["verdict"] = "unjudged";
+    const judged = judgementOf(judgements, finding.fingerprint);
+    const fresh = hits.filter((h) => !claimed.has(h.spot));
+    let outcome: Outcome = "unjudged";
     let reason: FindingScore["reason"];
-    if (matches.length > 0 || judged === "real") verdict = "true_positive";
-    else if (decoy || judged === "false_positive") {
-      verdict = "false_positive";
-      reason = decoy ? "decoy" : "judged";
+    if (hits.length > 0 && fresh.length === 0) {
+      outcome = "duplicate";
+      reason = "same_expected";
+    } else if (hits.length > 0 || judged?.verdict === "real") outcome = "true_positive";
+    else if (judged?.verdict === "duplicate") {
+      outcome = "duplicate";
+      reason = "judged";
+    } else if (decoy || judged) {
+      outcome = "false_positive";
+      reason = decoy ? "decoy" : judged!.verdict === "false_positive" ? "judged" : (judged!.verdict as "not_security" | "test_code");
+    }
+    for (const h of hits) {
+      claimed.add(h.spot);
+      if (!firstMatch.has(h.id)) firstMatch.set(h.id, finding.fingerprint);
+    }
+    for (const id of matches) {
+      const best = severityByExpected.get(id);
+      if (!best || RANK[finding.severity] < RANK[best]) severityByExpected.set(id, finding.severity);
     }
     return {
       fingerprint: finding.fingerprint,
       title: finding.title,
+      category: finding.category,
       severity: finding.severity,
       confidence: finding.confidence,
       at: `${sink.file}:${sink.line}`,
+      shown: isShown(finding),
+      testCode: cited.every((step) => isTestPath(step.file)),
       matches,
-      verdict,
+      outcome,
       reason,
     };
   });
 
+  const found = new Set(firstMatch.keys());
+  const foundShown = new Set(findings.filter((f) => f.shown).flatMap((f) => f.matches));
   for (const expected of benchmark.expected) {
     if (expected.category === "hardcoded_secret" && report.leads.some((lead) => matchesSecretLead(expected, lead))) found.add(expected.id);
   }
 
   const serious = benchmark.expected.filter((e) => SERIOUS.has(e.severity));
-  const shown = findings.filter((f) => SERIOUS.has(f.severity) && f.confidence !== "low");
-  const truePositives = shown.filter((f) => f.verdict === "true_positive").length;
-  const falsePositives = shown.filter((f) => f.verdict === "false_positive").length;
-  const unjudged = shown.length - truePositives - falsePositives;
+  const shown = findings.filter((f) => f.shown);
+  const tally = (list: FindingScore[]) => {
+    const count = (outcome: Outcome) => list.filter((f) => f.outcome === outcome).length;
+    return { total: list.length, truePositives: count("true_positive"), falsePositives: count("false_positive"), duplicates: count("duplicate"), unjudged: count("unjudged") };
+  };
+  const shownTally = tally(shown);
+  const allTally = tally(findings);
+  const severity = { exact: 0, under: 0, over: 0 };
+  for (const expected of benchmark.expected) {
+    const got = severityByExpected.get(expected.id);
+    if (!got) continue;
+    const delta = RANK[got] - RANK[expected.severity];
+    if (delta === 0) severity.exact++;
+    else if (delta > 0) severity.under++;
+    else severity.over++;
+  }
 
   return {
     name: benchmark.name,
     kind: benchmark.kind,
     expected: { total: benchmark.expected.length, serious: serious.length },
-    found: { total: found.size, serious: serious.filter((e) => found.has(e.id)).length },
+    found: { total: found.size, serious: serious.filter((e) => found.has(e.id)).length, seriousShown: serious.filter((e) => foundShown.has(e.id)).length },
     missed: benchmark.expected.filter((e) => !found.has(e.id)).map(({ id, title, severity }) => ({ id, title, severity })),
-    shown: { total: shown.length, truePositives, falsePositives, unjudged },
+    shown: { ...shownTally, testCode: shown.filter((f) => f.testCode).length },
+    all: allTally,
     recall: ratio(serious.filter((e) => found.has(e.id)).length, serious.length),
+    recallShown: ratio(serious.filter((e) => foundShown.has(e.id)).length, serious.length),
     recallAll: ratio(found.size, benchmark.expected.length),
-    precision: { lower: ratio(truePositives, shown.length), known: ratio(truePositives, truePositives + falsePositives) },
+    precision: precisionOf(shownTally),
+    precisionAll: precisionOf(allTally),
+    severity,
+    matchedBy: Object.fromEntries(firstMatch),
     findings,
   };
 }
 
-function matchesFinding(expected: ExpectedFinding, finding: Finding): boolean {
+/** Over unique findings: duplicates are left out (they are counted as the duplicate rate). */
+function precisionOf(t: { truePositives: number; falsePositives: number; unjudged: number }): { lower: number | null; known: number | null } {
+  return { lower: ratio(t.truePositives, t.truePositives + t.falsePositives + t.unjudged), known: ratio(t.truePositives, t.truePositives + t.falsePositives) };
+}
+
+export function matchesFinding(expected: ExpectedFinding, finding: Pick<Finding, "category" | "cwe" | "entryPoint" | "attackPath">, ranges = expected.locations): boolean {
+  return matchRange(expected, finding, ranges) !== null;
+}
+
+/**
+ * Which expected location a finding lands on, or null. The class must agree
+ * (category or CWE), and either its sink (last hop) is within a location, or
+ * two of its cited lines are. One passing hop is not enough: attack paths run
+ * through shared lines (route tables, auth middleware) that sit inside other
+ * bugs' locations.
+ */
+export function matchRange(expected: ExpectedFinding, finding: Pick<Finding, "category" | "cwe" | "entryPoint" | "attackPath">, ranges = expected.locations): number | null {
   const sameClass = finding.category === expected.category || (finding.cwe !== null && expected.cwe.includes(finding.cwe));
-  if (!sameClass) return false;
-  const cited = [finding.entryPoint, ...finding.attackPath];
-  return cited.some(({ file, line }) => expected.locations.some((range) => within(range, file, line, TOLERANCE)));
+  if (!sameClass) return null;
+  const sink = finding.attackPath.at(-1)!;
+  const atSink = ranges.findIndex((range) => within(range, sink.file, sink.line, TOLERANCE));
+  if (atSink >= 0) return atSink;
+  const cited = [...new Map([finding.entryPoint, ...finding.attackPath].map((s) => [`${s.file}:${s.line}`, s])).values()];
+  const counts = ranges.map((range) => cited.filter((s) => within(range, s.file, s.line, TOLERANCE)).length);
+  if (counts.reduce((a, b) => a + b, 0) < 2) return null;
+  return counts.indexOf(Math.max(...counts));
 }
 
 function matchesSecretLead(expected: ExpectedFinding, lead: Lead): boolean {
@@ -122,27 +246,124 @@ function within(range: CodeRange, file: string, line: number, tolerance: number)
   return range.file === file && line >= range.startLine - tolerance && line <= range.endLine + tolerance;
 }
 
-function ratio(numerator: number, denominator: number): number | null {
+export function ratio(numerator: number, denominator: number): number | null {
   return denominator === 0 ? null : numerator / denominator;
+}
+
+/**
+ * A scan of the commit that fixed the benchmark's bugs. Any finding there that
+ * still matches a fixed bug (at its patched location) is a confirmed false
+ * positive: the fix is the ground truth. Partial fixes are left out.
+ */
+export interface PatchedScore {
+  name: string;
+  /** Expected bugs with a clean fix and known patched location. */
+  checked: number;
+  /** Of those, how many the scan still reported. */
+  reflagged: string[];
+  findings: number;
+}
+
+export function scorePatched(benchmark: Benchmark, report: ScanReport): PatchedScore {
+  const fixed = benchmark.expected.filter((e) => !e.partialFix && e.patchedLocations && e.patchedLocations.length > 0);
+  const reflagged = fixed.filter((e) => report.findings.some((f) => isShown(f) && matchesFinding(e, f, e.patchedLocations))).map((e) => e.id);
+  return { name: benchmark.name, checked: fixed.length, reflagged, findings: report.findings.length };
 }
 
 export interface Aggregate {
   recall: number | null;
+  recallShown: number | null;
   precision: { lower: number | null; known: number | null };
+  precisionAll: { lower: number | null; known: number | null };
   unjudged: number;
+  shown: number;
+  /** Duplicates ÷ shown findings. */
+  duplicateRate: number | null;
+  /** Shown findings entirely in test/fixture/example code ÷ shown findings. */
+  testCodeRate: number | null;
+  severity: { exact: number; under: number; over: number; accuracy: number | null };
+  /** Fixed bugs still reported on the fixed commit ÷ fixed bugs checked. */
+  patchedFpRate: number | null;
+  patchedChecked: number;
 }
 
 /** Pools counts across benchmarks rather than averaging ratios, so big benchmarks weigh more. */
-export function aggregate(scores: BenchmarkScore[]): Aggregate {
+export function aggregate(scores: BenchmarkScore[], patched: PatchedScore[] = []): Aggregate {
   const vulnerable = scores.filter((s) => s.kind === "vulnerable");
-  const expected = vulnerable.reduce((sum, s) => sum + s.expected.serious, 0);
-  const found = vulnerable.reduce((sum, s) => sum + s.found.serious, 0);
-  const shown = scores.reduce((sum, s) => sum + s.shown.total, 0);
-  const tp = scores.reduce((sum, s) => sum + s.shown.truePositives, 0);
-  const fp = scores.reduce((sum, s) => sum + s.shown.falsePositives, 0);
+  const sum = (pick: (s: BenchmarkScore) => number, list = scores) => list.reduce((n, s) => n + pick(s), 0);
+  const expected = sum((s) => s.expected.serious, vulnerable);
+  const tp = sum((s) => s.shown.truePositives);
+  const fp = sum((s) => s.shown.falsePositives);
+  const unjudged = sum((s) => s.shown.unjudged);
+  const shown = sum((s) => s.shown.total);
+  const allTp = sum((s) => s.all.truePositives);
+  const allFp = sum((s) => s.all.falsePositives);
+  const allUnjudged = sum((s) => s.all.unjudged);
+  const severity = { exact: sum((s) => s.severity.exact), under: sum((s) => s.severity.under), over: sum((s) => s.severity.over) };
+  const checked = patched.reduce((n, p) => n + p.checked, 0);
   return {
-    recall: ratio(found, expected),
-    precision: { lower: ratio(tp, shown), known: ratio(tp, tp + fp) },
-    unjudged: shown - tp - fp,
+    recall: ratio(sum((s) => s.found.serious, vulnerable), expected),
+    recallShown: ratio(sum((s) => s.found.seriousShown, vulnerable), expected),
+    precision: { lower: ratio(tp, tp + fp + unjudged), known: ratio(tp, tp + fp) },
+    precisionAll: { lower: ratio(allTp, allTp + allFp + allUnjudged), known: ratio(allTp, allTp + allFp) },
+    unjudged,
+    shown,
+    duplicateRate: ratio(sum((s) => s.shown.duplicates), shown),
+    testCodeRate: ratio(sum((s) => s.shown.testCode), shown),
+    severity: { ...severity, accuracy: ratio(severity.exact, severity.exact + severity.under + severity.over) },
+    patchedFpRate: ratio(patched.reduce((n, p) => n + p.reflagged.length, 0), checked),
+    patchedChecked: checked,
+  };
+}
+
+/**
+ * Agreement between repeated scans of one benchmark. Variance is structural
+ * (parallel agentic exploration), so each change is judged on several runs.
+ */
+export interface Stability {
+  name: string;
+  runs: number;
+  /** Serious recall per run. */
+  recalls: number[];
+  /** Serious expected bugs found in any run ÷ serious expected. */
+  unionRecall: number | null;
+  /** Serious expected bugs found in every run ÷ found in any. */
+  agreement: number | null;
+  /**
+   * Of expected bugs found in two runs, the share reported under the same
+   * fingerprint. Below 1, a rescan files the same bug again as a new finding.
+   */
+  fingerprintStability: number | null;
+  /** The same, after the product recognises stored findings on a rescan (`adoptKnownFingerprints`): what users see. */
+  recognised?: number | null;
+}
+
+export function stability(benchmark: Benchmark, runs: BenchmarkScore[]): Stability {
+  const serious = benchmark.expected.filter((e) => SERIOUS.has(e.severity)).map((e) => e.id);
+  const foundIn = (s: BenchmarkScore) => new Set(serious.filter((id) => !s.missed.some((m) => m.id === id)));
+  const sets = runs.map(foundIn);
+  const union = new Set(sets.flatMap((s) => [...s]));
+  const every = [...union].filter((id) => sets.every((s) => s.has(id)));
+  let pairs = 0;
+  let same = 0;
+  for (let i = 0; i < runs.length; i++) {
+    for (let j = i + 1; j < runs.length; j++) {
+      for (const id of Object.keys(runs[i]!.matchedBy)) {
+        const other = runs[j]!.matchedBy[id];
+        if (!other) continue;
+        pairs++;
+        // Same bug, same identity: either finding's fingerprint appears among the other run's matches for it.
+        const left = new Set(runs[i]!.findings.filter((f) => f.matches.includes(id)).map((f) => f.fingerprint));
+        if (runs[j]!.findings.some((f) => f.matches.includes(id) && left.has(f.fingerprint))) same++;
+      }
+    }
+  }
+  return {
+    name: benchmark.name,
+    runs: runs.length,
+    recalls: runs.map((s) => s.recall ?? 0),
+    unionRecall: ratio(union.size, serious.length),
+    agreement: ratio(every.length, union.size),
+    fingerprintStability: ratio(same, pairs),
   };
 }

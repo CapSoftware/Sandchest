@@ -2,23 +2,31 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Benchmark } from "./benchmark";
+import { DATA_DIR, REPO_ROOT } from "./data";
 
-export const REPO_ROOT = resolve(import.meta.dir, "../..");
+export { REPO_ROOT };
 const CACHE = join(REPO_ROOT, ".sandchest/benchmarks");
 
 /**
- * A checkout of the benchmark at its pinned commit. Remote benchmarks are
- * fetched once (depth 1) into a gitignored cache and reused.
+ * A checkout of the benchmark at its pinned commit (or, with `"patched"`, at
+ * the commit that fixed it). Remote benchmarks are fetched once (depth 1)
+ * into a gitignored cache and reused. Local sources are relative to the eval
+ * data directory.
  */
-export async function checkout(benchmark: Benchmark): Promise<string> {
-  if ("path" in benchmark.source) return resolve(REPO_ROOT, benchmark.source.path);
+export async function checkout(benchmark: Benchmark, at: "vulnerable" | "patched" = "vulnerable"): Promise<string> {
+  if ("path" in benchmark.source) return resolve(DATA_DIR, benchmark.source.path);
+  const commit = at === "patched" ? benchmark.patched?.commit : benchmark.source.commit;
+  if (!commit) throw new Error(`${benchmark.name} has no patched commit`);
+  return checkoutAt(benchmark.source.repo, commit, at === "patched" ? `${benchmark.name}-patched` : benchmark.name);
+}
 
-  const { repo, commit } = benchmark.source;
-  const dir = join(CACHE, `${benchmark.name}-${commit.slice(0, 12)}`);
+/** A cached depth-1 checkout of `repo` at `commit`. */
+export async function checkoutAt(repo: string, commit: string, name: string): Promise<string> {
+  const dir = join(CACHE, `${name}-${commit.slice(0, 12)}`);
   if (existsSync(join(dir, ".git"))) return dir;
 
   await mkdir(CACHE, { recursive: true });
-  const temp = await mkdtemp(join(CACHE, `.${benchmark.name}-`));
+  const temp = await mkdtemp(join(CACHE, `.${name}-`));
   try {
     await git(temp, "init", "--quiet");
     await git(temp, "fetch", "--quiet", "--depth=1", repo, commit);

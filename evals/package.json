@@ -10,7 +10,11 @@
     "reverify": "bun --env-file=../.env.local src/reverify.ts",
     "fpcheck": "bun --env-file=../.env.local src/fpcheck.ts",
     "outcomes": "bun --env-file=../.env.local src/outcomes.ts",
-    "harvest": "bun --env-file=../.env.local src/harvest.ts"
+    "harvest": "bun --env-file=../.env.local src/harvest.ts",
+    "validate": "bun src/validate.ts",
+    "judge": "bun src/judge.ts",
+    "prod": "bun src/prod.ts",
+    "scorecard": "bun src/scorecard.ts"
   },
   "dependencies": {
     "@sandchest/db": "workspace:*",

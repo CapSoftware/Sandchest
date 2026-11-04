@@ -1,14 +1,14 @@
 /**
  * Measures the skeptic on labelled findings, without re-running the hunt.
  *
- *   bun run reverify --run evals/results/<run>   benchmark findings from a saved run
+ *   bun run reverify --run <run>                 benchmark findings from a saved run
  *                    [--private]                  plus labelled real-world findings
  *
- * Labels: benchmark findings that match an expected vulnerability are real.
- * False labels come only from human-verified findings in
- * evals/private/labels/<target>.json ({ fingerprint: { label, scan } }):
- * decoy hits are not used, because several turned out to be real bugs in
- * the "safe" code.
+ * Labels: benchmark findings that match an expected vulnerability, or that
+ * were judged real, are real; findings judged false_positive or not_security
+ * are false (judgements/<benchmark>.json). Real-world targets use
+ * labels/<target>.json ({ fingerprint: { label, scan } }). Decoy hits and
+ * clean-repo findings are not used as false labels: many turned out real.
  *
  * Every finding was shown by the skeptic that produced it, so this is a
  * paired comparison: how many real findings the current skeptic still shows
@@ -16,13 +16,16 @@
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { createLlmClient, loadLlmConfig, startLocalIndexer } from "@sandchest/engine";
 import { loadPricing, verifyFindings, type Finding, type ScanReport, type Verification } from "@sandchest/engine/scan";
 import { loadBenchmarks } from "./benchmark";
-import { checkout, REPO_ROOT } from "./checkout";
-import { score } from "./score";
+import { checkout } from "./checkout";
+import { DATA_DIR, LABELS_DIR, requireData, RUNS_DIR } from "./data";
+import { readRun, loadJudgements } from "./runs";
+import { judgementOf, score } from "./score";
+import { runDir } from "./scorecard";
 
 const { values } = parseArgs({
   options: {
@@ -44,41 +47,41 @@ interface Group {
 }
 
 const severities = new Set(values.severities!.split(","));
+requireData();
 const groups: Group[] = [];
 
 if (values.run) {
-  const dir = resolve(process.env.INIT_CWD ?? REPO_ROOT, values.run);
-  for (const benchmark of (await loadBenchmarks()).filter((b) => b.kind === "vulnerable")) {
-    const file = join(dir, `${benchmark.name}.scan.json`);
-    if (!existsSync(file)) continue;
-    const report = JSON.parse(await readFile(file, "utf8")) as ScanReport;
-    const scored = score(benchmark, report);
+  const dir = runDir(values.run);
+  const run = await readRun(dir);
+  const benchmarks = await loadBenchmarks();
+  for (const benchmark of benchmarks) {
+    const report = run.scans.get(benchmark.name)?.[0];
+    if (!report) continue;
+    // Real: matches an expected bug, or judged real. False: judged false (decoys aren't used: several
+    // turned out to be real bugs in the "safe" code, and clean repos have real bugs too).
+    const judgements = await loadJudgements(benchmark.name);
+    const scored = score(benchmark, report, judgements);
     const items = report.findings.flatMap((finding, i): Group["items"] => {
+      if (!severities.has(finding.severity)) return [];
       const verdict = scored.findings[i]!;
-      return severities.has(finding.severity) && verdict.matches.length > 0 ? [{ finding, label: "real" }] : [];
+      const judged = judgementOf(judgements, finding.fingerprint);
+      if (verdict.matches.length > 0 || judged?.verdict === "real") return [{ finding, label: "real" }];
+      if (judged && (judged.verdict === "false_positive" || judged.verdict === "not_security")) return [{ finding, label: "false" }];
+      return [];
     });
-    if (items.length > 0) groups.push({ name: benchmark.name, root: await checkout(benchmark), report, items });
-  }
-  // Clean, well-maintained repos should surface no serious bugs: any shown finding here is a false
-  // positive (this is what the clean benchmarks are for — measuring the FP rate).
-  for (const benchmark of (await loadBenchmarks()).filter((b) => b.kind === "clean")) {
-    const file = join(dir, `${benchmark.name}.scan.json`);
-    if (!existsSync(file)) continue;
-    const report = JSON.parse(await readFile(file, "utf8")) as ScanReport;
-    const items = report.findings.flatMap((finding): Group["items"] => (severities.has(finding.severity) ? [{ finding, label: "false" as const }] : []));
     if (items.length > 0) groups.push({ name: benchmark.name, root: await checkout(benchmark), report, items });
   }
 }
 
 if (values.private) {
-  const targets = JSON.parse(await readFile(join(REPO_ROOT, "evals/private/targets.json"), "utf8")) as Array<{ name: string; path: string }>;
+  const targets = JSON.parse(await readFile(join(DATA_DIR, "targets.json"), "utf8")) as Array<{ name: string; path: string }>;
   for (const target of targets) {
-    const labelFile = join(REPO_ROOT, "evals/private/labels", `${target.name}.json`);
+    const labelFile = join(LABELS_DIR, `${target.name}.json`);
     if (!existsSync(labelFile)) continue;
     const labels = JSON.parse(await readFile(labelFile, "utf8")) as Record<string, { label: Label; scan: string }>;
     // Labelled findings live in several scans; replay each scan's with that scan's threat model.
     for (const scan of [...new Set(Object.values(labels).map((l) => l.scan))]) {
-      const report = JSON.parse(await readFile(join(REPO_ROOT, "evals/private/results", scan, `${target.name}.scan.json`), "utf8")) as ScanReport;
+      const report = JSON.parse(await readFile(join(RUNS_DIR, scan, `${target.name}.scan.json`), "utf8")) as ScanReport;
       const items = report.findings.filter((f) => labels[f.fingerprint]).map((finding) => ({ finding, label: labels[finding.fingerprint]!.label }));
       if (items.length > 0) groups.push({ name: `${target.name}@${scan.slice(11, 19)}`, root: target.path, report, items });
     }
@@ -150,7 +153,7 @@ console.log(`FALSE (${fakes.length}): removed ${pct(mean(fakes.map((r) => (survi
 console.log(`Self-disagreement (shown in some runs, not others): real ${reals.filter(unstable).length}/${reals.length}, false ${fakes.filter(unstable).length}/${fakes.length}`);
 console.log(`Cost: $${cost.toFixed(2)}`);
 
-const outDir = values.private ? join(REPO_ROOT, "evals/private/results") : join(REPO_ROOT, "evals/results");
+const outDir = join(DATA_DIR, "replays");
 await mkdir(outDir, { recursive: true });
 const out = join(outDir, `reverify-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
 await writeFile(out, `${JSON.stringify(rows, null, 2)}\n`);
