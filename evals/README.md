@@ -20,6 +20,7 @@ bun run evals --rescore <run>           # re-score saved scans, e.g. after judgi
 bun run scorecard <run> --baseline <run>
 bun run judge <run>                     # the findings still needing a verdict
 bun run fpcheck                         # skeptic on vulnerable vs fixed code (cents)
+bun run restage <run>                   # replay the final merge of repeat reports on saved scans (cents)
 bun run validate --fetch                # every cited line exists at its commit
 bun run prod                            # production quality, from the read replica
 ```
@@ -45,11 +46,13 @@ report, with the lines they would cite. Tags choose run sets:
 
 ## Scoring
 
-A finding matches an expected vulnerability when any line it cites (entry
-point or path hop) falls within an expected location, give or take five
-lines, and its category, CWE or class family agrees. Findings are taken in
-report order: the first to match a bug is its true positive, later ones are
-duplicates.
+A finding matches an expected vulnerability when its sink, or at least two
+of the lines it cites, fall within an expected location (give or take five
+lines) and its category or CWE agrees. Each expected location is credited to
+one finding and each finding to one location (a maximum matching, earlier
+findings first), so a finding whose lines also fall in a neighbouring bug's
+range doesn't take both. Findings that match only locations already credited
+are duplicates.
 
 | Number | Meaning |
 |---|---|
@@ -57,6 +60,7 @@ duplicates.
 | Recall as shown | Same, counting only bugs found by a finding shown by default (critical/high, not low confidence). The gap to recall is bugs we found and rated too low to show. |
 | Precision (strict) | Of unique shown findings: true positives ÷ all, unjudged counted as false. The number we hold to. "Judged only" leaves unjudged out. |
 | Duplicate rate | Shown findings that repeat a bug already reported in the same scan. |
+| Bugs hidden by merging | The engine merges repeat reports of one issue (`report.merged`). A merge that absorbed a finding matching an expected bug no kept finding reports, or one judged a distinct real bug, hid it. Should be 0. |
 | Test/fixture code | Shown findings whose every cited line is in tests, fixtures or examples. |
 | Severity | Severity of the best match against the expected severity. |
 | Fixed bugs re-flagged | Scanning the fixing commit of a `cve` benchmark: fixed bugs still reported at their patched location. Each is a confirmed false positive; the fix is the ground truth. |
@@ -75,7 +79,9 @@ Strict precision only rises when unmatched findings are judged.
 `bun run judge <run>` writes the queue, in full, to the run's `judge.md`.
 Record verdicts with `bun run judge set` (or `judge apply` for a batch):
 `real`, `false_positive`, `not_security` (true, but nobody but the attacker
-is harmed), `test_code` or `duplicate`. Fingerprints are stable across
+is harmed), `test_code` or `duplicate` (of a fingerprint, or `expected:<id>`
+when the line ranges missed a match; a duplicate counts as the bug it repeats
+when that bug isn't otherwise in the scan). Fingerprints are stable across
 scans, so verdicts carry over to later runs.
 
 ## Privacy

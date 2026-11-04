@@ -120,6 +120,22 @@ describe("score", () => {
     expect(result.precision).toEqual({ lower: 0.5, known: 0.5 });
   });
 
+  test("a finding in two bugs' ranges is credited to one, so the other's own finding is not a duplicate", () => {
+    const near: Benchmark = {
+      ...benchmark,
+      expected: [
+        { id: "a", title: "", severity: "high", category: "broken_authentication", cwe: [], locations: [{ file: "jwt.ts", startLine: 10, endLine: 30 }] },
+        { id: "b", title: "", severity: "high", category: "broken_authentication", cwe: [], locations: [{ file: "jwt.ts", startLine: 25, endLine: 40 }] },
+      ],
+    };
+    // The first sits where both ranges overlap; the second only in a's.
+    const result = score(near, report([finding({ sink: ["jwt.ts", 27], category: "broken_authentication" }), finding({ sink: ["jwt.ts", 12], category: "broken_authentication" })]));
+    expect(result.findings.map((f) => f.outcome)).toEqual(["true_positive", "true_positive"]);
+    // A third report of a is a duplicate.
+    const three = score(near, report([finding({ sink: ["jwt.ts", 27], category: "broken_authentication" }), finding({ sink: ["jwt.ts", 12], category: "broken_authentication" }), finding({ sink: ["jwt.ts", 14], category: "broken_authentication" })]));
+    expect(three.findings.map((f) => f.outcome)).toEqual(["true_positive", "true_positive", "duplicate"]);
+  });
+
   test("a duplicate counts as the bug it duplicates when that is not otherwise in the scan", () => {
     const judgements = {
       "q.ts:1": { verdict: "duplicate" as const, duplicateOf: "expected:sqli" },

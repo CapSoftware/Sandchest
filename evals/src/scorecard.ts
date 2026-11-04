@@ -22,6 +22,7 @@ export const TARGETS = {
   duplicateRate: 0.05,
   testCodeRate: 0.02,
   patchedFpRate: 0.1,
+  mergeLosses: 0,
   severityAccuracy: 0.7,
   fingerprintStability: 0.9,
 };
@@ -63,6 +64,15 @@ export function rows(run: RunScore, base?: RunScore): Row[] {
     { metric: "Precision, shown (judged only)", value: a.precision.known, baseline: b?.precision.known, better: "higher", format: pct, noise: NOISE.precision },
     { metric: "Precision, every severity (strict)", value: a.precisionAll.lower, baseline: b?.precisionAll.lower, better: "higher", format: pct, noise: NOISE.precision },
     { metric: "Duplicate rate, shown", value: a.duplicateRate, baseline: b?.duplicateRate, better: "lower", target: TARGETS.duplicateRate, format: pct, noise: NOISE.rate },
+    {
+      metric: "Bugs hidden by merging repeats",
+      value: a.merged || b?.merged ? a.mergeLosses : null,
+      baseline: b?.merged ? b.mergeLosses : undefined,
+      better: "lower",
+      target: TARGETS.mergeLosses,
+      format: String,
+      noise: 0.5,
+    },
     { metric: "Test/fixture code, shown", value: a.testCodeRate, baseline: b?.testCodeRate, better: "lower", target: TARGETS.testCodeRate, format: pct, noise: NOISE.rate },
     { metric: "Severity matches expected", value: a.severity.accuracy, baseline: b?.severity.accuracy, better: "higher", target: TARGETS.severityAccuracy, format: pct, noise: NOISE.precision },
     { metric: "Fixed bugs re-flagged (FP on fixed code)", value: a.patchedFpRate, baseline: b?.patchedFpRate, better: "lower", target: TARGETS.patchedFpRate, format: pct, noise: NOISE.rate },
@@ -112,6 +122,10 @@ export function render(run: RunScore, base?: RunScore): { text: string; regressi
   lines.push("");
   lines.push(`Shown findings: ${a.shown}; unjudged ${unjudged}${unjudged ? " (strict precision counts them as false: judge them with `bun run judge`)" : ""}.`);
   lines.push(`Severity of matched bugs: ${a.severity.exact} as expected, ${a.severity.under} under-rated, ${a.severity.over} over-rated.`);
+  if (a.merged) {
+    const lost = [...run.scores.entries()].flatMap(([name, list]) => list.flatMap((s) => s.merges.lost.map((l) => `${name}/${l.fingerprint} (${l.bug})`)));
+    lines.push(`Merged repeat reports: ${a.merged}; hid a bug: ${lost.length ? [...new Set(lost)].join(", ") : "none"}.`);
+  }
   if (a.patchedChecked) lines.push(`Fixed commits: ${a.patchedChecked} fixed bugs checked; re-flagged: ${run.patched.flatMap((p) => p.reflagged.map((id) => `${p.name}/${id}`)).join(", ") || "none"}.`);
   for (const s of run.stability) {
     lines.push(`Stability ${s.name}: ${s.runs} runs, recall ${s.recalls.map(pct).join(" / ")}, union ${s.unionRecall === null ? "—" : pct(s.unionRecall)}, same fingerprint ${s.fingerprintStability === null ? "—" : pct(s.fingerprintStability)}, recognised on rescan ${s.recognised == null ? "—" : pct(s.recognised)}.`);

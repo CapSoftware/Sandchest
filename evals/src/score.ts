@@ -124,6 +124,12 @@ export interface BenchmarkScore {
   severity: { exact: number; under: number; over: number };
   /** Expected id → the fingerprint that matched it first (for stability across runs). */
   matchedBy: Record<string, string>;
+  /**
+   * Findings the engine merged into another (`report.merged`), and those whose
+   * merge hid a bug: the absorbed finding matched an expected bug no kept
+   * finding reports, or a reviewer judged it a distinct real bug.
+   */
+  merges: { total: number; lost: Array<{ fingerprint: string; title: string; bug: string }> };
   findings: FindingScore[];
 }
 
@@ -154,37 +160,63 @@ function canonical(judgements: Judgements, fingerprint: string): JudgementRecord
 
 export function score(benchmark: Benchmark, report: ScanReport, judgements: Judgements = {}): BenchmarkScore {
   const firstMatch = new Map<string, string>();
-  /** `expected id#location` already reported: a later finding on the same spot is a duplicate. */
-  const claimed = new Set<string>();
   const severityByExpected = new Map<string, Finding["severity"]>();
   const present = new Set(report.findings.map((f) => f.fingerprint));
-  const findings: FindingScore[] = report.findings.map((finding) => {
-    const hits = benchmark.expected.flatMap((expected) => {
+  const known = new Set(benchmark.expected.map((e) => e.id));
+  // Pass 1: which expected locations ("spots") each finding could be reporting.
+  const prepared = report.findings.map((finding) => {
+    const spots = new Set<string>();
+    const matches: string[] = [];
+    for (const expected of benchmark.expected) {
       const range = matchRange(expected, finding);
-      return range === null ? [] : [{ id: expected.id, spot: `${expected.id}#${range}` }];
-    });
-    const matches = hits.map((h) => h.id);
-    const sink = finding.attackPath.at(-1)!;
-    const cited = [finding.entryPoint, ...finding.attackPath];
-    const decoy = benchmark.decoys.some((range) => within(range, sink.file, sink.line, 0));
+      if (range === null) continue;
+      spots.add(`${expected.id}#${range}`);
+      matches.push(expected.id);
+    }
     let judged = judgementFor(judgements, finding);
-    // A reviewer's "duplicate of expected:<id>" is a match the line ranges missed.
+    // A reviewer's "duplicate of expected:<id>" is a match the line ranges missed: it can report any of that bug's locations.
     const judgedExpected = judged?.verdict === "duplicate" && judged.duplicateOf?.startsWith("expected:") ? judged.duplicateOf.slice("expected:".length) : undefined;
-    if (judgedExpected && benchmark.expected.some((e) => e.id === judgedExpected) && !hits.some((h) => h.id === judgedExpected)) {
-      // Fresh unless the bug was already reported somewhere in this scan.
-      hits.push({ id: judgedExpected, spot: [...claimed].find((c) => c.startsWith(`${judgedExpected}#`)) ?? `${judgedExpected}#judged` });
-      matches.push(judgedExpected);
+    if (judgedExpected && known.has(judgedExpected)) {
+      if (!matches.includes(judgedExpected)) {
+        const ranges = benchmark.expected.find((e) => e.id === judgedExpected)!.locations.length;
+        for (let i = 0; i < ranges; i++) spots.add(`${judgedExpected}#${i}`);
+        matches.push(judgedExpected);
+      }
       judged = undefined;
     }
     // A duplicate of another finding is only a duplicate when that finding is in this report; otherwise it stands in for it.
     if (judged?.verdict === "duplicate" && judged.duplicateOf && !judgedExpected && !present.has(judged.duplicateOf)) judged = canonical(judgements, judged.duplicateOf);
-    const fresh = hits.filter((h) => !claimed.has(h.spot));
+    return { finding, spots: [...spots], matches, judged };
+  });
+  // Pass 2: each spot is credited to one finding and each finding to one spot (a maximum matching, earlier
+  // findings first). A finding whose lines also fall in a neighbouring bug's range no longer takes both, so the
+  // finding that really reports the neighbour is not counted as its duplicate.
+  const owner = new Map<string, number>();
+  const assign = (i: number, seen: Set<string>): boolean => {
+    for (const spot of prepared[i]!.spots) {
+      if (seen.has(spot)) continue;
+      seen.add(spot);
+      const current = owner.get(spot);
+      if (current === undefined || assign(current, seen)) {
+        owner.set(spot, i);
+        return true;
+      }
+    }
+    return false;
+  };
+  prepared.forEach((_, i) => assign(i, new Set()));
+  const credited = new Set(owner.values());
+
+  const findings: FindingScore[] = prepared.map(({ finding, spots, matches, judged }, i) => {
+    const sink = finding.attackPath.at(-1)!;
+    const cited = [finding.entryPoint, ...finding.attackPath];
+    const decoy = benchmark.decoys.some((range) => within(range, sink.file, sink.line, 0));
     let outcome: Outcome = "unjudged";
     let reason: FindingScore["reason"];
-    if (hits.length > 0 && fresh.length === 0) {
+    if (spots.length > 0 && !credited.has(i)) {
       outcome = "duplicate";
       reason = "same_expected";
-    } else if (hits.length > 0 || judged?.verdict === "real") outcome = "true_positive";
+    } else if (spots.length > 0 || judged?.verdict === "real") outcome = "true_positive";
     else if (judged?.verdict === "duplicate") {
       outcome = "duplicate";
       reason = "judged";
@@ -192,11 +224,8 @@ export function score(benchmark: Benchmark, report: ScanReport, judgements: Judg
       outcome = "false_positive";
       reason = decoy ? "decoy" : judged!.verdict === "false_positive" ? "judged" : (judged!.verdict as "not_security" | "test_code");
     }
-    for (const h of hits) {
-      claimed.add(h.spot);
-      if (!firstMatch.has(h.id)) firstMatch.set(h.id, finding.fingerprint);
-    }
     for (const id of matches) {
+      if (!firstMatch.has(id)) firstMatch.set(id, finding.fingerprint);
       const best = severityByExpected.get(id);
       if (!best || RANK[finding.severity] < RANK[best]) severityByExpected.set(id, finding.severity);
     }
@@ -254,8 +283,23 @@ export function score(benchmark: Benchmark, report: ScanReport, judgements: Judg
     precisionAll: precisionOf(allTally),
     severity,
     matchedBy: Object.fromEntries(firstMatch),
+    merges: mergeLosses(benchmark, report, judgements, found),
     findings,
   };
+}
+
+function mergeLosses(benchmark: Benchmark, report: ScanReport, judgements: Judgements, found: Set<string>): BenchmarkScore["merges"] {
+  const merged = report.merged ?? [];
+  const lost: BenchmarkScore["merges"]["lost"] = [];
+  for (const { into, finding } of merged) {
+    const hidden = benchmark.expected.find((expected) => !found.has(expected.id) && matchRange(expected, finding) !== null);
+    const judged = judgementFor(judgements, finding);
+    // Judged a distinct real bug, unless what it merged into was judged its duplicate.
+    const primary = report.findings.find((f) => f.fingerprint === into);
+    const distinct = judged?.verdict === "real" && !(primary && judgementFor(judgements, primary)?.duplicateOf === finding.fingerprint);
+    if (hidden || distinct) lost.push({ fingerprint: finding.fingerprint, title: finding.title, bug: hidden ? hidden.id : "judged real" });
+  }
+  return { total: merged.length, lost };
 }
 
 /** Over unique findings: duplicates are left out (they are counted as the duplicate rate). */
@@ -337,6 +381,9 @@ export interface Aggregate {
   /** Fixed bugs still reported on the fixed commit ÷ fixed bugs checked. */
   patchedFpRate: number | null;
   patchedChecked: number;
+  /** Findings merged into another, and bugs those merges hid (should be 0). */
+  merged: number;
+  mergeLosses: number;
 }
 
 /** Pools counts across benchmarks rather than averaging ratios, so big benchmarks weigh more. */
@@ -365,6 +412,8 @@ export function aggregate(scores: BenchmarkScore[], patched: PatchedScore[] = []
     severity: { ...severity, accuracy: ratio(severity.exact, severity.exact + severity.under + severity.over) },
     patchedFpRate: ratio(patched.reduce((n, p) => n + p.reflagged.length, 0), checked),
     patchedChecked: checked,
+    merged: sum((s) => s.merges.total),
+    mergeLosses: sum((s) => s.merges.lost.length),
   };
 }
 
