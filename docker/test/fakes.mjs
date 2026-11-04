@@ -149,6 +149,8 @@ function forgejoApi(request, response, path, raw) {
     forgejo.hooks.push({ type: body.type, url: body.config.url, events: body.events, signed: Boolean(body.config.secret) });
     return json(response, 201, { id: forgejo.hooks.length });
   }
+  // The pull request's author has write access, so it is reviewed automatically.
+  if (request.method === "GET" && api === "/repos/acme/app/collaborators/dev/permission") return json(response, 200, { permission: "write" });
   if (request.method === "GET" && api === "/repos/acme/app/branches/main") return json(response, 200, { name: "main", commit: { id: process.env.FAKE_HEAD_SHA } });
   if (request.method === "GET" && api === "/repos/acme/app/pulls/5.diff") {
     response.writeHead(200, { "content-type": "text/plain" });
