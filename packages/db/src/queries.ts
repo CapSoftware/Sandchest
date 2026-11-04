@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, gt, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
+import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries, type Forge } from "./schema";
 
 export type Org = typeof orgs.$inferSelect;
 export type Repo = typeof repos.$inferSelect;
@@ -24,6 +24,8 @@ export async function claimDelivery(database: Db, id: string, event: string): Pr
 // ---- Installations ---------------------------------------------------------
 
 export interface AccountInput {
+  /** Default "github". */
+  provider?: Forge;
   githubAccountId: number;
   githubLogin: string;
   type: "User" | "Organization";
@@ -42,20 +44,20 @@ export async function upsertInstallation(database: Db, installationId: number, a
     const [org] = await tx
       .insert(orgs)
       .values({ ...account, installationId })
-      .onConflictDoUpdate({ target: orgs.githubAccountId, set: { githubLogin: account.githubLogin, type: account.type, installationId } })
+      .onConflictDoUpdate({ target: [orgs.provider, orgs.githubAccountId], set: { githubLogin: account.githubLogin, type: account.type, installationId } })
       .returning();
-    const saved = await upsertRepos(tx as unknown as Db, org!.id, repoList);
+    const saved = await upsertRepos(tx as unknown as Db, org!.id, repoList, org!.provider);
     return { org: org!, repos: saved };
   });
 }
 
-export async function upsertRepos(database: Db, orgId: string, repoList: RepoInput[]): Promise<Repo[]> {
+export async function upsertRepos(database: Db, orgId: string, repoList: RepoInput[], provider: Forge = "github"): Promise<Repo[]> {
   if (repoList.length === 0) return [];
   return database
     .insert(repos)
-    .values(repoList.map((repo) => ({ ...repo, orgId, enabled: true })))
+    .values(repoList.map((repo) => ({ ...repo, orgId, provider, enabled: true })))
     .onConflictDoUpdate({
-      target: repos.githubRepoId,
+      target: [repos.provider, repos.githubRepoId],
       set: {
         orgId,
         fullName: sql`excluded.full_name`,
@@ -79,10 +81,10 @@ const forgetCode = {
 };
 
 /** A repo removed from the installation: stop scanning it and delete the code its findings quote. */
-export async function disableRepos(database: Db, githubRepoIds: number[]): Promise<void> {
+export async function disableRepos(database: Db, githubRepoIds: number[], provider: Forge = "github"): Promise<void> {
   if (githubRepoIds.length === 0) return;
   await database.transaction(async (tx) => {
-    const disabled = await tx.update(repos).set({ enabled: false }).where(inArray(repos.githubRepoId, githubRepoIds)).returning({ id: repos.id });
+    const disabled = await tx.update(repos).set({ enabled: false }).where(and(eq(repos.provider, provider), inArray(repos.githubRepoId, githubRepoIds))).returning({ id: repos.id });
     if (disabled.length > 0) await tx.update(findings).set(forgetCode).where(inArray(findings.repoId, disabled.map((r) => r.id)));
   });
 }
@@ -92,9 +94,9 @@ export async function disableRepos(database: Db, githubRepoIds: number[]): Promi
  * delete the code their findings quote. Findings stay until data deletion.
  */
 /** Forgets an installation. Returns the org it belonged to, if Sandchest knew it. */
-export async function removeInstallation(database: Db, installationId: number): Promise<{ id: string } | undefined> {
+export async function removeInstallation(database: Db, installationId: number, provider: Forge = "github"): Promise<{ id: string } | undefined> {
   return database.transaction(async (tx) => {
-    const [org] = await tx.update(orgs).set({ installationId: null }).where(eq(orgs.installationId, installationId)).returning({ id: orgs.id });
+    const [org] = await tx.update(orgs).set({ installationId: null }).where(and(eq(orgs.provider, provider), eq(orgs.installationId, installationId))).returning({ id: orgs.id });
     if (!org) return undefined;
     await tx.update(repos).set({ enabled: false }).where(eq(repos.orgId, org.id));
     await tx.update(findings).set(forgetCode).where(sql`${findings.repoId} in (select id from ${repos} where org_id = ${org.id})`);
@@ -102,12 +104,12 @@ export async function removeInstallation(database: Db, installationId: number): 
   });
 }
 
-export async function orgByInstallation(database: Db, installationId: number): Promise<Org | undefined> {
-  return database.query.orgs.findFirst({ where: eq(orgs.installationId, installationId) });
+export async function orgByInstallation(database: Db, installationId: number, provider: Forge = "github"): Promise<Org | undefined> {
+  return database.query.orgs.findFirst({ where: and(eq(orgs.provider, provider), eq(orgs.installationId, installationId)) });
 }
 
-export async function repoByGithubId(database: Db, githubRepoId: number): Promise<(Repo & { org: Org }) | undefined> {
-  return database.query.repos.findFirst({ where: eq(repos.githubRepoId, githubRepoId), with: { org: true } });
+export async function repoByGithubId(database: Db, githubRepoId: number, provider: Forge = "github"): Promise<(Repo & { org: Org }) | undefined> {
+  return database.query.repos.findFirst({ where: and(eq(repos.provider, provider), eq(repos.githubRepoId, githubRepoId)), with: { org: true } });
 }
 
 export async function repoByFullName(database: Db, fullName: string): Promise<(Repo & { org: Org }) | undefined> {

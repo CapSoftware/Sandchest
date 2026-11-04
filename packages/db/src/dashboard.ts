@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
+import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type Forge, type OrgSettings } from "./schema";
 
 type Severity = "critical" | "high" | "medium" | "low";
 export type RepoPermission = (typeof permissionCache.$inferSelect)["permission"];
@@ -18,17 +18,17 @@ export async function userById(database: Db, userId: string): Promise<User | und
 }
 
 /** Known, installed orgs by GitHub installation id. */
-export async function orgsByInstallation(database: Db, installationIds: number[]) {
+export async function orgsByInstallation(database: Db, installationIds: number[], provider: Forge = "github") {
   if (installationIds.length === 0) return [];
   return database
     .select({ id: orgs.id, installationId: orgs.installationId, githubAccountId: orgs.githubAccountId, githubLogin: orgs.githubLogin, type: orgs.type })
     .from(orgs)
-    .where(inArray(orgs.installationId, installationIds));
+    .where(and(eq(orgs.provider, provider), inArray(orgs.installationId, installationIds)));
 }
 
-export async function repoIdsByGithubId(database: Db, githubRepoIds: number[]): Promise<Map<number, string>> {
+export async function repoIdsByGithubId(database: Db, githubRepoIds: number[], provider: Forge = "github"): Promise<Map<number, string>> {
   if (githubRepoIds.length === 0) return new Map();
-  const rows = await database.select({ id: repos.id, githubRepoId: repos.githubRepoId }).from(repos).where(inArray(repos.githubRepoId, githubRepoIds));
+  const rows = await database.select({ id: repos.id, githubRepoId: repos.githubRepoId }).from(repos).where(and(eq(repos.provider, provider), inArray(repos.githubRepoId, githubRepoIds)));
   return new Map(rows.map((row) => [row.githubRepoId, row.id]));
 }
 

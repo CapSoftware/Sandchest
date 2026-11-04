@@ -54,14 +54,22 @@ export interface HackerProfile {
   voice: string;
 }
 
+/**
+ * Where an account and its repositories live: GitHub, or a Forgejo or Gitea
+ * instance. The `github_*` ids and the installation id are that forge's own.
+ */
+export const FORGES = ["github", "forgejo"] as const;
+export type Forge = (typeof FORGES)[number];
+
 /** One GitHub account (user or organisation) with the app installed. The billing customer. */
 export const orgs = pgTable("orgs", {
   id: uuid("id").primaryKey().defaultRandom(),
-  githubAccountId: bigint("github_account_id", { mode: "number" }).notNull().unique(),
+  provider: text("provider", { enum: FORGES }).notNull().default("github"),
+  githubAccountId: bigint("github_account_id", { mode: "number" }).notNull(),
   githubLogin: text("github_login").notNull(),
   type: text("type", { enum: ["User", "Organization"] }).notNull(),
-  /** Null once uninstalled. */
-  installationId: bigint("installation_id", { mode: "number" }).unique(),
+  /** Null once uninstalled. On Forgejo, which has no installations, the account id while the bot covers it. */
+  installationId: bigint("installation_id", { mode: "number" }),
   settings: jsonb("settings").$type<OrgSettings>().notNull().default({ checkThreshold: "high" }),
   /**
    * The deep scan that used the org's free first Dig. It stays used while
@@ -71,7 +79,10 @@ export const orgs = pgTable("orgs", {
   freeDigScanId: uuid("free_dig_scan_id"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}, (table) => [
+  uniqueIndex("orgs_provider_account_unique").on(table.provider, table.githubAccountId),
+  uniqueIndex("orgs_provider_installation_unique").on(table.provider, table.installationId),
+]);
 
 export const repos = pgTable(
   "repos",
@@ -80,7 +91,9 @@ export const repos = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => orgs.id, { onDelete: "cascade" }),
-    githubRepoId: bigint("github_repo_id", { mode: "number" }).notNull().unique(),
+    /** Same as the org's. */
+    provider: text("provider", { enum: FORGES }).notNull().default("github"),
+    githubRepoId: bigint("github_repo_id", { mode: "number" }).notNull(),
     fullName: text("full_name").notNull(),
     private: boolean("private").notNull(),
     defaultBranch: text("default_branch").notNull(),
@@ -91,7 +104,7 @@ export const repos = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [index("repos_org_idx").on(table.orgId)],
+  (table) => [index("repos_org_idx").on(table.orgId), uniqueIndex("repos_provider_repo_unique").on(table.provider, table.githubRepoId)],
 );
 
 /** The repo's threat model: summary text only, never source. */

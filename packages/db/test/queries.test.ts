@@ -95,6 +95,22 @@ function finding(fingerprint: string): FindingInput {
 }
 
 describe("installations", () => {
+  it("keeps GitHub and Forgejo accounts and repos with the same ids apart", async () => {
+    const github = await upsertInstallation(database, 9100, { ...account, githubAccountId: 9100 }, [repo(9101)]);
+    const forgejo = await upsertInstallation(database, 9100, { ...account, provider: "forgejo", githubAccountId: 9100 }, [repo(9101)]);
+    expect(forgejo.org.id).not.toBe(github.org.id);
+    expect(forgejo.org.provider).toBe("forgejo");
+    expect(forgejo.repos[0]!.provider).toBe("forgejo");
+    expect((await repoByGithubId(database, 9101))?.org.id).toBe(github.org.id);
+    expect((await repoByGithubId(database, 9101, "forgejo"))?.org.id).toBe(forgejo.org.id);
+
+    await disableRepos(database, [9101], "forgejo");
+    expect((await repoByGithubId(database, 9101, "forgejo"))?.enabled).toBe(false);
+    expect((await repoByGithubId(database, 9101))?.enabled).toBe(true);
+    await removeInstallation(database, 9100, "forgejo");
+    expect((await repoByGithubId(database, 9101))?.org.installationId).toBe(9100);
+  });
+
   it("upserts orgs and repos, disables removed repos and survives uninstall", async () => {
     const { org, repos } = await upsertInstallation(database, 9001, account, [repo(1), repo(2)]);
     expect(repos).toHaveLength(2);
