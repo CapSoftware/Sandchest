@@ -65,12 +65,22 @@ const at = (spot: string) => {
   return { file: spot.slice(0, split), line: Number(spot.slice(split + 1)) };
 };
 
-/** A finding's judgement: by fingerprint, or else by a judged finding that is the same bug (same rule as rescans). */
-export function judgementFor(judgements: Judgements, finding: Pick<Finding, "fingerprint" | "category" | "entryPoint" | "attackPath">): JudgementRecord | undefined {
+/**
+ * A finding's judgement: by fingerprint, or else by a judged finding that is
+ * the same bug (same rule as rescans). A judged finding that is itself in the
+ * scan (`present`) lends its verdict to nothing else: a second finding at its
+ * lines is a different report (a missing rate limit on the login whose bypass
+ * was judged), not the same bug under a new fingerprint.
+ */
+export function judgementFor(
+  judgements: Judgements,
+  finding: Pick<Finding, "fingerprint" | "category" | "entryPoint" | "attackPath">,
+  present: ReadonlySet<string> = new Set(),
+): JudgementRecord | undefined {
   const exact = judgementOf(judgements, finding.fingerprint);
   if (exact) return exact;
   for (const [print, value] of Object.entries(judgements)) {
-    if (typeof value === "string" || !value.where) continue;
+    if (typeof value === "string" || !value.where || present.has(print)) continue;
     const judged = { fingerprint: print, category: value.where.category, entryPoint: at(value.where.entry), attackPath: value.where.path.map(at) };
     if (sameBug(judged, finding)) return value;
   }
@@ -173,7 +183,7 @@ export function score(benchmark: Benchmark, report: ScanReport, judgements: Judg
       spots.add(`${expected.id}#${range}`);
       matches.push(expected.id);
     }
-    let judged = judgementFor(judgements, finding);
+    let judged = judgementFor(judgements, finding, present);
     // A reviewer's "duplicate of expected:<id>" is a match the line ranges missed: it can report any of that bug's locations.
     const judgedExpected = judged?.verdict === "duplicate" && judged.duplicateOf?.startsWith("expected:") ? judged.duplicateOf.slice("expected:".length) : undefined;
     if (judgedExpected && known.has(judgedExpected)) {

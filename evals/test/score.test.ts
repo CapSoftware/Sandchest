@@ -159,6 +159,13 @@ describe("score", () => {
     expect(elsewhere.findings[0]!.outcome).toBe("unjudged");
   });
 
+  test("a judged finding still in the scan lends its verdict to no other finding at its lines", () => {
+    const judged = finding({ sink: ["q.ts", 40] });
+    const judgements = { [judged.fingerprint]: { verdict: "false_positive" as const, where: { category: "sql_injection", entry: "routes.ts:1", path: ["q.ts:40"] } } };
+    const result = score(benchmark, report([judged, finding({ sink: ["q.ts", 42] })]), judgements);
+    expect(result.findings.map((f) => f.outcome)).toEqual(["false_positive", "unjudged"]);
+  });
+
   test("flags findings whose whole path is test code, and severity against expected", () => {
     const result = score(
       benchmark,
