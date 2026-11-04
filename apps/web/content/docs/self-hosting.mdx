@@ -51,6 +51,7 @@ All of them go in `docker/.env`.
 | `POSTGRES_PASSWORD` | Required. Letters and digits only, set before the first start |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Required. Your model endpoint. One model does every job |
 | `GITHUB_APP_ID` and the other `GITHUB_…` lines | Empty until setup gives you the App's keys. While `GITHUB_APP_ID` is empty, the server runs in setup mode |
+| `FORGEJO_URL` and the other `FORGEJO_…` lines | Optional. A Forgejo or Gitea instance, reviewed through a bot account, instead of or beside GitHub. With `FORGEJO_URL` set there is no setup mode. See [Forgejo and Gitea](#forgejo-and-gitea) |
 | `SANDCHEST_SETUP_TOKEN` | Optional. Your own setup token, 24 or more characters, instead of the one derived from `BETTER_AUTH_SECRET` |
 | `SANDCHEST_BIND`, `SANDCHEST_PORT` | Optional. Where `web` listens on the machine. The default is `127.0.0.1:3000`: loopback only, for a tunnel or reverse proxy in front. `0.0.0.0` listens on every interface |
 | `SMTP_URL`, `EMAIL_FROM` | Optional. Email about critical findings and finished deep scans. Without them, no email is sent |
@@ -59,6 +60,10 @@ All of them go in `docker/.env`.
 | `LLM_PRICE_INPUT`, `LLM_PRICE_CACHED_INPUT`, `LLM_PRICE_OUTPUT` | Optional. Your model's prices, in US dollars per million tokens, so each scan records what it cost |
 
 There is no billing key: billing stays off.
+
+## Forgejo and Gitea
+
+Sandchest also reviews repositories on a Forgejo or Gitea instance. Forgejo has no Apps, so you create a bot account there, give it a token, and list the owners and repositories it covers in `FORGEJO_OWNERS`. Sandchest adds its webhooks, builds each repository's threat model and reviews pull requests as it does on GitHub. A commit status named "Sandchest" stands in for the Check, with a summary comment and an inline review. People can sign in with Forgejo through an OAuth2 application on the instance. The [full guide](https://github.com/CapSoftware/Sandchest/tree/main/docker#forgejo--gitea) lists the token's scopes, the webhook and the sign-in setup.
 
 ## How it runs
 
@@ -79,7 +84,7 @@ Without billing there are no plans, no credits, and nothing to buy. The limits t
 
 A self-hosted Sandchest has no telemetry and sends nothing to us. It connects to:
 
-- **GitHub**, to read the repositories you installed it on and post reviews.
+- **GitHub**, or your Forgejo or Gitea instance, to read the repositories you chose and post reviews.
 - **Your model endpoint**, for the scans themselves.
 - **OSV** (osv.dev), the open vulnerability database, to look up your dependencies. Only package names and versions are sent.
 - **Your mail server and Sentry project**, only if you set them.

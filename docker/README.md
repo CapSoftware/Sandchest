@@ -95,6 +95,74 @@ To listen on every interface instead, set `SANDCHEST_BIND=0.0.0.0` in `.env`. Se
 
 If the address changes later, update `SANDCHEST_APP_URL`, restart, and in the App's settings on GitHub change the homepage, webhook URL (`<address>/api/github/webhooks`), callback URL (`<address>/api/auth/callback/github`) and setup URL (`<address>/dashboard`).
 
+## Forgejo / Gitea
+
+Sandchest can review repositories on a Forgejo or Gitea instance instead of, or beside, GitHub. Forgejo has no Apps, so Sandchest works as a bot account you create there, and you list which owners and repositories it covers. Nothing changes for GitHub: with no `FORGEJO_…` settings, Sandchest runs exactly as above. With `FORGEJO_URL` set, the `GITHUB_…` lines may stay empty, and the server skips setup mode. To add a GitHub App as well, either create it from the setup page before you set `FORGEJO_URL`, or remove `FORGEJO_URL` while you run setup.
+
+It is tested against Forgejo 17 (Gitea API 1.22). It uses the API that Gitea and Forgejo share, so recent Gitea works the same way.
+
+### 1. A bot account and its token
+
+1. **Create a user for Sandchest**, such as `sandchest-bot`. Its name is what people see on statuses, reviews and comments.
+2. **Give it access to the repositories** to review. Statuses, reviews and comments need write access. Checking who may run `/sandchest review` needs admin access. So add the bot to a team with admin access to those repositories, or as an admin collaborator. To let Sandchest add an organisation's webhook itself, add the bot to the organisation's Owners team instead.
+3. **Create a token for the bot**: sign in as the bot, open Settings, Applications, and generate a token with these scopes:
+
+   | Scope | Why |
+   |---|---|
+   | `repository`: read and write | Reading code, diffs and branches. Posting commit statuses and reviews. Repository webhooks. |
+   | `issue`: read and write | The summary comment on a pull request. |
+   | `organization`: read | Listing an organisation's repositories. Use read and write to let Sandchest add the organisation webhook itself. |
+   | `user`: read | Listing a user's repositories. |
+
+Scans clone over HTTPS with this token. Forgejo can't mint a short-lived token for one repository, as a GitHub App does, so keep the bot's reach to the repositories you want reviewed. The token travels as an HTTP header in the clone's environment, never in a URL, on a command line or in the log.
+
+### 2. Settings
+
+Add these to `docker/.env`:
+
+| Setting | What to put |
+|---|---|
+| `FORGEJO_URL` | The instance's address, such as `https://git.example.com`. No trailing slash. |
+| `FORGEJO_TOKEN` | The bot's token. |
+| `FORGEJO_WEBHOOK_SECRET` | `openssl rand -hex 32` |
+| `FORGEJO_OWNERS` | What Sandchest covers, comma-separated. Write `acme` for every repository of a user or organisation, and `acme/app` for one repository. |
+| `FORGEJO_WEBHOOKS` | Optional. `auto` (the default) adds the webhooks itself; `manual` leaves them to you. |
+| `FORGEJO_CLIENT_ID`, `FORGEJO_CLIENT_SECRET` | Optional, for signing in with Forgejo (step 4). |
+
+Then restart with `docker compose up -d`. Archived repositories, mirrors and empty repositories are skipped. Every ten minutes Sandchest reads the covered repositories again: new ones are recorded and get their threat model, and removed ones are disabled, as on GitHub. A repository that sends a webhook first is recorded right away. Take an owner off `FORGEJO_OWNERS` and Sandchest forgets it, as if the App had been uninstalled.
+
+### 3. Webhooks
+
+With `FORGEJO_WEBHOOKS=auto`, Sandchest adds one webhook to each covered organisation, or to each repository for users and single repositories, the first time it reads them. It needs the bot to own the organisation, or administer the repository. If it may not, the log says so, and you add the webhook by hand:
+
+- **Target URL:** `<SANDCHEST_APP_URL>/api/forgejo/webhooks`
+- **Type:** Forgejo or Gitea
+- **Content type:** `application/json`
+- **Secret:** the value of `FORGEJO_WEBHOOK_SECRET`
+- **Events:** "Custom events", with Push, Pull request (all of its events), Issue comment and Repository.
+
+Forgejo signs every delivery with the secret (`X-Forgejo-Signature`, or `X-Gitea-Signature` on Gitea), and Sandchest refuses a delivery whose signature doesn't match.
+
+Forgejo blocks webhooks to private addresses by default. If Sandchest runs on your network, allow its host in Forgejo's `app.ini`: `[webhook] ALLOWED_HOST_LIST = sandchest.example.com`.
+
+### 4. Signing in with Forgejo
+
+1. **Create an OAuth2 application** on the instance: in Settings, Applications, OAuth2 applications (your own, an organisation's, or the site administration's). Set the redirect URI to `<SANDCHEST_APP_URL>/api/auth/callback/forgejo`, and keep it a confidential client.
+2. **Put its client ID and secret** in `FORGEJO_CLIENT_ID` and `FORGEJO_CLIENT_SECRET`, and restart.
+
+The sign-in page then shows "Continue with Forgejo", beside "Continue with GitHub" when the App is configured too. People see findings for the covered repositories they can push to, and change an owner's settings if they own or administer its organisation, or if it is their own account. Sandchest asks for the `read:user`, `read:repository` and `read:organization` scopes. Forgejo honours them only when the instance allows OAuth2 scopes (`[oauth2] ENABLE_ADDITIONAL_GRANT_SCOPES = true`); otherwise the token may do anything the person may, and Sandchest only reads with it.
+
+### What pull requests get
+
+The same as on GitHub, with Forgejo's own tools:
+
+- **A commit status named "Sandchest"** stands in for the Check: pending while the review runs, then success or failure, with a link to the scan. A failure means findings at or above the account's threshold, as on GitHub. When a review isn't run or can't finish, the status is a success, so it never blocks a merge.
+- **A summary comment** when the status isn't a plain success. A commit status holds one line, so the comment carries what a Check's summary would.
+- **One review with inline comments** on private repositories. Public repositories only get counts and a link, as on GitHub, because everything on the pull request is public.
+- **The same rules**: drafts (a `WIP:` title) wait, pull requests from forks of public repositories wait for a maintainer's `/sandchest review`, and on private repositories a fork's author needs write access. Pushes to the default branch build the threat model and re-check open findings.
+
+Sandchest creates no issues and no security advisories, on GitHub or on Forgejo. Findings stay in the dashboard, where only people with push access see them. Forgejo has no security advisories, so if that ever changes, a Forgejo equivalent would need a private repository or a confidential issue.
+
 ## Optional settings
 
 | Setting | Effect |
@@ -144,6 +212,8 @@ docker compose up -d
 
 ## Troubleshooting
 
+**Forgejo pull requests get no status.** In the webhook's settings on Forgejo, Recent deliveries shows each delivery and its response. A 401 means `FORGEJO_WEBHOOK_SECRET` does not match the webhook's secret. A 404 means `FORGEJO_URL` is not set. "Repo not enabled" means the repository isn't in `FORGEJO_OWNERS`, or the bot can't read it. If no delivery is listed, check Forgejo's `[webhook] ALLOWED_HOST_LIST`.
+
 **Compose says a required variable is missing.** Fill it in `docker/.env`; the message names the setting.
 
 **The `web` container keeps restarting.** A setting is invalid, for example a `SANDCHEST_ADMIN_TOKEN` under 24 characters. `docker compose logs web` names it after "Sandchest cannot start".
@@ -182,6 +252,8 @@ docker compose up -d
 docker build -f docker/Dockerfile -t sandchest:local .
 docker/test/e2e.sh
 ```
+
+`docker/test/e2e-forgejo.sh` does the same for Forgejo, with Forgejo and the model faked and no GitHub App at all. It runs the sync, which records the bot's repositories, adds the webhook and builds the threat model. Then it sends a signed pull request webhook and checks the pending and failing statuses, the inline review and the summary comment. Last, it signs in with Forgejo through OAuth2 and checks that the dashboard lists the repository.
 
 ## Creating the App for a hosted service
 
