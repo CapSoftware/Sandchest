@@ -14,6 +14,8 @@
  * probability (`noul`) or a chosen option (`choice`).
  */
 
+import { createHash } from "node:crypto";
+
 export interface NoulQuestion {
   type: "noul";
   instructions: string;
@@ -129,6 +131,45 @@ export function createClassifier(config: ClassifierConfig): Classifier {
           await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** n));
         }
       }
+    },
+  };
+}
+
+/** Where cached classifier answers live: a file store in evals, memory or a table elsewhere. */
+export interface ClassifierCache {
+  get(key: string): Promise<ClassifierResult | undefined>;
+  set(key: string, result: ClassifierResult): Promise<void>;
+}
+
+/**
+ * A classifier that answers a question it has seen before from `cache`. The key
+ * is a hash of the model, the questions and the exact code shown, so changed
+ * code, a changed question or another model is always asked afresh. A cached
+ * answer bills no tokens. Cache trouble never fails a call: it falls through to
+ * the classifier.
+ */
+export function cachedClassifier(inner: Classifier, cache: ClassifierCache): Classifier & { readonly hits: number; readonly misses: number } {
+  let hits = 0;
+  let misses = 0;
+  return {
+    model: inner.model,
+    get hits() {
+      return hits;
+    },
+    get misses() {
+      return misses;
+    },
+    async ask(state, questions, signal) {
+      const key = createHash("sha256").update(JSON.stringify([inner.model, questions, state])).digest("hex");
+      const cached = await cache.get(key).catch(() => undefined);
+      if (cached) {
+        hits++;
+        return { answers: cached.answers, inputTokens: 0 };
+      }
+      misses++;
+      const result = await inner.ask(state, questions, signal);
+      await cache.set(key, result).catch(() => {});
+      return result;
     },
   };
 }

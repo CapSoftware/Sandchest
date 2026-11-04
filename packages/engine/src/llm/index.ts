@@ -1,10 +1,12 @@
 export { createLlmClient, type LlmClient, type LlmClientOptions } from "./client";
 export { loadLlmConfig, ROLE_REASONING, type LlmConfig } from "./config";
 export {
+  cachedClassifier,
   createClassifier,
   loadClassifierConfig,
   ClassifierError,
   type Classifier,
+  type ClassifierCache,
   type ClassifierConfig,
   type ClassifierQuestion,
   type ClassifierAnswer,

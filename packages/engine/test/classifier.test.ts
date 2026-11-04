@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createClassifier, loadClassifierConfig } from "../src/llm/classifier";
+import { cachedClassifier, createClassifier, loadClassifierConfig, type Classifier, type ClassifierResult } from "../src/llm/classifier";
 
 /** A fetch that answers with scripted responses and records requests. */
 function scripted(...responses: Array<Response | Error>) {
@@ -65,5 +65,51 @@ describe("createClassifier", () => {
     expect(requests[0]!.headers.get("x-long")).toBeNull();
     await client.ask("x".repeat(100_001), { q: { type: "noul", instructions: "?" } });
     expect(requests[1]!.headers.get("x-long")).toBe("true");
+  });
+});
+
+describe("cachedClassifier", () => {
+  const questions = { is_http_handler: { type: "noul" as const, instructions: "handler?" } };
+  function counting(model = "m"): Classifier & { calls: number } {
+    const inner = {
+      model,
+      calls: 0,
+      async ask(): Promise<ClassifierResult> {
+        inner.calls++;
+        return { answers: { is_http_handler: { type: "noul", noul: 0.9 } }, inputTokens: 50 };
+      },
+    };
+    return inner;
+  }
+  const memory = () => {
+    const map = new Map<string, ClassifierResult>();
+    return { map, get: async (k: string) => map.get(k), set: async (k: string, v: ClassifierResult) => void map.set(k, v) };
+  };
+
+  test("asks once per piece of code, and a cached answer bills nothing", async () => {
+    const inner = counting();
+    const classifier = cachedClassifier(inner, memory());
+    expect((await classifier.ask("code A", questions)).inputTokens).toBe(50);
+    const again = await classifier.ask("code A", questions);
+    expect(again.inputTokens).toBe(0);
+    expect(again.answers.is_http_handler).toEqual({ type: "noul", noul: 0.9 });
+    await classifier.ask("code B", questions);
+    expect(inner.calls).toBe(2);
+    expect([classifier.hits, classifier.misses]).toEqual([1, 2]);
+  });
+
+  test("another model or question is asked afresh", async () => {
+    const cache = memory();
+    await cachedClassifier(counting("m1"), cache).ask("code", questions);
+    const other = counting("m2");
+    await cachedClassifier(other, cache).ask("code", questions);
+    await cachedClassifier(other, cache).ask("code", { is_http_handler: { type: "noul", instructions: "changed" } });
+    expect(other.calls).toBe(2);
+  });
+
+  test("a broken cache never fails the call", async () => {
+    const inner = counting();
+    const classifier = cachedClassifier(inner, { get: async () => Promise.reject(new Error("disk")), set: async () => Promise.reject(new Error("disk")) });
+    expect((await classifier.ask("code", questions)).inputTokens).toBe(50);
   });
 });

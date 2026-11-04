@@ -22,6 +22,7 @@ import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig,
 import { createOsvClient, loadPricing, runScan, type ScanLimits, type ScanReport } from "@sandchest/engine/scan";
 import { z } from "zod";
 import { loadBenchmarks, select, type Benchmark } from "./benchmark";
+import { evalClassifier } from "./cache";
 import { checkout } from "./checkout";
 import { DATA_DIR, REPO_ROOT, requireData, RUNS_DIR } from "./data";
 import { readRun, scoreRun, type RunMeta } from "./runs";
@@ -91,7 +92,8 @@ async function scanAll(): Promise<string> {
 
   const client = createLlmClient(loadLlmConfig());
   const classifierConfig = loadClassifierConfig();
-  const classifier = classifierConfig ? createClassifier(classifierConfig) : undefined;
+  // Cached on disk: benchmark code is pinned, so recovery is billed once and identical across runs.
+  const classifier = evalClassifier(classifierConfig ? createClassifier(classifierConfig) : undefined);
   const osv = values["no-osv"] ? undefined : createOsvClient();
   const pricing = loadPricing();
 
