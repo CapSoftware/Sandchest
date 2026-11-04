@@ -9,11 +9,10 @@ import type { AuthModel, PriorFinding, RepoHistory, ThreatModel } from "./schema
 import type { Wrap } from "./tools";
 
 const RUBRIC = `Severity = who can exploit it × what they get:
-- critical: unauthenticated remote code execution, takeover of any account, full access to a data store, or taking money or paid service at will. This includes an unauthenticated caller changing instance-wide configuration that controls login, tokens or outbound mail (identity providers, signing secrets, mail servers), since that leads to account takeover
-- high: any authenticated user can read or change other users' data, escalate privileges, obtain secrets, or get paid features or credits for free; or one cheap request forces the owner into orders of magnitude more work or spend (amplification). This includes a user changing someone else's role or permissions, up or down (a guest demoting an admin); a limited or delegated admin granting itself or others full admin; a member changing organisation-wide settings or billing details their role does not allow; and injection into a database query that can read other users' or tenants' data, blind or not
+- critical: unauthenticated remote code execution, takeover of any account, full access to a data store, or taking money or paid service at will
+- high: any authenticated user can read or change other users' data, escalate privileges, obtain secrets, or get paid features or credits for free; or one cheap request forces the owner into orders of magnitude more work or spend (amplification)
 - medium: exploitable, but with limited impact or uncommon preconditions; or an endpoint meant to be public lacks throttling in the application (it is often enforced at the edge, which you cannot see)
-- low: defence in depth
-Rate the attack as it lands, not how easily it is cleaned up: do not lower severity because an admin can undo the damage, because the attacker first needs an ordinary account or a lesser role the app hands out, or because the attack is blind, slow or needs a well-formed request.`;
+- low: defence in depth`;
 
 /**
  * The engine runs on an abliterated model: refusal behaviour removed, so it
