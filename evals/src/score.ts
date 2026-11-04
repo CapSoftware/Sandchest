@@ -29,7 +29,9 @@ export const TOLERANCE = 5;
  * - `false_positive`: the attack doesn't work.
  * - `not_security`: true, but nobody but the attacker is harmed (reliability, self-harm, admin-only).
  * - `test_code`: in tests, fixtures or examples that don't ship.
- * - `duplicate`: the same bug as `duplicateOf`.
+ * - `duplicate`: the same bug as `duplicateOf`, a fingerprint or `expected:<id>`. A duplicate of an
+ *   expected bug counts as finding it (the line ranges missed it); a duplicate of a finding absent
+ *   from the scan takes that finding's verdict.
  */
 export const VERDICTS = ["real", "false_positive", "not_security", "test_code", "duplicate"] as const;
 export type Verdict = (typeof VERDICTS)[number];
@@ -139,11 +141,23 @@ export function isShown(finding: Pick<Finding, "severity" | "confidence">): bool
   return SERIOUS.has(finding.severity) && finding.confidence !== "low";
 }
 
+/** The verdict behind a chain of duplicates (a → b → c): what the canonical finding was judged. */
+function canonical(judgements: Judgements, fingerprint: string): JudgementRecord | undefined {
+  const seen = new Set<string>();
+  let record = judgementOf(judgements, fingerprint);
+  while (record?.verdict === "duplicate" && record.duplicateOf && !record.duplicateOf.startsWith("expected:") && !seen.has(record.duplicateOf)) {
+    seen.add(record.duplicateOf);
+    record = judgementOf(judgements, record.duplicateOf);
+  }
+  return record?.verdict === "duplicate" ? undefined : record;
+}
+
 export function score(benchmark: Benchmark, report: ScanReport, judgements: Judgements = {}): BenchmarkScore {
   const firstMatch = new Map<string, string>();
   /** `expected id#location` already reported: a later finding on the same spot is a duplicate. */
   const claimed = new Set<string>();
   const severityByExpected = new Map<string, Finding["severity"]>();
+  const present = new Set(report.findings.map((f) => f.fingerprint));
   const findings: FindingScore[] = report.findings.map((finding) => {
     const hits = benchmark.expected.flatMap((expected) => {
       const range = matchRange(expected, finding);
@@ -153,7 +167,17 @@ export function score(benchmark: Benchmark, report: ScanReport, judgements: Judg
     const sink = finding.attackPath.at(-1)!;
     const cited = [finding.entryPoint, ...finding.attackPath];
     const decoy = benchmark.decoys.some((range) => within(range, sink.file, sink.line, 0));
-    const judged = judgementFor(judgements, finding);
+    let judged = judgementFor(judgements, finding);
+    // A reviewer's "duplicate of expected:<id>" is a match the line ranges missed.
+    const judgedExpected = judged?.verdict === "duplicate" && judged.duplicateOf?.startsWith("expected:") ? judged.duplicateOf.slice("expected:".length) : undefined;
+    if (judgedExpected && benchmark.expected.some((e) => e.id === judgedExpected) && !hits.some((h) => h.id === judgedExpected)) {
+      // Fresh unless the bug was already reported somewhere in this scan.
+      hits.push({ id: judgedExpected, spot: [...claimed].find((c) => c.startsWith(`${judgedExpected}#`)) ?? `${judgedExpected}#judged` });
+      matches.push(judgedExpected);
+      judged = undefined;
+    }
+    // A duplicate of another finding is only a duplicate when that finding is in this report; otherwise it stands in for it.
+    if (judged?.verdict === "duplicate" && judged.duplicateOf && !judgedExpected && !present.has(judged.duplicateOf)) judged = canonical(judgements, judged.duplicateOf);
     const fresh = hits.filter((h) => !claimed.has(h.spot));
     let outcome: Outcome = "unjudged";
     let reason: FindingScore["reason"];

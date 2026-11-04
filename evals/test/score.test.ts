@@ -120,6 +120,21 @@ describe("score", () => {
     expect(result.precision).toEqual({ lower: 0.5, known: 0.5 });
   });
 
+  test("a duplicate counts as the bug it duplicates when that is not otherwise in the scan", () => {
+    const judgements = {
+      "q.ts:1": { verdict: "duplicate" as const, duplicateOf: "expected:sqli" },
+      "y.ts:1": { verdict: "duplicate" as const, duplicateOf: "x.ts:1" },
+      "x.ts:1": { verdict: "real" as const },
+    };
+    // The reviewer's match stands in for the missed line range, and the canonical's verdict for a missing canonical.
+    const alone = score(benchmark, report([finding({ sink: ["q.ts", 1] }), finding({ sink: ["y.ts", 1] })]), judgements);
+    expect(alone.findings.map((f) => [f.outcome, f.matches])).toEqual([["true_positive", ["sqli"]], ["true_positive", []]]);
+    expect(alone.recall).toBe(0.5);
+    // Alongside the bug it repeats, it is a duplicate.
+    const both = score(benchmark, report([finding({ sink: ["a.ts", 10] }), finding({ sink: ["q.ts", 1] })]), judgements);
+    expect(both.findings.map((f) => f.outcome)).toEqual(["true_positive", "duplicate"]);
+  });
+
   test("a judgement carries over to the same bug under a new fingerprint", () => {
     const judgements = { old: { verdict: "false_positive" as const, where: { category: "sql_injection", entry: "routes.ts:1", path: ["q.ts:40"] } } };
     const result = score(benchmark, report([finding({ sink: ["q.ts", 42] }), finding({ sink: ["q.ts", 90] })]), judgements);
