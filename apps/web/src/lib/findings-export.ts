@@ -17,6 +17,8 @@ export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 export interface ExportContext {
   /** The dashboard's address, for links back to each finding. */
   baseUrl: string;
+  /** The Forgejo instance, for links into its repositories' code. */
+  forgejoUrl?: string;
   /** What the list was filtered by, as shown on the page. */
   filters: { status: string; severities: Severity[]; repo?: string; includeLowConfidence: boolean };
   now?: Date;
@@ -89,7 +91,7 @@ export function markdownReport(rows: ExportedFinding[], context: ExportContext):
       const rating = [`**${SEVERITY_LABEL[row.severity]}**`, `${row.confidence} confidence`, categoryLabel(row.category), row.cwe, statusOf(row)].filter(Boolean).join(" · ");
       const origin = [`Repository: ${row.repoFullName}`, row.prNumber !== null ? `found reviewing PR #${row.prNumber}` : "", `first seen ${shortDate(row.firstSeenAt)}`, `[view in Sandchest](${link(row)})`].filter(Boolean).join(" · ");
       const moved = row.stale ? "\n\nThe cited code has changed since it was found; the next deep scan checks it again." : "";
-      const sections = findingSections(promptFinding(row), { heading: "###", link: (file, line) => githubLine(row.repoFullName, row.defaultBranch, file, line) });
+      const sections = findingSections(promptFinding(row), { heading: "###", link: (file, line) => githubLine(row.repoFullName, row.defaultBranch, file, line, row.provider === "forgejo" ? context.forgejoUrl : undefined) });
       return `## ${i + 1}. ${row.title}\n\n${rating}\n\n${origin}${moved}\n\n${sections}`;
     })
     .join("\n\n---\n\n");

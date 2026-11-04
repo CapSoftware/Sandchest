@@ -27,6 +27,7 @@ const REPOS: Array<[name: string, open: Partial<Record<Severity, number>>, revie
 export function sampleRepos(): DashboardRepo[] {
   return REPOS.map(([name, open, reviews, privateRepo], i) => ({
     id: id(100 + i),
+    provider: "github",
     fullName: `acme/${name}`,
     private: privateRepo,
     orgId: SAMPLE_ORG_ID,
@@ -163,7 +164,7 @@ export function sampleFinding(): NonNullable<Awaited<ReturnType<typeof findingFo
       lastSeenAt: ago(120),
       fixedAt: null,
     },
-    repo: { id: id(100), fullName: "acme/api", private: true, defaultBranch: "main" },
+    repo: { id: id(100), provider: "github", fullName: "acme/api", private: true, defaultBranch: "main" },
     history: [{ type: "seen", at: ago(60 * 24 * 3), login: null, scanId: id(301) }],
   };
 }
@@ -218,7 +219,7 @@ export function sampleScan(): NonNullable<Awaited<ReturnType<typeof scanForUser>
       startedAt: started,
       finishedAt: ago(39),
     },
-    repo: { id: id(100), fullName: "acme/api", private: true },
+    repo: { id: id(100), provider: "github", fullName: "acme/api", private: true },
     org: { login: "acme", hacker: null },
     metrics: null,
     findings: sampleFindings(8)
@@ -248,6 +249,7 @@ export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow 
   };
   const org: SettingsOrg = {
     id: SAMPLE_ORG_ID,
+    provider: "github",
     login: "acme",
     type: "Organization",
     installationId: 1,

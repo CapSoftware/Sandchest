@@ -80,7 +80,8 @@ export function SettingsView({
               <p className="field-legend">Repositories</p>
               <p className="field-help">
                 {org.repos.length === 0 ? "None you can push to." : "The ones you can push to."}{" "}
-                {org.admin && (
+                {/* On Forgejo the operator chooses repositories, in FORGEJO_OWNERS. */}
+                {org.admin && org.provider === "github" && (
                   <a className="quiet" href={installationUrl(org)}>
                     Choose repositories on GitHub
                   </a>

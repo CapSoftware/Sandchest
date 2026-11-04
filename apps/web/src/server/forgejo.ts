@@ -18,3 +18,8 @@ export function forgejoClient(): Forgejo | undefined {
 export function setForgejoClient(value: Forgejo | undefined): void {
   instance = value;
 }
+
+/** The Forgejo instance's web address for a Forgejo repository, for links; undefined for GitHub's. */
+export function forgejoWebUrl(provider: "github" | "forgejo"): string | undefined {
+  return provider === "forgejo" ? config().forgejo?.url : undefined;
+}

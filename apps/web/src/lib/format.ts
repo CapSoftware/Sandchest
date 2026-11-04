@@ -105,9 +105,18 @@ export function compactNumber(value: number): string {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-/** A GitHub link to a line on the default branch. Lines drift as code changes; good enough to jump there. */
-export function githubLine(repo: string, ref: string, file: string, line: number): string {
-  return `https://github.com/${repo}/blob/${encodeURIComponent(ref)}/${file.split("/").map(encodeURIComponent).join("/")}#L${line}`;
+/** A GitHub link to a line on the default branch. Lines drift as code changes; good enough to jump there. With `forgejoUrl`, the same on that Forgejo instance. */
+export function githubLine(repo: string, ref: string, file: string, line: number, forgejoUrl?: string): string {
+  const path = file.split("/").map(encodeURIComponent).join("/");
+  if (forgejoUrl) return `${forgejoUrl}/${repo}/src/branch/${encodeURIComponent(ref)}/${path}#L${line}`;
+  return `https://github.com/${repo}/blob/${encodeURIComponent(ref)}/${path}#L${line}`;
+}
+
+/** A repository's page, or one of its pull requests, on GitHub or on the Forgejo instance at `forgejoUrl`. */
+export function repoUrl(repo: string, forgejoUrl?: string, pull?: number): string {
+  const base = `${forgejoUrl ?? "https://github.com"}/${repo}`;
+  if (pull === undefined) return base;
+  return forgejoUrl ? `${base}/pulls/${pull}` : `${base}/pull/${pull}`;
 }
 
 const SHORT_DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });

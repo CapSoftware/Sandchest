@@ -5,10 +5,11 @@
  * and never holds the page up for more than a few seconds: without it the
  * briefing is built from what the database knows.
  */
-import { adminOrgs, orgForAdmin, orgRepos } from "@sandchest/db";
+import { adminOrgs, orgForAdmin, orgRepos, type Forge } from "@sandchest/db";
 import type { AccountProfile, InstalledRepository } from "@sandchest/github";
 import { type Briefing, type RecruitAccount, websiteUrl } from "@/lib/briefing";
 import { readHacker } from "@/lib/hacker";
+import { config } from "./config";
 import { db } from "./db";
 import { githubApp } from "./github-app";
 import { describeError } from "./log";
@@ -19,10 +20,11 @@ const WAIT_MS = 3_000;
 type FromGitHub = { profile: AccountProfile | null; repos: Map<number, InstalledRepository> };
 const cache = new Map<string, { at: number; value: Promise<FromGitHub> }>();
 
-function fromGitHub(org: { id: string; githubLogin: string; type: "User" | "Organization"; installationId: number | null }): Promise<FromGitHub> {
+function fromGitHub(org: { id: string; provider: Forge; githubLogin: string; type: "User" | "Organization"; installationId: number | null }): Promise<FromGitHub> {
   const hit = cache.get(org.id);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
-  const installation = org.installationId ? githubApp().installation(org.installationId) : null;
+  // A Forgejo org's briefing is built from what the database knows.
+  const installation = org.provider === "github" && org.installationId ? githubApp().installation(org.installationId) : null;
   const value = Promise.all([
     installation?.account(org.githubLogin, org.type).catch(logged("profile")) ?? null,
     installation?.repositories().catch(logged("repositories")) ?? null,
@@ -33,6 +35,13 @@ function fromGitHub(org: { id: string; githubLogin: string; type: "User" | "Orga
     if (!got.profile) cache.delete(org.id);
   });
   return value;
+}
+
+/** The account's picture on its forge. Forgejo, like GitHub, serves it at /<name>.png. */
+function avatarUrl(org: { provider: Forge; githubLogin: string }): string {
+  const login = encodeURIComponent(org.githubLogin);
+  const forgejo = config().forgejo;
+  return org.provider === "forgejo" && forgejo ? `${forgejo.url}/${login}.png` : `https://github.com/${login}.png?size=128`;
 }
 
 function logged(what: string) {
@@ -71,7 +80,7 @@ export async function briefing(user: { id: string; email: string | null }, orgId
       about: (profile?.description ?? profile?.bio)?.trim() || null,
       website: websiteUrl(profile?.blog),
       location: profile?.location?.trim() || null,
-      avatar: profile?.avatar_url ?? `https://github.com/${encodeURIComponent(org.githubLogin)}.png?size=128`,
+      avatar: profile?.avatar_url ?? avatarUrl(org),
     },
     repos: repos.map((repo) => {
       const details = github.repos.get(repo.githubRepoId);

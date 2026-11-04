@@ -15,6 +15,7 @@ import { SEVERITIES } from "@/lib/format";
 import { site } from "@/lib/site";
 import { track } from "./analytics";
 import { auth } from "./auth";
+import { config } from "./config";
 import { db } from "./db";
 
 const Id = z.uuid();
@@ -122,7 +123,7 @@ export async function copyFindings(input: ExportFiltersInput, format: "markdown"
   const filters = listFilters(input);
   if (!filters || (format !== "markdown" && format !== "json")) return { error: "Those filters aren’t valid." };
   const rows = await findingsForExport(db(), user.id, filters);
-  const text = exportFindings(rows, format, { baseUrl: site.url, filters: { status: filters.status, severities: filters.severities, repo: filters.repoId, includeLowConfidence: filters.includeLowConfidence } });
+  const text = exportFindings(rows, format, { baseUrl: site.url, forgejoUrl: config().forgejo?.url, filters: { status: filters.status, severities: filters.severities, repo: filters.repoId, includeLowConfidence: filters.includeLowConfidence } });
   await track("findings_copied", {
     userId: user.id,
     props: { format, status: filters.status, findings: rows.length, repos: new Set(rows.map((row) => row.repoFullName)).size, filtered: filters.severities.length > 0 || filters.repoId !== undefined, low_confidence: filters.includeLowConfidence },

@@ -4,7 +4,8 @@ import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
 import { ScanRows } from "@/components/app/scan-rows";
 import { When } from "@/components/app/when";
-import { compactNumber, SEVERITIES } from "@/lib/format";
+import { compactNumber, repoUrl, SEVERITIES } from "@/lib/format";
+import { forgejoWebUrl } from "@/server/forgejo";
 import type { OrgPlan } from "@/server/org-plans";
 import "../../../rig.css";
 
@@ -29,8 +30,8 @@ export function RepoView({ repo, plan, findings, history }: { repo: DashboardRep
           <h1 className="page-title">{name}</h1>
           <p className="page-sub">
             {repo.fullName} · {repo.private ? "private" : "public"} ·{" "}
-            <a className="quiet" href={`https://github.com/${repo.fullName}`} target="_blank" rel="noreferrer">
-              GitHub
+            <a className="quiet" href={repoUrl(repo.fullName, forgejoWebUrl(repo.provider))} target="_blank" rel="noreferrer">
+              {repo.provider === "forgejo" ? "Forgejo" : "GitHub"}
             </a>
           </p>
         </div>

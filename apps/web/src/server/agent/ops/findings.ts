@@ -4,6 +4,7 @@ import { exportFindings } from "@/lib/findings-export";
 import { fixPrompt } from "@sandchest/engine/fix-prompt";
 import type { PathStep } from "@sandchest/engine/scan";
 import { z } from "zod";
+import { config } from "../../config";
 import { db } from "../../db";
 import { ApiError, notFound } from "../errors";
 import { flag, int, operation, RepoRef, SEVERITY, Uuid } from "../operation";
@@ -124,7 +125,7 @@ export const findingOps = [
       const severities = severitiesOf(input.severity) ?? [];
       const includeLowConfidence = input.include_low_confidence ?? false;
       const rows = await findingsForExport(db(), context.principal.userId, { status, severities, repoId: repo?.id, includeLowConfidence });
-      const text = exportFindings(rows, format, { baseUrl: context.appUrl, filters: { status, severities, repo: repo?.id, includeLowConfidence } });
+      const text = exportFindings(rows, format, { baseUrl: context.appUrl, forgejoUrl: config().forgejo?.url, filters: { status, severities, repo: repo?.id, includeLowConfidence } });
       if (format === "prompt") await recordPromptsCopied(db(), context.principal.userId, rows.map((row) => row.id));
       return { format, findings: rows.length, repos: [...new Set(rows.map((row) => row.repoFullName))], text };
     },

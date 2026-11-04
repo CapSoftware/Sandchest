@@ -4,7 +4,8 @@ import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
 import { ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
-import { compactNumber, plural, SCAN_KIND_LABEL } from "@/lib/format";
+import { compactNumber, plural, repoUrl, SCAN_KIND_LABEL } from "@/lib/format";
+import { forgejoWebUrl } from "@/server/forgejo";
 import { readHacker } from "@/lib/hacker";
 import type { OrgPlan } from "@/server/org-plans";
 import "../../../rig.css";
@@ -59,7 +60,7 @@ export function ScanView({ row, again, next, waitingOn }: { row: ScanRow; again?
             </p>
           </div>
           {scan.prNumber !== null && (
-            <a className="key key-secondary" href={`https://github.com/${repo.fullName}/pull/${scan.prNumber}`} target="_blank" rel="noreferrer">
+            <a className="key key-secondary" href={repoUrl(repo.fullName, forgejoWebUrl(repo.provider), scan.prNumber)} target="_blank" rel="noreferrer">
               <span className="key-face">Open the pull request</span>
             </a>
           )}

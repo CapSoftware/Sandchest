@@ -8,6 +8,7 @@ import { Link } from "@/components/app/hover-link";
 import { Submit } from "@/components/app/submit";
 import { When } from "@/components/app/when";
 import { ATTACKER_LABEL, categoryLabel, DISMISS_REASON_LABEL, githubLine, SCAN_KIND_LABEL } from "@/lib/format";
+import { forgejoWebUrl } from "@/server/forgejo";
 import { changeFinding } from "@/server/actions";
 
 /** A finding as the page reads it: the row, its repository and its history. */
@@ -71,7 +72,7 @@ export function FindingView({ row }: { row: FindingRow }) {
             <ol className="path">
               <li className="hop hop-entry">
                 <div className="hop-at">
-                  <a href={githubLine(repo.fullName, repo.defaultBranch, entry.file, entry.line)} target="_blank" rel="noreferrer">
+                  <a href={githubLine(repo.fullName, repo.defaultBranch, entry.file, entry.line, forgejoWebUrl(repo.provider))} target="_blank" rel="noreferrer">
                     {entry.file}:{entry.line}
                   </a>
                   <span className="hop-role">Entry point</span>
@@ -81,7 +82,7 @@ export function FindingView({ row }: { row: FindingRow }) {
               {path.map((step, i) => (
                 <li key={`${step.file}:${step.line}:${i}`} className={i === path.length - 1 ? "hop hop-sink" : "hop"}>
                   <div className="hop-at">
-                    <a href={githubLine(repo.fullName, repo.defaultBranch, step.file, step.line)} target="_blank" rel="noreferrer">
+                    <a href={githubLine(repo.fullName, repo.defaultBranch, step.file, step.line, forgejoWebUrl(repo.provider))} target="_blank" rel="noreferrer">
                       {step.file}:{step.line}
                     </a>
                     {i === path.length - 1 && <span className="hop-role">Where it lands</span>}
