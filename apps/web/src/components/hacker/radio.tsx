@@ -7,7 +7,7 @@ import { Keycap } from "./keycap";
  * mix at its own quiet points. Browsers keep them for a year (next.config.ts),
  * so bump the version when a track changes.
  */
-const RADIO_VERSION = "1";
+const RADIO_VERSION = "2";
 const TRACKS = Array.from({ length: 10 }, (_, i) => `/radio/${String(i + 1).padStart(2, "0")}.webm?v=${RADIO_VERSION}`);
 const VOLUME = 0.55;
 const FADE_MS = 400;
