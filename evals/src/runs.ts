@@ -82,7 +82,7 @@ export interface RunScore {
   patched: PatchedScore[];
   stability: Stability[];
   aggregate: Aggregate;
-  cost: { usd: number | null; per100kLoc: number | null };
+  cost: { usd: number | null; perScan: number | null; per100kLoc: number | null };
   medianMinutes: number | null;
   /** Scans of targets that aren't benchmarks (real repositories), scored only by judgements. */
   targets: BenchmarkScore[];
@@ -133,7 +133,7 @@ export async function scoreRun(run: RunScans, benchmarks: Benchmark[], only?: Se
     patched,
     stability: stab,
     aggregate: aggregate([...scores.values()].flat(), patched),
-    cost: { usd, per100kLoc: usd === null ? null : ratio(usd * 100_000, loc) },
+    cost: { usd, perScan: usd === null ? null : ratio(usd, reports.length), per100kLoc: usd === null ? null : ratio(usd * 100_000, loc) },
     medianMinutes: minutes.length ? minutes[Math.floor((minutes.length - 1) / 2)]! : null,
     targets,
   };

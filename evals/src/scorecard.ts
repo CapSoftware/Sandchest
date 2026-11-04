@@ -69,7 +69,7 @@ export function rows(run: RunScore, base?: RunScore): Row[] {
     { metric: "Same bug, same fingerprint across runs", value: fpStability(run), baseline: base ? fpStability(base) : undefined, better: "higher", format: pct, noise: NOISE.rate },
     { metric: "Same bug recognised on rescan", value: recognised(run), baseline: base ? recognised(base) : undefined, better: "higher", target: TARGETS.fingerprintStability, format: pct, noise: NOISE.rate },
     { metric: "Bugs found in every run (of any run)", value: agreement(run), baseline: base ? agreement(base) : undefined, better: "higher", format: pct, noise: NOISE.recall },
-    { metric: "Cost", value: run.cost.usd, baseline: base?.cost.usd, better: "lower", format: usd, noise: NOISE.costShare, relative: true },
+    { metric: "Cost per scan", value: run.cost.perScan, baseline: base?.cost.perScan, better: "lower", format: usd, noise: NOISE.costShare, relative: true },
     { metric: "Cost per 100k LOC", value: run.cost.per100kLoc, baseline: base?.cost.per100kLoc, better: "lower", format: usd, noise: NOISE.costShare, relative: true },
     { metric: "Median scan time", value: run.medianMinutes, baseline: base?.medianMinutes, better: "lower", target: TARGETS.medianMinutes, format: mins, noise: NOISE.timeShare, relative: true },
   ];
