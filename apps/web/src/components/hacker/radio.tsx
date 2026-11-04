@@ -23,9 +23,10 @@ export interface Radio {
 }
 
 /**
- * Background music for the hacker's room, off until asked for. Tracks play in
- * a shuffled order, every one once before any repeats, and never the same one
- * twice running. Only the track playing is fetched, and it streams.
+ * Background music for the hacker's room, off until asked for. Track 1 always
+ * opens the station; the rest follow in a shuffled order, every one once before
+ * any repeats, and never the same one twice running. Only the track playing is
+ * fetched, and it streams.
  */
 export function useRadio(): Radio {
   const [supported, setSupported] = useState(false);
@@ -53,7 +54,7 @@ export function useRadio(): Radio {
   }, []);
 
   const play = useCallback((el: HTMLAudioElement) => {
-    if (queue.current.length === 0) queue.current = shuffled(TRACKS.length, track === null ? null : track - 1);
+    if (queue.current.length === 0) queue.current = track === null ? [0, ...shuffled(TRACKS.length - 1, null).map((i) => i + 1)] : shuffled(TRACKS.length, track - 1);
     const index = queue.current.shift()!;
     el.src = TRACKS[index]!;
     setTrack(index + 1);
