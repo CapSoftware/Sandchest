@@ -4,6 +4,7 @@
  * because a step that dies is retried from the start.
  */
 import { withUtm } from "@/lib/analytics";
+import { RECON_WAIT } from "@/lib/scan-progress";
 import { DEEP_SCAN_TIERS, deepScanCredits, prReviewCredits } from "@sandchest/billing";
 import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
 import {
@@ -16,6 +17,7 @@ import {
   noteScanEvent,
   notificationRecipients,
   openFindings,
+  pendingRecon,
   recordMetrics,
   repoHistory,
   saveThreatModel,
@@ -78,6 +80,12 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
       await refuse(scan, gate);
       return { state: "done" };
     }
+  }
+  // A deep scan of a repo still being mapped waits for the map and builds on it, rather than mapping it again
+  // beside the recon (the first deep scan starts the moment recon does).
+  if (scan.status === "queued" && scan.kind === "deep" && (await pendingRecon(db(), scan.repoId))) {
+    await noteScanEvent(db(), scan.id, RECON_WAIT, `Waiting for recon to map ${scan.repo.fullName} first, usually under a minute. The deep scan starts from that map as soon as it’s done.`);
+    return { state: "queued" };
   }
   if (!(await claimScanSlot(db(), scan.id, scan.orgId, ORG_CONCURRENCY))) {
     // Said once (a repeat of the last line is skipped), so the feed explains the wait.

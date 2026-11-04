@@ -48,7 +48,8 @@ function Result({ scan }: { scan: ScanListItem }) {
     return (
       <span className="scan-result-live">
         <span className="blink" aria-hidden="true" />
-        {SCAN_STATUS_LABEL[scan.status]}
+        {/* Recon is the map every other scan of the repo starts from, not a scan for findings. */}
+        {scan.kind === "recon" && scan.status !== "publishing" ? "Mapping the code" : SCAN_STATUS_LABEL[scan.status]}
       </span>
     );
   if (scan.status !== "completed") return <span className="scan-result-off" data-status={scan.status}>{SCAN_STATUS_LABEL[scan.status] ?? scan.status}</span>;

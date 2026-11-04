@@ -2,7 +2,7 @@
 import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { duration, SCAN_STATUS_LABEL, timeAgo } from "@/lib/format";
-import { TRACKS, trackStates } from "@/lib/scan-progress";
+import { trackOf, trackStates } from "@/lib/scan-progress";
 
 export interface FeedEvent {
   seq: number;
@@ -132,9 +132,10 @@ function clock(ms: number): string {
 /** The scan's steps as a row of pixel bars: done in gold, the current one digging, the rest dark. */
 export function ScanTrack() {
   const { kind, status, events } = useLive();
-  const track = TRACKS[kind];
-  if (!track) return null;
-  const states = trackStates(kind, status, events.map((event) => event.type));
+  const types = events.map((event) => event.type);
+  const track = trackOf(kind, types);
+  if (track.length === 0) return null;
+  const states = trackStates(kind, status, types);
   const current = track[states.findIndex((s) => s === "current")];
   return (
     <div className="track" style={{ "--steps": track.length } as CSSProperties} role="list" aria-label={current ? `Now: ${current.label}` : status === "queued" ? "Waiting to start" : "Steps"}>
@@ -173,7 +174,7 @@ export function ScanFeed() {
         {events.length === 0 && following && status === "queued" && <li className="feed-line feed-empty">Waiting for a free slot…</li>}
         {events.map((event) => (
           <li key={event.seq} className="feed-line" data-type={event.type.split(":")[0]}>
-            <span className="feed-time">{event.type === "queue" ? "··:··" : feedClock(event.at - origin)}</span>
+            <span className="feed-time">{event.type.split(":")[0] === "queue" ? "··:··" : feedClock(event.at - origin)}</span>
             <span className="feed-message">{event.message}</span>
           </li>
         ))}

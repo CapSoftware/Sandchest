@@ -9,7 +9,7 @@ import type { ShotName } from "@/components/rig/shots";
 import { newSignals } from "@/components/rig/signals";
 import { plural, SCAN_KIND_LABEL } from "@/lib/format";
 import { PHOSPHORS, swatch, type HackerProfile } from "@/lib/hacker";
-import { TRACKS, trackStates } from "@/lib/scan-progress";
+import { RECON_WAIT, trackOf, trackStates } from "@/lib/scan-progress";
 import { HoverLink } from "./hover-link";
 import { useLive } from "./scan-live";
 import { useInSkeleton } from "./skeleton";
@@ -37,11 +37,14 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
   const [dragged, setDragged] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const signals = useRef(newSignals());
-  const states = trackStates(live.kind, live.status, live.events.map((e) => e.type));
-  const steps = TRACKS[live.kind] ?? [];
+  const types = live.events.map((e) => e.type);
+  const states = trackStates(live.kind, live.status, types);
+  const steps = trackOf(live.kind, types);
   const track = steps.map((step, i) => ({ label: step.label, state: states[i] ?? "pending" }));
   const active = ACTIVE.has(live.status);
   const now = track.find((step) => step.state === "current");
+  // Queued behind the repository's recon: that's what it's waiting on, and it says so.
+  const forRecon = live.status === "queued" && types.includes(RECON_WAIT);
   const found = active ? live.events.filter((e) => e.type === "finding").length : findings;
 
   const next: LiveModel = {
@@ -138,7 +141,7 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
           )}
           <span className="watch-doing">
             <span className="watch-dot" aria-hidden="true" />
-            {live.status === "queued" ? "Waiting to start on" : active ? "Working on" : "Worked on"} {repo}
+            {forRecon ? "Waiting for recon to map" : live.status === "queued" ? "Waiting to start on" : active ? "Working on" : "Worked on"} {repo}
           </span>
         </p>
         <span className="watch-tools">
@@ -173,7 +176,7 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
                 <i key={i} data-state={step.state} />
               ))}
             </span>
-            <span className="watch-step">{now ? now.label : live.status === "queued" ? "Queued" : active ? "Starting" : "Done"}</span>
+            <span className="watch-step">{forRecon ? "Waiting for recon" : now ? now.label : live.status === "queued" ? "Queued" : active ? "Starting" : "Done"}</span>
           </span>
         )}
         <span className="watch-found" data-some={found > 0 || undefined}>

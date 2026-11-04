@@ -143,6 +143,12 @@ export async function recruit(orgId: string, _previous: RecruitOutcome, form: Fo
       return purchase(orgId, {}, purchaseForm);
     }
   }
+  // No billing (a self-hosted server, or local dev): nothing to pay, so the hacker starts on the first target now.
+  if (!billingEnabled()) {
+    const row = await orgForAdmin(db(), user.id, orgId);
+    const { startFirstTarget } = await import("./first-target");
+    redirect(row ? await startFirstTarget(user.id, row.org, "/dashboard?recruited=1") : "/dashboard?recruited=1");
+  }
   redirect("/dashboard?recruited=1");
 }
 

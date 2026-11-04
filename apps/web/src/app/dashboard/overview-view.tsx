@@ -66,9 +66,15 @@ export function OverviewView({
       {running.map((repo) => (
         <HoverLink key={repo.id} href={`/dashboard/scans/${repo.activeDeepScanId}`} className="running-strip">
           <span className="blink" aria-hidden="true" />
-          <span>
-            Deep scan of <strong>{repo.fullName}</strong> is running
-          </span>
+          {repo.activeDeepScanWaitsForRecon ? (
+            <span>
+              Deep scan of <strong>{repo.fullName}</strong> starts once recon has mapped it
+            </span>
+          ) : (
+            <span>
+              Deep scan of <strong>{repo.fullName}</strong> is running
+            </span>
+          )}
           <span className="running-strip-go">Watch</span>
         </HoverLink>
       ))}

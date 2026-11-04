@@ -1,6 +1,6 @@
 /** The scan page's step track, from a scan's status and the stages its feed reached. */
 import { describe, expect, test } from "bun:test";
-import { stepOf, TRACKS, trackStates } from "@/lib/scan-progress";
+import { RECON_WAIT, stepOf, trackOf, TRACKS, trackStates } from "@/lib/scan-progress";
 
 const deep = TRACKS.deep!.map((step) => step.key);
 
@@ -47,5 +47,15 @@ describe("scan track", () => {
     expect(trackStates("recon", "completed", [])).toEqual(["done", "done", "done", "done"]);
     expect(trackStates("deep", "failed", ["stage:setup", "stage:index", "stage:sweep"])).toEqual(["done", "done", "failed", "pending", "pending", "pending", "pending"]);
     expect(trackStates("deep", "refused", [])).toEqual(deep.map(() => "pending"));
+  });
+
+  test("a deep scan that waits for its repository's recon shows recon as its first step, then moves past it", () => {
+    expect(trackOf("deep", [RECON_WAIT]).map((s) => s.key)).toEqual(["wait", ...deep]);
+    expect(trackOf("deep", ["queue"])).toBe(TRACKS.deep!);
+    expect(trackStates("deep", "queued", [RECON_WAIT])).toEqual(["current", ...deep.map(() => "pending" as const)]);
+    // Started, before its first stage line arrives: setup is current, recon done.
+    expect(trackStates("deep", "running", [RECON_WAIT])).toEqual(["done", "current", ...deep.slice(1).map(() => "pending" as const)]);
+    expect(trackStates("deep", "running", [RECON_WAIT, "stage:setup", "stage:index"])).toEqual(["done", "done", "current", ...deep.slice(2).map(() => "pending" as const)]);
+    expect(trackStates("deep", "completed", [RECON_WAIT])).toHaveLength(deep.length + 1);
   });
 });

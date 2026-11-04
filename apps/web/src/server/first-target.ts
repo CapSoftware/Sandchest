@@ -8,13 +8,15 @@ import { db } from "./db";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 
-/** Where to go once paid: the first Dig's live view, or the dashboard if it can't start. */
-export async function startFirstTarget(userId: string, org: { id: string; settings: { firstTarget?: string } }): Promise<string> {
-  const fallback = "/dashboard?plan=started";
+/**
+ * Where to go once joined: the first Dig's live view, or `fallback` if it can't start. A target that was
+ * deep scanned already (recruiting again, say) isn't scanned again.
+ */
+export async function startFirstTarget(userId: string, org: { id: string; settings: { firstTarget?: string } }, fallback = "/dashboard?plan=started"): Promise<string> {
   const target = org.settings.firstTarget;
   if (!target || !(await orgRepos(db(), org.id)).some((repo) => repo.id === target)) return fallback;
   const row = await repoForUser(db(), userId, target);
-  if (!row) return fallback;
+  if (!row || row.repo.lastDeepScanAt) return fallback;
   try {
     const { requestDeepScan } = await import("./dig");
     const result = await requestDeepScan({ ...row.repo, org: row.org });

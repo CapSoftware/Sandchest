@@ -1,4 +1,4 @@
-import { dashboardRepos, scanForUser } from "@sandchest/db";
+import { dashboardRepos, pendingRecon, scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
@@ -31,9 +31,16 @@ export default async function ScanPage({ params }: Params) {
     row.scan.kind === "deep" && !ACTIVE.has(row.scan.status)
       ? await dashboardRepos(db(), user.id, { repoId: row.repo.id }).then(async ([repo]) => (repo ? { repo, plan: (await orgPlans([repo])).get(repo.orgId) } : undefined))
       : undefined;
+  // A recon that a deep scan is waiting for points on to it: that's the scan they're here for.
+  const next =
+    row.scan.kind === "recon" && ACTIVE.has(row.scan.status)
+      ? await dashboardRepos(db(), user.id, { repoId: row.repo.id }).then(([repo]) => (repo?.activeDeepScanWaitsForRecon ? (repo.activeDeepScanId ?? undefined) : undefined))
+      : undefined;
+  // A deep scan queued behind its repo's recon points back to it: that's what it's waiting on.
+  const waitingOn = row.scan.kind === "deep" && row.scan.status === "queued" ? await pendingRecon(db(), row.repo.id) : undefined;
   return (
     <PageShape id="scan">
-      <ScanView row={row} again={again} />
+      <ScanView row={row} again={again} next={next} waitingOn={waitingOn} />
     </PageShape>
   );
 }

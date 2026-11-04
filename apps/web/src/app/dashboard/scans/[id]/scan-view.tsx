@@ -18,8 +18,12 @@ export function title(kind: string, prNumber: number | null): string {
   return kind === "pr_review" && prNumber !== null ? `Review of PR #${prNumber}` : (SCAN_KIND_LABEL[kind] ?? "Scan");
 }
 
-/** A scan, drawn from what the page read; its loading state draws it from a sample scan. `again` is the Dig key of a finished deep scan's repo. */
-export function ScanView({ row, again }: { row: ScanRow; again?: { repo: DashboardRepo; plan: OrgPlan } }) {
+/**
+ * A scan, drawn from what the page read; its loading state draws it from a sample scan. `again` is the Dig key
+ * of a finished deep scan's repo; `next` is the deep scan a running recon is mapping the repo for, and
+ * `waitingOn` the recon a queued deep scan waits for.
+ */
+export function ScanView({ row, again, next, waitingOn }: { row: ScanRow; again?: { repo: DashboardRepo; plan: OrgPlan }; next?: string; waitingOn?: string }) {
   const { scan, repo, org, metrics, findings, events } = row;
   const live = ACTIVE.has(scan.status);
   const shown = findings.filter((finding) => finding.confidence !== "low");
@@ -63,6 +67,25 @@ export function ScanView({ row, again }: { row: ScanRow; again?: { repo: Dashboa
         </div>
 
         {scan.error && <p className="scan-error">{scan.error}</p>}
+
+        {next && (
+          <HoverLink href={`/dashboard/scans/${next}`} className="running-strip">
+            <span className="blink" aria-hidden="true" />
+            <span>
+              Recon maps <strong>{repo.fullName}</strong> first, usually in under a minute. The deep scan starts from this map.
+            </span>
+            <span className="running-strip-go">Watch the deep scan</span>
+          </HoverLink>
+        )}
+        {waitingOn && (
+          <HoverLink href={`/dashboard/scans/${waitingOn}`} className="running-strip">
+            <span className="blink" aria-hidden="true" />
+            <span>
+              Recon is mapping <strong>{repo.fullName}</strong> first, usually in under a minute. This deep scan starts from that map.
+            </span>
+            <span className="running-strip-go">Watch recon</span>
+          </HoverLink>
+        )}
 
         <ScanWatch profile={readHacker(org.hacker)} repo={repo.fullName} findings={shown.length} hackerHref={`/dashboard/hacker?org=${scan.orgId}`} />
 

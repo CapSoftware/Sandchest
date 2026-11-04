@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
 
@@ -231,7 +231,18 @@ export async function claimScanSlot(database: Db, scanId: string, orgId: string,
       .select({ running: sql<number>`count(*)::int` })
       .from(scans)
       .where(and(eq(scans.orgId, orgId), eq(scans.status, "running"), lane))) as [{ running: number }];
-    if (running >= limit) return false;
+    // A recon a deep scan is waiting on goes ahead of the rest of the org's recon, so a first deep scan waits
+    // for one repository's map, not every repository's.
+    const ahead =
+      scan.kind === "recon" &&
+      running === limit &&
+      !!(await tx
+        .select({ id: scans.id })
+        .from(scans)
+        .where(and(eq(scans.repoId, scan.repoId), eq(scans.kind, "deep"), eq(scans.status, "queued")))
+        .limit(1)
+        .then(([row]) => row));
+    if (running >= limit && !ahead) return false;
     await tx.update(scans).set({ status: "running", startedAt: new Date() }).where(eq(scans.id, scanId));
     return true;
   });
@@ -305,6 +316,21 @@ export async function strandedScans(database: Db, now = new Date()): Promise<{ u
 /** Whether a deep scan for the repo is queued or running right now. */
 export async function activeDeepScan(database: Db, repoId: string): Promise<Scan | undefined> {
   return database.query.scans.findFirst({ where: and(eq(scans.repoId, repoId), eq(scans.kind, "deep"), inArray(scans.status, ["queued", "running", "publishing"])) });
+}
+
+/** How long a deep scan waits for its repo's recon before it maps the code itself, as it would with no recon. */
+export const RECON_WAIT_MS = 30 * 60_000;
+
+/**
+ * The repo's recon, if one is queued or running and recent: a deep scan that waits for it reuses its threat
+ * model. An older one may be stuck, so it holds nothing up.
+ */
+export async function pendingRecon(database: Db, repoId: string, now = new Date()): Promise<string | undefined> {
+  const row = await database.query.scans.findFirst({
+    columns: { id: true },
+    where: and(eq(scans.repoId, repoId), eq(scans.kind, "recon"), inArray(scans.status, ["queued", "running"]), gt(scans.createdAt, new Date(now.getTime() - RECON_WAIT_MS))),
+  });
+  return row?.id;
 }
 
 export async function markDeepScanned(database: Db, repoId: string, at: Date, loc: number): Promise<void> {

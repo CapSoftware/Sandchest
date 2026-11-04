@@ -39,6 +39,7 @@ export function sampleRepos(): DashboardRepo[] {
     lastScan: { id: id(300 + i), kind: "pr_review", status: "completed", at: ago(90 + i * 140) },
     reviews30d: reviews,
     activeDeepScanId: null,
+    activeDeepScanWaitsForRecon: false,
     freeDig: false,
   }));
 }

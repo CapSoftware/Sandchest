@@ -4,7 +4,7 @@
  * alert that takes over the screen for each finding.
  */
 import { aside, momentOf, shellUser, type HackerProfile } from "@/lib/hacker";
-import type { StepState } from "@/lib/scan-progress";
+import { RECON_WAIT, type StepState } from "@/lib/scan-progress";
 import type { Kit, Painter } from "./screen";
 import { typed } from "./text";
 import { JOLT_S, type Signals } from "./signals";
@@ -75,8 +75,8 @@ export function livePainter(model: { current: LiveModel }, signals: { current: S
       if (seen.has(line.seq)) continue;
       seen.add(line.seq);
       const from = catchingUp ? -100 : Math.max(t, queueAt);
-      const kind = line.type === "finding" ? "finding" : line.type.startsWith("stage:") ? "stage" : line.type === "warning" ? "warning" : line.type === "queue" ? "queue" : "line";
-      shown.push({ text: line.message, kind, from, clock: line.type === "queue" ? "··:··" : clock(line.at - m.origin) });
+      const kind = line.type === "finding" ? "finding" : line.type.startsWith("stage:") ? "stage" : line.type === "warning" ? "warning" : line.type.split(":")[0] === "queue" ? "queue" : "line";
+      shown.push({ text: line.message, kind, from, clock: line.type.split(":")[0] === "queue" ? "··:··" : clock(line.at - m.origin) });
       queueAt = from + Math.min(1.2, line.message.length / 90);
       const moment = momentOf(line.type);
       const said = moment && aside(m.profile.voice, moment, line.seq);
@@ -105,7 +105,11 @@ export function livePainter(model: { current: LiveModel }, signals: { current: S
     sidebar(kit, t, m, activity, live);
     bottomBar(kit, m);
 
-    if (m.status === "queued") overlay(kit, t, "Waiting for a free slot", `${m.profile.handle} starts as soon as one opens.`, true);
+    if (m.status === "queued") {
+      // Behind the repository's recon (a first deep scan, usually), or behind the org's other scans.
+      if (m.lines.some((line) => line.type === RECON_WAIT)) overlay(kit, t, "Waiting for recon", `Recon is mapping ${m.repo} first. ${m.profile.handle} starts from that map.`, true);
+      else overlay(kit, t, "Waiting for a free slot", `${m.profile.handle} starts as soon as one opens.`, true);
+    }
     if (alert && t - alert.from < 3.6 && t >= alert.from) findingAlert(kit, t - alert.from, alert.title);
     if (!live && m.status !== "queued") {
       const ended = m.status === "completed" ? (m.findings > 0 ? `${m.findings} ${m.findings === 1 ? "finding" : "findings"}` : "Nothing held up") : m.status === "failed" ? "The scan failed" : m.status === "refused" ? "Not started" : "Cancelled";

@@ -16,6 +16,7 @@ import {
   strandedScans,
   updateScan,
   claimScanSlot,
+  pendingRecon,
   feedSince,
   noteScanEvent,
   createDb,
@@ -275,6 +276,24 @@ describe("scans", () => {
     expect(await claimScanSlot(database, deep.id, org.id, 2)).toBe(true);
     // The third recon still waits: its lane is full.
     expect(await claimScanSlot(database, recons[claims.indexOf(false)]!.scan.id, org.id, 2)).toBe(false);
+  });
+  it("lets the recon a waiting deep scan needs go ahead of a full recon lane, once", async () => {
+    const { org, repos } = await upsertInstallation(database, 9015, { ...account, githubAccountId: 115 }, [repo(25), repo(26), repo(27), repo(28)]);
+    const make = (i: number, kind: "recon" | "deep") => createScan(database, { repoId: repos[i]!.id, orgId: org.id, kind, trigger: "manual", headSha: `ahead${i}` });
+    const [a, b, c, d] = await Promise.all([0, 1, 2, 3].map((i) => make(i, "recon")));
+    expect(await claimScanSlot(database, a!.scan.id, org.id, 2)).toBe(true);
+    expect(await claimScanSlot(database, b!.scan.id, org.id, 2)).toBe(true);
+    // The lane is full; repo 2's deep scan is waiting for its map, so repo 2's recon starts anyway.
+    expect(await claimScanSlot(database, c!.scan.id, org.id, 2)).toBe(false);
+    await make(2, "deep");
+    await make(3, "deep");
+    expect(await pendingRecon(database, repos[2]!.id)).toBeString();
+    expect(await claimScanSlot(database, c!.scan.id, org.id, 2)).toBe(true);
+    // Only one goes over: repo 3's waits for a slot like any other.
+    expect(await claimScanSlot(database, d!.scan.id, org.id, 2)).toBe(false);
+    expect(await pendingRecon(database, repos[0]!.id)).toBeString();
+    await database.update(schema.scans).set({ status: "completed" }).where(eq(schema.scans.id, a!.scan.id));
+    expect(await pendingRecon(database, repos[0]!.id)).toBeUndefined();
   });
 
   it("notes why a scan waits once, not on every poll, and reports when it started", async () => {

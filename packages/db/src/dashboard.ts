@@ -106,6 +106,8 @@ export interface DashboardRepo {
   /** Pull request reviews in the last 30 days. */
   reviews30d: number;
   activeDeepScanId: string | null;
+  /** Whether that deep scan is queued behind the repo's recon, to start from its map (see `pendingRecon`). */
+  activeDeepScanWaitsForRecon: boolean;
   /** Whether the org's next Dig is its free first one. */
   freeDig: boolean;
 }
@@ -141,6 +143,7 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     scan_status: string | null;
     scan_at: string | null;
     active_deep_id: string | null;
+    deep_waits: boolean;
     free_dig: boolean;
     reviews_30d: number;
   }>(sql`
@@ -151,6 +154,10 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
       coalesce(f.medium, 0)::int as medium, coalesce(f.low, 0)::int as low,
       s.id as scan_id, s.kind as scan_kind, s.status as scan_status, coalesce(s.finished_at, s.started_at, s.created_at) as scan_at,
       d.id as active_deep_id, ${FREE_DIG_AVAILABLE} as free_dig,
+      (d.status = 'queued' and exists (
+        select 1 from ${scans} rc where rc.repo_id = r.id and rc.kind = 'recon' and rc.status in ('queued', 'running')
+          and rc.created_at > now() - interval '30 minutes'
+      )) is true as deep_waits,
       (select count(*) from ${scans} pr where pr.repo_id = r.id and pr.kind = 'pr_review' and pr.created_at > now() - interval '30 days')::int as reviews_30d
     from ${repos} r
     join ${orgs} o on o.id = r.org_id
@@ -168,7 +175,7 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
       where repo_id = r.id order by created_at desc limit 1
     ) s on true
     left join lateral (
-      select id from ${scans} where repo_id = r.id and kind = 'deep' and status in ('queued', 'running', 'publishing') limit 1
+      select id, status from ${scans} where repo_id = r.id and kind = 'deep' and status in ('queued', 'running', 'publishing') limit 1
     ) d on true
     where r.enabled ${options.repoId ? sql`and r.id = ${options.repoId}` : sql``}
     order by coalesce(f.critical, 0) desc, coalesce(f.high, 0) desc, coalesce(f.medium, 0) desc, r.full_name
@@ -187,6 +194,7 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     lastScan: row.scan_id ? { id: row.scan_id, kind: row.scan_kind!, status: row.scan_status!, at: new Date(row.scan_at!) } : null,
     reviews30d: row.reviews_30d,
     activeDeepScanId: row.active_deep_id,
+    activeDeepScanWaitsForRecon: row.deep_waits,
     freeDig: row.free_dig,
   }));
 }

@@ -80,7 +80,7 @@ function RepoRow({ repo, org }: { repo: DashboardRepo; org: boolean }) {
         {repo.activeDeepScanId ? (
           <span className="scan-result-live">
             <span className="blink" aria-hidden="true" />
-            Deep scan running
+            {repo.activeDeepScanWaitsForRecon ? "Recon mapping, then deep scan" : "Deep scan running"}
           </span>
         ) : repo.lastScan ? (
           <>
