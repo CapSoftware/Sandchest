@@ -7,8 +7,8 @@
  * minutes, and by a webhook from a repository not seen before.
  */
 import { disableRepos, installedOrgs, orgByInstallation, orgRepos, removeInstallation, upsertInstallation, type Org } from "@sandchest/db";
-import type { Forgejo, ForgejoConfig } from "@sandchest/forgejo";
-import type { InstalledRepository } from "@sandchest/github";
+import type { Forgejo, ForgejoConfig, Owner } from "@sandchest/forgejo";
+import { GitHubError, type InstalledRepository } from "@sandchest/github";
 import { billingEnabled, canScan } from "./billing";
 import { config } from "./config";
 import { forgejoClient } from "./forgejo";
@@ -91,9 +91,7 @@ export async function recordForgejoRepo(deps: ForgejoDeps, fullName: string): Pr
 async function syncOwner(deps: ForgejoDeps, name: string, only: string[] | undefined, options: { partial: boolean }): Promise<Org> {
   const { forgejo, db } = deps;
   const owner = await forgejo.owner(name);
-  const repos: InstalledRepository[] = only
-    ? (await Promise.all(only.map((repo) => forgejo.repository(`${owner.login}/${repo}`)))).filter((repo) => !repo.empty)
-    : await forgejo.repositories(owner);
+  const repos = only ? await listedRepositories(forgejo, owner, only) : await forgejo.repositories(owner);
   // An owner's "installation id" is its own Forgejo id.
   const known = await orgByInstallation(db, owner.id, "forgejo");
   const enabled = new Set(known ? (await orgRepos(db, known.id)).map((repo) => repo.githubRepoId) : []);
@@ -111,6 +109,27 @@ async function syncOwner(deps: ForgejoDeps, name: string, only: string[] | undef
   // Only for repositories new or back since the last sync: the sweep runs every ten minutes, and would otherwise retry a failed recon each time.
   if (repos.some((repo) => !enabled.has(repo.id))) await startRecon(deps, org);
   return org;
+}
+
+/**
+ * The repositories FORGEJO_OWNERS names one by one. One that is gone (or
+ * misspelt) is left out, so the rest still sync and it is disabled like a
+ * removed one. Any other failure fails the owner, so a passing outage
+ * disables nothing.
+ */
+async function listedRepositories(forgejo: Forgejo, owner: Owner, names: string[]): Promise<InstalledRepository[]> {
+  const results = await Promise.allSettled(names.map((name) => forgejo.repository(`${owner.login}/${name}`)));
+  const repos: InstalledRepository[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      if (result.value) repos.push(result.value);
+    } else if (result.reason instanceof GitHubError && result.reason.status === 404) {
+      console.warn(`A repository FORGEJO_OWNERS lists for Forgejo owner ${owner.id} was not found: skipped`);
+    } else {
+      throw result.reason;
+    }
+  }
+  return repos;
 }
 
 /** One webhook on a whole organisation, or one per repository (single repositories, and users, who have no account-wide webhooks). */

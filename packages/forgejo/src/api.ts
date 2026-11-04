@@ -111,12 +111,13 @@ export class Forgejo {
   async repositories(owner: Owner): Promise<InstalledRepository[]> {
     const path = `/${owner.type === "Organization" ? "orgs" : "users"}/${encodeURIComponent(owner.login)}/repos?limit=${LIMIT}`;
     const repos = await githubPaginate(this.auth, path, (page: ApiRepository[]) => page, {}, this.http);
-    return repos.filter((repo) => !repo.archived && !repo.mirror && !repo.empty).map(toInstalled);
+    return repos.filter(scanned).map(toInstalled);
   }
 
-  async repository(fullName: string): Promise<InstalledRepository & { empty: boolean }> {
+  /** One repository, or undefined when it is archived, a mirror or empty, as `repositories()` leaves those out. */
+  async repository(fullName: string): Promise<InstalledRepository | undefined> {
     const repo = await this.get<ApiRepository>(`/repos/${fullName}`);
-    return { ...toInstalled(repo), empty: !!repo.empty };
+    return scanned(repo) ? toInstalled(repo) : undefined;
   }
 
   pull(repo: string, number: number): Promise<{ number: number; draft?: boolean; head: { sha: string; repo_id: number }; base: { sha: string; ref: string }; user: { login: string } }> {
@@ -206,6 +207,11 @@ export class Forgejo {
   private get<T>(path: string): Promise<T> {
     return githubRequest<T>(this.auth, path, {}, this.http);
   }
+}
+
+/** Archived repositories and mirrors take no pushes here, and an empty one has nothing to clone. */
+function scanned(repo: ApiRepository): boolean {
+  return !repo.archived && !repo.mirror && !repo.empty;
 }
 
 function toInstalled(repo: ApiRepository): InstalledRepository {

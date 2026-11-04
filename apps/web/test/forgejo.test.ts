@@ -78,6 +78,7 @@ const owner = { id: 300, login: "acme" };
 const repos = [
   { id: 11, full_name: "acme/private-app", private: true, default_branch: "main", owner },
   { id: 12, full_name: "acme/public-app", private: false, default_branch: "main", owner },
+  { id: 13, full_name: "acme/old-app", private: true, default_branch: "main", owner, archived: true },
 ];
 const DIFF = [
   "diff --git a/app.js b/app.js",
@@ -458,6 +459,17 @@ describe.skipIf(!available)("Forgejo, end to end", () => {
     expect((await repoByGithubId(database, 12, "forgejo"))?.enabled).toBe(true);
     expect(started).toHaveLength(1);
     expect((await scanById(database, started.splice(0)[0]!))).toMatchObject({ repoId: repo.id, kind: "recon" });
+  });
+
+  test("a listed repository that is gone or archived leaves the owner's others to sync", async () => {
+    const deps = forgejoDeps()!;
+    const owners = ["private-app", "gone", "old-app"].map((repo) => ({ owner: "acme", repo }));
+    const result = await syncForgejo({ ...deps, forgejo: new Forgejo({ ...deps.forgejo.config, owners }, { fetch: fakeFetch, maxBackoffMs: 1 }) });
+    expect(result.failed).toBe(0);
+    expect((await repoByGithubId(database, 11, "forgejo"))?.enabled).toBe(true);
+    expect(await repoByGithubId(database, 13, "forgejo")).toBeUndefined();
+    // No longer listed, so disabled.
+    expect((await repoByGithubId(database, 12, "forgejo"))?.enabled).toBe(false);
   });
 
   test("a deleted repository is disabled, and an owner taken off FORGEJO_OWNERS is forgotten", async () => {
