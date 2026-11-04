@@ -138,7 +138,7 @@ async function onInstallationRepositories(deps: WebhookDeps, payload: Installati
  * way, once the org has a plan. Queued in one serialised step, so it never
  * doubles up with the recon that buying a plan starts.
  */
-export async function startRecon(deps: WebhookDeps, org: { id: string; githubLogin: string }): Promise<WebhookOutcome> {
+export async function startRecon(deps: Pick<WebhookDeps, "db" | "startScan" | "canScan">, org: { id: string; githubLogin: string }): Promise<WebhookOutcome> {
   if (deps.canScan && !(await deps.canScan(org))) return { status: "handled", scans: [], detail: "recon waits for a plan and credits" };
   // "HEAD" is resolved to the default branch's commit when the scan clones.
   const scans = await queuePendingRecons(deps.db, org.id);
@@ -205,9 +205,10 @@ async function onIssueComment(deps: WebhookDeps, payload: IssueCommentEvent): Pr
  * not started twice, but one whose workflow never started (a failed start
  * before a redelivery) is started now. Free scans fold into one already on
  * the way (`queuePushScan`): they cost nothing, so pushes must not multiply them.
+ * Forgejo's webhooks use it too.
  */
-async function newScan(
-  deps: WebhookDeps,
+export async function newScan(
+  deps: Pick<WebhookDeps, "db" | "startScan">,
   input: { repoId: string; orgId: string; kind: ScanKind; headSha: string; baseSha?: string; prNumber?: number; trigger?: "webhook" | "manual" },
 ): Promise<string> {
   const values = { trigger: "webhook" as const, ...input };

@@ -407,7 +407,7 @@ function findingRow(seed: FindingSeed): FindingRow {
   };
   const history: FindingRow["history"] = [{ type: "seen", at: ago(seed.firstSeen), login: null, scanId: id(seed.scan) }];
   if (seed.resolved) history.push({ type: seed.status === "fixed" ? "fixed" : "dismissed", at: ago(seed.resolved.at), login: seed.resolved.login, scanId: null } as FindingRow["history"][number]);
-  return { finding, repo: { id: id(repo.n), fullName: `${DEMO_LOGIN}/${repo.name}`, private: repo.privateRepo, defaultBranch: "main" }, history };
+  return { finding, repo: { id: id(repo.n), provider: "github", fullName: `${DEMO_LOGIN}/${repo.name}`, private: repo.privateRepo, defaultBranch: "main" }, history };
 }
 
 export function demoFinding(findingId: string): FindingRow | undefined {
@@ -674,6 +674,7 @@ export function demoRepos(): DashboardRepo[] {
     const live = repo.name === "api";
     return {
       id: id(repo.n),
+      provider: "github",
       fullName: `${DEMO_LOGIN}/${repo.name}`,
       private: repo.privateRepo,
       orgId: DEMO_ORG_ID,
@@ -747,6 +748,7 @@ export function demoSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow } 
   };
   const org: SettingsOrg = {
     id: DEMO_ORG_ID,
+    provider: "github",
     login: DEMO_LOGIN,
     type: "Organization",
     installationId: 1,

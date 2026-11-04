@@ -37,6 +37,10 @@ export interface HttpOptions {
   timeoutMs?: number;
   /** Longest wait before a retry, including a rate-limit reset. Default 60s. */
   maxBackoffMs?: number;
+  /** The API's name in error messages. Default "GitHub"; Forgejo reuses this client. */
+  name?: string;
+  /** Follow pagination links on `baseUrl`, not the host they name. Forgejo builds them from its public address, which may not be the one Sandchest reaches it at. */
+  rebaseLinks?: boolean;
 }
 
 /** Sends one authenticated API request. `auth` is called per attempt so a refreshed token is used on retry. */
@@ -44,6 +48,12 @@ export async function githubRequest<T>(auth: () => Promise<string>, path: string
   const { response } = await send(auth, path, options, http);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+/** Like `githubRequest`, for a response that is not JSON (a diff). */
+export async function githubText(auth: () => Promise<string>, path: string, options: RequestOptions = {}, http: HttpOptions = {}): Promise<string> {
+  const { response } = await send(auth, path, options, http);
+  return response.text();
 }
 
 /** Follows `Link: rel="next"` until `limit` items. `pick` extracts the items from each page. */
@@ -61,6 +71,7 @@ export async function githubPaginate<T, P = T[]>(
     const { response } = await send(auth, next, { signal: options.signal }, http);
     items.push(...pick((await response.json()) as P));
     next = nextLink(response.headers.get("link"));
+    if (next && http.rebaseLinks) next = rebase(next, (http.baseUrl ?? API).replace(/\/+$/, ""), http.name ?? "GitHub");
   }
   return items.slice(0, limit);
 }
@@ -92,20 +103,20 @@ async function send(auth: () => Promise<string>, path: string, options: RequestO
         signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
       });
       if (response.ok) return { response };
-      failure = await errorFrom(response);
+      failure = await errorFrom(response, http.name ?? "GitHub");
       if (!failure.retryable || attempt >= maxAttempts) throw failure;
       await wait(Math.min(maxBackoffMs, retryDelay(response, attempt)), options.signal);
     } catch (error) {
       if (options.signal?.aborted) throw options.signal.reason;
       if (error instanceof GitHubError) throw error;
       // Network error or timeout.
-      if (attempt >= maxAttempts) throw new GitHubError(`GitHub request failed: ${(error as Error).message}`, 0, true);
+      if (attempt >= maxAttempts) throw new GitHubError(`${http.name ?? "GitHub"} request failed: ${(error as Error).message}`, 0, true);
       await wait(Math.min(maxBackoffMs, backoff(attempt)), options.signal);
     }
   }
 }
 
-async function errorFrom(response: Response): Promise<GitHubError> {
+async function errorFrom(response: Response, name: string): Promise<GitHubError> {
   const text = (await response.text().catch(() => "")).slice(0, 500);
   let message = text;
   try {
@@ -116,7 +127,7 @@ async function errorFrom(response: Response): Promise<GitHubError> {
   const rateLimited =
     response.status === 429 || (response.status === 403 && (response.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(message)));
   const retryable = rateLimited || (response.status >= 500 && response.status !== 501);
-  return new GitHubError(`GitHub ${response.status}: ${message}`, response.status, retryable);
+  return new GitHubError(`${name} ${response.status}: ${message}`, response.status, retryable);
 }
 
 /** `retry-after` (seconds), else the primary rate-limit reset, else exponential backoff. */
@@ -136,6 +147,15 @@ function backoff(attempt: number): number {
 
 function nextLink(header: string | null): string | undefined {
   return header?.split(",").find((part) => part.includes('rel="next"'))?.match(/<([^>]+)>/)?.[1];
+}
+
+/** A link's path and query on `base`: what follows the base's own path (`/api/v1`) in the link. Throws when that path is not in it, as there is no telling where the link's page is on `base`. */
+function rebase(link: string, base: string, name: string): string {
+  const basePath = new URL(base).pathname.replace(/\/+$/, "");
+  const url = new URL(link);
+  const at = url.pathname.indexOf(`${basePath}/`);
+  if (at < 0) throw new GitHubError(`${name} pagination link is not under the API URL's path (${basePath}): set the API URL to end in the path the instance's own links use`, 0, false);
+  return `${base}${url.pathname.slice(at + basePath.length)}${url.search}`;
 }
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {

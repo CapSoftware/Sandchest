@@ -16,6 +16,7 @@
         "@sandchest/db": "workspace:*",
         "@sandchest/email": "workspace:*",
         "@sandchest/engine": "workspace:*",
+        "@sandchest/forgejo": "workspace:*",
         "@sandchest/github": "workspace:*",
         "@sandchest/workspace": "workspace:*",
         "@stripe/stripe-js": "10.2.0",
@@ -102,6 +103,16 @@
       "dependencies": {
         "@sandchest/workspace": "workspace:*",
         "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/forgejo": {
+      "name": "@sandchest/forgejo",
+      "dependencies": {
+        "@sandchest/github": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
@@ -456,6 +467,8 @@
     "@sandchest/engine": ["@sandchest/engine@workspace:packages/engine"],
 
     "@sandchest/evals": ["@sandchest/evals@workspace:evals"],
+
+    "@sandchest/forgejo": ["@sandchest/forgejo@workspace:packages/forgejo"],
 
     "@sandchest/github": ["@sandchest/github@workspace:packages/github"],
 

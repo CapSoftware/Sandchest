@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { Recruit } from "@/components/recruit/recruit";
 import { currentUser } from "@/server/access";
 import { signIn } from "@/server/actions";
-import { authConfigured } from "@/server/auth";
+import { signInProviders } from "@/server/auth";
 import { billingEnabled } from "@/server/billing";
 import { claimIntent } from "@/server/free-credits";
 import { setupNeeded } from "@/server/setup";
@@ -25,7 +25,8 @@ export default async function GetStartedPage() {
   // build has neither.
   await connection();
   // A server without a GitHub App or sign-in yet: the sign-in page explains what's missing.
-  if (setupNeeded() || !authConfigured()) redirect("/sign-in");
+  // Recruiting starts with GitHub sign-in; a Forgejo-only deployment signs in on its own page.
+  if (setupNeeded() || !signInProviders().includes("github")) redirect("/sign-in");
   if (await currentUser()) redirect("/dashboard/recruit");
   const [stats, claim] = await Promise.all([liveStats().catch(() => null), claimIntent(null)]);
   return (

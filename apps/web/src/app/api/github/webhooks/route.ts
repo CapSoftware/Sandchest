@@ -44,7 +44,9 @@ export async function POST(request: Request): Promise<Response> {
   const bytes = await readBody(request, MAX_BYTES);
   if (!bytes) return tooLarge();
   // Verify against the exact bytes GitHub signed, before parsing anything.
-  if (!verifySignature(config().GITHUB_WEBHOOK_SECRET, bytes, signature)) {
+  const secret = config().GITHUB_WEBHOOK_SECRET;
+  // Without a GitHub App (a Forgejo-only deployment) no delivery can be genuine.
+  if (!secret || !verifySignature(secret, bytes, signature)) {
     return Response.json({ error: "invalid signature" }, { status: 401 });
   }
   const body = new TextDecoder().decode(bytes);

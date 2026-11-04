@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type OrgSettings } from "./schema";
+import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type Forge, type OrgSettings } from "./schema";
 
 type Severity = "critical" | "high" | "medium" | "low";
 export type RepoPermission = (typeof permissionCache.$inferSelect)["permission"];
@@ -18,17 +18,17 @@ export async function userById(database: Db, userId: string): Promise<User | und
 }
 
 /** Known, installed orgs by GitHub installation id. */
-export async function orgsByInstallation(database: Db, installationIds: number[]) {
+export async function orgsByInstallation(database: Db, installationIds: number[], provider: Forge = "github") {
   if (installationIds.length === 0) return [];
   return database
     .select({ id: orgs.id, installationId: orgs.installationId, githubAccountId: orgs.githubAccountId, githubLogin: orgs.githubLogin, type: orgs.type })
     .from(orgs)
-    .where(inArray(orgs.installationId, installationIds));
+    .where(and(eq(orgs.provider, provider), inArray(orgs.installationId, installationIds)));
 }
 
-export async function repoIdsByGithubId(database: Db, githubRepoIds: number[]): Promise<Map<number, string>> {
+export async function repoIdsByGithubId(database: Db, githubRepoIds: number[], provider: Forge = "github"): Promise<Map<number, string>> {
   if (githubRepoIds.length === 0) return new Map();
-  const rows = await database.select({ id: repos.id, githubRepoId: repos.githubRepoId }).from(repos).where(inArray(repos.githubRepoId, githubRepoIds));
+  const rows = await database.select({ id: repos.id, githubRepoId: repos.githubRepoId }).from(repos).where(and(eq(repos.provider, provider), inArray(repos.githubRepoId, githubRepoIds)));
   return new Map(rows.map((row) => [row.githubRepoId, row.id]));
 }
 
@@ -53,11 +53,15 @@ async function linkGithub(tx: Tx, userId: string, github: { id: number; login?: 
     .where(eq(users.id, userId));
 }
 
-/** Replaces everything a user may see with what GitHub just reported, including who they are on GitHub. */
+/**
+ * Replaces everything a user may see with what GitHub just reported, including
+ * who they are on GitHub. Someone signed in with Forgejo has no GitHub
+ * identity: only their Forgejo `login` is kept.
+ */
 export async function replaceAccess(
   database: Db,
   userId: string,
-  access: { repos: Array<{ repoId: string; permission: RepoPermission }>; adminOrgIds: string[]; github: { id: number; login: string } },
+  access: { repos: Array<{ repoId: string; permission: RepoPermission }>; adminOrgIds: string[]; github?: { id: number; login: string }; login?: string },
   at = new Date(),
 ): Promise<void> {
   await database.transaction(async (tx) => {
@@ -65,7 +69,8 @@ export async function replaceAccess(
     await tx.delete(orgAdmins).where(eq(orgAdmins.userId, userId));
     if (access.repos.length > 0) await tx.insert(permissionCache).values(access.repos.map((repo) => ({ userId, ...repo, checkedAt: at })));
     if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, checkedAt: at })));
-    await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
+    if (access.github) await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
+    else await tx.update(users).set({ accessCheckedAt: at, ...(access.login ? { login: access.login } : {}) }).where(eq(users.id, userId));
   });
 }
 
@@ -79,10 +84,14 @@ export async function sessionUser(database: Db, token: string): Promise<{ id: st
   return row;
 }
 
-/** The id of the user's GitHub account row, which better-auth needs to hand out its token. */
-export async function githubAccountRowId(database: Db, userId: string): Promise<string | undefined> {
-  const [row] = await database.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, userId), eq(accounts.providerId, "github"))).limit(1);
-  return row?.id;
+/** The user's sign-in account row (GitHub or Forgejo), which better-auth needs to hand out its token. */
+export async function signInAccount(database: Db, userId: string): Promise<{ id: string; providerId: Forge } | undefined> {
+  const [row] = await database
+    .select({ id: accounts.id, providerId: accounts.providerId })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), inArray(accounts.providerId, ["github", "forgejo"])))
+    .limit(1);
+  return row as { id: string; providerId: Forge } | undefined;
 }
 
 const canSee = (userId: string) => sql`exists (select 1 from ${permissionCache} pc where pc.user_id = ${userId} and pc.repo_id = ${repos.id})`;
@@ -91,6 +100,7 @@ const canSee = (userId: string) => sql`exists (select 1 from ${permissionCache} 
 
 export interface DashboardRepo {
   id: string;
+  provider: Forge;
   fullName: string;
   private: boolean;
   orgId: string;
@@ -124,6 +134,7 @@ export const FREE_DIG_AVAILABLE = sql`(o.free_dig_scan_id is null or not exists 
 export async function dashboardRepos(database: Db, userId: string, options: { repoId?: string } = {}): Promise<DashboardRepo[]> {
   const rows = await database.execute<{
     id: string;
+    provider: Forge;
     full_name: string;
     private: boolean;
     org_id: string;
@@ -147,7 +158,7 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     free_dig: boolean;
     reviews_30d: number;
   }>(sql`
-    select r.id, r.full_name, r.private, o.id as org_id, o.github_login as org_login,
+    select r.id, r.provider, r.full_name, r.private, o.id as org_id, o.github_login as org_login,
       exists (select 1 from ${orgAdmins} oa where oa.user_id = ${userId} and oa.org_id = o.id) as org_admin,
       ob.checked_at as billing_checked_at, ob.plan_id, ob.credits, r.loc, r.last_deep_scan_at,
       coalesce(f.critical, 0)::int as critical, coalesce(f.high, 0)::int as high,
@@ -182,6 +193,7 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
   `);
   return rows.map((row) => ({
     id: row.id,
+    provider: row.provider,
     fullName: row.full_name,
     private: row.private,
     orgId: row.org_id,
@@ -304,6 +316,7 @@ export async function findingsForExport(database: Db, userId: string, filters: F
     .select({
       id: findings.id,
       repoFullName: repos.fullName,
+      provider: repos.provider,
       defaultBranch: repos.defaultBranch,
       title: findings.title,
       severity: findings.severity,
@@ -344,7 +357,7 @@ export type ExportedFinding = Awaited<ReturnType<typeof findingsForExport>>[numb
 export async function findingForUser(database: Db, userId: string, findingId: string) {
   const [[row], history] = await Promise.all([
     database
-      .select({ finding: findings, repo: { id: repos.id, fullName: repos.fullName, private: repos.private, defaultBranch: repos.defaultBranch } })
+      .select({ finding: findings, repo: { id: repos.id, provider: repos.provider, fullName: repos.fullName, private: repos.private, defaultBranch: repos.defaultBranch } })
       .from(findings)
       .innerJoin(repos, eq(repos.id, findings.repoId))
       .where(and(eq(findings.id, findingId), canSee(userId))),
@@ -430,7 +443,7 @@ export async function scanForUser(database: Db, userId: string, scanId: string, 
     database
       .select({
         scan: scans,
-        repo: { id: repos.id, fullName: repos.fullName, private: repos.private },
+        repo: { id: repos.id, provider: repos.provider, fullName: repos.fullName, private: repos.private },
         org: { login: orgs.githubLogin, hacker: sql<unknown>`${orgs.settings} -> 'hacker'` },
         metrics: scanMetrics,
       })
@@ -746,6 +759,7 @@ export async function hackerRecord(database: Db, userId: string, orgId: string):
 
 export interface SettingsOrg {
   id: string;
+  provider: Forge;
   login: string;
   type: "User" | "Organization";
   installationId: number | null;
@@ -776,7 +790,7 @@ export async function settingsOrgs(database: Db, userId: string): Promise<Settin
   const byId = new Map<string, SettingsOrg>();
   const add = (org: typeof orgs.$inferSelect, billing: typeof orgBilling.$inferSelect | null) => {
     let entry = byId.get(org.id);
-    if (!entry) byId.set(org.id, (entry = { id: org.id, login: org.githubLogin, type: org.type, installationId: org.installationId, settings: org.settings, admin: false, billing, repos: [] }));
+    if (!entry) byId.set(org.id, (entry = { id: org.id, provider: org.provider, login: org.githubLogin, type: org.type, installationId: org.installationId, settings: org.settings, admin: false, billing, repos: [] }));
     return entry;
   };
   for (const { org, billing } of admin) add(org, billing).admin = true;

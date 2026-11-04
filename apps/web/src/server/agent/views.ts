@@ -15,9 +15,9 @@ export function installUrl(): string | null {
   return slug ? `https://github.com/apps/${slug}/installations/new` : null;
 }
 
-/** Where an installation's repositories are chosen on GitHub. */
-export function installationSettingsUrl(org: { login: string; type: "User" | "Organization"; installationId: number | null }): string | null {
-  if (!org.installationId) return null;
+/** Where an installation's repositories are chosen on GitHub. None on Forgejo, where the operator chooses them. */
+export function installationSettingsUrl(org: { provider?: "github" | "forgejo"; login: string; type: "User" | "Organization"; installationId: number | null }): string | null {
+  if (!org.installationId || org.provider === "forgejo") return null;
   return org.type === "Organization"
     ? `https://github.com/organizations/${encodeURIComponent(org.login)}/settings/installations/${org.installationId}`
     : `https://github.com/settings/installations/${org.installationId}`;

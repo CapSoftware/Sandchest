@@ -10,6 +10,7 @@ function row(id: string, change: Partial<ExportedFinding> = {}): ExportedFinding
   return {
     id,
     repoFullName: "acme/api",
+    provider: "github",
     defaultBranch: "main",
     title: `Finding ${id}`,
     severity: "critical",
@@ -111,6 +112,12 @@ describe("markdown report", () => {
     expect(report).toContain("[`db/invoices.ts:12`](https://github.com/acme/api/blob/main/db/invoices.ts#L12)");
     expect(report).toContain("### Proof of concept");
     expect(report).not.toContain("db.find(id)");
+  });
+
+  test("links a Forgejo repository's code to its Forgejo instance", () => {
+    const report = exportFindings([row("a", { provider: "forgejo" }), row("b")], "markdown", { ...context, forgejoUrl: "https://git.example.com" });
+    expect(report).toContain("[`db/invoices.ts:12`](https://git.example.com/acme/api/src/branch/main/db/invoices.ts#L12)");
+    expect(report).toContain("[`db/invoices.ts:12`](https://github.com/acme/api/blob/main/db/invoices.ts#L12)");
   });
 });
 

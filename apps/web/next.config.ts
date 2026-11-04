@@ -27,7 +27,7 @@ const nextConfig: NextConfig = {
   // Hovering a link prefetches the page's data, so the click renders at once instead of showing a skeleton.
   experimental: { dynamicOnHover: true },
   // Workspace packages ship TypeScript source.
-  transpilePackages: ["@sandchest/billing", "@sandchest/db", "@sandchest/email", "@sandchest/engine", "@sandchest/github", "@sandchest/workspace"],
+  transpilePackages: ["@sandchest/billing", "@sandchest/db", "@sandchest/email", "@sandchest/engine", "@sandchest/forgejo", "@sandchest/github", "@sandchest/workspace"],
   // Inlined at build time, so code only the self-hosted server needs is dropped from every other build.
   env: { SANDCHEST_STANDALONE: standalone ? "1" : "" },
   ...(standalone && {

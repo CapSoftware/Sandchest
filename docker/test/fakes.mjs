@@ -8,8 +8,12 @@
  * review. The model: just enough of the
  * chat-completions stream to take one scan from recon to a finding.
  *
+ * Forgejo, under /forgejo (docker/test/e2e-forgejo.sh): the bot's view of
+ * one organisation and its repository, webhooks, commit statuses, reviews and
+ * comments, and a person signing in through OAuth2 and reading their access.
+ *
  * POST /control?delayMs=N slows the model down; GET /stats counts calls; GET /posted
- * returns the check runs and reviews the App posted.
+ * returns the check runs and reviews the App posted, and what the Forgejo bot posted.
  *
  * Env: FAKE_PEM_FILE (the App's private key), FAKE_HEAD_SHA (the test repo's
  * main branch), FAKE_PORT (default 4010).
@@ -29,6 +33,10 @@ let codeUsed = false;
 /** Check runs and reviews the App posted, for the test to read back. */
 const checks = [];
 const reviews = [];
+/** What the Forgejo bot posted. */
+const forgejo = { hooks: [], statuses: [], reviews: [], comments: [] };
+const FORGEJO_BOT = "Bearer forgejo-bot-token";
+const FORGEJO_PERSON = "Bearer forgejo-user-token";
 const PR_PATCH =
   '@@ -1,7 +1,7 @@\n const express = require("express")\n const app = express()\n app.post("/login", async (req, res) => {\n-  const rows = await db.query("SELECT 1")\n+  const rows = await db.query("SELECT * FROM users WHERE email = \'" + req.body.email + "\'")\n   res.json(rows)\n })\n module.exports = app';
 /** How long the model takes to answer; the test slows it down to restart the server mid-scan. */
@@ -70,7 +78,7 @@ const candidate = {
   severity: "high",
   entryPoint: { file: "app.js", line: 3, description: "POST /login, body.email" },
   path: [{ file: "app.js", line: VULNERABLE_LINE, note: "email concatenated into the query" }],
-  preconditions: { attacker: "unauthenticated", details: "none" },
+  preconditions: { attacker: "unauthenticated", trigger: "POSTs a crafted email to the login form", details: "none" },
   proofOfConcept: "POST /login email=' OR '1'='1",
   impact: "Reads every user row.",
 };
@@ -112,6 +120,59 @@ function stream(response, reply) {
   response.end("data: [DONE]\n\n");
 }
 
+// ---- Forgejo --------------------------------------------------------------
+
+const FORGEJO_REPO = { id: 2001, full_name: "acme/app", private: true, default_branch: "main", owner: { id: 300, login: "acme" } };
+const PR_DIFF = `diff --git a/app.js b/app.js\nindex 1..2 100644\n--- a/app.js\n+++ b/app.js\n${PR_PATCH}\n`;
+
+function forgejoApi(request, response, path, raw) {
+  const auth = request.headers.authorization;
+  // OAuth2: the authorization code becomes a person's token.
+  if (request.method === "POST" && path === "/login/oauth/access_token") {
+    const form = new URLSearchParams(raw);
+    if (form.get("code") !== "forgejo-code" || form.get("grant_type") !== "authorization_code") return json(response, 400, { error: "invalid_grant" });
+    return json(response, 200, { access_token: "forgejo-user-token", token_type: "bearer", expires_in: 3600, refresh_token: "forgejo-refresh" });
+  }
+  const api = path.replace(/^\/api\/v1/, "");
+  if (auth === FORGEJO_PERSON) {
+    if (api === "/user") return json(response, 200, { id: 501, login: "alice", full_name: "Alice", email: "alice@example.com", avatar_url: "" });
+    if (api === "/user/repos") return json(response, 200, [{ id: 2001, permissions: { admin: true, push: true, pull: true } }]);
+    if (api === "/users/alice/orgs/acme/permissions") return json(response, 200, { is_owner: true, is_admin: true, can_write: true, can_read: true });
+    return json(response, 404, { message: "Not Found" });
+  }
+  if (auth !== FORGEJO_BOT) return json(response, 401, { message: "token is required" });
+  const body = raw ? JSON.parse(raw) : undefined;
+  if (request.method === "GET" && api === "/orgs/acme") return json(response, 200, { id: 300, name: "acme", username: "acme" });
+  if (request.method === "GET" && api === "/orgs/acme/repos") return json(response, 200, [FORGEJO_REPO]);
+  if (request.method === "GET" && api === "/orgs/acme/hooks") return json(response, 200, forgejo.hooks.map((hook, i) => ({ id: i + 1, type: hook.type, active: true, config: { url: hook.url } })));
+  if (request.method === "POST" && api === "/orgs/acme/hooks") {
+    forgejo.hooks.push({ type: body.type, url: body.config.url, events: body.events, signed: Boolean(body.config.secret) });
+    return json(response, 201, { id: forgejo.hooks.length });
+  }
+  // The pull request's author has write access, so it is reviewed automatically.
+  if (request.method === "GET" && api === "/repos/acme/app/collaborators/dev/permission") return json(response, 200, { permission: "write" });
+  if (request.method === "GET" && api === "/repos/acme/app/branches/main") return json(response, 200, { name: "main", commit: { id: process.env.FAKE_HEAD_SHA } });
+  if (request.method === "GET" && api === "/repos/acme/app/pulls/5.diff") {
+    response.writeHead(200, { "content-type": "text/plain" });
+    return response.end(PR_DIFF);
+  }
+  const status = api.match(/^\/repos\/acme\/app\/statuses\/(\w+)$/);
+  if (request.method === "POST" && status) {
+    forgejo.statuses.push({ sha: status[1], state: body.state, context: body.context, description: body.description, targetUrl: body.target_url });
+    return json(response, 201, { id: forgejo.statuses.length });
+  }
+  if (request.method === "POST" && api === "/repos/acme/app/pulls/5/reviews") {
+    forgejo.reviews.push({ commitId: body.commit_id, event: body.event, comments: (body.comments ?? []).map((c) => ({ path: c.path, line: c.new_position })) });
+    return json(response, 200, { id: forgejo.reviews.length });
+  }
+  if (request.method === "POST" && api === "/repos/acme/app/issues/5/comments") {
+    forgejo.comments.push({ title: body.body.split("\n")[0] });
+    return json(response, 201, { id: forgejo.comments.length });
+  }
+  console.log(`fakes: unexpected Forgejo ${request.method} ${api}`);
+  return json(response, 404, { message: "Not Found" });
+}
+
 // ---- Server ---------------------------------------------------------------
 
 http
@@ -130,7 +191,8 @@ http
         return;
       }
       if (request.method === "GET" && path === "/stats") return json(response, 200, stats);
-      if (request.method === "GET" && path === "/posted") return json(response, 200, { checks, reviews });
+      if (request.method === "GET" && path === "/posted") return json(response, 200, { checks, reviews, forgejo });
+      if (path.startsWith("/forgejo/")) return forgejoApi(request, response, path.slice("/forgejo".length), raw);
       if (request.method === "POST" && path === "/control") {
         delayMs = Number(url.searchParams.get("delayMs") ?? 0);
         return json(response, 200, { delayMs });

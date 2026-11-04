@@ -47,15 +47,16 @@ import {
   type ScanEvent,
   type ThreatModel,
 } from "@sandchest/engine/scan";
-import { checkResult, notReviewed, parsePatch, reviewBody, reviewComment, shown, type Installation, type PullFile, type ReviewComment } from "@sandchest/github";
+import { checkResult, notReviewed, parsePatch, reviewBody, reviewComment, shown, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { IndexerBinary, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
 import { config } from "./config";
+import { forgeFor, type RepoForge } from "./forges";
 import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
-import { classifier, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
+import { classifier, db, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
 
 /** Concurrent scans per org (SPEC §4), in each lane: recon, and everything else (see `claimScanSlot`). */
@@ -100,9 +101,8 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
     return { state: "queued" };
   }
   if (scan.kind === "pr_review" && !scan.checkRunId && scan.repo.org.installationId) {
-    const checkRunId = await githubApp()
-      .installation(scan.repo.org.installationId)
-      .createCheckRun(scan.repo.fullName, {
+    const checkRunId = await forgeFor(scan.repo.org.provider, scan.repo.org.installationId)
+      .createCheck(scan.repo.fullName, {
         name: CHECK_NAME,
         headSha: scan.headSha,
         externalId: scan.id,
@@ -119,7 +119,7 @@ async function scanCredits(scan: LoadedScan): Promise<number> {
   // Not sized yet: hold the most a deep scan can cost; the charge is what it measures.
   if (scan.kind === "deep") return (scan.repo.loc === null ? undefined : deepScanCredits(scan.repo.loc)) ?? DEEP_SCAN_TIERS.at(-1)!.credits;
   if (scan.kind !== "pr_review" || !scan.prNumber || !scan.repo.org.installationId) return 0;
-  const files = await githubApp().installation(scan.repo.org.installationId).pullFiles(scan.repo.fullName, scan.prNumber);
+  const files = await forgeFor(scan.repo.org.provider, scan.repo.org.installationId).pullFiles(scan.repo.fullName, scan.prNumber);
   const relevant = relevantChanges(files.map(toChangedFile));
   return relevant.length ? prReviewCredits(changedLines(relevant)) : 0;
 }
@@ -130,10 +130,10 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
   // The Check first: once the scan is marked refused, a retried step would never post it.
   let checkRunId = scan.checkRunId;
   if (scan.kind === "pr_review" && scan.repo.org.installationId) {
-    const installation = githubApp().installation(scan.repo.org.installationId);
+    const forge = forgeFor(scan.repo.org.provider, scan.repo.org.installationId);
     const { conclusion, output } = notReviewed(gate.reason, withUtm(`${appUrl()}/dashboard/settings`, "github", "check"), gate.credits);
-    checkRunId ??= await installation.createCheckRun(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
-    await installation.completeCheckRun(scan.repo.fullName, checkRunId, conclusion, output);
+    checkRunId ??= await forge.createCheck(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
+    await forge.completeCheck(scan.repo.fullName, { id: checkRunId, name: CHECK_NAME, headSha: scan.headSha, prNumber: scan.prNumber }, conclusion, output);
   }
   await updateScan(db(), scan.id, { status: "refused", error: message, finishedAt: new Date(), checkRunId });
 }
@@ -145,9 +145,9 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
   const installationId = scan.repo.org.installationId;
   if (!installationId || !scan.repo.enabled) throw new ScanFinished("Repository is no longer installed");
 
-  const installation = githubApp().installation(installationId);
+  const forge = forgeFor(scan.repo.org.provider, installationId);
   // A fix check settles what it has to re-check before any sandbox or clone, so a push that touches no cited file costs one API call.
-  const affected = scan.kind === "fix_check" ? await affectedFindings(scan, installation) : [];
+  const affected = scan.kind === "fix_check" ? await affectedFindings(scan, forge) : [];
   if (scan.kind === "fix_check" && affected.length === 0) return { findings: 0 };
   const events = new EventWriter(db(), scan.id);
   // A stage's name travels with it ("stage:hunt"), so the page can light its step on the track.
@@ -162,8 +162,8 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     const ref = scan.headSha === "HEAD" ? scan.repo.defaultBranch : scan.headSha;
     // Clone while the diff and the stored threat model load.
     const [, pullFiles, memory] = await Promise.all([
-      installation.cloneToken(scan.repo.githubRepoId).then((token) => workspace.clone({ url: `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`, ref }, { depth: 1, token })),
-      scan.kind === "pr_review" && scan.prNumber ? installation.pullFiles(scan.repo.fullName, scan.prNumber) : Promise.resolve(undefined),
+      forge.cloneSource(scan.repo).then(({ url, token }) => workspace.clone({ url, ref }, { depth: 1, token })),
+      scan.kind === "pr_review" && scan.prNumber ? forge.pullFiles(scan.repo.fullName, scan.prNumber) : Promise.resolve(undefined),
       storedThreatModel(db(), scan.repo.id),
     ]);
     const headSha = (await workspace.exec(["git", "rev-parse", "HEAD"])).stdout.trim();
@@ -246,7 +246,7 @@ export async function publishScan(scanId: string): Promise<void> {
   if (scan.status !== "running" && scan.status !== "publishing") return;
   const installationId = scan.repo.org.installationId;
   if (scan.kind === "pr_review" && scan.checkRunId && scan.prNumber && installationId) {
-    const installation = githubApp().installation(installationId);
+    const forge = forgeFor(scan.repo.org.provider, installationId);
     const stats = (scan.stats ?? {}) as { findingIds?: string[] };
     // A finding someone dismissed stays quiet when a later scan finds it again.
     const findings = (await findingsById(stats.findingIds ?? [])).filter((row) => row.status !== "dismissed").map(toEngineFinding);
@@ -254,7 +254,7 @@ export async function publishScan(scanId: string): Promise<void> {
     let inline = 0;
     // Private repos get the details inline; public repos only ever get the redacted Check.
     if (scan.repo.private && visible.length > 0) {
-      const diffs = new Map((await installation.pullFiles(scan.repo.fullName, scan.prNumber)).map((f) => [f.filename, parsePatch(f.filename, f.patch)]));
+      const diffs = new Map((await forge.pullFiles(scan.repo.fullName, scan.prNumber)).map((f) => [f.filename, parsePatch(f.filename, f.patch)]));
       const comments: ReviewComment[] = [];
       const unplaced: Finding[] = [];
       for (const finding of visible) {
@@ -264,11 +264,12 @@ export async function publishScan(scanId: string): Promise<void> {
         else unplaced.push(finding);
       }
       inline = comments.length;
-      await installation.createReview(scan.repo.fullName, scan.prNumber, { commitId: scan.headSha, body: reviewBody(visible, unplaced, detailsUrl(scan.id, "github", "review")), comments });
+      await forge.createReview(scan.repo.fullName, scan.prNumber, { commitId: scan.headSha, body: reviewBody(visible, unplaced, detailsUrl(scan.id, "github", "review")), comments });
     }
     const threshold = scan.repo.org.settings.checkThreshold;
     const { conclusion, output } = checkResult({ findings, threshold, isPublic: !scan.repo.private, detailsUrl: detailsUrl(scan.id, "github", "check"), credits: scan.credits, inline });
-    await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);
+    const check = { id: scan.checkRunId, name: CHECK_NAME, headSha: scan.headSha, prNumber: scan.prNumber, detailsUrl: detailsUrl(scan.id, "github", "check") };
+    await forge.completeCheck(scan.repo.fullName, check, conclusion, output);
   }
   await updateScan(db(), scan.id, { status: "completed", finishedAt: new Date() });
   await charge(scan);
@@ -329,12 +330,11 @@ export async function failScan(scanId: string, message: string): Promise<void> {
   });
   if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
   if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
-    await githubApp()
-      .installation(scan.repo.org.installationId)
-      .completeCheckRun(scan.repo.fullName, scan.checkRunId, "neutral", {
-        title: scan.status === "refused" ? "Not reviewed" : "Review could not finish",
-        summary: scan.status === "refused" ? message : "Sandchest could not finish this review. It does not block merging; push again to retry.",
-      });
+    const check = { id: scan.checkRunId, name: CHECK_NAME, headSha: scan.headSha, prNumber: scan.prNumber, detailsUrl: detailsUrl(scan.id, "github", "check") };
+    await forgeFor(scan.repo.org.provider, scan.repo.org.installationId).completeCheck(scan.repo.fullName, check, "neutral", {
+      title: scan.status === "refused" ? "Not reviewed" : "Review could not finish",
+      summary: scan.status === "refused" ? message : "Sandchest could not finish this review. It does not block merging; push again to retry.",
+    });
   }
 }
 
@@ -433,10 +433,10 @@ function toEngineFinding(row: FindingRow): Finding & { id: string } {
 }
 
 /** Open findings citing a file the push changed. A fix check's head is the pushed commit, never "HEAD". */
-async function affectedFindings(scan: LoadedScan, installation: Installation): Promise<FindingRow[]> {
+async function affectedFindings(scan: LoadedScan, forge: RepoForge): Promise<FindingRow[]> {
   const open = await openFindings(db(), scan.repo.id);
   if (open.length === 0) return [];
-  const changed = new Set((await installation.compare(scan.repo.fullName, scan.baseSha ?? `${scan.headSha}~1`, scan.headSha)).map((f) => f.filename));
+  const changed = new Set((await forge.compare(scan.repo.fullName, scan.baseSha ?? `${scan.headSha}~1`, scan.headSha)).map((f) => f.filename));
   return open.filter((f) => citedFiles(f).some((file) => changed.has(file)));
 }
 

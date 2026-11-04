@@ -3,9 +3,11 @@
  * GitHub reports push access or higher, and changes an org's settings only
  * as its admin. Access is read from GitHub with the person's own token and
  * cached for five minutes: after two it refreshes in the background, after
- * five a request waits for GitHub.
+ * five a request waits for GitHub. Someone who signed in with Forgejo gets
+ * the same from Forgejo.
  */
-import { githubAccountRowId, orgsByInstallation, replaceAccess, repoIdsByGithubId, sessionUser, userById, type RepoPermission } from "@sandchest/db";
+import { installedOrgs, orgsByInstallation, replaceAccess, repoIdsByGithubId, sessionUser, signInAccount, userById, type RepoPermission } from "@sandchest/db";
+import type { Forgejo } from "@sandchest/forgejo";
 import { GitHubError, readUserAccess, type HttpOptions } from "@sandchest/github";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -14,6 +16,7 @@ import { cache } from "react";
 import { auth, authConfigured, sessionCookieName, verifiedSessionToken } from "./auth";
 import { config } from "./config";
 import { db } from "./db";
+import { forgejoClient } from "./forgejo";
 
 const SOFT_TTL_MS = 2 * 60_000;
 const HARD_TTL_MS = 5 * 60_000;
@@ -99,14 +102,21 @@ export function refreshAccess(userId: string, http?: HttpOptions): Promise<void>
   let pending = inFlight.get(userId);
   if (!pending) {
     pending = (async () => {
-      const accountId = await githubAccountRowId(db(), userId);
-      if (!accountId) throw new GitHubError("No GitHub account for this user", 401, false);
+      const account = await signInAccount(db(), userId);
+      if (!account) throw new GitHubError("No sign-in account for this user", 401, false);
       // A refresh token that expired or was revoked means signing in again, like a 401 from GitHub.
       const { accessToken } = await auth()
-        .api.getAccessToken({ body: { accountId, userId } })
+        .api.getAccessToken({ body: { accountId: account.id, userId } })
         .catch(() => ({ accessToken: undefined }));
-      if (!accessToken) throw new GitHubError("No usable GitHub token for this user", 401, false);
-      await storeAccess(userId, accessToken, http);
+      if (!accessToken) throw new GitHubError("No usable sign-in token for this user", 401, false);
+      if (account.providerId === "forgejo") {
+        const forgejo = forgejoClient();
+        // Forgejo was configured when they signed in and is not now: nothing of it to show.
+        if (!forgejo) throw new GitHubError("Forgejo is not configured", 401, false);
+        await storeForgejoAccess(userId, forgejo.asUser(accessToken));
+      } else {
+        await storeAccess(userId, accessToken, http);
+      }
     })().finally(() => inFlight.delete(userId));
     inFlight.set(userId, pending);
   }
@@ -138,5 +148,22 @@ export async function storeAccess(userId: string, token: string, http?: HttpOpti
     repos: visible.flatMap((repo) => (repoIds.has(repo.id) ? [{ repoId: repoIds.get(repo.id)!, permission: repo.role as RepoPermission }] : [])),
     adminOrgIds: installations.filter((i) => i.admin).map((i) => known.get(i.installationId)!),
     github: { id: access.userId, login: access.login },
+  });
+}
+
+/**
+ * Forgejo → database, for someone signed in with Forgejo: the covered
+ * repositories they can push to, and the covered owners they administer
+ * (their own account, or an organisation they own). Exposed for tests.
+ */
+export async function storeForgejoAccess(userId: string, forgejo: Forgejo): Promise<void> {
+  const [me, reachable, orgs] = await Promise.all([forgejo.currentUser(), forgejo.myRepositories(), installedOrgs(db(), "forgejo")]);
+  const roles = reachable.flatMap((repo): Array<{ id: number; role: RepoPermission }> => (repo.permissions?.admin ? [{ id: repo.id, role: "admin" }] : repo.permissions?.push ? [{ id: repo.id, role: "write" }] : []));
+  const repoIds = await repoIdsByGithubId(db(), roles.map((repo) => repo.id), "forgejo");
+  const admin = await Promise.all(orgs.map(async (org) => (org.type === "User" ? org.githubAccountId === me.id : forgejo.orgAdmin(me.login, org.githubLogin))));
+  await replaceAccess(db(), userId, {
+    repos: roles.flatMap((repo) => (repoIds.has(repo.id) ? [{ repoId: repoIds.get(repo.id)!, permission: repo.role }] : [])),
+    adminOrgIds: orgs.filter((_, i) => admin[i]).map((org) => org.id),
+    login: me.login,
   });
 }

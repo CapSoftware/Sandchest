@@ -2,7 +2,7 @@ export { createDb, db, type Db, type DbOptions } from "./client";
 export * from "./queries";
 export * as schema from "./schema";
 export type { EventName, EventProps, HackerProfile, OrgSettings } from "./schema";
-export { EVENT_NAMES } from "./schema";
+export { EVENT_NAMES, FORGES, type Forge } from "./schema";
 export * from "./dashboard";
 export * from "./billing";
 export * from "./recruit";

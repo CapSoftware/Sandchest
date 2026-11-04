@@ -45,7 +45,7 @@ export interface RepoRef {
 export interface CloneOptions {
   depth: number;
   filter?: "blob:none";
-  /** Short-lived installation token. Sent only to the repo's host and never written to disk. */
+  /** A token that can read the repo: a short-lived installation token on GitHub, the bot's own token on Forgejo. Sent only to the repo's host and never written to disk. */
   token?: string;
   timeoutMs?: number;
 }

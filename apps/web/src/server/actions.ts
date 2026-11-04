@@ -15,16 +15,25 @@ import { SEVERITIES } from "@/lib/format";
 import { site } from "@/lib/site";
 import { track } from "./analytics";
 import { auth } from "./auth";
+import { config } from "./config";
 import { db } from "./db";
 
 const Id = z.uuid();
 
 export async function signIn(next: string): Promise<void> {
+  return signInWith("github", next);
+}
+
+export async function signInWithForgejo(next: string): Promise<void> {
+  return signInWith("forgejo", next);
+}
+
+async function signInWith(provider: "github" | "forgejo", next: string): Promise<void> {
   // Checked again here: a bound argument can be changed by the client.
   const callbackURL = /^\/(?![/\\])/.test(next) ? next : "/dashboard";
   await track("sign_in_started", { props: { next: routeOf(callbackURL) } });
-  const result = await auth().api.signInSocial({ body: { provider: "github", callbackURL, errorCallbackURL: "/sign-in?error=1" }, headers: await headers() });
-  if (!result.url) throw new Error("GitHub sign-in did not return a URL");
+  const result = await auth().api.signInSocial({ body: { provider, callbackURL, errorCallbackURL: "/sign-in?error=1" }, headers: await headers() });
+  if (!result.url) throw new Error(`Sign-in with ${provider} did not return a URL`);
   redirect(result.url);
 }
 
@@ -114,7 +123,7 @@ export async function copyFindings(input: ExportFiltersInput, format: "markdown"
   const filters = listFilters(input);
   if (!filters || (format !== "markdown" && format !== "json")) return { error: "Those filters aren’t valid." };
   const rows = await findingsForExport(db(), user.id, filters);
-  const text = exportFindings(rows, format, { baseUrl: site.url, filters: { status: filters.status, severities: filters.severities, repo: filters.repoId, includeLowConfidence: filters.includeLowConfidence } });
+  const text = exportFindings(rows, format, { baseUrl: site.url, forgejoUrl: config().forgejo?.url, filters: { status: filters.status, severities: filters.severities, repo: filters.repoId, includeLowConfidence: filters.includeLowConfidence } });
   await track("findings_copied", {
     userId: user.id,
     props: { format, status: filters.status, findings: rows.length, repos: new Set(rows.map((row) => row.repoFullName)).size, filtered: filters.severities.length > 0 || filters.repoId !== undefined, low_confidence: filters.includeLowConfidence },
