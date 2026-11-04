@@ -7,6 +7,7 @@ import {
   createScan,
   disableRepos,
   hasOpenFindings,
+  lastPrReviewRefused,
   orgByInstallation,
   queuePendingRecons,
   queuePushScan,
@@ -163,6 +164,12 @@ async function onPullRequest(deps: WebhookDeps, payload: PullRequestEvent): Prom
   if (fork && !TRUSTED_AUTHORS.has(pr.author_association)) return { status: "ignored", detail: "fork PR from an untrusted author" };
   if (fork && !WRITE_ROLES.has(await deps.github.installation(repo.org.installationId).permission(repo.fullName, pr.user.login))) {
     return { status: "ignored", detail: "fork PR from an author without write access: waiting for /sandchest review" };
+  }
+
+  // Refused once on this PR and still unable to pay: the PR already has a Check saying why, so later pushes don't
+  // stack another refusal on it. Buying a plan or credits lets the next push run.
+  if (deps.canScan && (await lastPrReviewRefused(deps.db, repo.id, pr.number)) && !(await deps.canScan(repo.org))) {
+    return { status: "ignored", detail: "pr review already refused on this PR: waiting for a plan or credits" };
   }
 
   const scanId = await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "pr_review", headSha: pr.head.sha, baseSha: pr.base.sha, prNumber: pr.number });

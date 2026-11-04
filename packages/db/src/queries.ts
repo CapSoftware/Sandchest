@@ -170,6 +170,16 @@ export async function createScan(database: Db, input: NewScan): Promise<{ scan: 
   return { scan: existing, created: false };
 }
 
+/** Whether the newest review of this pull request was refused (no plan, or out of credits). */
+export async function lastPrReviewRefused(database: Db, repoId: string, prNumber: number): Promise<boolean> {
+  const last = await database.query.scans.findFirst({
+    where: and(eq(scans.repoId, repoId), eq(scans.kind, "pr_review"), eq(scans.prNumber, prNumber)),
+    orderBy: desc(scans.createdAt),
+    columns: { status: true },
+  });
+  return last?.status === "refused";
+}
+
 /**
  * Queues the free scan a push asks for, folding a burst of pushes into one.
  * A fix check still waiting takes the newest head and keeps its base, so it
