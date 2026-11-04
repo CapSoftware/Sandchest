@@ -46,17 +46,18 @@ type Section = (typeof FOOTER)[number]["links"][number]["id"];
 /**
  * `visitor` is set only on the landing page, which is built once for each
  * (see `homeRewrites`): signed in, a Dashboard key; otherwise Sign in. Docs
- * and legal pages stay a single static page and show neither.
+ * and legal pages stay a single static page and show neither. On narrow
+ * screens the links drop out by the header's width (globals.css), the key last.
  */
 export function SiteHeader({ current, visitor }: { current?: Section; visitor?: "signed-in" | "signed-out" }) {
   return (
-    <header className="site-header">
+    <header className="site-header" data-visitor={visitor ?? "none"}>
       <a href="/" className="wordmark" aria-label="Sandchest home">
         <img src={brandAsset("/sandchest-logo-dark.svg")} alt="Sandchest" width={138} height={26} />
       </a>
       <nav aria-label="Main" className="header-nav">
         {NAV.map((link) => (
-          <a key={link.id} href={link.href} aria-current={link.id === current ? "page" : undefined}>
+          <a key={link.id} href={link.href} data-nav={link.id} aria-current={link.id === current ? "page" : undefined}>
             {link.label}
           </a>
         ))}

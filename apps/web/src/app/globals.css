@@ -59,6 +59,15 @@ html:has(.page) {
   background: url("/grain.png") 0 0 / 128px 128px, var(--color-void);
 }
 
+/*
+ * The keys' fire and glow bleed into the gutter. On the narrowest phones a
+ * key fills the column and its fire reaches past the window: it is cut at the
+ * edge instead of scrolling the page sideways.
+ */
+html:has(.page) {
+  overflow-x: clip;
+}
+
 /* One narrow, left-aligned column for the whole page. */
 
 .page {
@@ -70,6 +79,7 @@ html:has(.page) {
 }
 
 .site-header {
+  container-type: inline-size;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -96,17 +106,58 @@ html:has(.page) {
   white-space: nowrap;
 }
 
-/* Phones: the wordmark and three links share one line. */
-@media (max-width: 30rem) {
+/*
+ * Narrow headers keep one line inside the gutter: the links tighten, then
+ * drop out by the header's own width, Docs first, then Open source, then
+ * (signed in, the narrowest phones) Demo. Sign in and the Dashboard key always
+ * stay; the footer still links everything. Geist Mono is fixed-width, so each
+ * step is the measured width of what is left, plus a few pixels of air.
+ */
+@container (width < 32rem) {
   .header-nav {
     gap: 1rem;
     font-size: 0.8125rem;
   }
 }
 
-/* The narrowest phones drop Docs from the header; the footer still links it. */
-@media (max-width: 26rem) {
-  .header-nav a[href="/docs"] {
+@container (width < 21.5rem) {
+  [data-visitor="none"] [data-nav="docs"] {
+    display: none;
+  }
+}
+
+@container (width < 18.5rem) {
+  [data-visitor="none"] [data-nav="github"] {
+    display: none;
+  }
+}
+
+@container (width < 26rem) {
+  [data-visitor="signed-out"] [data-nav="docs"] {
+    display: none;
+  }
+}
+
+@container (width < 23rem) {
+  [data-visitor="signed-out"] [data-nav="github"] {
+    display: none;
+  }
+}
+
+@container (width < 29rem) {
+  [data-visitor="signed-in"] [data-nav="docs"] {
+    display: none;
+  }
+}
+
+@container (width < 26rem) {
+  [data-visitor="signed-in"] [data-nav="github"] {
+    display: none;
+  }
+}
+
+@container (width < 20rem) {
+  [data-visitor="signed-in"] [data-nav="demo"] {
     display: none;
   }
 }
