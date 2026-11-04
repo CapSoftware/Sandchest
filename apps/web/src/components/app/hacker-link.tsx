@@ -1,7 +1,7 @@
 "use client";
-import { usePathname } from "next/navigation";
 import { HackerMark } from "@/components/hacker/hacker-mark";
 import type { HackerProfile } from "@/lib/hacker";
+import { useDashboardPath } from "./demo";
 import { HACKER_PATH } from "./nav";
 import { HoverLink } from "./hover-link";
 
@@ -11,7 +11,7 @@ import { HoverLink } from "./hover-link";
  * while they're on a job.
  */
 export function HackerLink({ profile, working }: { profile: Pick<HackerProfile, "handle" | "hoodie" | "phosphor">; working: boolean }) {
-  const path = usePathname();
+  const path = useDashboardPath();
   const here = path === HACKER_PATH || path.startsWith(`${HACKER_PATH}/`);
   return (
     <HoverLink href={HACKER_PATH} className="app-hacker" aria-current={here ? "page" : undefined} aria-label={`${profile.handle}, your hacker${working ? ", on a job" : ""}`}>

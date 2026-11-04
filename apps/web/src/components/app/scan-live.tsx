@@ -24,6 +24,17 @@ export interface Live {
   renderedAt: number;
   events: FeedEvent[];
   following: boolean;
+  /** How many of the page's findings to show yet, when a scripted scan reveals them as its feed names them. */
+  revealed?: number;
+}
+
+/** A made-up scan to play on a loop instead of following a real one: lines at seconds in, when it ends, and how long it rests done. */
+export interface LiveLoop {
+  script: Array<[at: number, type: string, message: string]>;
+  endsAt: number;
+  rest: number;
+  /** Seconds in that a new visitor joins, so the feed is busy from the start. */
+  joinAt: number;
 }
 
 const ACTIVE = new Set(["queued", "running", "publishing"]);
@@ -42,11 +53,12 @@ export function useLive(): Live {
  * feed line, and the end, when the page refreshes to show the result. The
  * parts below read from it, wherever they sit on the page.
  */
-export function ScanLive({ scanId, initial, children }: { scanId: string; initial: Omit<Live, "following">; children: ReactNode }) {
-  const [state, setState] = useState<Live>({ ...initial, following: ACTIVE.has(initial.status) });
+export function ScanLive({ scanId, initial, loop, children }: { scanId: string; initial: Omit<Live, "following">; loop?: LiveLoop; children: ReactNode }) {
+  const [state, setState] = useState<Live>({ ...initial, following: ACTIVE.has(initial.status), revealed: loop ? 0 : undefined });
   const last = useRef(initial.events.at(-1)?.seq ?? 0);
   const router = useRouter();
-  const live = ACTIVE.has(initial.status);
+  const live = ACTIVE.has(initial.status) && !loop;
+  useLoop(loop, setState);
 
   useEffect(() => {
     if (!live) return;
@@ -72,6 +84,57 @@ export function ScanLive({ scanId, initial, children }: { scanId: string; initia
   }, [live, scanId, router]);
 
   return <LiveContext.Provider value={state}>{children}</LiveContext.Provider>;
+}
+
+/**
+ * Plays `loop` into the live state: its lines as their times come, done at its end, then the same run again from
+ * the start. Sequence numbers carry on from run to run, so the hacker's screen types each run's lines anew.
+ */
+function useLoop(loop: LiveLoop | undefined, setState: (update: (current: Live) => Live) => void) {
+  const script = useRef(loop);
+  const on = loop !== undefined;
+  useEffect(() => {
+    const play = script.current;
+    if (!on || !play) return;
+    let origin = Date.now() - play.joinAt * 1000;
+    let base = 0;
+    let shown = -1;
+    let done: boolean | undefined;
+    const tick = () => {
+      const now = Date.now();
+      if (now - origin >= (play.endsAt + play.rest) * 1000) {
+        origin = now;
+        base += play.script.length;
+        shown = -1;
+      }
+      const t = (now - origin) / 1000;
+      const lines = play.script.filter(([at]) => at <= t);
+      const ended = t >= play.endsAt;
+      if (lines.length === shown && ended === done) return;
+      shown = lines.length;
+      done = ended;
+      setState((current) => ({
+        ...current,
+        status: ended ? "completed" : "running",
+        createdAt: origin,
+        startedAt: origin,
+        finishedAt: ended ? origin + play.endsAt * 1000 : null,
+        durationMs: ended ? play.endsAt * 1000 : null,
+        events: lines.map(([at, type, message], i) => ({ seq: base + i + 1, type, message, at: origin + at * 1000 })),
+        following: !ended,
+        revealed: lines.filter(([, type]) => type === "finding").length,
+      }));
+    };
+    tick();
+    const timer = setInterval(tick, 200);
+    return () => clearInterval(timer);
+  }, [on, setState]);
+}
+
+/** Its children, once a scripted scan has revealed finding `at` (the first, by default); always, on a real scan. */
+export function Reveal({ at = 0, children }: { at?: number; children: ReactNode }) {
+  const { revealed } = useLive();
+  return revealed === undefined || at < revealed ? children : null;
 }
 
 /** "Queued 3 min. ago", "Scanning, started 2 min. ago", "Done 1 hr. ago". Kept current while it runs. */

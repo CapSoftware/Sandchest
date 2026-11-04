@@ -126,3 +126,72 @@ function overlap(a: Located[], b: Located[]): number {
 export function normalizePath(path: string): string {
   return path.trim().replace(/^\.\//, "").replace(/^\/+/, "");
 }
+
+/** A finding as stored after a scan: enough to recognise the same bug when a later scan reports it. */
+export interface KnownFinding {
+  fingerprint: string;
+  category: string;
+  entryPoint: { file: string; line: number };
+  attackPath: Array<{ file: string; line: number }>;
+  /** Other reports folded into this finding (`file:line` of their sink and entry). */
+  alsoReportedAs?: Array<{ category: string; at: string; entry: string }>;
+}
+
+/**
+ * Whether two reports describe the same bug, by the registry's rules for
+ * one scan: same class family, and the same sink (same file, within three
+ * lines), the same entry point, or most of the same path. Stored findings
+ * have no enclosing function, so the sink match is by file and line only.
+ */
+export function sameBug(a: KnownFinding, b: KnownFinding): boolean {
+  if (sameReport(a, b)) return true;
+  // A merged finding is also each report it absorbed: match those by sink or entry.
+  const views = (k: KnownFinding) => [
+    { category: k.category, sink: k.attackPath.at(-1), entry: k.entryPoint },
+    ...(k.alsoReportedAs ?? []).map((r) => ({ category: r.category, sink: location(r.at), entry: location(r.entry) })),
+  ];
+  if (!a.alsoReportedAs?.length && !b.alsoReportedAs?.length) return false;
+  return views(a).some((x) =>
+    views(b).some(
+      (y) =>
+        family(x.category as Category) === family(y.category as Category) &&
+        ((!!x.sink && !!y.sink && x.sink.file === y.sink.file && Math.abs(x.sink.line - y.sink.line) <= 3) || (x.entry.file === y.entry.file && x.entry.line === y.entry.line)),
+    ),
+  );
+}
+
+function location(at: string): { file: string; line: number } {
+  const colon = at.lastIndexOf(":");
+  return colon === -1 ? { file: at, line: 0 } : { file: at.slice(0, colon), line: Number(at.slice(colon + 1)) || 0 };
+}
+
+function sameReport(a: KnownFinding, b: KnownFinding): boolean {
+  if (family(a.category as Category) !== family(b.category as Category)) return false;
+  const sinkA = a.attackPath.at(-1);
+  const sinkB = b.attackPath.at(-1);
+  if (!sinkA || !sinkB) return false;
+  if (sinkA.file === sinkB.file && Math.abs(sinkA.line - sinkB.line) <= 3) return true;
+  if (a.entryPoint.file === b.entryPoint.file && a.entryPoint.line === b.entryPoint.line) return true;
+  const [shorter, longer] = a.attackPath.length <= b.attackPath.length ? [a.attackPath, b.attackPath] : [b.attackPath, a.attackPath];
+  const shared = shorter.filter((hop) => longer.some((other) => hop.file === other.file && Math.abs(hop.line - other.line) <= 2)).length;
+  return shared / shorter.length >= 0.5;
+}
+
+/**
+ * Gives each new finding the fingerprint of the stored finding it repeats,
+ * so a rescan updates the existing finding (and keeps the team's verdict on
+ * it) instead of filing the same bug again. The fingerprint alone misses
+ * this: it keys on the sink and its function, and hunters cite a different
+ * last hop from one scan to the next. Exact fingerprint matches are kept; a
+ * stored finding is adopted by at most one new finding per scan.
+ */
+export function adoptKnownFingerprints<T extends KnownFinding>(findings: T[], known: KnownFinding[]): T[] {
+  const taken = new Set(findings.map((f) => f.fingerprint).filter((print) => known.some((k) => k.fingerprint === print)));
+  return findings.map((finding) => {
+    if (taken.has(finding.fingerprint)) return finding;
+    const match = known.find((k) => !taken.has(k.fingerprint) && sameBug(k, finding));
+    if (!match) return finding;
+    taken.add(match.fingerprint);
+    return { ...finding, fingerprint: match.fingerprint };
+  });
+}

@@ -4,7 +4,7 @@
  *
  * One plan, $1 a month, and credits at $1 each, less in bigger purchases,
  * bought ahead and spent as the hacker works. Auto top-up buys more when the balance runs low, up to a
- * monthly limit the org sets. Bought credits never expire.
+ * monthly limit the org can change or remove. Bought credits never expire.
  */
 
 /** The one balance every paid scan draws from. */
@@ -87,6 +87,13 @@ export const MAX_PURCHASE_CREDITS = 1_000;
 /** Auto top-up buys credits once fewer than this are left: the price of the smallest Dig. */
 export const TOP_UP_BELOW = 5;
 
+/**
+ * The most auto top-up spends in a month until the org changes it: a few hundred pull request reviews, so
+ * it rarely stops a team, while a card that isn't theirs can't run up more. Orgs can raise it, lower it or
+ * remove it in Settings.
+ */
+export const DEFAULT_TOP_UP_LIMIT_USD = 500;
+
 export function planById(id: string | null | undefined): Plan | undefined {
   return PLANS.find((plan) => plan.id === id);
 }
@@ -113,11 +120,6 @@ export function creditsDiscount(credits: number): number {
   return Math.round((1 - creditRate(credits) / CREDIT_PRICE) * 100);
 }
 
-/** The default monthly auto top-up limit: five top-ups, and never under $50. */
-export function defaultAutoTopUpLimit(quantity: number): number {
-  return Math.max(50, creditsPrice(quantity) * 5);
-}
-
 /** What one auto top-up of `quantity` credits buys and costs on a plan: whole packs, rounded up. */
 export function autoTopUpSize(plan: Plan, quantity: number): { credits: number; price: number } {
   const packs = Math.max(1, Math.ceil(quantity / plan.pack.credits));
@@ -126,16 +128,22 @@ export function autoTopUpSize(plan: Plan, quantity: number): { credits: number; 
   return { credits: packs * plan.pack.credits, price: packs * plan.pack.price };
 }
 
+/** Auto top-up as Autumn runs it. `perMonth` is the most top-ups a month, or null for no limit. */
+export interface AutoTopUpControl {
+  enabled: boolean;
+  threshold: number;
+  quantity: number;
+  perMonth: number | null;
+}
+
 /**
  * Autumn's auto top-up control for an org's choice: buy `quantity` credits
- * when fewer than TOP_UP_BELOW are left, as many times a month as the
- * monthly limit allows. Under one top-up a month means off.
+ * when fewer than TOP_UP_BELOW are left, as often as needed, or as many
+ * times a month as a monthly limit allows. A limit under one top-up means off.
  */
-export function autoTopUpControl(
-  plan: Plan,
-  choice: { enabled: boolean; quantity: number; monthlyLimitUsd: number },
-): { enabled: boolean; threshold: number; quantity: number; perMonth: number } {
+export function autoTopUpControl(plan: Plan, choice: { enabled: boolean; quantity: number; monthlyLimitUsd: number | null }): AutoTopUpControl {
   const size = autoTopUpSize(plan, choice.quantity);
+  if (choice.monthlyLimitUsd === null) return { enabled: choice.enabled, threshold: TOP_UP_BELOW, quantity: size.credits, perMonth: null };
   const perMonth = Math.floor(choice.monthlyLimitUsd / size.price);
   return { enabled: choice.enabled && perMonth >= 1, threshold: TOP_UP_BELOW, quantity: size.credits, perMonth: Math.max(perMonth, 1) };
 }

@@ -5,7 +5,7 @@
  * the vulnerable version, false positives on the patched one. Run before any
  * prompt or model change ships, so changes are judged on real bugs.
  *
- *   bun run harvest [--include-private] [--out evals/private/fixpairs-harvested.json]
+ *   bun run harvest [--include-private] [--out evals/private/fixpairs/harvested.json]
  *
  * Public repositories only by default: harvesting a private repository means
  * running our evals on a customer's code, which needs their consent.
@@ -18,7 +18,7 @@ import { createDb, fixedPairs } from "@sandchest/db";
 import { REPO_ROOT } from "./checkout";
 
 const { values } = parseArgs({
-  options: { "include-private": { type: "boolean", default: false }, out: { type: "string", default: "evals/private/fixpairs-harvested.json" } },
+  options: { "include-private": { type: "boolean", default: false }, out: { type: "string", default: "evals/private/fixpairs/harvested.json" } },
 });
 
 const CACHE = join(REPO_ROOT, ".sandchest/harvest");

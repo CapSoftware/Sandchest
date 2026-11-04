@@ -20,7 +20,7 @@ import {
   createAutumn,
   createStripe,
   DEFAULT_CREDITS,
-  defaultAutoTopUpLimit,
+  DEFAULT_TOP_UP_LIMIT_USD,
   isTrial,
   planById,
   type AttachResult,
@@ -210,7 +210,7 @@ export async function startPendingRecon(orgId: string): Promise<string[]> {
 export async function applyAutoTopUp(orgId: string, planId: string | null, choice: OrgSettings["autoTopUp"]): Promise<BillingState["autoTopUp"]> {
   const plan = isTrial(planId) ? undefined : planById(planId);
   const control = plan && choice ? autoTopUpControl(plan, { ...choice, quantity: choice.quantity ?? DEFAULT_CREDITS }) : null;
-  const off = { enabled: false, threshold: 0, quantity: 0, perMonth: 1 };
+  const off = { enabled: false, threshold: 0, quantity: 0, perMonth: null };
   await autumn()!.setAutoTopUp(orgId, control ?? off);
   return control ?? off;
 }
@@ -218,18 +218,21 @@ export async function applyAutoTopUp(orgId: string, planId: string | null, choic
 /**
  * An admin's auto top-up choice: kept with the org's settings, then pushed to
  * Autumn and read back. `quantity` defaults to the last choice, then
- * DEFAULT_CREDITS; the limit to five top-ups' worth. Throws if Autumn
+ * DEFAULT_CREDITS. `monthlyLimitUsd` null means no limit; left out, it
+ * keeps the last choice's, else DEFAULT_TOP_UP_LIMIT_USD. Throws if Autumn
  * refuses, after the choice is saved.
  */
 export async function saveAutoTopUpChoice(
   userId: string,
   row: { org: { id: string; githubLogin: string; settings: OrgSettings }; billing: { planId: string | null } | null },
-  input: { enabled: boolean; quantity?: number; monthlyLimitUsd?: number },
+  input: { enabled: boolean; quantity?: number; monthlyLimitUsd?: number | null },
 ): Promise<{ ok: true; choice: NonNullable<OrgSettings["autoTopUp"]> } | { ok: false; reason: "no_plan" | "not_admin" }> {
   const plan = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
   if (!plan) return { ok: false, reason: "no_plan" };
   const quantity = input.quantity ?? row.org.settings.autoTopUp?.quantity ?? DEFAULT_CREDITS;
-  const choice = { enabled: input.enabled, quantity, monthlyLimitUsd: input.monthlyLimitUsd || defaultAutoTopUpLimit(quantity) };
+  const last = row.org.settings.autoTopUp;
+  const monthlyLimitUsd = input.monthlyLimitUsd !== undefined ? input.monthlyLimitUsd : last ? last.monthlyLimitUsd : DEFAULT_TOP_UP_LIMIT_USD;
+  const choice = { enabled: input.enabled, quantity, monthlyLimitUsd };
   if (!(await updateOrgSettings(db(), userId, row.org.id, { autoTopUp: choice }))) return { ok: false, reason: "not_admin" };
   await applyAutoTopUp(row.org.id, plan.id, choice);
   await syncBilling(row.org);

@@ -16,6 +16,7 @@ import type { IndexerClient } from "../indexer/client";
 import type { LlmClient } from "../llm";
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent, type ScanLimits } from "./context";
 import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate } from "./gate";
+import { consolidateFindings, type MergedFinding } from "./consolidate";
 import { isFatal, errorMessage } from "./errors";
 import { capChanges, changedLines, changeTool, relevantChanges, touchesChange, type ChangedFile } from "./changes";
 import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
@@ -32,6 +33,7 @@ import { createWrap, repoTools, type RouteInfo } from "./tools";
 import type { Runtime } from "./runtime";
 import { validateFindings, type ValidateOptions } from "./validate";
 import { proveFindings } from "./prove";
+import { isFixtureFile } from "./paths";
 import { trustRank, trustTier } from "./trust";
 import { authzConsistencyLeads, authzScoreLeads } from "./consistency";
 import { classifyEntryPoints } from "./classify";
@@ -93,6 +95,8 @@ export interface ScanReport {
   findings: Finding[];
   /** Candidates the skeptic disproved, with the code it cited. */
   dismissed: DismissedCandidate[];
+  /** Findings folded into another that reports the same issue (see `consolidate.ts`). Absent in older reports. */
+  merged?: MergedFinding[];
   stats: {
     candidates: number;
     rejectedByGate: number;
@@ -398,6 +402,23 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     }
   }
 
+  // One issue reported from two angles (different lines, different category) is merged into one finding.
+  let merged: MergedFinding[] = [];
+  if (findings.length > 1 && !signal.aborted) {
+    emit({ type: "stage", stage: "verify", message: "Merging repeat reports of the same issue…" });
+    const result = await consolidateFindings({ client: ctx.client, findings, wrap: ctx.wrap, signal, run: (task) => ctx.limiter.run(task, "urgent") });
+    if (result.usage) ctx.meter.add("skeptic", result.usage.usage, result.usage.attempts, result.usage.retries);
+    if (result.merged.length) emit({ type: "progress", message: `Merged ${result.merged.length} repeat report${result.merged.length === 1 ? "" : "s"} into the findings they repeat.` });
+    findings.splice(0, findings.length, ...result.findings);
+    merged = result.merged;
+  }
+
+  // Code that doesn't ship (tests, fixtures, examples) isn't reachable by an attacker: still reported, hidden by default.
+  for (const finding of findings) {
+    if (!isFixtureFile(finding.entryPoint.file) || !finding.attackPath.every((step) => isFixtureFile(step.file))) continue;
+    finding.confidence = "low";
+    finding.mitigations = [finding.mitigations, "Every cited line is in test, fixture or example code, which doesn't ship."].filter(Boolean).join(" ");
+  }
   // Trust is set from the evidence each finding now carries (validation, origin).
   for (const finding of findings) finding.trust = trustTier(finding);
   // Attribute each finding to the signals that raised it, so outcomes can be traced back to them.
@@ -425,6 +446,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     leads,
     findings,
     dismissed,
+    merged,
     stats: {
       candidates: registry.size,
       rejectedByGate: base.counters.rejected,

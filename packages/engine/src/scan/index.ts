@@ -1,6 +1,7 @@
+export { consolidateFindings, CONSOLIDATE_SYSTEM_PROMPT, type ConsolidateResult, type MergedFinding } from "./consolidate";
 export { DEFAULT_LIMITS, type ScanEvent, type ScanLimits } from "./context";
 export { fixPrompt } from "./fix-prompt";
-export { fingerprint } from "./gate";
+export { adoptKnownFingerprints, fingerprint, sameBug, type KnownFinding } from "./gate";
 export { loadPricing, type Pricing } from "./metrics";
 export { createOsvClient, type OsvClient } from "./osv";
 export { runRecon, runScan, ScanRefusedError, verifyFindings, type ReconResult, type DismissedCandidate, type ScanOptions, type ScanReport, type Verification, type VerifyOptions } from "./pipeline";

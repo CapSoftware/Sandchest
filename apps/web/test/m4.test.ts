@@ -376,6 +376,18 @@ describe.skipIf(!available)("billing", () => {
     expect((await orgBillingRow(database, acme.id))?.autoTopUp).toEqual({ enabled: true, threshold: 5, quantity: 20, perMonth: 1 });
   });
 
+  test("auto top-up with no monthly limit keeps buying as credits run low", async () => {
+    await applyAutoTopUp(acme.id, "standard", { enabled: true, quantity: 10, monthlyLimitUsd: null });
+    expect(autumn.get(acme.id).autoTopUp).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: null });
+    const customer = autumn.get(acme.id);
+    customer.topUpsThisMonth = 1_000;
+    customer.credits = 5;
+    const charges = customer.charges.length;
+    await autumn.reserve({ customerId: acme.id, credits: 1, lockId: crypto.randomUUID(), expiresAt: new Date(Date.now() + 60_000) });
+    expect(customer.charges.slice(charges).filter((c) => c.what === "auto_top_up")).toHaveLength(1);
+    customer.autoTopUp = null;
+  });
+
   test("a PR on an account with no plan gets a neutral 'no plan' Check", async () => {
     const { org } = await upsertInstallation(database, 777, { githubAccountId: 3, githubLogin: "solo", type: "User" }, [{ githubRepoId: 77, fullName: "solo/app", private: false, defaultBranch: "main" }]);
     const event = prEvent({ id: 77, full_name: "solo/app", private: false, default_branch: "main" }, 1, "solohead");

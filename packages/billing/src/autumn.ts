@@ -8,7 +8,7 @@
  * sent with an idempotency key can be sent again by the caller, though:
  * Autumn turns away a key it has seen, so it charges once.
  */
-import { CREDITS, planById, PLANS, TOP_UP, type PlanId } from "./plans";
+import { CREDITS, planById, PLANS, TOP_UP, type AutoTopUpControl, type PlanId } from "./plans";
 
 export interface AutumnConfig {
   secretKey: string;
@@ -40,7 +40,7 @@ export interface BillingState {
   /** A plan that takes over at the end of this period (a downgrade). */
   nextPlanId: PlanId | null;
   credits: { remaining: number; resetsAt: Date | null };
-  autoTopUp: { enabled: boolean; threshold: number; quantity: number; perMonth: number } | null;
+  autoTopUp: AutoTopUpControl | null;
 }
 
 export interface Reservation {
@@ -94,7 +94,8 @@ export interface Autumn {
   preview(input: { customerId: string; planId: PlanId | typeof TOP_UP.id; credits?: number; promotionCode?: string }): Promise<ChargePreview>;
   /** A Stripe billing portal session: card, invoices, cancellation. */
   portal(customerId: string, returnUrl: string): Promise<string>;
-  setAutoTopUp(customerId: string, control: { enabled: boolean; threshold: number; quantity: number; perMonth: number }): Promise<void>;
+  /** Sets auto top-up. Without `perMonth` there is no monthly limit: leaving it out clears one set before. */
+  setAutoTopUp(customerId: string, control: AutoTopUpControl): Promise<void>;
 }
 
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -263,7 +264,7 @@ export function createAutumn(config: AutumnConfig): Autumn {
                 enabled: control.enabled,
                 threshold: control.threshold,
                 quantity: control.quantity,
-                purchase_limit: { interval: "month", interval_count: 1, limit: Math.max(1, control.perMonth) },
+                ...(control.perMonth !== null ? { purchase_limit: { interval: "month", interval_count: 1, limit: Math.max(1, control.perMonth) } } : {}),
               },
             ],
           },
@@ -300,6 +301,6 @@ export function billingState(raw: RawCustomer): BillingState {
     renewsAt: active && !cancelling ? date(active.current_period_end) : null,
     nextPlanId: (planById(scheduled?.plan_id)?.id ?? null) as PlanId | null,
     credits: { remaining: Math.max(0, Math.floor(balance?.remaining ?? 0)), resetsAt: date(balance?.next_reset_at) },
-    autoTopUp: topUp ? { enabled: topUp.enabled, threshold: topUp.threshold, quantity: topUp.quantity, perMonth: topUp.purchase_limit?.limit ?? 0 } : null,
+    autoTopUp: topUp ? { enabled: topUp.enabled, threshold: topUp.threshold, quantity: topUp.quantity, perMonth: topUp.purchase_limit?.limit ?? null } : null,
   };
 }

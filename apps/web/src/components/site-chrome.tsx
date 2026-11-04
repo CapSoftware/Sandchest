@@ -7,6 +7,7 @@ import { isDraftLegalLink, legal } from "@/lib/legal";
 import { brandAsset, site } from "@/lib/site";
 
 const NAV = [
+  { id: "demo", label: "Demo", href: site.links.demo },
   { id: "docs", label: "Docs", href: site.links.docs },
   { id: "github", label: "Open source", href: site.githubUrl },
 ] as const;

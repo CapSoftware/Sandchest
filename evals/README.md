@@ -1,14 +1,28 @@
 # Evals
 
-Measures how well the engine finds real vulnerabilities (recall) and how
-often what it reports is real (precision), plus time and cost per scan.
+Measures how well the engine finds real vulnerabilities (recall), how often
+what it reports is real (precision), and everything that makes a report
+worth reading: duplicates, severity, test-code noise, false positives on
+fixed code, stability across runs, time and cost.
+
+This directory holds the harness. The data it runs on (benchmarks, planted
+fixtures, judgements, labels, run history) lives in a private repository
+checked out at `evals/private` (gitignored here), or wherever
+`SANDCHEST_EVALS_DIR` points. Keeping the test set private stops it leaking
+into model training data or being tuned against. Without the data checkout,
+the commands below stop with instructions.
 
 ```sh
-bun run indexer:build            # once, and after indexer changes
-bun run evals                    # every benchmark
-bun run evals juice-shop dvwa    # a subset
-bun run evals --parallel 2       # two benchmarks at a time
-bun run evals --rescore evals/results/<run>   # re-score saved scans
+bun run indexer:build                   # once, and after indexer changes
+bun run evals                           # benchmarks tagged `core`
+bun run evals cve --repeat 2 --note "…" # by tag or name; `all` for everything
+bun run evals --rescore <run>           # re-score saved scans, e.g. after judging
+bun run scorecard <run> --baseline <run>
+bun run judge <run>                     # the findings still needing a verdict
+bun run fpcheck                         # skeptic on vulnerable vs fixed code (cents)
+bun run restage <run>                   # replay the final merge of repeat reports on saved scans (cents)
+bun run validate --fetch                # every cited line exists at its commit
+bun run prod                            # production quality, from the read replica
 ```
 
 The model is configured with `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`
@@ -16,61 +30,63 @@ in `.env.local`. Set `LLM_PRICE_*` to report cost (see `.env.example`).
 
 ## Benchmarks
 
-Each file in [`benchmarks/`](benchmarks) pins a repository to a commit (or
-points at a fixture in this directory) and lists the vulnerabilities a
-careful reviewer would report, with the lines they would cite:
+A benchmark pins a repository to a commit (or points at a fixture in the
+data repository) and lists the vulnerabilities a careful reviewer would
+report, with the lines they would cite. Tags choose run sets:
 
-- **Intentionally vulnerable apps** (`juice-shop`, `nodegoat`, `dvwa`,
-  `crapi`) measure recall on well-known bugs across Node, PHP, Java, Python
-  and Go.
-- **`seeded-app`** ([`fixtures/seeded-app`](fixtures/seeded-app)) is a small
-  Next.js and Postgres app with planted bugs in modern code, next to safe
-  code that looks dangerous.
-- **Clean repositories** (`clean-*`) are well-maintained applications. Every
-  serious finding there is a false-positive candidate.
+- `core`: intentionally vulnerable apps across languages, a small app with
+  planted bugs next to safe look-alikes, and well-maintained clean apps.
+  Run on every engine change.
+- `cve`: real, published advisories in real applications, pinned to the
+  commit before the fix. Each also names the fixing commit (`patched`), and
+  carries a hunter-shaped `replay` of the bug for `fpcheck`.
+- `large`: repositories over 200k LOC, where a fixed scan budget is thinnest.
 
-`decoys` are lines that look dangerous but are safe; a finding whose sink
-lands on one is a known false positive.
-
-Remote benchmarks are fetched once into `.sandchest/benchmarks/`.
+`decoys` are lines that look dangerous but are safe.
 
 ## Scoring
 
-A finding matches an expected vulnerability when any line it cites (entry
-point or path hop) falls within an expected location, give or take five
-lines, and its category or CWE agrees. Committed secrets also count when a
-secret lead lands on the location.
+A finding matches an expected vulnerability when its sink, or at least two
+of the lines it cites, fall within an expected location (give or take five
+lines) and its category or CWE agrees. Each expected location is credited to
+one finding and each finding to one location (a maximum matching, earlier
+findings first), so a finding whose lines also fall in a neighbouring bug's
+range doesn't take both. Findings that match only locations already credited
+are duplicates.
 
-- **Recall** is over expected critical and high vulnerabilities, pooled
-  across the vulnerable benchmarks. Target: at least 70%.
-- **Precision** is over the findings the product shows by default (critical
-  and high, not low confidence). Matches and findings judged real are true
-  positives; decoy hits and findings judged false are false positives.
-  Anything else is unjudged, so precision is shown as a range: unjudged
-  counted as false, then left out. Target: at least 80%.
-- **Time**: median deep scan under 15 minutes.
+| Number | Meaning |
+|---|---|
+| Recall | Expected critical and high bugs found, pooled across vulnerable benchmarks. |
+| Recall as shown | Same, counting only bugs found by a finding shown by default (critical/high, not low confidence). The gap to recall is bugs we found and rated too low to show. |
+| Precision (strict) | Of unique shown findings: true positives ÷ all, unjudged counted as false. The number we hold to. "Judged only" leaves unjudged out. |
+| Duplicate rate | Shown findings that repeat a bug already reported in the same scan. |
+| Bugs hidden by merging | The engine merges repeat reports of one issue (`report.merged`). A merge that absorbed a finding matching an expected bug no kept finding reports, or one judged a distinct real bug, hid it. Should be 0. |
+| Test/fixture code | Shown findings whose every cited line is in tests, fixtures or examples. |
+| Severity | Severity of the best match against the expected severity. |
+| Fixed bugs re-flagged | Scanning the fixing commit of a `cve` benchmark: fixed bugs still reported at their patched location. Each is a confirmed false positive; the fix is the ground truth. |
+| Same fingerprint across runs | With `--repeat`, of bugs found in two runs, the share reported under the same fingerprint. Below 100%, a rescan files the same bug again as new. |
+| Cost, time | Per run, per 100k LOC, median minutes. |
+
+Every run is compared with the last comparable one, both re-scored with the
+current scorer and judgements on the benchmarks they share, and changes
+beyond run-to-run noise are flagged. Single runs move about ±4 points in
+recall with no change at all, so use `--repeat` before trusting a small
+difference.
 
 ## Judging
 
-Unmatched findings are listed in `evals/results/<run>/unjudged.md`. Record a
-verdict by adding the fingerprint to
-`evals/private/judgements/<benchmark>.json`:
-
-```json
-{ "3f9c0a1b2c3d4e5f": "real", "0a1b2c3d4e5f6a7b": "false_positive" }
-```
-
-Fingerprints are stable across scans, so judgements carry over to later
-runs. Re-score a saved run with `--rescore`.
-
-## Real-world targets
-
-`bun run evals --private` scans the repositories listed in
-`evals/private/targets.json` (`[{ "name": "my-app", "path": "/abs/path" }]`)
-and writes reports to `evals/private/results/`. Only scan code you own.
+Strict precision only rises when unmatched findings are judged.
+`bun run judge <run>` writes the queue, in full, to the run's `judge.md`.
+Record verdicts with `bun run judge set` (or `judge apply` for a batch):
+`real`, `false_positive`, `not_security` (true, but nobody but the attacker
+is harmed), `test_code` or `duplicate` (of a fingerprint, or `expected:<id>`
+when the line ranges missed a match; a duplicate counts as the bug it repeats
+when that bug isn't otherwise in the scan). Fingerprints are stable across
+scans, so verdicts carry over to later runs.
 
 ## Privacy
 
 Scan reports contain code excerpts and, for real-world targets, live
-vulnerabilities. `evals/results/` and `evals/private/` are gitignored; never
-commit anything from them.
+vulnerabilities. Everything the harness writes goes to the data
+repository; nothing from it is committed here. Production findings on
+repositories we don't own are labelled by id only.

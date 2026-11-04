@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_TIERS, defaultAutoTopUpLimit, FREE_CREDITS, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
+import { CREDIT_AMOUNTS, CREDIT_PRICE, CREDIT_TIERS, creditsPrice, creditsSaving, DEEP_SCAN_TIERS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, MAX_PURCHASE_CREDITS, PLAN, PR_REVIEW_TIERS, TOP_UP_BELOW } from "@sandchest/billing";
 import { setupPrompt } from "@/lib/agent-prompt";
 import { site } from "@/lib/site";
 
@@ -74,7 +74,7 @@ describe("pricing matches the billing package", () => {
     expect(pricing).toContain(`Testers can claim ${FREE_CREDITS.credits} free credits from [sandchest.com/claim](/claim), or by typing a tester's code`);
     expect(pricing).toContain(`when fewer than ${TOP_UP_BELOW} are left`);
     expect(pricing).toContain(`run low (below ${TOP_UP_BELOW})`);
-    expect(pricing).toContain(`${money(defaultAutoTopUpLimit(CREDIT_AMOUNTS[0]))}, or five top-ups if that is more`);
+    expect(pricing).toContain(`It spends at most ${money(DEFAULT_TOP_UP_LIMIT_USD)} a month unless you change that`);
   });
 
   test("the summary ranges", () => {

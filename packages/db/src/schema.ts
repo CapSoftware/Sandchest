@@ -33,8 +33,8 @@ export interface OrgSettings {
   checkThreshold: "critical" | "high" | "medium" | "low";
   /** Email people with access about critical findings and finished deep scans. Default on. */
   emailNotifications?: boolean;
-  /** Buy `quantity` credits automatically when they run low, up to a monthly spend in USD. Unset means off. Older choices have no quantity. */
-  autoTopUp?: { enabled: boolean; monthlyLimitUsd: number; quantity?: number };
+  /** Buy `quantity` credits automatically when they run low, up to a monthly spend in USD (null: no limit). Unset means off. Older choices have no quantity. */
+  autoTopUp?: { enabled: boolean; monthlyLimitUsd: number | null; quantity?: number };
   /** The org's hacker, as chosen when recruiting it. Only how the rig looks and talks; scans ignore it. */
   hacker?: HackerProfile;
   /** Who the org is, for receipts: given while recruiting, prefilled from GitHub. */
@@ -498,8 +498,8 @@ export const orgBilling = pgTable("org_billing", {
   nextPlanId: text("next_plan_id"),
   credits: integer("credits").notNull().default(0),
   creditsResetAt: timestamp("credits_reset_at", { withTimezone: true }),
-  /** Auto top-up as Autumn has it: threshold and quantity in credits, top-ups per month. */
-  autoTopUp: jsonb("auto_top_up").$type<{ enabled: boolean; threshold: number; quantity: number; perMonth: number }>(),
+  /** Auto top-up as Autumn has it: threshold and quantity in credits, top-ups per month (null: no limit). */
+  autoTopUp: jsonb("auto_top_up").$type<{ enabled: boolean; threshold: number; quantity: number; perMonth: number | null }>(),
   /** First time a plan was seen active: recon starts then. */
   activatedAt: timestamp("activated_at", { withTimezone: true }),
   checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
@@ -621,13 +621,13 @@ export const EVENT_NAMES = [
   "payment_completed",
 
   // ---- Billing ----
-  /** A plan or credits were chosen. props: kind ("plan" | "top_up"), plan, credits, route ("confirm" | "stripe" | "charged"), outcome ("ok" | "invalid" | "not_admin" | "same_plan" | "needs_plan" | "checkout_failed" | "error"). */
+  /** A plan or credits were chosen. props: kind ("plan" | "top_up"), plan, credits, auto_top_up (joining from Settings: whether it was left on), route ("confirm" | "stripe" | "charged"), outcome ("ok" | "invalid" | "not_admin" | "same_plan" | "needs_plan" | "checkout_failed" | "error"). */
   "purchase_started",
   /** A purchase was confirmed on the confirm page. props: kind, plan, credits, route ("stripe" | "charged" | "repeated": confirmed before, not charged again), outcome (as purchase_started, or "stale": a page from before purchase ids). */
   "purchase_confirmed",
   /** Stripe's billing portal was opened. props: outcome ("ok" | "error"). */
   "billing_portal_opened",
-  /** Auto top-up was changed. props: enabled, quantity, monthly_limit_usd, outcome ("ok" | "error"). */
+  /** Auto top-up was changed. props: enabled, quantity, monthly_limit_usd (null: no limit), outcome ("ok" | "error"). */
   "auto_top_up_saved",
   /** Someone came back from Stripe (Checkout, a card step or the portal). props: had_plan, had_paid_plan, plan_now (enum), outcome ("first_plan" | "paid" | "unchanged" | "pending"). */
   "billing_returned",

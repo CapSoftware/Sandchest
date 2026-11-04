@@ -1,4 +1,4 @@
-import { autoTopUpSize, DEFAULT_CREDITS, defaultAutoTopUpLimit, isTrial, PLAN, planById } from "@sandchest/billing/plans";
+import { autoTopUpSize, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, PLAN, planById } from "@sandchest/billing/plans";
 import type { OrgBillingRow, OrgSettings } from "@sandchest/db";
 import { Link } from "@/components/app/hover-link";
 import { plural, shortDate, usd } from "@/lib/format";
@@ -102,10 +102,10 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
         <p className="field-legend">Auto top-up</p>
         <p className="field-help">
           {auto && autoSize
-            ? `On: adds ${plural(autoSize.credits, "credit")} for ${usd(autoSize.price)} when your balance falls below ${auto.threshold}, up to ${plural(auto.perMonth, "time")} a month.`
+            ? `On: adds ${plural(autoSize.credits, "credit")} for ${usd(autoSize.price)} when your balance falls below ${auto.threshold}, ${auto.perMonth === null ? "with no monthly limit" : `up to ${plural(auto.perMonth, "time")} a month`}.`
             : "Off. Pull request reviews stop when credits run out."}
         </p>
-        {org.admin && <AutoTopUpForm orgId={org.id} planId={plan.id} enabled={autoOn} quantity={quantity} limit={choice?.monthlyLimitUsd ?? defaultAutoTopUpLimit(quantity)} />}
+        {org.admin && <AutoTopUpForm orgId={org.id} planId={plan.id} enabled={autoOn} quantity={quantity} limit={choice ? choice.monthlyLimitUsd : DEFAULT_TOP_UP_LIMIT_USD} />}
       </div>
 
       {!plan.offered && (

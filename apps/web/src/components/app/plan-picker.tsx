@@ -1,5 +1,5 @@
 "use client";
-import { CREDIT_AMOUNTS, creditsPrice, creditsSaving, DEFAULT_CREDITS, PLAN } from "@sandchest/billing/plans";
+import { CREDIT_AMOUNTS, creditsPrice, creditsSaving, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { useActionState, useState } from "react";
 import { usd } from "@/lib/format";
 import { PRICES } from "@/lib/pricing";
@@ -14,6 +14,8 @@ import { Submit } from "./submit";
 export function PlanPicker({ orgId, current, admin }: { orgId: string; current: string | null; admin: boolean }) {
   const [state, action] = useActionState<BillingOutcome, FormData>(purchase.bind(null, orgId), {});
   const [credits, setCredits] = useState<number>(DEFAULT_CREDITS);
+  // Joining turns auto top-up on, as recruiting does, unless they untick it.
+  const [autoTopUp, setAutoTopUp] = useState(true);
   const switching = current !== null;
   return (
     <form action={action} className="plans">
@@ -40,6 +42,18 @@ export function PlanPicker({ orgId, current, admin }: { orgId: string; current: 
                 </option>
               ))}
             </select>
+          </p>
+        )}
+        {admin && !switching && (
+          <p className="field-help">
+            <input type="hidden" name="autoTopUp" value={autoTopUp ? "on" : "off"} />
+            <label className="toggle">
+              <input type="checkbox" checked={autoTopUp} onChange={(event) => setAutoTopUp(event.target.checked)} data-track={autoTopUp ? "plan-auto-top-up-off" : "plan-auto-top-up-on"} />
+              Auto top-up
+            </label>{" "}
+            {autoTopUp
+              ? `adds ${credits} credits for ${usd(creditsPrice(credits))} whenever fewer than ${TOP_UP_BELOW} are left, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Once joined, you can change the limit here.`
+              : "is off, so pull request reviews stop when the credits run out."}
           </p>
         )}
         {admin && (

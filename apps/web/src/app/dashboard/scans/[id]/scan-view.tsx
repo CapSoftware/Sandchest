@@ -2,7 +2,7 @@ import type { DashboardRepo, scanForUser } from "@sandchest/db";
 import { Dig } from "@/components/app/dig";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
-import { ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack } from "@/components/app/scan-live";
+import { Reveal, ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack, type LiveLoop } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
 import { compactNumber, plural, repoUrl, SCAN_KIND_LABEL } from "@/lib/format";
 import { forgejoWebUrl } from "@/server/forgejo";
@@ -22,9 +22,10 @@ export function title(kind: string, prNumber: number | null): string {
 /**
  * A scan, drawn from what the page read; its loading state draws it from a sample scan. `again` is the Dig key
  * of a finished deep scan's repo; `next` is the deep scan a running recon is mapping the repo for, and
- * `waitingOn` the recon a queued deep scan waits for.
+ * `waitingOn` the recon a queued deep scan waits for. The demo plays `loop` instead of following the scan, and shows
+ * its findings as the feed names them.
  */
-export function ScanView({ row, again, next, waitingOn }: { row: ScanRow; again?: { repo: DashboardRepo; plan: OrgPlan }; next?: string; waitingOn?: string }) {
+export function ScanView({ row, again, next, waitingOn, loop }: { row: ScanRow; again?: { repo: DashboardRepo; plan: OrgPlan }; next?: string; waitingOn?: string; loop?: LiveLoop }) {
   const { scan, repo, org, metrics, findings, events } = row;
   const live = ACTIVE.has(scan.status);
   const shown = findings.filter((finding) => finding.confidence !== "low");
@@ -45,7 +46,7 @@ export function ScanView({ row, again, next, waitingOn }: { row: ScanRow; again?
     <>
       {/* Keyed by status: when the scan ends and the page refreshes, the view starts again from the
           finished scan (its end time and measured duration) instead of keeping what it followed live. */}
-      <ScanLive key={scan.status} scanId={scan.id} initial={initial}>
+      <ScanLive key={scan.status} scanId={scan.id} initial={initial} loop={loop}>
         <nav className="crumbs" aria-label="Breadcrumb">
           <Link href="/dashboard/scans">Scans</Link>
           <span aria-hidden="true">/</span>
@@ -121,35 +122,39 @@ export function ScanView({ row, again, next, waitingOn }: { row: ScanRow; again?
         </dl>
 
         {shown.length > 0 && (
-          <section className="block" aria-labelledby="found-title">
-            <h2 id="found-title" className="block-title">
-              Found
-            </h2>
-            <ul className="rows">
-              {shown.map((finding) => (
-                <li key={finding.id} className="row finding-row">
-                  <HoverLink href={`/dashboard/findings/${finding.id}`}>
-                    <Heat severity={finding.severity} label />
-                    <span className="finding-row-title">{finding.title}</span>
-                    <span className="finding-row-when">
-                      {(finding.status === "fixed" || finding.status === "dismissed") && (
-                        <span className="status status-badge" data-status={finding.status}>
-                          {finding.status === "fixed" ? "Fixed" : "Dismissed"}
+          <Reveal>
+            <section className="block" aria-labelledby="found-title">
+              <h2 id="found-title" className="block-title">
+                Found
+              </h2>
+              <ul className="rows">
+                {shown.map((finding, i) => (
+                  <Reveal key={finding.id} at={i}>
+                    <li className="row finding-row">
+                      <HoverLink href={`/dashboard/findings/${finding.id}`}>
+                        <Heat severity={finding.severity} label />
+                        <span className="finding-row-title">{finding.title}</span>
+                        <span className="finding-row-when">
+                          {(finding.status === "fixed" || finding.status === "dismissed") && (
+                            <span className="status status-badge" data-status={finding.status}>
+                              {finding.status === "fixed" ? "Fixed" : "Dismissed"}
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
-                    {finding.sink && (
-                      <span className="finding-row-where">
-                        <code>
-                          {finding.sink.file}:{finding.sink.line}
-                        </code>
-                      </span>
-                    )}
-                  </HoverLink>
-                </li>
-              ))}
-            </ul>
-          </section>
+                        {finding.sink && (
+                          <span className="finding-row-where">
+                            <code>
+                              {finding.sink.file}:{finding.sink.line}
+                            </code>
+                          </span>
+                        )}
+                      </HoverLink>
+                    </li>
+                  </Reveal>
+                ))}
+              </ul>
+            </section>
+          </Reveal>
         )}
 
         <section className="block" aria-labelledby="feed-title">
