@@ -1,4 +1,5 @@
 import { ChestStage } from "@/components/chest-stage";
+import { DemoKey } from "@/components/demo-key";
 import { FindingStrip } from "@/components/finding-strip";
 import { HackerAtWork } from "@/components/hacker-at-work";
 import { HeroKey } from "@/components/hero-key";
@@ -29,7 +30,10 @@ export function LandingPage({ visitor }: { visitor: Visitor }) {
             unrestricted models to find real vulnerabilities in your code before attackers do.
           </p>
           <div className="hero-actions">
-            <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted} track="hero-get-started">Get started</HeroKey>
+            <div className="hero-keys">
+              <HeroKey href={visitor === "signed-in" ? site.links.dashboard : site.links.getStarted} track="hero-get-started">Get started</HeroKey>
+              <DemoKey href={site.links.demo} track="hero-demo" />
+            </div>
             <AgentPromptButton
               className="hero-agent"
               track="hero-agent-prompt"

@@ -317,6 +317,107 @@ html:has(.page) {
   text-decoration-color: var(--color-gold);
 }
 
+/* The gold key and the demo key, side by side where there's room. */
+.hero-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem 1.75rem;
+}
+
+/*
+ * The demo key (demo-key.tsx): the gold key's dark twin. Same size and
+ * stepped corners, a pixel outline; pointed at, the outline lights gold, a
+ * dithered glow comes up behind it and a scan line sweeps down its face.
+ */
+.demo-key .button-face {
+  position: relative;
+  gap: 0.875rem;
+  padding: 0 1.75rem 0 1.375rem;
+  background: var(--color-soot);
+  color: var(--color-sand);
+  box-shadow:
+    inset 0 0 0 2px var(--color-edge),
+    inset 0 -3px 0 2px var(--color-seam);
+}
+
+.demo-key:hover .button-face,
+.demo-key:focus-visible .button-face {
+  color: var(--color-bright);
+  box-shadow:
+    inset 0 0 0 2px var(--color-gold),
+    inset 0 -3px 0 2px var(--color-seam);
+}
+
+.demo-key::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  background: repeating-conic-gradient(var(--color-amber) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+  mask-image: radial-gradient(closest-side, #000 35%, transparent);
+  opacity: 0;
+  transition: opacity 160ms;
+  pointer-events: none;
+}
+
+.demo-key:hover::before,
+.demo-key:focus-visible::before {
+  opacity: 0.4;
+}
+
+/* The scan line: a soft gold band, dithered at its core, wiping top to bottom. */
+.demo-key .button-face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to bottom, transparent 0 40%, rgb(254 194 66 / 0.16) 48%, rgb(254 194 66 / 0.32) 50%, rgb(254 194 66 / 0.16) 52%, transparent 60% 100%)
+    0 0 / 100% 250% no-repeat;
+  background-position: 0 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .demo-key:hover .button-face::after,
+  .demo-key:focus-visible .button-face::after {
+    opacity: 1;
+    animation: demo-key-scan 1.6s steps(24) infinite;
+  }
+}
+
+@keyframes demo-key-scan {
+  from {
+    background-position: 0 100%;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* The play mark: a gold pixel triangle in a small dark screen. */
+.demo-key-play {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding-left: 2px;
+  background: var(--color-void);
+  color: var(--color-gold);
+  box-shadow: inset 0 0 0 2px var(--color-seam);
+  transition:
+    color 120ms,
+    box-shadow 120ms;
+}
+
+.demo-key:hover .demo-key-play,
+.demo-key:focus-visible .demo-key-play {
+  color: var(--color-gold-light);
+  box-shadow:
+    inset 0 0 0 2px var(--color-seam),
+    0 0 0.75rem rgb(254 194 66 / 0.35);
+}
+
 /* The key's fire (hero-key.tsx): behind the face, on the chest's 2px grid. */
 .key-fire {
   position: absolute;
