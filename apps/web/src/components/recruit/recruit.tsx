@@ -9,6 +9,7 @@ import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, cre
 import { linesLabel, restCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
 import { closedMessage, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
 import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
+import { site } from "@/lib/site";
 import {
   aside,
   DEFAULT_HACKER,
@@ -737,9 +738,7 @@ function Connect({
             </li>
           ))}
         </ol>
-        <p className="onboard-fine">
-          <GitHubMark /> Read-only. It never pushes code.
-        </p>
+        <ReadOnlyNote />
       </div>
     );
   }
@@ -771,7 +770,23 @@ function Connect({
           <GitHubMark /> Connect another account
         </a>
       )}
+      <ReadOnlyNote />
     </>
+  );
+}
+
+/** What connecting GitHub hands over, for anyone wary of an unrestricted model near their code. */
+function ReadOnlyNote() {
+  return (
+    <p className="onboard-fine">
+      <Lock />
+      <span>
+        Read-only. Each scan runs in its own VM, deleted when it ends, and your code is never stored.{" "}
+        <a href={site.links.security} target="_blank" rel="noreferrer">
+          How your code is handled
+        </a>
+      </span>
+    </p>
   );
 }
 
