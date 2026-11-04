@@ -26,9 +26,11 @@ import type { IndexerClient } from "../indexer/client";
 import type { Classifier } from "../llm/classifier";
 import type { ReadResult, RouteInfo } from "./tools";
 
+/** The indexer returns at most this many definitions per call. */
+const DEFINITIONS_PER_CALL = 20_000;
 const HTTP_VERBS = new Set(["get", "post", "put", "delete", "patch", "head", "options"]);
 
-interface Definition {
+export interface Definition {
   name: string;
   kind: string;
   file: string;
@@ -75,10 +77,16 @@ export interface ClassifyOptions {
   onProgress?: (message: string) => void;
 }
 
-const DEFAULTS = { handlerThreshold: 0.85, maxCandidates: 500, concurrency: 12, budgetMs: 60_000 } as const;
+const DEFAULTS = { handlerThreshold: 0.85, maxCandidates: 1000, concurrency: 24, budgetMs: 120_000 } as const;
 
 /** Files that are frontend assets, never server-side HTTP handlers. */
-const FRONTEND = /\.(jsx|tsx|vue|svelte|css|scss|sass|less|html|htm|mdx|md|json|ya?ml|toml|lock)$/i;
+const FRONTEND = /\.(vue|svelte|css|scss|sass|less|html|htm|mdx|md|json|ya?ml|toml|lock)$|(^|\/)(frontend|web_src|stimulus|webcomponents)\//i;
+/** JSX is usually a UI component, but server code is sometimes written in it (an RPC router in `.tsx`). */
+const JSX = /\.(jsx|tsx)$/i;
+const SERVER_PATH = /(^|\/)(server|api|trpc)\//i;
+/** An ordering hint only: code that looks client-side is classified last. */
+const CLIENT_HINT = /(^|\/)[^/]*(client|front)[^/]*\/|(^|\/)(ui|components|editor)\//i;
+const isFrontend = (file: string) => FRONTEND.test(file) || (JSX.test(file) && !SERVER_PATH.test(file));
 
 /**
  * Last-segment patterns that are never an HTTP handler in any language:
@@ -104,34 +112,117 @@ function verbOf(name: string): string {
 }
 
 /**
- * Candidate definitions to classify. When the route detector found routes, the
- * missed handlers are overwhelmingly their siblings, so we take *every*
- * function and method in those directories (recall matters most — the
- * vulnerable handler is often a common-named method the call graph resolves as
- * "called", which a roots-only filter would drop). When no route was detected,
- * there is no server-side anchor, so we fall back to call-graph roots across the
- * backend — entry points or dead code — to bound the work. Frontend files and
- * obvious non-handlers are always excluded, and the set is capped.
+ * Where handlers usually live: controller, view, endpoint, resource and route
+ * files or directories. A ranking hint only (the classifier still decides what
+ * is a handler), so files named this way are classified first.
  */
-async function fetchCandidates(indexer: IndexerClient, routes: RouteInfo[], max: number, signal?: AbortSignal): Promise<Definition[] | null> {
+const HANDLER_PATH = /(^|\/)(controllers?|views?|handlers?|endpoints?|resources?|resolvers?|routes?|routers?|api|rest|rpc)(\/|_|\.|$)|(controller|endpoint|resource|resolver|handler|views?|router|api)s?\.[a-z]+$/i;
+
+/**
+ * Candidate definitions to classify, from three pools in order:
+ * - every function and method in files named like handlers (above), wherever
+ *   they are. Route rules often see the route table but not its handlers
+ *   (Django `urls.py` names views in another directory), or nothing at all
+ *   (frameworks with no rule);
+ * - every definition in directories that hold detected routes: missed handlers
+ *   are often their siblings, and often common-named methods the call graph
+ *   resolves as "called", which a roots-only filter would drop;
+ * - with no route detected, call-graph roots across the backend (entry points
+ *   or dead code), to bound the work.
+ * Frontend files and obvious non-handlers are excluded. Within a pool the
+ * candidates are taken round-robin across files, so the cap spreads over every
+ * file instead of exhausting the first few alphabetically.
+ */
+export async function entryPointCandidates(indexer: IndexerClient, routes: RouteInfo[], max: number, signal?: AbortSignal): Promise<Definition[] | null> {
   const routeDirs = [...new Set(routes.map((r) => directory(r.at)).filter(Boolean))];
-  let pool: Definition[];
+  const pools: Definition[][] = [];
   try {
+    const all = await allDefinitions(indexer, "", signal);
+    pools.push(all.filter((d) => HANDLER_PATH.test(d.file)));
     if (routeDirs.length > 0) {
       const perDir = await Promise.all(routeDirs.map((dir) => indexer.call<{ definitions: Definition[] }>("definitions", { path: `${dir}/`, limit: 10_000 }, signal).then((r) => r.definitions)));
-      const byKey = new Map<string, Definition>();
-      for (const def of perDir.flat()) byKey.set(`${def.file}\u0000${def.name}\u0000${def.line}`, def);
-      pool = [...byKey.values()];
+      pools.push(perDir.flat());
     } else {
-      pool = (await indexer.call<{ definitions: Definition[] }>("definitions", { roots: true, limit: 20_000 }, signal)).definitions;
+      pools.push((await indexer.call<{ definitions: Definition[] }>("definitions", { roots: true, limit: 20_000 }, signal)).definitions);
     }
   } catch {
     return null; // indexer too old (no `definitions` tool) or unavailable.
   }
-  const usable = pool.filter((d) => !FRONTEND.test(d.file) && !NOT_A_HANDLER.test(lastSegment(d.name)));
-  // Methods first (class-based handlers are the common miss), then by location — a stable, bounded set.
-  usable.sort((a, b) => Number(b.kind === "method") - Number(a.kind === "method") || a.file.localeCompare(b.file) || a.line - b.line);
-  return usable.slice(0, max);
+  // Handlers the route rules already found are scored separately: they must not take the cap's slots.
+  const { keys: detected } = detectedHandlers(routes);
+  const seen = new Set<string>();
+  const out: Definition[] = [];
+  for (const pool of pools) {
+    const usable = pool.filter((d) => {
+      const key = `${d.file}\u0000${d.name}\u0000${d.line}`;
+      if (seen.has(key) || detected.has(`${d.file}\u0000${d.name}`) || isFrontend(d.file) || NOT_A_HANDLER.test(lastSegment(d.name))) return false;
+      seen.add(key);
+      return true;
+    });
+    // Client-looking paths last. Nothing is dropped, so this only decides what a capped run classifies.
+    out.push(...roundRobin(usable.filter((d) => !CLIENT_HINT.test(d.file))), ...roundRobin(usable.filter((d) => CLIENT_HINT.test(d.file))));
+  }
+  return out.slice(0, max);
+}
+
+/** Handlers the route rules found, by `file\u0000name`, and as a list. */
+function detectedHandlers(routes: RouteInfo[]): { keys: Set<string>; list: Array<{ name: string; file: string; line: number }> } {
+  const keys = new Set<string>();
+  const list: Array<{ name: string; file: string; line: number }> = [];
+  for (const route of routes) {
+    for (const handler of route.handlers) {
+      const [name, loc] = handler.split(" @ ");
+      if (!name || !loc) continue;
+      const file = loc.slice(0, loc.lastIndexOf(":"));
+      const line = Number(loc.slice(loc.lastIndexOf(":") + 1));
+      const key = `${file}\u0000${name}`;
+      if (keys.has(key)) continue;
+      keys.add(key);
+      list.push({ name, file, line });
+    }
+  }
+  return { keys, list };
+}
+
+/**
+ * Every definition under `dir` (a `path/` prefix, or "" for the repository),
+ * however large it is. One call returns at most 20,000, which cut off whole
+ * directories of the largest repositories, controllers included; a directory
+ * over the limit is read one child at a time instead.
+ */
+async function allDefinitions(indexer: IndexerClient, dir: string, signal?: AbortSignal, depth = 0): Promise<Definition[]> {
+  const first = await indexer.call<{ definitions: Definition[]; total: number }>("definitions", { ...(dir && { path: dir }), limit: DEFINITIONS_PER_CALL }, signal);
+  if (first.total <= first.definitions.length || depth >= 8) return first.definitions;
+  const listing = await indexer.call<{ entries: Array<{ name: string; type: "dir" | "file" }> }>("list_dir", { path: dir.replace(/\/$/, "") }, signal);
+  const parts = await Promise.all(
+    listing.entries.map((entry) =>
+      entry.type === "dir"
+        ? allDefinitions(indexer, `${dir}${entry.name}/`, signal, depth + 1)
+        : indexer.call<{ definitions: Definition[] }>("definitions", { path: `${dir}${entry.name}`, limit: DEFINITIONS_PER_CALL }, signal).then((r) => r.definitions.filter((d) => d.file === `${dir}${entry.name}`)),
+    ),
+  );
+  return parts.flat();
+}
+
+/**
+ * The route list with recovered handlers merged in: detected routes that name a
+ * handler, then the recovered ones, then route table entries that name no
+ * handler (the hunter still has to resolve those). The access-control hunters
+ * take entry points in this order, up to their cap.
+ */
+export function mergeRecovered(routes: RouteInfo[], recovered: RouteInfo[]): RouteInfo[] {
+  if (recovered.length === 0) return routes;
+  return [...routes.filter((r) => r.handlers.length), ...recovered, ...routes.filter((r) => !r.handlers.length)];
+}
+
+/** One definition from each file in turn (methods first within a file, then by line), files in path order. */
+function roundRobin(defs: Definition[]): Definition[] {
+  const byFile = new Map<string, Definition[]>();
+  for (const def of defs) byFile.set(def.file, [...(byFile.get(def.file) ?? []), def]);
+  const queues = [...byFile.keys()].sort().map((file) => byFile.get(file)!.sort((a, b) => Number(b.kind === "method") - Number(a.kind === "method") || a.line - b.line));
+  const out: Definition[] = [];
+  for (let i = 0; out.length < defs.length; i++) for (const queue of queues) if (queue[i]) out.push(queue[i]!);
+  return out;
 }
 
 async function readWindow(indexer: IndexerClient, file: string, line: number, endLine: number | undefined, signal?: AbortSignal): Promise<string> {
@@ -197,23 +288,10 @@ export async function classifyEntryPoints(indexer: IndexerClient, classifier: Cl
 
   const empty: EntryRecovery = { recovered: [], handlers: [], stats: { candidates: 0, classified: 0, recovered: 0, refusals: 0, failures: 0, inputTokens: 0 } };
 
-  const pool = await fetchCandidates(indexer, routes, max, signal);
+  const pool = await entryPointCandidates(indexer, routes, max, signal);
   if (pool === null) return empty; // indexer too old (no `definitions` tool) or unavailable: skip cleanly.
 
-  const detectedKeys = new Set<string>();
-  const detected: Array<{ name: string; file: string; line: number }> = [];
-  for (const route of routes) {
-    for (const handler of route.handlers) {
-      const [name, loc] = handler.split(" @ ");
-      if (!name || !loc) continue;
-      const file = loc.slice(0, loc.lastIndexOf(":"));
-      const line = Number(loc.slice(loc.lastIndexOf(":") + 1));
-      const key = `${file}\u0000${name}`;
-      if (detectedKeys.has(key)) continue;
-      detectedKeys.add(key);
-      detected.push({ name, file, line });
-    }
-  }
+  const { keys: detectedKeys, list: detected } = detectedHandlers(routes);
 
   const candidates = pool.filter((d) => !detectedKeys.has(`${d.file}\u0000${d.name}`));
   // Classify recovered candidates (need the handler verdict) and detected handlers (need the authz score for peer comparison).

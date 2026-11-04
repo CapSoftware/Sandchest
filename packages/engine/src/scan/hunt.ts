@@ -50,6 +50,14 @@ const ACCESS_CONTROL_BRIEF =
   "For each entry point, work out who can call it (anonymous, any user, admin) and whether it checks that the caller may act on the specific object it reads or changes. Look for missing auth middleware, inconsistent guards between similar routes, IDs taken from the request without an ownership check, role or ownership fields an attacker can set, broken session or token handling, and password reset or login flaws.";
 
 /**
+ * The entry points each access-control hunter reviews: product routes before
+ * test and fixture routes, so the capped hunters cover what ships first.
+ */
+export function accessControlGroups(routes: RouteInfo[]): RouteInfo[][] {
+  return chunk(productFirst(routes, (r) => r.at), ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
+}
+
+/**
  * Splits the attack surface: one hunter per risky subsystem, access-control
  * hunters across every entry point (several when there are many, so no one
  * hunter becomes the long pole), and one for the deterministic leads.
@@ -65,9 +73,8 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
   const under = (prefixes: string[], at: string | undefined) =>
     !!at && prefixes.some((prefix) => prefix === "" || at === prefix || at.startsWith(`${prefix}/`) || at.startsWith(`${prefix}:`));
 
-  // Product routes before test/fixture routes, so the capped access-control hunters cover what ships first.
   const ranked = productFirst(routes, (r) => r.at);
-  const accessGroups = chunk(ranked, ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
+  const accessGroups = accessControlGroups(routes);
   // Access control, abuse and leads hunters always run; subsystems share the rest.
   const reserved = Math.max(1, accessGroups.length) + 2;
   for (const subsystem of subsystems.slice(0, Math.max(1, maxHunters - reserved))) {

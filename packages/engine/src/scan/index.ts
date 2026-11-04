@@ -13,7 +13,9 @@ export { proveFinding, proveFindings, type ProveOptions } from "./prove";
 export { trustTier, trustRank } from "./trust";
 export { mergeReports, runScanEnsemble, type EnsembleReport, type SupportedFinding } from "./ensemble";
 export { authzConsistencyLeads, authzScoreLeads, detectAuthzDeviations, detectAuthzScoreDeviations, type Deviation, type HandlerGuards, type ScoredHandler } from "./consistency";
-export { classifyEntryPoints, type ClassifiedHandler, type ClassifyOptions, type EntryRecovery } from "./classify";
+export { classifyEntryPoints, entryPointCandidates, mergeRecovered, type ClassifiedHandler, type ClassifyOptions, type Definition, type EntryRecovery } from "./classify";
+export { accessControlGroups } from "./hunt";
+export type { RouteInfo } from "./tools";
 export { investigateAuthModel } from "./investigate";
 export type { Runtime, RuntimeExecOptions, RuntimeExecResult } from "./runtime";
 export {

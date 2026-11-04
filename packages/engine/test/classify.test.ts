@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { IndexerClient } from "../src/indexer";
 import type { Classifier, ClassifierResult } from "../src/llm/classifier";
-import { classifyEntryPoints } from "../src/scan/classify";
+import { classifyEntryPoints, entryPointCandidates } from "../src/scan/classify";
 import type { RouteInfo } from "../src/scan/tools";
 
 interface Def {
@@ -66,6 +66,26 @@ describe("classifyEntryPoints", () => {
     expect(recovery.stats.recovered).toBe(2);
   });
 
+  test("classifies handler-named files anywhere first, one per file in turn, within the cap", async () => {
+    // Routes live in the URL table; the views are elsewhere, and a long helper file would fill a small cap alone.
+    const routes: RouteInfo[] = [{ method: "ANY", path: "/members/", at: "app/urls/project.py:5", chain: ["as_view"], handlers: [], framework: "django" }];
+    const all = [
+      ...Array.from({ length: 5 }, (_, i) => def(`helper${i}`, "app/urls/helpers.py", "function", i + 1)),
+      def("MemberView.patch", "app/views/member.py", "method", 40),
+      def("MemberView.get", "app/views/member.py", "method", 20),
+      def("IssueView.put", "app/views/issue.py", "method", 30),
+    ];
+    const seen: string[] = [];
+    const classifier = fakeClassifier({ "MemberView.patch": { handler: 0.95 } });
+    const indexer = fakeIndexer([], routes, {});
+    const call = indexer.call.bind(indexer);
+    indexer.call = async <T,>(tool: string, args: Record<string, unknown> = {}) =>
+      tool === "definitions" ? ({ definitions: args.path ? all.filter((d) => d.file.startsWith(String(args.path))) : all, total: all.length } as T) : call<T>(tool, args);
+    const recovery = await classifyEntryPoints(indexer, { ...classifier, ask: (state, q, s) => (seen.push(/^# (\S+)/.exec(state)![1]!), classifier.ask(state, q, s)) }, routes, { maxCandidates: 4, concurrency: 1 });
+    expect(seen).toEqual(["IssueView.put", "MemberView.get", "MemberView.patch", "helper0"]);
+    expect(recovery.recovered.map((r) => r.at)).toEqual(["app/views/member.py:40"]);
+  });
+
   test("a classifier failure drops only that candidate, never the run", async () => {
     const roots = [def("A.get", "api/a.py"), def("B.get", "api/b.py")];
     const routes: RouteInfo[] = [{ method: "GET", path: "/x", at: "api/x.py:1", chain: [], handlers: ["x @ api/x.py:1"], framework: "flask" }];
@@ -105,5 +125,42 @@ describe("classifyEntryPoints", () => {
     const recovery = await classifyEntryPoints(fakeIndexer(roots, routes), fakeClassifier(scores), routes, { maxCandidates: 10 });
     expect(recovery.stats.candidates).toBe(10);
     expect(recovery.recovered.length).toBe(10);
+  });
+
+  test("reads every definition of a repository too large for one call, a directory at a time", async () => {
+    // The indexer returns at most 20,000 per call; the handlers sit alphabetically last.
+    const big = Array.from({ length: 20_000 }, (_, i) => def(`util${i}`, `aaa/lib${i % 50}.py`, "function", i + 1));
+    const controller = def("TeamResource.addMember", "zzz/resources/team.py");
+    const all = [...big, controller];
+    const indexer: IndexerClient = {
+      async ready() {},
+      async call<T>(tool: string, args: Record<string, unknown> = {}): Promise<T> {
+        if (tool === "routes") return { routes: [], total: 0 } as T;
+        if (tool === "list_dir") {
+          const dir = String(args.path ?? "");
+          const prefix = dir ? `${dir}/` : "";
+          const names = new Map<string, "dir" | "file">();
+          for (const d of all.filter((d) => d.file.startsWith(prefix))) {
+            const rest = d.file.slice(prefix.length);
+            names.set(rest.split("/")[0]!, rest.includes("/") ? "dir" : "file");
+          }
+          return { path: dir, entries: [...names].map(([name, type]) => ({ name, type })) } as T;
+        }
+        if (tool === "definitions") {
+          const matching = all.filter((d) => !args.path || d.file.startsWith(String(args.path)));
+          return { definitions: matching.slice(0, Math.min(Number(args.limit ?? 2000), 20_000)), total: matching.length } as T;
+        }
+        throw new Error(`unexpected tool ${tool}`);
+      },
+    };
+    const candidates = await entryPointCandidates(indexer, [], 10);
+    expect(candidates![0]).toEqual(controller);
+  });
+
+  test("skips UI components but keeps server code written in JSX", async () => {
+    const all = [def("Button.render", "apps/web/components/views/button.tsx"), def("rolesRouter.update", "packages/rpc/server/routers/roles/_router.tsx"), def("Stimulus.connect", "frontend/src/controllers/members.ts")];
+    const indexer = fakeIndexer([], [], { definitions: { definitions: all, total: all.length } });
+    const candidates = await entryPointCandidates(indexer, [], 10);
+    expect(candidates!.map((d) => d.name)).toEqual(["rolesRouter.update"]);
   });
 });

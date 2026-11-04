@@ -36,7 +36,7 @@ import { proveFindings } from "./prove";
 import { isFixtureFile } from "./paths";
 import { trustRank, trustTier } from "./trust";
 import { authzConsistencyLeads, authzScoreLeads } from "./consistency";
-import { classifyEntryPoints } from "./classify";
+import { classifyEntryPoints, mergeRecovered } from "./classify";
 import type { Classifier } from "../llm/classifier";
 
 export interface ScanOptions {
@@ -196,7 +196,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     if (recovery) {
       classifiedHandlers = recovery.handlers;
       const { candidates, classified, failures, refusals } = recovery.stats;
-      if (recovery.recovered.length > 0) routes = [...routes, ...recovery.recovered];
+      routes = mergeRecovered(routes, recovery.recovered);
       if (candidates > 0) {
         emit({
           type: "progress",
