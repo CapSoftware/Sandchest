@@ -2,6 +2,7 @@
  * Server configuration, validated once. A misconfigured deployment fails on
  * its first request with every problem listed, not halfway through a scan.
  */
+import { loadForgejoConfig, type ForgejoConfig } from "@sandchest/forgejo";
 import { z } from "zod";
 
 const Schema = z.object({
@@ -14,9 +15,13 @@ const Schema = z.object({
    * connection and never use it. Default DATABASE_URL.
    */
   DATABASE_POOLER_URL: z.string().min(1).optional(),
-  GITHUB_APP_ID: z.string().min(1),
-  GITHUB_APP_PRIVATE_KEY: z.string().min(1),
-  GITHUB_WEBHOOK_SECRET: z.string().min(1),
+  /** The GitHub App. Required unless the deployment uses only Forgejo (FORGEJO_URL). */
+  GITHUB_APP_ID: z.string().min(1).optional(),
+  GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
+  GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /** Sign-in with Forgejo: an OAuth2 application on the instance. The rest of FORGEJO_* is read by `loadForgejoConfig`. */
+  FORGEJO_CLIENT_ID: z.string().min(1).optional(),
+  FORGEJO_CLIENT_SECRET: z.string().min(1).optional(),
   /** Public URL of this app, for links in Checks and comments. */
   SANDCHEST_APP_URL: z.url(),
   /** Bearer token for operator-only routes (manual scans, any scan's live feed). */
@@ -74,7 +79,9 @@ const Schema = z.object({
   SANDCHEST_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
-export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" };
+const GITHUB_APP = ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET"] as const;
+
+export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local"; forgejo: ForgejoConfig | undefined };
 
 let cached: Config | undefined;
 
@@ -87,15 +94,26 @@ export function config(env: Record<string, string | undefined> = process.env): C
   if (cached && env === process.env) return cached;
   // An empty value means unset: env files and Docker Compose pass blanks for settings left empty.
   const parsed = Schema.safeParse(Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined && value.trim() !== "")));
-  if (!parsed.success) {
-    throw new Error(`Invalid server configuration:\n  ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n  ")}`);
+  const issues = parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+  let forgejo: ForgejoConfig | undefined;
+  try {
+    forgejo = loadForgejoConfig(env);
+  } catch (error) {
+    issues.push((error as Error).message);
+  }
+  // A deployment needs a forge: the GitHub App, Forgejo, or both.
+  if (!env.FORGEJO_URL?.trim()) {
+    for (const name of GITHUB_APP) if (!env[name]?.trim()) issues.push(`${name}: required (or set FORGEJO_URL to use Forgejo)`);
+  }
+  if (!parsed.success || issues.length > 0) {
+    throw new Error(`Invalid server configuration:\n  ${[...new Set(issues)].join("\n  ")}`);
   }
   // On Vercel scans get a sandbox; self-hosted installs scan on the host.
   const workspace = parsed.data.SANDCHEST_WORKSPACE ?? (env.VERCEL ? "sandbox" : "local");
   if (workspace === "sandbox" && !parsed.data.SANDCHEST_INDEXER_LINUX_BIN && !(parsed.data.SANDCHEST_INDEXER_LINUX_URL && parsed.data.SANDCHEST_INDEXER_LINUX_SHA256)) {
     throw new Error("Sandbox scans need SANDCHEST_INDEXER_LINUX_BIN, or SANDCHEST_INDEXER_LINUX_URL with SANDCHEST_INDEXER_LINUX_SHA256.");
   }
-  const result = { ...parsed.data, workspace };
+  const result = { ...parsed.data, workspace, forgejo };
   if (env === process.env) cached = result;
   return result;
 }

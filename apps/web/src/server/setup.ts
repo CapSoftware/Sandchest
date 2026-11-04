@@ -19,9 +19,9 @@ const MIN_TOKEN_LENGTH = 24;
 
 type Env = Record<string, string | undefined>;
 
-/** Whether this deployment still needs its GitHub App. */
+/** Whether this deployment still needs its GitHub App. One that uses only Forgejo never does. */
 export function setupNeeded(env: Env = process.env): boolean {
-  return !env.GITHUB_APP_ID?.trim();
+  return !env.GITHUB_APP_ID?.trim() && !env.FORGEJO_URL?.trim();
 }
 
 /** The setup token, or undefined when neither source is usable. */

@@ -50,6 +50,7 @@ COPY packages/billing/package.json packages/billing/
 COPY packages/db/package.json packages/db/
 COPY packages/email/package.json packages/email/
 COPY packages/engine/package.json packages/engine/
+COPY packages/forgejo/package.json packages/forgejo/
 COPY packages/github/package.json packages/github/
 COPY packages/workspace/package.json packages/workspace/
 COPY evals/package.json evals/

@@ -171,8 +171,8 @@ export function stopGateway(server) {
 /** Calls the sweep on loopback, as Vercel Cron does in the cloud. Failures are logged and retried next time. */
 function scheduleSweep(port, secret) {
   const sweep = async () => {
-    // Nothing to sweep until setup has given the server its GitHub App.
-    if (!process.env.GITHUB_APP_ID?.trim()) return;
+    // Nothing to sweep until setup has given the server its GitHub App, or it has Forgejo.
+    if (!process.env.GITHUB_APP_ID?.trim() && !process.env.FORGEJO_URL?.trim()) return;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/cron/sweep`, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(120_000) });
       if (!response.ok) console.error(`Sweep failed: HTTP ${response.status}`);

@@ -5,7 +5,8 @@ import { activeDeepScan, claimFreeDig, createScan, deleteUnstartedScan, type Org
 import { digState } from "@/lib/dig-state";
 import { autumn, reserveScan } from "./billing";
 import { describeError } from "./log";
-import { db, githubApp } from "./services";
+import { forgeFor } from "./forges";
+import { db } from "./services";
 import { startScan } from "./start";
 
 export type DigResult =
@@ -25,7 +26,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   if (state.state === "running") return { ok: false, reason: "running", scanId: state.scanId };
   if (state.state === "too_large") return { ok: false, reason: "too_large" };
 
-  const headSha = await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);
+  const headSha = await forgeFor(repo.org.provider, repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch);
 
   // Claim the repo's one deep-scan slot before holding any credits, so a second
   // Dig that loses the race never reaches Autumn: no hold, no auto top-up, no
