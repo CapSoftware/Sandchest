@@ -46,6 +46,8 @@ import { catalog, db, githubApp } from "./services";
 
 /** The feed is re-read this far behind its cursor: OSV can publish a record stamped a little earlier than one already read. */
 const FEED_OVERLAP_MS = 2 * 3_600_000;
+/** Changes handled per ecosystem per sweep. */
+const FEED_MAX_CHANGES = 2_000;
 /** Every inventory is checked in full at least this often. */
 const RECHECK_MS = 24 * 3_600_000;
 /** Records are fetched from OSV's public bucket, which serves this many at once without strain. */
@@ -73,10 +75,13 @@ export async function saveDependencies(repoId: string, commitSha: string, starte
 /**
  * Reads the inventory from a scan's indexer while the scan runs, so the
  * workspace is never kept for it. Never throws: the scan must not fail
- * because the directory couldn't be updated.
+ * because the directory couldn't be updated. `pinnedAt` is when the scan's
+ * commit was chosen (never later than that): a scan that waited in the queue
+ * holds an older commit than a refresh that ran meanwhile, and must not
+ * overwrite it.
  */
-export function captureFromScan(repoId: string, commitSha: string, indexer: IndexerClient): { read: Promise<unknown>; done: Promise<void> } {
-  const startedAt = new Date();
+export function captureFromScan(repoId: string, commitSha: string, pinnedAt: Date, indexer: IndexerClient): { read: Promise<unknown>; done: Promise<void> } {
+  const startedAt = pinnedAt;
   const read = indexer.call<{ dependencies: Dependency[] }>("deps", {});
   const done = read
     .then(({ dependencies }) => saveDependencies(repoId, commitSha, startedAt, dependencies))
@@ -133,7 +138,7 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
       await workspace.destroy().catch(() => {});
     }
     await saveDependencies(repoId, headSha, startedAt, dependencies);
-    await releaseInventoryRefresh(db(), repoId, "");
+    await releaseInventoryRefresh(db(), repoId);
     return { state: "done", dependencies: dependencies.length };
   } catch (error) {
     await releaseInventoryRefresh(db(), repoId, describeError(error)).catch(() => {});
@@ -218,7 +223,11 @@ export async function syncAdvisories(now = Date.now()): Promise<SyncResult> {
         await setFeedCursor(db(), ecosystem, now);
         continue;
       }
-      const { changes } = await catalog().changedSince(ecosystem, cursor - FEED_OVERLAP_MS);
+      const read = await catalog().changedSince(ecosystem, cursor - FEED_OVERLAP_MS);
+      // Newest first. A burst bigger than one sweep should take (OSV re-stamping an ecosystem) is handled up
+      // to the cap and the cursor moves past the rest: the daily full check of every inventory covers them.
+      const changes = read.changes.slice(0, FEED_MAX_CHANGES);
+      const newestRead = Math.max(cursor, ...read.changes.slice(0, 1).map((change) => stampMs(change.modified) ?? 0));
       if (changes.length === 0) {
         await setFeedCursor(db(), ecosystem, cursor);
         continue;
@@ -249,8 +258,7 @@ export async function syncAdvisories(now = Date.now()): Promise<SyncResult> {
         result.packages += installed.length;
         result.added.push(...(await checkPackages(installed, "feed", records)));
       }
-      const newest = Math.max(cursor, ...changes.map((change) => stampMs(change.modified) ?? 0));
-      await setFeedCursor(db(), ecosystem, newest);
+      await setFeedCursor(db(), ecosystem, newestRead);
     } catch (error) {
       result.errors.push(`${ecosystem}: ${describeError(error)}`);
     }
@@ -273,11 +281,9 @@ async function checkPackages(packages: PackageVersion[], origin: "feed" | "inven
 
 /** The CVE directory's share of the ten-minute sweep. */
 export async function sweepCves(startInventory: (repoId: string) => Promise<void>, now = new Date()): Promise<{ changed: number; added: number; refreshed: number; rechecked: number; errors: number }> {
-  const [sync, due, unchecked] = await Promise.all([
-    syncAdvisories(now.getTime()),
-    inventoriesDue(db(), REFRESHES_PER_SWEEP),
-    inventoriesUnchecked(db(), new Date(now.getTime() - RECHECK_MS), RECHECKS_PER_SWEEP),
-  ]);
+  // The feed and the daily checks run side by side, so a slow feed never holds back the safety net.
+  const syncing = syncAdvisories(now.getTime()).catch((error: unknown): SyncResult => ({ changed: 0, packages: 0, added: [], errors: [describeError(error)] }));
+  const [due, unchecked] = await Promise.all([inventoriesDue(db(), REFRESHES_PER_SWEEP), inventoriesUnchecked(db(), new Date(now.getTime() - RECHECK_MS), RECHECKS_PER_SWEEP)]);
   const started = await Promise.allSettled(due.map((repoId) => startInventory(repoId)));
   // A first check that failed when the inventory was read is still the inventory's; later ones find new advisories.
   const rechecked = await mapLimit(unchecked, 3, ({ repoId, checkedAt }) =>
@@ -289,6 +295,7 @@ export async function sweepCves(startInventory: (repoId: string) => Promise<void
       },
     ),
   );
+  const sync = await syncing;
   for (const error of sync.errors) console.error(`OSV feed: ${error}`);
   return {
     changed: sync.changed,

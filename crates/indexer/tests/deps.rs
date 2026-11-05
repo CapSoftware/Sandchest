@@ -206,3 +206,18 @@ fn import_sites_are_shipped_code_and_capped_at_ten() {
     assert_eq!(jwt.imported_at.len(), 10);
     assert!(jwt.imported_at.iter().all(|site| site.starts_with("src/auth")), "{:?}", jwt.imported_at);
 }
+
+#[test]
+fn a_nested_project_with_its_own_yarn_lock_keeps_its_own_versions() {
+    let tree = Tree::new("yarn-nested");
+    tree.write("package.json", r#"{ "dependencies": { "react": "^18.2.0" } }"#);
+    tree.write("yarn.lock", "react@^18.2.0:\n  version \"18.2.0\"\n");
+    tree.write("website/package.json", r#"{ "dependencies": { "react": "^18.2.0" } }"#);
+    tree.write("website/yarn.lock", "react@^18.2.0:\n  version \"18.3.1\"\n");
+    tree.write("src/app.js", "const React = require(\"react\");\n");
+    tree.write("website/src/page.js", "const React = require(\"react\");\n");
+
+    let deps = tree.deps();
+    assert_eq!(imported_at(&deps, "react", "18.2.0"), vec!["src/app.js:1"]);
+    assert_eq!(imported_at(&deps, "react", "18.3.1"), vec!["website/src/page.js:1"]);
+}

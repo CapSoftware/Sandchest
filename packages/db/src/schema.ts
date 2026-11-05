@@ -904,6 +904,9 @@ export const repoInventories = pgTable(
     runningSince: timestamp("running_since", { withTimezone: true }),
     /** Why the last refresh failed, if it did. */
     error: text("error"),
+    /** Refreshes failed in a row since the last one that worked; each waits twice as long before the next try. */
+    failures: integer("failures").notNull().default(0),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
   },
   (table) => [
     index("repo_inventories_checked_idx").on(table.checkedAt),

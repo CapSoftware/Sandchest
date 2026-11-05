@@ -147,6 +147,7 @@ export function CvesView({
                         imported at <code>{where.site}</code>
                       </>
                     )}
+                    {where.why && `: ${where.why}`}
                     {where.more > 0 && ` and ${where.more} more ${where.more === 1 ? "repository" : "repositories"}`}
                   </span>
                 </HoverLink>

@@ -46,6 +46,7 @@ pub struct ImportSite<'a> {
 pub fn collect(store: &Store, imports: &[ImportSite]) -> Vec<Dep> {
     let mut deps: BTreeMap<(&'static str, String, String), Dep> = BTreeMap::new();
     let mut resolution = NpmResolution::default();
+    let lock_dirs = npm_lock_dirs(store);
     let mut add = |ecosystem: &'static str, name: &str, version: &str, manifest: &str, direct: bool, dev: bool| {
         let version = clean_version(version);
         if name.is_empty() || version.is_empty() {
@@ -77,7 +78,7 @@ pub fn collect(store: &Store, imports: &[ImportSite]) -> Vec<Dep> {
             "package.json" => {
                 let Ok(json) = serde_json::from_str::<Value>(text) else { continue };
                 // A workspace package's versions live in the lockfile at the workspace root, above it.
-                let has_lock = npm_lock_above(store, dir);
+                let has_lock = nearest_lock(&lock_dirs, dir).is_some();
                 for (section, dev) in [("dependencies", false), ("devDependencies", true), ("optionalDependencies", false)] {
                     for (name, range) in json.get(section).and_then(Value::as_object).into_iter().flatten() {
                         // Without a lockfile, the lowest version a range allows is the best guess.
@@ -117,7 +118,10 @@ pub fn collect(store: &Store, imports: &[ImportSite]) -> Vec<Dep> {
                 }
                 // Each workspace gets the entry its own manifest's range names.
                 resolution.lock_dirs.insert(dir.to_owned());
-                for (workspace, name, range) in npm_manifests(store, dir) {
+                // Only the manifests this lockfile installs: a nested project with its own lockfile resolves its own.
+                for (workspace, name, range) in
+                    npm_manifests(store, dir).into_iter().filter(|(workspace, _, _)| nearest_lock(&lock_dirs, workspace) == Some(dir))
+                {
                     let found = specs.get(&format!("{name}@{range}")).or_else(|| specs.get(&format!("{name}@npm:{range}")));
                     if let Some(version) = found {
                         resolution.workspace.insert((workspace, name), clean_version(version));
@@ -235,18 +239,26 @@ fn clean_version(raw: &str) -> String {
 /// manifest's ranges are not what is installed).
 const NPM_LOCKFILES: &[&str] = &["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"];
 
-/// Whether an npm lockfile sits in `dir` or a directory above it. Listed files count too, so a lockfile
-/// too large to load still marks the manifest's ranges as not what is installed.
-fn npm_lock_above(store: &Store, dir: &str) -> bool {
-    let mut current = Some(dir);
-    while let Some(at) = current {
-        let listed = store.list_dir(at);
-        if listed.iter().any(|(name, is_dir)| !is_dir && NPM_LOCKFILES.contains(&name.as_str())) {
-            return true;
+/// Directories holding an npm lockfile. Skipped files count too, so a lockfile too large or binary to load
+/// (bun.lockb) still marks a manifest's ranges as not what is installed. Built once per index.
+fn npm_lock_dirs(store: &Store) -> HashSet<&str> {
+    let loaded = store.files.iter().map(|file| file.path.as_str());
+    let skipped = store.skipped.iter().map(|file| file.path.as_str());
+    loaded.chain(skipped).filter(|path| NPM_LOCKFILES.contains(&path.rsplit('/').next().unwrap_or(path))).map(parent).collect()
+}
+
+/// The nearest directory at or above `dir` holding an npm lockfile.
+fn nearest_lock<'a>(lock_dirs: &HashSet<&'a str>, dir: &'a str) -> Option<&'a str> {
+    let mut at = dir;
+    loop {
+        if lock_dirs.contains(at) {
+            return Some(at);
         }
-        current = if at.is_empty() { None } else { Some(at.rsplit_once('/').map_or("", |(parent, _)| parent)) };
+        if at.is_empty() {
+            return None;
+        }
+        at = parent(at);
     }
-    false
 }
 
 /// What the `package.json` files a lockfile covers declare: every package named in any of them, and those

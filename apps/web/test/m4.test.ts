@@ -77,7 +77,9 @@ beforeAll(async () => {
   resetConfig();
   database = createDb(url.toString(), { max: 5 });
   await migrate(database);
-  setServices({ db: database, github: fakeGithub });
+  // The sweep also syncs the CVE directory: OSV is stubbed so the cron never waits on the network.
+  const noAdvisories = { matches: async (packages: unknown[]) => packages.map(() => []), record: async () => undefined, changedSince: async () => ({ changes: [], complete: true }) };
+  setServices({ db: database, github: fakeGithub, catalog: noAdvisories });
   setAutumn(autumn);
   setScanStarter(async (id) => void started.push(id));
   setRunStatus(async (runId) => runs.get(runId));

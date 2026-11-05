@@ -112,7 +112,8 @@ export async function markInventoriesChecked(database: Db, repoIds: string[], at
 
 /** A push changed a manifest or lockfile: the inventory should be read again. */
 export async function requestInventory(database: Db, repoId: string, at = new Date()): Promise<void> {
-  await database.insert(repoInventories).values({ repoId, requestedAt: at }).onConflictDoUpdate({ target: repoInventories.repoId, set: { requestedAt: at } });
+  // A new push is a new chance: whatever failed before may be fixed by it.
+  await database.insert(repoInventories).values({ repoId, requestedAt: at }).onConflictDoUpdate({ target: repoInventories.repoId, set: { requestedAt: at, failures: 0, failedAt: null } });
 }
 
 /** How long a refresh may hold a repository before another may take over. */
@@ -129,12 +130,20 @@ export async function claimInventoryRefresh(database: Db, repoId: string): Promi
   return claimed.length > 0;
 }
 
+/** Ends a refresh. With `error`, it failed: the repository backs off before the next try. */
 export async function releaseInventoryRefresh(database: Db, repoId: string, error?: string): Promise<void> {
   await database
     .update(repoInventories)
-    .set({ runningSince: null, ...(error !== undefined && { error: error.slice(0, 500) }) })
+    .set(
+      error === undefined
+        ? { runningSince: null, error: null, failures: 0, failedAt: null }
+        : { runningSince: null, error: error.slice(0, 500), failures: sql`${repoInventories.failures} + 1`, failedAt: new Date() },
+    )
     .where(eq(repoInventories.repoId, repoId));
 }
+
+/** After this many failed refreshes in a row a repository waits for its next lockfile push. */
+export const MAX_REFRESH_FAILURES = 6;
 
 /**
  * Repositories whose inventory should be read now: asked for by a push, or
@@ -154,6 +163,9 @@ export async function inventoriesDue(database: Db, limit: number): Promise<strin
         isNotNull(orgs.installationId),
         or(isNull(repoInventories.repoId), isNull(repoInventories.capturedAt), isNotNull(repoInventories.requestedAt)),
         or(isNull(repoInventories.runningSince), sql`${repoInventories.runningSince} < now() - ${REFRESH_LEASE}`),
+        // Failing repositories back off: 20 minutes, then 40, 80… and stop until the next push.
+        or(isNull(repoInventories.failedAt), sql`${repoInventories.failedAt} < now() - interval '20 minutes' * power(2, ${repoInventories.failures} - 1)`),
+        or(isNull(repoInventories.failures), lt(repoInventories.failures, MAX_REFRESH_FAILURES)),
       ),
     )
     .orderBy(sql`${repoInventories.requestedAt} desc nulls last`)
@@ -253,6 +265,17 @@ export async function applyMatches(
           select 1 from jsonb_to_recordset(${wanted}::jsonb) as w(ecosystem text, name text, version text, advisory text)
           where w.ecosystem = ra.ecosystem and w.name = ra.name and w.version = ra.version and w.advisory = ra.advisory_id
         )`);
+    // A whole-repository check also settles matches whose version a concurrent inventory read removed
+    // after the insert above saw it (the reopen would otherwise outlive the version).
+    if (input.repoId) {
+      await tx.execute(sql`
+        update ${repoAdvisories} ra set resolved_at = now()
+        where ra.repo_id = ${input.repoId} and ra.resolved_at is null
+          and not exists (
+            select 1 from ${repoDependencies} d
+            where d.repo_id = ra.repo_id and d.ecosystem = ra.ecosystem and d.name = ra.name and d.version = ra.version
+          )`);
+    }
     return [...added].filter((row) => row.inserted).map(({ repoId, advisoryId, ecosystem, name, version }) => ({ repoId, advisoryId, ecosystem, name, version }));
   });
 }
@@ -438,8 +461,8 @@ async function matchRows(database: Db, userId: string, scope: { repoId?: string;
     join ${advisories} a on a.id = ra.advisory_id and a.withdrawn_at is null
     left join ${repoInventories} i on i.repo_id = ra.repo_id
     left join ${repoDependencies} d on d.repo_id = ra.repo_id and d.ecosystem = ra.ecosystem and d.name = ra.name and d.version = ra.version
-    where true ${repoFilter} ${advisoryFilter}
-    order by ra.first_seen_at desc
+    where (ra.resolved_at is null or ra.resolved_at > now() - interval '90 days') ${repoFilter} ${advisoryFilter}
+    order by (ra.resolved_at is null) desc, ra.first_seen_at desc
     limit ${MAX_ROWS}`);
   return [...rows];
 }

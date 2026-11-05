@@ -35,12 +35,13 @@ export function evidence(match: Pick<CveMatch, "usage" | "dev" | "direct" | "app
 }
 
 /** The line a list row shows under the summary: where the vulnerability is, most exposed match first. */
-export function whereLine(item: CveListItem): { repo: string; text: string; site?: string; more: number } {
+export function whereLine(item: CveListItem): { repo: string; text: string; site?: string; why?: string; more: number } {
   const open = item.matches.filter((m) => m.resolvedAt === null);
   const shown = open.find(inCode) ?? open[0] ?? item.matches[0]!;
   const repos = new Set((open.length ? open : item.matches).map((m) => m.repoId));
   const site = inCode(shown) ? shown.importedAt[0] : undefined;
-  return { repo: shown.repoFullName, text: `${shown.name}@${shown.version}`, site, more: repos.size - 1 };
+  const why = site ? undefined : evidence(shown).toLowerCase();
+  return { repo: shown.repoFullName, text: `${shown.name}@${shown.version}`, site, why, more: repos.size - 1 };
 }
 
 /** A link to an import site, at the commit the inventory was read from (the default branch when unknown). */

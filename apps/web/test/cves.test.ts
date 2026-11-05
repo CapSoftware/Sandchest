@@ -8,7 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { createDb, cveCoverage, cveForUser, dashboardCves, inventoriesDue, saveThreatModel, schema, upsertInstallation, type Db } from "@sandchest/db";
+import { claimInventoryRefresh, createDb, cveCoverage, cveForUser, dashboardCves, inventoriesDue, releaseInventoryRefresh, requestInventory, saveThreatModel, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Change, OsvCatalog, OsvRecord, PackageVersion } from "@sandchest/engine/advisories";
 import type { GitHubApp } from "@sandchest/github";
@@ -281,5 +281,33 @@ describe("CVE directory", () => {
     await handleWebhook(deps, "push", "d-2", push("d-2", ["apps/web/package.json", "bun.lock"]));
     expect(started).toEqual([webId]);
     expect(await inventoriesDue(database, 10)).toEqual([webId]);
+  });
+
+  test("a refresh that keeps failing backs off, gives up, and starts over on the next push", async () => {
+    if (!available) return;
+    const due = async () => (await inventoriesDue(database, 10)).includes(webId);
+    expect(await due()).toBe(true);
+    expect(await claimInventoryRefresh(database, webId)).toBe(true);
+    expect(await due()).toBe(false);
+    await releaseInventoryRefresh(database, webId, "clone failed");
+    // Just failed: waits 20 minutes.
+    expect(await due()).toBe(false);
+    const age = async (failures: number, minutes: number) =>
+      database.$client`update repo_inventories set failures = ${failures}, failed_at = now() - make_interval(mins => ${minutes}) where repo_id = ${webId}`;
+    await age(1, 25);
+    expect(await due()).toBe(true);
+    await age(3, 70);
+    expect(await due()).toBe(false);
+    await age(3, 90);
+    expect(await due()).toBe(true);
+    await age(6, 100_000);
+    expect(await due()).toBe(false);
+    await requestInventory(database, webId);
+    expect(await due()).toBe(true);
+    // Success clears the count.
+    expect(await claimInventoryRefresh(database, webId)).toBe(true);
+    await releaseInventoryRefresh(database, webId);
+    const [row] = await database.$client`select failures, error, failed_at from repo_inventories where repo_id = ${webId}`;
+    expect([row!.failures, row!.error, row!.failed_at]).toEqual([0, null, null]);
   });
 });

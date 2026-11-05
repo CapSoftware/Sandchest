@@ -204,7 +204,8 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     const indexer = createIndexerClient({ url: handle.url, token: handle.token });
     // Recon, deep scans and fix checks have the default branch checked out: the CVE directory's inventory is read
     // from it while the scan runs. A PR review's checkout is the PR's, not what is installed.
-    inventory = scan.kind === "pr_review" ? undefined : captureFromScan(scan.repo.id, headSha, indexer);
+    // The commit was chosen when the scan was made (or now, for "HEAD"), however long it queued.
+    inventory = scan.kind === "pr_review" ? undefined : captureFromScan(scan.repo.id, headSha, scan.headSha === "HEAD" ? new Date(started) : scan.createdAt, indexer);
     const model = parseThreatModel(memory?.threatModel);
     // Setup already spent part of the step's time.
     const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };

@@ -197,7 +197,8 @@ async function onPush(deps: WebhookDeps, payload: PushEvent): Promise<WebhookOut
   // A mapped repository whose manifests or lockfiles changed: what it installs may have, so the CVE directory reads it again.
   if (model && deps.startInventory && changesDependencies(payload)) {
     await requestInventory(deps.db, repo.id);
-    await deps.startInventory(repo.id);
+    // The request is stored: if the start fails, the sweep starts it. The scans above must not be redelivered for it.
+    await deps.startInventory(repo.id).catch((error: unknown) => console.error(`Inventory refresh for repo ${repo.id} not started: ${error instanceof Error ? error.message : String(error)}`));
   }
   return { status: scans.length ? "handled" : "ignored", detail: scans.length ? undefined : "nothing to check", scans: scans.filter(Boolean) };
 }

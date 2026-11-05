@@ -59,7 +59,9 @@ CREATE TABLE "repo_inventories" (
 	"checked_at" timestamp with time zone,
 	"requested_at" timestamp with time zone,
 	"running_since" timestamp with time zone,
-	"error" text
+	"error" text,
+	"failures" integer DEFAULT 0 NOT NULL,
+	"failed_at" timestamp with time zone
 );
 --> statement-breakpoint
 ALTER TABLE "repo_advisories" ADD CONSTRAINT "repo_advisories_repo_id_repos_id_fk" FOREIGN KEY ("repo_id") REFERENCES "public"."repos"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
