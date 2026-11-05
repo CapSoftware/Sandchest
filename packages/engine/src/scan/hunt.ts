@@ -11,7 +11,7 @@ import { CandidateSchema, type Candidate, type Lead, type ThreatModel } from "./
 import { touchesChange, type ChangedFile } from "./changes";
 import { agentTool, formatLead, type AgentTool, type RouteInfo, type Wrap } from "./tools";
 import { productFirst } from "./paths";
-import type { ScanContext } from "./context";
+import { DEFAULT_LIMITS, type ScanContext } from "./context";
 
 export interface Assignment {
   name: string;
@@ -31,15 +31,18 @@ export interface HunterStats {
 
 const MAX_ROUTES_LISTED = 150;
 const MAX_LEADS_LISTED = 80;
-/** Entry points one access-control hunter reviews; more are split across hunters. */
-const ROUTES_PER_ACCESS_HUNTER = 60;
 /**
  * Broken access control is the highest-yield class and must cover every entry
- * point, so this scales with the route count rather than capping at a fixed
- * slice: a 300-route app got only 120 routes (40%) reviewed at the old cap of
- * 2. The ceiling keeps the hunters inside one concurrency wave.
+ * point, so the access-control hunters scale with the route count (one per
+ * `accessRoutesPerHunter`) rather than capping at a fixed slice: a 300-route
+ * app got only 120 routes (40%) reviewed at the old cap of 2. `maxAccessHunters`
+ * keeps them inside one concurrency wave.
  */
-const MAX_ACCESS_HUNTERS = 6;
+export interface AccessSplit {
+  routesPerHunter: number;
+  maxHunters: number;
+}
+const DEFAULT_SPLIT: AccessSplit = { routesPerHunter: DEFAULT_LIMITS.accessRoutesPerHunter, maxHunters: DEFAULT_LIMITS.maxAccessHunters };
 /** Sinks every scan must rule on when a route reaches them: the classic injection shapes. */
 const HIGH_SIGNAL_SINK = /^(sql|nosql|command|code_eval|deserialization|xxe|template|ssrf|path) sink with (built|variable) input$/;
 /** Items one coverage hunter checks. */
@@ -53,8 +56,41 @@ const ACCESS_CONTROL_BRIEF =
  * The entry points each access-control hunter reviews: product routes before
  * test and fixture routes, so the capped hunters cover what ships first.
  */
-export function accessControlGroups(routes: RouteInfo[]): RouteInfo[][] {
-  return chunk(productFirst(routes, (r) => r.at), ROUTES_PER_ACCESS_HUNTER).slice(0, MAX_ACCESS_HUNTERS);
+export function accessControlGroups(routes: RouteInfo[], split: AccessSplit = DEFAULT_SPLIT): RouteInfo[][] {
+  return chunk(productFirst(routes, (r) => r.at), split.routesPerHunter).slice(0, split.maxHunters);
+}
+
+/** What each roaming hunter looks for, in order: a scan with N roaming hunters runs the first N. */
+const ROAMING_FOCUS: Array<{ name: string; focus: string }> = [
+  {
+    name: "roaming: access control",
+    focus:
+      "Authentication and authorisation. Find the routes and handlers yourself (the framework's routing, controllers, resolvers, RPC procedures), then check who can call each and whether it checks that the caller may act on the specific object it reads or changes. Compare siblings: one missing guard among many is the classic bug.",
+  },
+  {
+    name: "roaming: injection",
+    focus: "Injection and dangerous sinks: SQL and NoSQL queries, shell commands, eval, templates, file paths, outbound requests, deserialisation, XML. Find the sinks with search(), then trace attacker input back to them.",
+  },
+  {
+    name: "roaming: business logic",
+    focus: "Business logic and abuse: payments, credits, quotas, invites, roles and settings a user should not be able to change, races, and expensive work an attacker can force.",
+  },
+  {
+    name: "roaming: identity",
+    focus: "Login, sessions, tokens, password reset, OAuth and SSO flows, account linking and invitations, and secrets in the code.",
+  },
+];
+
+/**
+ * Hunters that get a focus but no entry-point list. The list-driven hunters
+ * work through the routes they are given and skip what looks routine; these
+ * choose their own way in, and find bugs the others pass over.
+ */
+export function planRoaming(count: number): Assignment[] {
+  return ROAMING_FOCUS.slice(0, Math.max(0, count)).map(({ name, focus }) => ({
+    name,
+    brief: `Your scope: the whole application, with one focus. ${focus}\n\nYou get no list of entry points on purpose: other hunters work through the routes one by one. Find your own way in with search(), routes() and the code itself, follow whatever looks wrong, and go deep on it. Cover your whole focus before you stop.`,
+  }));
 }
 
 /**
@@ -62,7 +98,7 @@ export function accessControlGroups(routes: RouteInfo[]): RouteInfo[][] {
  * hunters across every entry point (several when there are many, so no one
  * hunter becomes the long pole), and one for the deterministic leads.
  */
-export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: Lead[], maxHunters: number, wrap: Wrap): Assignment[] {
+export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: Lead[], maxHunters: number, wrap: Wrap, split: AccessSplit = DEFAULT_SPLIT): Assignment[] {
   // Route paths and lead details come from the repository.
   const section = (title: string, lines: string[], empty: string) => `## ${title}\n${lines.length ? wrap(lines.join("\n")) : empty}`;
   const assignments: Assignment[] = [];
@@ -74,7 +110,7 @@ export function planAssignments(model: ThreatModel, routes: RouteInfo[], leads: 
     !!at && prefixes.some((prefix) => prefix === "" || at === prefix || at.startsWith(`${prefix}/`) || at.startsWith(`${prefix}:`));
 
   const ranked = productFirst(routes, (r) => r.at);
-  const accessGroups = accessControlGroups(routes);
+  const accessGroups = accessControlGroups(routes, split);
   // Access control, abuse and leads hunters always run; subsystems share the rest.
   const reserved = Math.max(1, accessGroups.length) + 2;
   for (const subsystem of subsystems.slice(0, Math.max(1, maxHunters - reserved))) {

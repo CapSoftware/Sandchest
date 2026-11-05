@@ -19,7 +19,7 @@ import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate } fr
 import { consolidateFindings, type MergedFinding } from "./consolidate";
 import { isFatal, errorMessage } from "./errors";
 import { capChanges, changedLines, changeTool, relevantChanges, touchesChange, type ChangedFile } from "./changes";
-import { planAssignments, planCoverage, planPrAssignments, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
+import { planAssignments, planCoverage, planPrAssignments, planRoaming, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
 import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
 import type { OsvClient } from "./osv";
@@ -341,9 +341,18 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const inChange = (at: string | undefined) => !change || (!!at && change.some((f) => at.startsWith(`${f.path}:`)));
   const assignments = change
     ? planPrAssignments(change, routes, signals.leads.filter((lead) => inChange(lead.at)), limits.prMaxHunters, wrap)
-    : planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap);
-  emit({ type: "stage", stage: "hunt", message: `Hunting across ${assignments.length} areas: ${assignments.map((a) => a.name).join(", ")}.` });
-  const [hunters, huntMs] = await time(() => hunt(assignments, { turns: limits.hunterTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.55) }));
+    : planAssignments(threatModel, routes, signals.leads, limits.maxHunters, wrap, { routesPerHunter: limits.accessRoutesPerHunter, maxHunters: limits.maxAccessHunters });
+  // Roaming hunters (deep scans only) run beside the others with their own, larger turn budget.
+  const roaming = change ? [] : planRoaming(limits.roamingHunters);
+  emit({ type: "stage", stage: "hunt", message: `Hunting across ${assignments.length + roaming.length} areas: ${[...assignments, ...roaming].map((a) => a.name).join(", ")}.` });
+  const [hunters, huntMs] = await time(async () =>
+    (
+      await Promise.all([
+        hunt(assignments, { turns: limits.hunterTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.55) }),
+        hunt(roaming, { turns: limits.roamingTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.roamingTurns + 16, deadline: at(0.55) }),
+      ])
+    ).flat(),
+  );
 
   let coverageMs = 0;
   const gaps =

@@ -19,13 +19,26 @@ export interface ScanLimits {
   turnsPerFinding: number;
   /** Default 40. */
   hunterMaxTurns: number;
+  /** Entry points one access-control hunter reviews; more are split across hunters. Default 60. */
+  accessRoutesPerHunter: number;
+  /** Access-control hunters at most (part of `maxHunters`). Default 6. */
+  maxAccessHunters: number;
+  /**
+   * Roaming hunters: each gets a focus area but no entry-point list, and finds
+   * its own way in. They catch bugs the list-driven hunters skip: on real
+   * advisories they lifted recall from about a third to over half, at about a
+   * third more model cost per deep scan. Default 4.
+   */
+  roamingHunters: number;
+  /** Model turns per roaming hunter (it earns `turnsPerFinding` more, up to this plus 16). Default 40. */
+  roamingTurns: number;
   /** Model turns per coverage hunter. Default 20. */
   coverageTurns: number;
   /** Model turns per skeptic review. Default 10. */
   skepticTurns: number;
   /** Model turns for recon exploration. Default 10. */
   reconTurns: number;
-  /** Model requests in flight at once across the scan. Default 12. */
+  /** Model requests in flight at once across the scan. Default 16. */
   concurrency: number;
   /** Largest repository scanned, in lines of hand-written code. Default 1,000,000. */
   maxLoc: number;
@@ -45,15 +58,20 @@ export interface ScanLimits {
 export const DEFAULT_LIMITS: ScanLimits = {
   // Sized to one concurrency wave: large apps need up to 6 access-control
   // hunters (one per ~60 routes) plus abuse, leads and the risky subsystems,
-  // all running in parallel. Small apps never reach the ceiling.
+  // all running in parallel, beside the roaming hunters. Small apps never
+  // reach the ceiling.
   maxHunters: 12,
   hunterTurns: 24,
   turnsPerFinding: 6,
   hunterMaxTurns: 40,
+  accessRoutesPerHunter: 60,
+  maxAccessHunters: 6,
+  roamingHunters: 4,
+  roamingTurns: 40,
   coverageTurns: 20,
   skepticTurns: 10,
   reconTurns: 10,
-  concurrency: 12,
+  concurrency: 16,
   maxLoc: 1_000_000,
   prMaxHunters: 3,
   prLineCap: 5_000,

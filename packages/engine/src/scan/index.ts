@@ -6,6 +6,7 @@ export { loadPricing, type Pricing } from "./metrics";
 export { createOsvClient, type OsvClient } from "./osv";
 export { runRecon, runScan, ScanRefusedError, verifyFindings, type ReconResult, type DismissedCandidate, type ScanOptions, type ScanReport, type Verification, type VerifyOptions } from "./pipeline";
 export * from "./schema";
+export { huntSystemPrompt } from "./prompts";
 export { capChanges, changedLines, isSecurityRelevant, relevantChanges, touchesChange, type ChangedFile } from "./changes";
 export { checkFixes, isDependencyManifest, reanchor, renderChanges, sweptDependency, type FixCheckOptions, type FixCheckResult } from "./fixcheck";
 export { storableLeads } from "./leads";
