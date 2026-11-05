@@ -1,7 +1,7 @@
 /** What setting up an org reads: the accounts a person may set up, an account's repositories, and Sandchest's running total. */
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { orgAdmins, orgBilling, orgs, repos, scans } from "./schema";
+import { findings, orgAdmins, orgBilling, orgs, repos, scans } from "./schema";
 
 
 /** The orgs a user may set up: installed accounts they administer, with their plan. */
@@ -38,4 +38,27 @@ export async function linesScanned(database: Db): Promise<{ lines: number; runni
       (select count(*) from ${scans} where status in ('running', 'publishing')) as running
   `);
   return { lines: Number(row?.lines ?? 0), running: Number(row?.running ?? 0) };
+}
+
+/**
+ * The newest findings Sandchest has made, across all orgs, for the landing
+ * page's live feed: only how bad each is, what kind of hole and when, never
+ * the title, the code, the repository or whose it is. Dismissed findings and
+ * ones the trust gate couldn't back are left out. Nothing younger than
+ * `minAgeMs` is returned, so a finding can't be tied to a push someone just
+ * watched land.
+ */
+export async function recentFindingClasses(database: Db, { limit, minAgeMs }: { limit: number; minAgeMs: number }) {
+  return database
+    .select({ severity: findings.severity, category: findings.category, firstSeenAt: findings.firstSeenAt })
+    .from(findings)
+    .where(
+      and(
+        sql`${findings.status} <> 'dismissed'`,
+        sql`(${findings.trust} is null or ${findings.trust} <> 'unconfirmed')`,
+        sql`${findings.firstSeenAt} <= now() - make_interval(secs => ${minAgeMs / 1000})`,
+      ),
+    )
+    .orderBy(sql`${findings.firstSeenAt} desc`)
+    .limit(limit);
 }

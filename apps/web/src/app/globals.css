@@ -653,6 +653,146 @@ html[data-js] [data-canvas="failed"] .scene-fallback {
   font-size: min(calc(92cqi / var(--ems)), 6.5rem);
 }
 
+/*
+ * The crawl: new advisories and findings rising away across a band as wide
+ * as the window, turning to sand as they go (see live-crawl.tsx). Nothing
+ * frames it: the sides fade into the page in the canvas itself.
+ */
+
+/* It needs its live feed: without JavaScript there is nothing to show. */
+html:not([data-js]) .crawl-section {
+  display: none;
+}
+
+.crawl-section[data-pending] .crawl-band {
+  visibility: hidden;
+}
+
+.crawl-band {
+  --cell: 2px;
+  position: relative;
+  width: 100vw;
+  height: clamp(26rem, 62vw, 34rem);
+  margin-top: clamp(1rem, 3vw, 2rem);
+  margin-left: calc(50% - 50vw);
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+@media (min-width: 48rem) {
+  .crawl-band {
+    --cell: 3px;
+    height: clamp(30rem, 44vw, 38rem);
+  }
+}
+
+/* Screen space: perspective, and the crumbling mask, are set by the component. Hidden until the mask is ready. */
+.crawl-stage {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+}
+
+.crawl-band[data-canvas="ready"] .crawl-stage {
+  visibility: visible;
+}
+
+/* The plane: a column hinged at the band's bottom edge and tipped back. */
+.crawl-plane {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  height: 0;
+  translate: -50% 0;
+  transform-origin: 50% 0;
+}
+
+.crawl-track {
+  position: absolute;
+  inset: 0 0 auto;
+  will-change: transform;
+}
+
+.crawl-entry {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+}
+
+.crawl-line {
+  white-space: pre;
+}
+
+.crawl-id,
+.crawl-kind {
+  text-decoration: none;
+}
+
+.crawl-id {
+  color: var(--color-bright);
+  text-shadow: 0 0 22px rgb(243 229 200 / 0.18);
+}
+
+a.crawl-id:hover {
+  color: var(--color-gold);
+}
+
+.crawl-summary {
+  color: var(--color-sand);
+}
+
+.crawl-meta {
+  color: var(--color-dust);
+}
+
+.crawl-kind {
+  color: var(--color-gold);
+  text-shadow:
+    0 0 18px rgb(254 194 66 / 0.45),
+    0 0 48px rgb(255 159 25 / 0.25);
+}
+
+.crawl-found {
+  color: var(--color-honey);
+}
+
+.crawl-sev-critical,
+.crawl-sev-high {
+  color: var(--color-ember);
+}
+
+.crawl-sev-medium {
+  color: var(--color-amber);
+}
+
+.crawl-sev-low {
+  color: var(--color-muted);
+}
+
+.crawl-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.crawl-caption {
+  max-width: 58ch;
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.crawl-caption a {
+  color: var(--color-sand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* Finding strip: a review comment on a pull request. */
 
 .strip {
