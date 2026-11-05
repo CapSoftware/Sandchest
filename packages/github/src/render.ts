@@ -147,6 +147,8 @@ export interface SummaryInput {
   credits?: number;
   /** How many findings were also placed as inline comments on the diff (private repos). */
   inline?: number;
+  /** Absolute URL of the animated chest shown at the top. */
+  animationUrl?: string;
 }
 
 /**
@@ -159,16 +161,18 @@ export function prSummary(input: SummaryInput): string {
   const visible = shown(input.findings) as SummaryInput["findings"];
   const commit = `\`${input.headSha.slice(0, 7)}\``;
   const cost = input.credits ? ` · ${input.credits} ${input.credits === 1 ? "credit" : "credits"}` : "";
+  // Linked to the review, or GitHub links it to the raw image.
+  const head = input.animationUrl ? [SUMMARY_MARKER, `<a href="${input.detailsUrl}"><img src="${input.animationUrl}" alt="Sandchest" width="152" height="120"></a>`] : [SUMMARY_MARKER];
   const foot = `<sub>Sandchest reviews every change for vulnerabilities an attacker could use${cost} · [Review details](${input.detailsUrl})</sub>`;
 
   if (visible.length === 0) {
-    return [SUMMARY_MARKER, `**Sandchest** reviewed ${commit}: nothing exploitable found in this change.`, foot].join("\n\n");
+    return [...head, `**Sandchest** reviewed ${commit}: nothing exploitable found in this change.`, foot].join("\n\n");
   }
   const counts = countBySeverity(visible);
   const issues = `${visible.length} ${visible.length === 1 ? "issue" : "issues"}`;
   if (input.isPublic) {
     return [
-      SUMMARY_MARKER,
+      ...head,
       `**Sandchest** found ${issues} in ${commit} (${counts}).`,
       `This repository is public, so the details stay private: [view them in the Sandchest dashboard →](${input.detailsUrl})`,
       `<sub>Only people who can push to this repository can see them.${cost ? ` Reviewed${cost}.` : ""}</sub>`,
@@ -180,11 +184,11 @@ export function prSummary(input: SummaryInput): string {
     return `| ${LABEL[f.severity]} | [${tableCell(f.title)}](${f.url}) | \`${tableCell(`${sink.file}:${sink.line}`)}\` |`;
   });
   const inline = input.inline ? ` ${input.inline} ${input.inline === 1 ? "is" : "are"} also commented on the diff.` : "";
-  const head = [SUMMARY_MARKER, `**Sandchest** found ${issues} in ${commit}: ${counts}.${inline}`, ["| Severity | Issue | Where |", "| --- | --- | --- |", ...rows].join("\n")];
+  const list = [...head, `**Sandchest** found ${issues} in ${commit}: ${counts}.${inline}`, ["| Severity | Issue | Where |", "| --- | --- | --- |", ...rows].join("\n")];
   const details = visible.map((f) => `<details><summary><b>${LABEL[f.severity]}</b> ${escapeHtml(f.title)}</summary>\n\n${reviewComment(f)}\n\n</details>`);
-  const full = [...head, ...details, foot].join("\n\n");
+  const full = [...list, ...details, foot].join("\n\n");
   if (full.length <= COMMENT_LIMIT) return full;
-  return [...head, `Full write-ups, proof and fix prompts are in the dashboard: [open the review →](${input.detailsUrl})`, foot].join("\n\n");
+  return [...list, `Full write-ups, proof and fix prompts are in the dashboard: [open the review →](${input.detailsUrl})`, foot].join("\n\n");
 }
 
 /**

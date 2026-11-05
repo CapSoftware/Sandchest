@@ -343,7 +343,7 @@ export async function publishScan(scanId: string): Promise<void> {
       inline = await postInlineReview(scan, installation, inlineable);
       await updateScan(db(), scan.id, { stats: { ...stats, inline } });
     }
-    await postSummary(scan, installation, prSummary({ findings: findings.map((f) => ({ ...f, url: findingUrl(f.id) })), isPublic: !scan.repo.private, headSha: scan.headSha, detailsUrl: detailsUrl(scan.id, "github", "comment"), credits: scan.credits, inline }), { create: true });
+    await postSummary(scan, installation, prSummary({ findings: findings.map((f) => ({ ...f, url: findingUrl(f.id) })), isPublic: !scan.repo.private, headSha: scan.headSha, detailsUrl: detailsUrl(scan.id, "github", "comment"), credits: scan.credits, inline, animationUrl: `${appUrl()}/github/review-chest.png?v=${PR_ANIMATION_VERSION}` }), { create: true });
     const threshold = scan.repo.org.settings.checkThreshold;
     const { conclusion, output } = checkResult({ findings, threshold, isPublic: !scan.repo.private, detailsUrl: detailsUrl(scan.id, "github", "check"), credits: scan.credits, inline });
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);
@@ -431,6 +431,9 @@ async function requireScan(scanId: string): Promise<LoadedScan> {
   if (!scan) throw new ScanFinished(`Scan ${scanId} not found`);
   return scan;
 }
+
+/** Bump after `bun run chest:comment` redraws the animation, so GitHub's image cache fetches the new one. */
+const PR_ANIMATION_VERSION = 1;
 
 function appUrl(): string {
   return config().SANDCHEST_APP_URL.replace(/\/$/, "");

@@ -229,6 +229,12 @@ describe("PR summary comment", () => {
     expect(body).not.toContain("<details>");
   });
 
+  test("the animated chest sits under the marker, above the result", () => {
+    const body = prSummary({ ...base, findings: [linked("high")], isPublic: true, animationUrl: "https://app/github/review-chest.png?v=1" });
+    expect(body.startsWith(`${SUMMARY_MARKER}\n\n<a href="https://app/scans/1"><img src="https://app/github/review-chest.png?v=1" alt="Sandchest" width="152" height="120"></a>\n\n**Sandchest** found 1 issue`)).toBe(true);
+    expect(prSummary({ ...base, findings: [], isPublic: false })).not.toContain("<img");
+  });
+
   test("an unfinished review says so instead of leaving an older result standing", () => {
     expect(prSummaryUnfinished({ headSha: "abcdef0123", detailsUrl: "https://app/scans/2", reason: "failed" })).toContain("couldn't finish reviewing `abcdef0`. Comment `/sandchest review` to try again");
   });
