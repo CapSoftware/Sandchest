@@ -25,7 +25,7 @@ export interface OsvRecord {
   affected?: Array<{
     package?: { ecosystem?: string; name?: string };
     severity?: Array<{ type: string; score: string }>;
-    ranges?: Array<{ type?: string; events?: OsvEvent[] }>;
+    ranges?: Array<{ type?: string; repo?: string; events?: OsvEvent[] }>;
     database_specific?: { severity?: string };
   }>;
   references?: Array<{ type?: string; url?: string }>;
@@ -170,5 +170,17 @@ function compareVersions(a: string, b: string): number {
  */
 export function packageKey(ecosystem: string, name: string): string {
   const lower = name.trim().toLowerCase();
-  return ecosystem === "PyPI" ? lower.replace(/[-_.]+/g, "-") : lower;
+  if (ecosystem === "PyPI") return lower.replace(/[-_.]+/g, "-");
+  if (ecosystem === "GIT") return lower.replace(/\/+$/, "").replace(/\.git$/, "");
+  return lower;
+}
+
+/**
+ * The names an OSV record affects in one ecosystem: its packages, or for `GIT`, the repositories its commit
+ * ranges are in.
+ */
+export function affectedNames(osv: OsvRecord, ecosystem: string): string[] {
+  return (osv.affected ?? []).flatMap((a) =>
+    ecosystem === "GIT" ? (a.ranges ?? []).flatMap((r) => (r.type === "GIT" && r.repo ? [r.repo] : [])) : a.package?.ecosystem === ecosystem && a.package.name ? [a.package.name] : [],
+  );
 }

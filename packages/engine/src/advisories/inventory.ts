@@ -11,8 +11,9 @@ import { packageKey } from "./record";
  * How the code uses a package. `product`: imported by shipped code.
  * `tooling`: imported only by tests, config or scripts in dot-directories.
  * `none`: installed but imported by none of the code (pulled in by another
- * package, or declared and unused). `unknown`: the ecosystem's imports aren't
- * traced (Rust, PHP, Ruby).
+ * package, or declared and unused). `unknown`: the code's imports can't say
+ * (Swift, Haskell and OCaml imports name modules, not packages; a Java artifact
+ * nothing names may still be loaded).
  */
 export type Usage = "product" | "tooling" | "none" | "unknown";
 
@@ -29,7 +30,7 @@ export interface InventoryEntry {
   usage: Usage;
   /**
    * The version is the lowest a manifest's range allows, because no lockfile
-   * was read: what is installed may well be newer.
+   * pins it: what is installed may well be newer.
    */
   approximate: boolean;
   /** Up to ten `file:line` import sites, shipped code first. */
@@ -40,13 +41,13 @@ const MAX_SITES = 10;
 
 export function toInventory(dependencies: Dependency[]): InventoryEntry[] {
   // A version read from a lockfile beats a range's floor for the same package.
-  const locked = new Set(dependencies.filter((d) => d.version && !fromRange(d)).map((d) => `${d.ecosystem}\0${packageKey(d.ecosystem, d.name)}`));
+  const locked = new Set(dependencies.filter((d) => d.version && !d.approximate).map((d) => `${d.ecosystem}\0${packageKey(d.ecosystem, d.name)}`));
   const seen = new Set<string>();
   const out: InventoryEntry[] = [];
   for (const dep of dependencies) {
     if (!dep.version) continue;
     const key = packageKey(dep.ecosystem, dep.name);
-    const approximate = fromRange(dep);
+    const approximate = dep.approximate === true;
     if (approximate && locked.has(`${dep.ecosystem}\0${key}`)) continue;
     const identity = `${dep.ecosystem}\0${key}\0${dep.version}`;
     if (seen.has(identity)) continue;
@@ -69,7 +70,3 @@ export function toInventory(dependencies: Dependency[]): InventoryEntry[] {
   return out;
 }
 
-/** npm versions read from `package.json` are a range's floor, not what is installed. */
-function fromRange(dep: Dependency): boolean {
-  return dep.ecosystem === "npm" && (dep.manifest === "package.json" || dep.manifest.endsWith("/package.json"));
-}

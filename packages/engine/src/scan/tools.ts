@@ -350,6 +350,8 @@ export interface Dependency {
   manifest: string;
   direct: boolean;
   dev: boolean;
+  /** The version is a range's floor, because no lockfile pins it: what is installed may be newer. */
+  approximate?: boolean;
   reachability: "imported" | "not_imported" | "unknown";
   importedAt?: string[];
 }

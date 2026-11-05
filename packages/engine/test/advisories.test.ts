@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createOsvCatalog, cvss3Score, fixedVersion, packageKey, scoreSeverity, stampMs, toAdvisoryRecord, toInventory, type OsvRecord } from "../src/advisories";
+import { affectedNames, createOsvCatalog, cvss3Score, fixedVersion, packageKey, scoreSeverity, stampMs, toAdvisoryRecord, toInventory, type OsvRecord } from "../src/advisories";
 import type { Dependency } from "../src/scan/tools";
 
 describe("cvss3Score", () => {
@@ -141,6 +141,19 @@ describe("catalog", () => {
     expect(calls).toEqual(["/v1/querybatch", "/v1/query"]);
   });
 
+  test("a git submodule is asked about by the commit it pins", async () => {
+    let queries: unknown;
+    const fake = (async (_url: string, init?: RequestInit) => {
+      queries = JSON.parse(String(init?.body)).queries;
+      return Response.json({ results: [{}, {}] });
+    }) as unknown as typeof fetch;
+    await createOsvCatalog({ fetch: fake }).matches([
+      { ecosystem: "GIT", name: "https://github.com/acme/lib", version: "6879efc2c1596d11a6a6ad296f80063b558d5e0f" },
+      { ecosystem: "npm", name: "a", version: "1.0.0" },
+    ]);
+    expect(queries).toEqual([{ commit: "6879efc2c1596d11a6a6ad296f80063b558d5e0f" }, { package: { ecosystem: "npm", name: "a" }, version: "1.0.0" }]);
+  });
+
   test("a short batch answer is an error, not a silent gap", async () => {
     const fake = (async () => Response.json({ results: [] })) as unknown as typeof fetch;
     await expect(createOsvCatalog({ fetch: fake }).matches([{ ecosystem: "npm", name: "a", version: "1" }])).rejects.toThrow("answered 0 of 1");
@@ -158,6 +171,19 @@ describe("catalog", () => {
     expect((await catalog.record("X", "npm"))?.id).toBe("X");
     expect(await catalog.record("GONE")).toBeUndefined();
     expect(seen[0]).toContain("/npm/X.json");
+  });
+});
+
+describe("affectedNames", () => {
+  const record: OsvRecord = {
+    id: "CVE-1",
+    modified: "m",
+    affected: [{ package: { ecosystem: "npm", name: "a" } }, { ranges: [{ type: "GIT", repo: "https://github.com/Acme/Lib.git", events: [] }] }],
+  };
+
+  test("names packages, or for GIT the repositories of its commit ranges, keyed the way submodules are", () => {
+    expect(affectedNames(record, "npm")).toEqual(["a"]);
+    expect(affectedNames(record, "GIT").map((name) => packageKey("GIT", name))).toEqual([packageKey("GIT", "https://github.com/acme/lib")]);
   });
 });
 
@@ -185,7 +211,7 @@ describe("toInventory", () => {
   });
 
   test("a lockfile version beats a range's floor for the same package; a lone range is kept, marked approximate", () => {
-    const inventory = toInventory([dep({ version: "15.0.0", manifest: "apps/web/package.json" }), dep({}), dep({ name: "express", version: "4.17.1", manifest: "package.json" })]);
+    const inventory = toInventory([dep({ version: "15.0.0", manifest: "apps/web/package.json", approximate: true }), dep({}), dep({ name: "express", version: "4.17.1", manifest: "package.json", approximate: true })]);
     expect(inventory.map((e) => `${e.name}@${e.version}${e.approximate ? "~" : ""}`)).toEqual(["next@15.5.3", "express@4.17.1~"]);
   });
 

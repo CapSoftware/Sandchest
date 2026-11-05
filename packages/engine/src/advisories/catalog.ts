@@ -38,6 +38,11 @@ export interface OsvCatalog {
   changedSince(ecosystem: string, since: number, signal?: AbortSignal): Promise<{ changes: Change[]; complete: boolean }>;
 }
 
+/** How OSV is asked about a package version. A git submodule is asked about by the commit it pins. */
+function query(pkg: PackageVersion) {
+  return pkg.ecosystem === "GIT" ? { commit: pkg.version } : { package: { ecosystem: pkg.ecosystem, name: pkg.name }, version: pkg.version };
+}
+
 export function createOsvCatalog(options: { fetch?: typeof fetch; timeoutMs?: number } = {}): OsvCatalog {
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -55,7 +60,7 @@ export function createOsvCatalog(options: { fetch?: typeof fetch; timeoutMs?: nu
   async function remaining(pkg: PackageVersion, token: string, signal?: AbortSignal): Promise<Change[]> {
     const out: Change[] = [];
     for (let pageToken: string | undefined = token; pageToken; ) {
-      const page: Page = await json<Page>(`${API}/query`, post({ package: { ecosystem: pkg.ecosystem, name: pkg.name }, version: pkg.version, page_token: pageToken }), signal);
+      const page: Page = await json<Page>(`${API}/query`, post({ ...query(pkg), page_token: pageToken }), signal);
       out.push(...(page.vulns ?? []).map(({ id, modified }) => ({ id, modified })));
       pageToken = page.next_page_token;
     }
@@ -67,7 +72,7 @@ export function createOsvCatalog(options: { fetch?: typeof fetch; timeoutMs?: nu
       const chunks: PackageVersion[][] = [];
       for (let start = 0; start < packages.length; start += BATCH) chunks.push(packages.slice(start, start + BATCH));
       const answered = await mapLimit(chunks, BATCH_CONCURRENCY, async (chunk) => {
-        const queries = chunk.map((p) => ({ package: { ecosystem: p.ecosystem, name: p.name }, version: p.version }));
+        const queries = chunk.map(query);
         const { results } = await json<{ results: Page[] }>(`${API}/querybatch`, post({ queries }), signal);
         if (results.length !== chunk.length) throw new Error(`OSV answered ${results.length} of ${chunk.length} queries`);
         return Promise.all(
