@@ -12,6 +12,7 @@ export const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/scans", label: "Scans" },
   { href: "/dashboard/findings", label: "Findings" },
+  { href: "/dashboard/cves", label: "CVEs" },
   { href: "/dashboard/repos", label: "Repos" },
   { href: "/dashboard/settings", label: "Settings" },
 ];

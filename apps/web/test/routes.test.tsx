@@ -92,6 +92,8 @@ describe("dashboard nav", () => {
       [`/dashboard/repos/${id}`, "/dashboard/repos"],
       ["/dashboard/findings", "/dashboard/findings"],
       [`/dashboard/findings/${id}`, "/dashboard/findings"],
+      ["/dashboard/cves", "/dashboard/cves"],
+      ["/dashboard/cves/CVE-2025-29927", "/dashboard/cves"],
       ["/dashboard/settings", "/dashboard/settings"],
       ["/dashboard/billing/confirm", "/dashboard"],
       ["/dashboardx", undefined],

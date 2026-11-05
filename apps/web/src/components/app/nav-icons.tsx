@@ -5,6 +5,7 @@ const ICONS: Record<string, readonly string[]> = {
   "/dashboard": ["XXXX.XXXX", "X..X.X..X", "X..X.X..X", "XXXX.XXXX", ".........", "XXXX.XXXX", "X..X.X..X", "X..X.X..X", "XXXX.XXXX"],
   "/dashboard/scans": [".XXXX....", "X....X...", "X....X...", "X....X...", "X....X...", ".XXXXX...", ".....XX..", "......XX.", ".......XX"],
   "/dashboard/findings": ["X.......X", ".X.XXX.X.", "..XXXXX..", "XXX.X.XXX", "..XXXXX..", "XXXXXXXXX", "..XXXXX..", ".X.XXX.X.", "X.......X"],
+  "/dashboard/cves": ["XXXXXXXXX", "X...X...X", "X...X...X", "X...X...X", "X.......X", ".X..X..X.", ".X.....X.", "..X...X..", "...XXX..."],
   "/dashboard/repos": [".XXXXXXX.", "X.......X", "XXXXXXXXX", "X...X...X", "X..XXX..X", "X...X...X", "X.......X", "XXXXXXXXX", "........."],
   "/dashboard/settings": ["..X......", "XXXXXXXXX", "..X......", "......X..", "XXXXXXXXX", "......X..", "...X.....", "XXXXXXXXX", "...X....."],
 };

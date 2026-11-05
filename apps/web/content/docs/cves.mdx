@@ -1,0 +1,35 @@
+---
+title: CVEs
+description: Known vulnerabilities in the packages your repositories install, matched as advisories are published, with the exact files that import them.
+---
+
+The CVEs page lists every known vulnerability that affects a version your repositories install, and shows where it is in your code: the package and version, the lockfile it comes from, and the files that import it, linked to the line on GitHub.
+
+## Where the data comes from
+
+- **What you install.** Sandchest reads each repository's manifests and lockfiles on its default branch: npm, pnpm, Yarn and Bun lockfiles, Python requirements, Pipfile, Poetry and uv lockfiles, Go modules, Maven and Gradle, Cargo, Composer and Bundler. It reads them when it maps or scans a repository, and again whenever a push to the default branch changes a manifest or lockfile. Reading them is free.
+- **What is known.** Advisories come from [OSV](https://osv.dev), which collects GitHub's advisory database, the Python, Go and Rust advisory databases and reports of malicious packages. Only package names and versions are sent; never code.
+
+When OSV publishes or changes an advisory, Sandchest checks every repository that installs the package within about ten minutes. Every repository is also checked in full once a day.
+
+## In your code, installed or resolved
+
+Each vulnerability is listed once, however many advisories describe it, and sorted by how exposed you are, then by severity.
+
+- **In your code**: shipped code imports the affected version.
+- **Installed**: the affected version is installed, but only as a dev dependency, pulled in by another package, imported only by tests, config or tooling, or in a language whose imports aren't traced yet (Rust, PHP, Ruby).
+- **Resolved**: an upgrade removed the affected version, or the advisory no longer applies to it.
+
+In a monorepo, each file counts for the version its own workspace resolves. When a lockfile holds three versions of a package, only the one your code actually loads is listed as in your code.
+
+Severity is the advisory's own rating, or the one its CVSS score gives when it has none. A malicious package is always critical.
+
+## Is this CVE in my code?
+
+Search for a CVE id, an advisory id or a package name. If a CVE isn't listed, none of your repositories installs a version it affects. Opening `/dashboard/cves/CVE-2025-29927` directly answers the same question for one CVE.
+
+## Fixing
+
+A vulnerability's page shows the version that fixes each installed one, and **Copy upgrade prompt** gives your coding agent one prompt per repository: which packages to upgrade, from which lockfile, and how to confirm the old version is gone. Once the upgrade reaches the default branch, the vulnerability moves to resolved.
+
+Agents can ask the same questions with `list_cves` and `get_cve`. See [Agents](/docs/agents).

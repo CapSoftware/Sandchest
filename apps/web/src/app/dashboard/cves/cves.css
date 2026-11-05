@@ -1,0 +1,186 @@
+/* The CVE directory: a list of vulnerabilities, and one vulnerability with every place it is in the code. */
+
+.cve-sub {
+  max-width: 60ch;
+  font-size: 0.9375rem;
+}
+
+.cve-search {
+  display: flex;
+  width: min(20rem, 100%);
+}
+
+.cve-search-input {
+  width: 100%;
+}
+
+.cve-row .finding-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.75rem;
+}
+
+.cve-key {
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  white-space: nowrap;
+}
+
+.cve-summary {
+  color: var(--color-sand);
+  font-weight: 400;
+}
+
+.cve-row .flag {
+  margin-left: 0;
+}
+
+.cve-flag-new {
+  color: var(--color-gold);
+}
+
+.cve-flag-hot {
+  color: var(--critical);
+}
+
+.cve-title {
+  font-family: var(--font-mono);
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+/* Where it is: one block per repository, one entry per installed version. */
+
+.cve-repos {
+  display: grid;
+  gap: 2rem;
+}
+
+.cve-repo-name {
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  color: var(--color-bright);
+}
+
+.cve-matches {
+  display: grid;
+  border-top: 1px solid var(--color-seam);
+}
+
+.cve-match {
+  position: relative;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.9rem 0 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--color-seam);
+}
+
+/* A pixel marks how close each version is to shipped code: ember inside it, dust outside, hollow once gone. */
+.cve-match::before {
+  content: "";
+  position: absolute;
+  top: 1.35rem;
+  left: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--color-dust);
+}
+
+.cve-match[data-in-code]::before {
+  background: var(--color-ember);
+}
+
+.cve-match[data-resolved]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-dust);
+}
+
+.cve-match-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+}
+
+.cve-package {
+  color: var(--color-bright);
+  overflow-wrap: anywhere;
+}
+
+.cve-match[data-resolved] .cve-package {
+  color: var(--color-dust);
+  text-decoration: line-through;
+}
+
+.cve-match-from {
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  overflow-wrap: anywhere;
+}
+
+.cve-evidence {
+  font-size: 0.875rem;
+  color: var(--color-muted);
+}
+
+.cve-sites {
+  display: grid;
+  gap: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.cve-sites a {
+  color: var(--color-gold);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.cve-sites a:hover {
+  color: var(--color-gold-light);
+  text-decoration: underline;
+}
+
+.cve-repo-actions {
+  margin-top: 1rem;
+}
+
+.cve-details .prose + .prose,
+.cve-details .poc {
+  margin-top: 1rem;
+}
+
+.cve-details .subhead:first-child {
+  margin-top: 0;
+}
+
+.cve-aliases,
+.cve-vector {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.cve-references {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.cve-more {
+  margin-top: 1rem;
+}
+
+.cve-more summary {
+  width: fit-content;
+  color: var(--color-gold);
+  cursor: pointer;
+}
+
+.cve-more summary:hover {
+  color: var(--color-gold-light);
+}
+
+.cve-more[open] summary {
+  margin-bottom: 1rem;
+}

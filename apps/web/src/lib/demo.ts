@@ -698,6 +698,11 @@ export function demoRepos(): DashboardRepo[] {
   });
 }
 
+/** The demo's repository id for a short name (`api`). */
+export function demoRepoId(name: string): string {
+  return repoId(name);
+}
+
 export function demoRepo(id: string): DashboardRepo | undefined {
   return demoRepos().find((repo) => repo.id === id);
 }

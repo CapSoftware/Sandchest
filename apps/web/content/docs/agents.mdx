@@ -132,6 +132,8 @@ Every tool is also an HTTP endpoint under `https://www.sandchest.com/api/v1`, wi
 | `get_fix_prompt` | `GET /findings/{id}/fix-prompt` | The prompt that fixes it |
 | `get_findings_prompt` | `GET /findings/prompt` | One prompt to fix many findings, or the list as Markdown or JSON |
 | `update_finding` | `PATCH /findings/{id}` | Dismiss (with a reason), mark fixed, or reopen |
+| `list_cves` | `GET /cves` | Known vulnerabilities in what your repositories install: in your code, installed or resolved |
+| `get_cve` | `GET /cves/{id}` | One CVE: where it is, the fixed version, and an upgrade prompt per repository |
 | `get_overview` | `GET /overview` | Reviews, scans, findings, fixes and credits over time |
 
 `{repo}` is a repository's id or its full name (`/repos/acme/api`), and `{account}` an account's id or GitHub login.

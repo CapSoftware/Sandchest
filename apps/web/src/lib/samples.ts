@@ -315,3 +315,8 @@ export function samplePulls(count = PULLS.length): PullRow[] {
           },
   }));
 }
+
+/** The sample repositories' ids by short name, for the CVE directory's samples. */
+export function sampleRepoId(name: string): string {
+  return id(100 + REPOS.findIndex(([repo]) => repo === name));
+}
