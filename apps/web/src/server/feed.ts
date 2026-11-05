@@ -6,6 +6,7 @@
  * One copy for everyone, rebuilt at most every ten minutes.
  */
 import { recentFindingClasses } from "@sandchest/db";
+import { CATEGORIES, SEVERITIES } from "@sandchest/engine/schema";
 import { unstable_cache } from "next/cache";
 import { categoryLabel, type Severity } from "@/lib/format";
 import { db } from "./db";
@@ -57,8 +58,17 @@ const FINDINGS = 60;
 const FINDINGS_SHOWN = 24;
 /** Kinds whose dashboard name reads oddly on its own. */
 const KIND: Record<string, string> = { business_logic: "Business logic flaw" };
-/** Findings this new aren't shown yet (see `recentFindingClasses`). */
+/** Findings this new aren't shown yet, nor any older than FINDING_DAYS (see `recentFindingClasses`). */
 const FINDING_DELAY_MS = 6 * 3_600_000;
+const FINDING_DAYS = 30;
+/** A day's findings are only shown once they came from at least this many orgs. */
+const MIN_ORGS_PER_DAY = 3;
+/** Text from OSV is cut to these lengths: it is someone else's data on our page. */
+const MAX_SUMMARY = 160;
+const MAX_PACKAGE = 100;
+/** GitHub advisory IDs use a fixed alphabet; anything else in a feed is skipped. */
+const GHSA_ID = /^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$/;
+const CVE_ID = /^CVE-\d{4}-\d{4,8}$/;
 const TIMEOUT_MS = 8_000;
 
 const OSV_SEVERITY: Record<string, Severity> = { CRITICAL: "critical", HIGH: "high", MODERATE: "medium", LOW: "low" };
@@ -95,7 +105,7 @@ export function recentChanges(csv: string, now: number): Array<{ id: string; mod
     if (comma < 0 || Number.isNaN(at)) continue;
     if (now - at > CHANGED_WITHIN_MS || changes.length === PER_ECOSYSTEM) break;
     const id = line.slice(comma + 1).trim();
-    if (id.startsWith("GHSA-") && !seen.has(id)) {
+    if (GHSA_ID.test(id) && !seen.has(id)) {
       seen.add(id);
       changes.push({ id, modified });
     }
@@ -105,29 +115,46 @@ export function recentChanges(csv: string, now: number): Array<{ id: string; mod
 
 /** One record, cached by its ID and when it last changed: a record is only fetched again when OSV changes it. */
 const record = unstable_cache(
-  async (ecosystem: string, id: string, _modified: string): Promise<OsvRecord> => (await osv(`${encodeURIComponent(ecosystem)}/${id}.json`)).json() as Promise<OsvRecord>,
+  async (ecosystem: string, id: string, _modified: string): Promise<OsvRecord> => (await osv(`${encodeURIComponent(ecosystem)}/${encodeURIComponent(id)}.json`)).json() as Promise<OsvRecord>,
   ["osv-record-v1"],
   { revalidate: 7 * 86_400 },
 );
 
-/** One advisory, in the words the crawl shows. Undefined for a record it can't show. */
-export function toAdvisory(record: OsvRecord, ecosystem: string): FeedAdvisory | undefined {
-  if (record.withdrawn || !record.summary || !record.published) return undefined;
-  const pkg = record.affected?.find((a) => a.package?.name)?.package;
-  if (!pkg?.name) return undefined;
-  const cve = record.aliases?.filter((a) => a.startsWith("CVE-")).sort()[0];
+/** Plain text on one line, no longer than `max`: control characters and runs of space collapse. */
+function clean(text: string, max: number): string {
+  const flat = text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).replace(/\s+\S*$/, "")}…`;
+}
+
+/**
+ * One advisory, in the words the crawl shows, from the record fetched for
+ * `id` in `ecosystem`. Undefined for a record it can't show. Every field is
+ * checked or rebuilt here, so nothing reaches the page in a shape we didn't
+ * choose.
+ */
+export function toAdvisory(record: OsvRecord, ecosystem: string, id = record.id): FeedAdvisory | undefined {
+  if (record.id !== id || !GHSA_ID.test(id) || !ECOSYSTEMS.includes(ecosystem)) return undefined;
+  if (record.withdrawn || typeof record.summary !== "string" || typeof record.published !== "string") return undefined;
+  const published = Date.parse(record.published);
+  if (Number.isNaN(published)) return undefined;
+  const name = record.affected?.find((a) => typeof a.package?.name === "string" && a.package.name.trim())?.package?.name;
+  if (!name) return undefined;
+  const pkg = clean(name, MAX_PACKAGE);
+  const cve = (Array.isArray(record.aliases) ? record.aliases : []).filter((a) => typeof a === "string" && CVE_ID.test(a)).sort()[0];
   // Summaries often lead with the package name, which the crawl shows on its own.
-  const lead = `${pkg.name}:`;
-  const summary = (record.summary.startsWith(lead) ? record.summary.slice(lead.length) : record.summary).trim();
+  let summary = clean(record.summary, MAX_SUMMARY + name.length + 1);
+  if (summary.startsWith(`${name}:`)) summary = summary.slice(name.length + 1).trim();
+  summary = clean(summary, MAX_SUMMARY);
+  if (!summary) return undefined;
   return {
     kind: "advisory",
-    id: cve ?? record.id,
+    id: cve ?? id,
     summary: summary.charAt(0).toUpperCase() + summary.slice(1),
     severity: OSV_SEVERITY[record.database_specific?.severity ?? ""] ?? null,
-    ecosystem: pkg.ecosystem ?? ecosystem,
-    package: pkg.name,
-    published: record.published,
-    url: `https://osv.dev/vulnerability/${record.id}`,
+    ecosystem,
+    package: pkg,
+    published: new Date(published).toISOString(),
+    url: `https://osv.dev/vulnerability/${encodeURIComponent(id)}`,
   };
 }
 
@@ -138,7 +165,7 @@ async function newestAdvisories(): Promise<FeedAdvisory[]> {
       const head = await osv(`${encodeURIComponent(ecosystem)}/modified_id.csv`, { headers: { range: `bytes=0-${FEED_HEAD_BYTES - 1}` } });
       const changes = recentChanges(await head.text(), now);
       const records = await settleLimited(changes, (change) => record(ecosystem, change.id, change.modified));
-      return records.flatMap((r) => (r.status === "fulfilled" ? [toAdvisory(r.value, ecosystem)] : [])).filter((a) => a !== undefined);
+      return records.flatMap((r, i) => (r.status === "fulfilled" ? [toAdvisory(r.value, ecosystem, changes[i]!.id)] : [])).filter((a) => a !== undefined);
     }),
   );
   const all = perEcosystem.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
@@ -186,17 +213,29 @@ export function foundDay(at: Date, now: Date): string {
 }
 
 async function newestFindings(): Promise<FeedFinding[]> {
-  const rows = await recentFindingClasses(db(), { limit: FINDINGS, minAgeMs: FINDING_DELAY_MS });
+  const rows = await recentFindingClasses(db(), { limit: FINDINGS, minAgeMs: FINDING_DELAY_MS, maxAgeDays: FINDING_DAYS, minOrgs: MIN_ORGS_PER_DAY });
   return toFindings(rows, new Date());
 }
 
-/** Findings as the crawl shows them: one line per kind, severity and day, and none of the catch-all kind, which says nothing. */
-export function toFindings(rows: Array<{ severity: Severity; category: string; firstSeenAt: Date }>, now: Date): FeedFinding[] {
+const SEVERITY_SET = new Set<string>(SEVERITIES);
+/** Only the engine's own kinds, so no free text can ever reach the page; and not the catch-all, which says nothing. */
+const KIND_SET = new Set<string>(CATEGORIES.filter((c) => c !== "other"));
+
+/**
+ * Findings as the crawl shows them: severity, kind and day, one line for
+ * each combination. Within a day they are ordered by severity and kind, not
+ * by when they were found.
+ */
+export function toFindings(rows: Array<{ severity: string; category: string; firstSeenAt: Date }>, now: Date): FeedFinding[] {
+  const days = (d: Date) => Math.floor(d.getTime() / 86_400_000);
+  const kept = rows
+    .filter((row) => SEVERITY_SET.has(row.severity) && KIND_SET.has(row.category) && !Number.isNaN(row.firstSeenAt.getTime()))
+    .map((row) => ({ day: days(row.firstSeenAt), severity: row.severity as Severity, category: row.category, at: row.firstSeenAt }))
+    .sort((a, b) => b.day - a.day || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.category.localeCompare(b.category));
   const seen = new Set<string>();
   const out: FeedFinding[] = [];
-  for (const row of rows) {
-    if (row.category === "other") continue;
-    const finding: FeedFinding = { kind: "finding", severity: row.severity, title: KIND[row.category] ?? categoryLabel(row.category), found: foundDay(row.firstSeenAt, now) };
+  for (const row of kept) {
+    const finding: FeedFinding = { kind: "finding", severity: row.severity, title: KIND[row.category] ?? categoryLabel(row.category), found: foundDay(row.at, now) };
     const key = `${finding.severity}:${finding.title}:${finding.found}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -217,4 +256,4 @@ async function readFeed(): Promise<Feed> {
 }
 
 // Next's data cache, so every server instance (and every visitor) shares one copy.
-export const liveFeed: () => Promise<Feed> = unstable_cache(readFeed, ["live-feed-v3"], { revalidate: FEED_TTL_S });
+export const liveFeed: () => Promise<Feed> = unstable_cache(readFeed, ["live-feed-v4"], { revalidate: FEED_TTL_S });

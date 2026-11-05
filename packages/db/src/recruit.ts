@@ -46,19 +46,31 @@ export async function linesScanned(database: Db): Promise<{ lines: number; runni
  * the title, the code, the repository or whose it is. Dismissed findings and
  * ones the trust gate couldn't back are left out. Nothing younger than
  * `minAgeMs` is returned, so a finding can't be tied to a push someone just
- * watched land.
+ * watched land, and a day's findings are only returned once they came from
+ * at least `minOrgs` different orgs, so none can be pinned on one. The org
+ * is only counted here; it never leaves the database.
  */
-export async function recentFindingClasses(database: Db, { limit, minAgeMs }: { limit: number; minAgeMs: number }) {
-  return database
-    .select({ severity: findings.severity, category: findings.category, firstSeenAt: findings.firstSeenAt })
-    .from(findings)
-    .where(
-      and(
-        sql`${findings.status} <> 'dismissed'`,
-        sql`(${findings.trust} is null or ${findings.trust} <> 'unconfirmed')`,
-        sql`${findings.firstSeenAt} <= now() - make_interval(secs => ${minAgeMs / 1000})`,
-      ),
+export async function recentFindingClasses(
+  database: Db,
+  { limit, minAgeMs, maxAgeDays, minOrgs }: { limit: number; minAgeMs: number; maxAgeDays: number; minOrgs: number },
+): Promise<Array<{ severity: string; category: string; firstSeenAt: Date }>> {
+  const rows = await database.execute<{ severity: string; category: string; first_seen_at: Date | string }>(sql`
+    with shown as (
+      select f.severity, f.category, f.first_seen_at, r.org_id, (f.first_seen_at at time zone 'UTC')::date as day
+      from ${findings} f
+      join ${repos} r on r.id = f.repo_id
+      where f.status <> 'dismissed'
+        and (f.trust is null or f.trust <> 'unconfirmed')
+        and f.first_seen_at <= now() - make_interval(secs => ${minAgeMs / 1000})
+        and f.first_seen_at > now() - make_interval(days => ${maxAgeDays})
+    ),
+    crowded as (
+      select day from shown group by day having count(distinct org_id) >= ${minOrgs}
     )
-    .orderBy(sql`${findings.firstSeenAt} desc`)
-    .limit(limit);
+    select severity, category, first_seen_at from shown
+    where day in (select day from crowded)
+    order by first_seen_at desc
+    limit ${limit}
+  `);
+  return rows.map((row) => ({ severity: row.severity, category: row.category, firstSeenAt: new Date(row.first_seen_at) }));
 }

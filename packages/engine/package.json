@@ -10,6 +10,7 @@
     "./scan": "./src/scan/index.ts",
     "./advisories": "./src/advisories/index.ts",
     "./fix-prompt": "./src/scan/fix-prompt.ts",
+    "./schema": "./src/scan/schema.ts",
     "./indexer/local": "./src/indexer/local.ts"
   },
   "scripts": {
