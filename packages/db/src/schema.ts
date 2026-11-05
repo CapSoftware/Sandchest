@@ -15,6 +15,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  real,
   smallint,
   text,
   timestamp,
@@ -812,6 +813,140 @@ export const events = pgTable(
       .where(sql`${table.name} = 'dashboard_visit'`),
   ],
 );
+
+// ---- CVE directory ---------------------------------------------------------
+// Known vulnerabilities (OSV advisories) matched against each repository's
+// dependency inventory. Advisories are public data; inventories hold package
+// names, versions and import locations, never code.
+
+export const ADVISORY_SEVERITIES = ["critical", "high", "medium", "low", "unknown"] as const;
+export type AdvisorySeverity = (typeof ADVISORY_SEVERITIES)[number];
+
+/** One OSV record that has matched a dependency at least once. Refreshed when OSV changes it. */
+export const advisories = pgTable(
+  "advisories",
+  {
+    /** OSV id: GHSA-…, PYSEC-…, GO-…, RUSTSEC-…, MAL-…. */
+    id: text("id").primaryKey(),
+    /**
+     * The vulnerability this record describes, shared by every record of it (OSV often holds a GHSA and a
+     * PYSEC or GO record for one bug): its lowest CVE id, else its GHSA id, else its own id.
+     */
+    vulnKey: text("vuln_key").notNull(),
+    aliases: text("aliases").array().notNull().default(sql`'{}'::text[]`),
+    summary: text("summary").notNull(),
+    details: text("details").notNull(),
+    severity: text("severity", { enum: ADVISORY_SEVERITIES }).notNull(),
+    /** CVSS 3 base score, when OSV gives a vector (or a GHSA alias does). */
+    score: real("score"),
+    vector: text("vector"),
+    malicious: boolean("malicious").notNull().default(false),
+    /** Affected packages and version ranges: [{ ecosystem, name, ranges: [{ introduced, fixed, lastAffected }] }]. */
+    affected: jsonb("affected").$type<Array<{ ecosystem: string; name: string; ranges: Array<{ introduced?: string; fixed?: string; lastAffected?: string }> }>>().notNull(),
+    references: jsonb("references").$type<Array<{ type: string; url: string }>>().notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    modifiedAt: timestamp("modified_at", { withTimezone: true }).notNull(),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("advisories_vuln_key_idx").on(table.vulnKey), index("advisories_aliases_idx").using("gin", table.aliases)],
+);
+
+export const DEPENDENCY_USAGES = ["product", "tooling", "none", "unknown"] as const;
+export type DependencyUsage = (typeof DEPENDENCY_USAGES)[number];
+
+/** What a repository's default branch installs, as of its last inventory. Replaced whole each time. */
+export const repoDependencies = pgTable(
+  "repo_dependencies",
+  {
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    ecosystem: text("ecosystem").notNull(),
+    name: text("name").notNull(),
+    /** The name as advisories are matched on (lowercase; PyPI normalised). */
+    packageKey: text("package_key").notNull(),
+    version: text("version").notNull(),
+    /** The lockfile or manifest the version was read from. */
+    manifest: text("manifest").notNull(),
+    direct: boolean("direct").notNull(),
+    dev: boolean("dev").notNull(),
+    /** product: imported by shipped code; tooling: only by tests or config; none: imported by no code; unknown: imports not traced. */
+    usage: text("usage", { enum: DEPENDENCY_USAGES }).notNull(),
+    /** The version is a manifest range's floor (no lockfile was read), so what is installed may be newer. */
+    approximate: boolean("approximate").notNull().default(false),
+    /** Up to ten `file:line` import sites, shipped code first. */
+    importedAt: text("imported_at").array().notNull().default(sql`'{}'::text[]`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.repoId, table.ecosystem, table.name, table.version] }),
+    // A changed advisory's question: which repositories install this package?
+    index("repo_dependencies_package_idx").on(table.ecosystem, table.packageKey),
+  ],
+);
+
+/** When each repository's inventory was read and last checked against OSV. */
+export const repoInventories = pgTable(
+  "repo_inventories",
+  {
+    repoId: uuid("repo_id")
+      .primaryKey()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    /** The commit the inventory was read from. Null until the first one. */
+    commitSha: text("commit_sha"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }),
+    dependencies: integer("dependencies").notNull().default(0),
+    /** Last time every package was checked against OSV. */
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    /** A push changed a manifest or lockfile: the inventory needs reading again. */
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    /** A refresh holds the repository while it reads the inventory. */
+    runningSince: timestamp("running_since", { withTimezone: true }),
+    /** Why the last refresh failed, if it did. */
+    error: text("error"),
+  },
+  (table) => [
+    index("repo_inventories_checked_idx").on(table.checkedAt),
+    index("repo_inventories_requested_idx").on(table.requestedAt).where(sql`${table.requestedAt} is not null`),
+  ],
+);
+
+/** An advisory affecting a version a repository installs. Resolved when the version goes or the advisory stops applying. */
+export const repoAdvisories = pgTable(
+  "repo_advisories",
+  {
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    advisoryId: text("advisory_id")
+      .notNull()
+      .references(() => advisories.id, { onDelete: "cascade" }),
+    ecosystem: text("ecosystem").notNull(),
+    name: text("name").notNull(),
+    version: text("version").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Null while the repository is affected. */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** How the match first appeared: an advisory published or changed after the inventory (`feed`), or reading the inventory (`inventory`). */
+    origin: text("origin", { enum: ["feed", "inventory"] }).notNull(),
+    /** Set once the people with access were emailed about it. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.repoId, table.advisoryId, table.ecosystem, table.name, table.version] }),
+    index("repo_advisories_open_idx").on(table.repoId).where(sql`${table.resolvedAt} is null`),
+    index("repo_advisories_advisory_idx").on(table.advisoryId),
+  ],
+);
+
+/** How far each ecosystem's OSV change feed has been read. */
+export const advisoryFeeds = pgTable("advisory_feeds", {
+  ecosystem: text("ecosystem").primaryKey(),
+  /** The newest change already handled (ms since the epoch, as text: OSV stamps are finer than Postgres keeps). */
+  cursor: text("cursor").notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const orgRelations = relations(orgs, ({ many }) => ({ repos: many(repos) }));
 export const repoRelations = relations(repos, ({ one, many }) => ({ org: one(orgs, { fields: [repos.orgId], references: [orgs.id] }), scans: many(scans) }));

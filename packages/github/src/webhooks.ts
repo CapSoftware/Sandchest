@@ -58,6 +58,9 @@ export interface PushEvent {
   before: string;
   after: string;
   deleted?: boolean;
+  forced?: boolean;
+  /** Up to 20 commits (GitHub's cap), each with the paths it touched. */
+  commits?: Array<{ added?: string[]; removed?: string[]; modified?: string[] }>;
   installation?: { id: number };
   repository: RepositoryRef & { default_branch: string };
 }
