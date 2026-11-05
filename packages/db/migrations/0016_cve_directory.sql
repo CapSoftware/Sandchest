@@ -1,3 +1,5 @@
+-- New tables only. The foreign keys to repos take a brief lock on it: give up rather than queue writers behind it.
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
 CREATE TABLE "advisories" (
 	"id" text PRIMARY KEY NOT NULL,
 	"vuln_key" text NOT NULL,
