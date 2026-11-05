@@ -121,7 +121,7 @@ const DEFAULT_INSTALL_TIMEOUT_MS = 8 * 60_000;
 /** Installs, starts the server detached, and waits for it to answer. */
 export async function bringUp(runtime: Runtime, plan: BringUpPlan, options: BringUpOptions): Promise<BootResult> {
   const { deadline, signal } = options;
-  const remaining = () => deadline - Date.now();
+  const remaining = () => Math.floor(deadline - Date.now());
   if (plan.install) {
     options.onProgress?.("Installing dependencies to boot the app…");
     const install = await runtime.exec(plan.install, { timeoutMs: Math.min(remaining(), options.installTimeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS), env: plan.env, signal });

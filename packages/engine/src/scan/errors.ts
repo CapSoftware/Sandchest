@@ -21,6 +21,7 @@ export function errorMessage(error: unknown): string {
  */
 export function untilDeadline(signal: AbortSignal | undefined, deadline: number | undefined): AbortSignal | undefined {
   if (deadline === undefined || !Number.isFinite(deadline)) return signal;
-  const timer = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
+  // Deadlines are fractions of a budget, so not always whole milliseconds: AbortSignal.timeout takes integers only.
+  const timer = AbortSignal.timeout(Math.max(1, Math.ceil(deadline - Date.now())));
   return signal ? AbortSignal.any([signal, timer]) : timer;
 }
