@@ -12,6 +12,23 @@ use crate::lang::Lang;
 
 /// Files larger than this are listed but not loaded.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// Dependency lockfiles are data the dependency inventory needs whole, and a
+/// big monorepo's lockfile is often several megabytes, so they get more room.
+const MAX_LOCKFILE_BYTES: u64 = 48 * 1024 * 1024;
+/// Lockfiles `deps` reads (see `deps.rs`).
+pub const LOCKFILES: &[&str] = &[
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "bun.lock",
+    "Pipfile.lock",
+    "poetry.lock",
+    "uv.lock",
+    "Cargo.lock",
+    "composer.lock",
+    "Gemfile.lock",
+];
 /// Default ceiling on text (plus line index) held for one checkout: several
 /// times what the engine's one-million-line scan limit needs.
 pub const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
@@ -222,7 +239,9 @@ fn relative_path(root: &Path, path: &Path) -> Option<String> {
 
 fn load_file(full: &Path, path: String, has_room: &dyn Fn(u64) -> bool) -> Result<File, Skipped> {
     let bytes = std::fs::metadata(full).map(|m| m.len()).unwrap_or(0);
-    if bytes > MAX_FILE_BYTES {
+    let name = path.rsplit('/').next().unwrap_or(&path);
+    let cap = if LOCKFILES.contains(&name) { MAX_LOCKFILE_BYTES } else { MAX_FILE_BYTES };
+    if bytes > cap {
         return Err(Skipped { path, reason: "too_large", bytes });
     }
     if !has_room(bytes) {
