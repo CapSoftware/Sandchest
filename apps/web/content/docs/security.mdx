@@ -97,6 +97,7 @@ To have your findings, threat models or account deleted too, write to the contac
 ## Who can see findings
 
 - A person can see a repository's findings only if GitHub says they have push access or higher to it, or an admin of its account invited them. Sandchest checks with GitHub using their own sign-in, and re-checks at least every five minutes.
+- People an admin invited are members or admins. Members see and work on every repository of the account; admins can also change its settings, billing and team. A role change or removal takes effect at once, and never touches what GitHub grants.
 - An invite is for one person: an email address GitHub must list as verified on their account, or one GitHub account. Its link carries a random token, of which Sandchest stores only a hash. It works once, for 7 days, and only while whoever sent it is still an admin. Removing someone takes their invited access away at once.
 - On public repositories, nothing about a finding is posted to GitHub beyond a count by severity, because Checks and comments there are public. See [PR reviews](/docs/scans#public-repositories).
 - Billing and settings can only be changed by admins of the GitHub organization, or the owner of a personal account.

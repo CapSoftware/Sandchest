@@ -7,6 +7,9 @@ import { When } from "@/components/app/when";
 import { plural, SCAN_KIND_LABEL, SEVERITIES } from "@/lib/format";
 import { site } from "@/lib/site";
 
+/** A repository's PR review mode, in a word or two. */
+const MODE_LABEL: Record<DashboardRepo["prReviews"], string> = { auto: "every push", command: "when asked", off: "off" };
+
 /** Lists longer than this get a filter. */
 const FILTER_FROM = 8;
 
@@ -52,7 +55,7 @@ export function ReposView({ repos }: { repos: DashboardRepo[] }) {
               <span role="columnheader">Repository</span>
               <span role="columnheader">Open findings</span>
               <span role="columnheader" className="repo-table-num">
-                Reviews, 30 days
+                PR reviews, 30 days
               </span>
               <span role="columnheader">Last scan</span>
             </div>
@@ -76,13 +79,14 @@ function RepoRow({ repo, org }: { repo: DashboardRepo; org: boolean }) {
         {org && <span className="repo-owner">{owner}/</span>}
         <span className="repo-line-repo">{name}</span>
         {!repo.private && <span className="tag">public</span>}
-        {repo.prReviews !== "auto" && <span className="tag">{repo.prReviews === "off" ? "PR reviews off" : "reviews when asked"}</span>}
+        {repo.prReviews !== "auto" && <span className="tag repo-mode-tag">{repo.prReviews === "off" ? "PR reviews off" : "reviews when asked"}</span>}
         {repo.deepScanSchedule !== "off" && <span className="tag">{repo.deepScanSchedule} deep scan</span>}
       </span>
       <span role="cell">
         <Tally open={repo.open} />
       </span>
       <span role="cell" className="repo-table-num repo-line-dim">
+        <span className={repo.prReviews === "auto" ? "repo-mode" : "repo-mode repo-mode-changed"}>{MODE_LABEL[repo.prReviews]}</span>
         {repo.reviews30d || "–"}
       </span>
       <span role="cell" className="repo-line-dim">

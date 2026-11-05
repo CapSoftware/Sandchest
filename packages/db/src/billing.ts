@@ -217,7 +217,7 @@ export interface OrgAdminContact {
   email: string;
   login: string | null;
   githubUserId: number | null;
-  /** GitHub confirmed them as an admin within the last 30 days. */
+  /** GitHub confirmed them as an admin within the last 30 days, or an admin invited them as one. */
   fresh: boolean;
 }
 
@@ -235,7 +235,8 @@ export async function orgAdminContacts(database: Db, orgId: string): Promise<Org
       email: users.email,
       login: users.login,
       githubUserId: users.githubUserId,
-      fresh: sql<boolean>`${orgAdmins.checkedAt} > now() - make_interval(days => ${ADMIN_FRESH_DAYS})`,
+      // An invited admin's row lasts exactly as long as their role (removing or demoting deletes it), so it's always current.
+      fresh: sql<boolean>`(${orgAdmins.via} = 'invite' or ${orgAdmins.checkedAt} > now() - make_interval(days => ${ADMIN_FRESH_DAYS}))`,
     })
     .from(orgAdmins)
     .innerJoin(users, eq(users.id, orgAdmins.userId))

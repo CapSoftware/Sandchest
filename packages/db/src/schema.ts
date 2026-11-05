@@ -499,7 +499,11 @@ export const permissionCache = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.repoId] }), index("permission_cache_repo_idx").on(table.repoId)],
 );
 
-/** Orgs whose settings a user may change: GitHub org admins, or the owner of a personal account. */
+/**
+ * Orgs whose settings and billing a user may change: GitHub org admins, the
+ * owner of a personal account, or someone an admin invited as an admin
+ * (`via` "invite", see `orgMembers`). Every admin check reads this table.
+ */
 export const orgAdmins = pgTable(
   "org_admins",
   {
@@ -509,15 +513,22 @@ export const orgAdmins = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => orgs.id, { onDelete: "cascade" }),
+    /** Where the role comes from. GitHub wins when both grant it, so demoting or removing someone never takes GitHub's away. */
+    via: text("via", { enum: ["github", "invite"] }).notNull().default("github"),
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.userId, table.orgId] }), index("org_admins_org_idx").on(table.orgId)],
 );
 
+export const TEAM_ROLES = ["member", "admin"] as const;
+export type TeamRole = (typeof TEAM_ROLES)[number];
+
 /**
- * People an admin invited to an org. They see every enabled repo of it, as
- * if GitHub reported write access, whatever GitHub says; settings and billing
- * stay with the org's admins. Removing the row removes the access at once.
+ * People an admin invited to an org. Every one sees every enabled repo of it,
+ * as if GitHub reported write access, whatever GitHub says. A `member` scans,
+ * reviews and resolves findings; an `admin` also changes the org's settings,
+ * billing and team. Removing the row, or changing the role, changes the
+ * access at once.
  */
 export const orgMembers = pgTable(
   "org_members",
@@ -528,10 +539,11 @@ export const orgMembers = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role", { enum: TEAM_ROLES }).notNull().default("member"),
     invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
-  (table) => [primaryKey({ columns: [table.orgId, table.userId] }), index("org_members_user_idx").on(table.userId)],
+  (table) => [primaryKey({ columns: [table.orgId, table.userId] }), index("org_members_user_idx").on(table.userId), check("org_members_role", sql`${table.role} in ('member', 'admin')`)],
 );
 
 /**
@@ -554,6 +566,8 @@ export const orgInvites = pgTable(
     /** Set for invites to a GitHub account; the login is only for display. */
     githubUserId: bigint("github_user_id", { mode: "number" }),
     githubLogin: text("github_login"),
+    /** The role they get on joining. */
+    role: text("role", { enum: TEAM_ROLES }).notNull().default("member"),
     invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
@@ -570,6 +584,7 @@ export const orgInvites = pgTable(
     index("org_invites_sender_idx").on(table.invitedBy, table.createdAt),
     index("org_invites_email_idx").on(table.email, table.createdAt),
     check("org_invites_one_invitee", sql`(${table.email} is null) <> (${table.githubUserId} is null)`),
+    check("org_invites_role", sql`${table.role} in ('member', 'admin')`),
   ],
 );
 
@@ -745,7 +760,7 @@ export const EVENT_NAMES = [
   "findings_copied",
 
   // ---- Team ----
-  /** An admin invited someone (or sent an invite again). org_id set. props: kind ("email" | "github"), resend, emailed, outcome ("ok" | "not_admin" | "invalid" | "no_such_user" | "already_member" | "self" | "limited" | "error"). */
+  /** An admin invited someone (or sent an invite again). org_id set. props: kind ("email" | "github"), role, resend, emailed, outcome ("ok" | "not_admin" | "invalid" | "no_such_user" | "already_member" | "self" | "limited" | "error"). */
   "team_invite_sent",
   /** An admin revoked a pending invite. org_id set. props: outcome ("ok" | "not_found"). */
   "team_invite_revoked",
@@ -753,6 +768,8 @@ export const EVENT_NAMES = [
   "team_invite_accepted",
   /** An admin removed an invited member, or a member left. org_id set. props: self (left on their own), outcome ("ok" | "not_found"). */
   "team_member_removed",
+  /** An admin changed an invited person's role. org_id set. props: role ("member" | "admin"), self, outcome ("ok" | "not_found"). */
+  "team_role_changed",
 
   // ---- Agents ----
   /** An agent was connected: a device code or an MCP client's consent was approved (or denied). props: method ("device" | "oauth"), outcome ("ok" | "denied" | "expired" | "invalid"). */

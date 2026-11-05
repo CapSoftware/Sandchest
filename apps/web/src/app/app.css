@@ -1815,6 +1815,18 @@ html:not([data-js]) .no-js-submit {
   gap: 1rem;
 }
 
+.team-role {
+  color: var(--color-sand);
+}
+
+.team-role-admin {
+  color: var(--color-gold);
+}
+
+.team-roles {
+  flex: none;
+}
+
 .team-row-expired .team-name {
   color: var(--color-dust);
 }
@@ -1867,7 +1879,7 @@ html:not([data-js]) .no-js-submit {
   .team-actions {
     grid-column: 4;
     grid-row: auto;
-    min-width: 8.5rem;
+    min-width: 11rem;
   }
 }
 
@@ -2888,7 +2900,7 @@ html:not([data-js]) .no-js-submit {
 .repo-table-head,
 .repo-line {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 7.5rem minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 11rem minmax(0, 1fr);
   align-items: center;
   gap: 1.5rem;
   padding: 0 0.75rem;
@@ -2950,6 +2962,26 @@ html:not([data-js]) .no-js-submit {
 .repo-table-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.repo-mode {
+  margin-right: 0.85rem;
+  color: var(--color-dust);
+}
+
+.repo-mode-changed {
+  color: var(--color-sand);
+}
+
+/* The mode shows in its own column; on phones, where that column is hidden, a changed one shows as a tag. */
+.repo-mode-tag {
+  display: none;
+}
+
+@media (max-width: 44rem) {
+  .repo-mode-tag {
+    display: inline;
+  }
 }
 
 @media (max-width: 44rem) {

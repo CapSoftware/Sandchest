@@ -5,15 +5,30 @@ import { timeAgo, timeUntil } from "./format";
 /** An org's team as Settings lists it: admins first, then people by name, then invites, newest first. */
 export function teamRows(team: OrgTeam | undefined, now = Date.now()): TeamRow[] {
   if (!team) return [];
-  const people = team.people.map((person): TeamRow => {
-    const handle = person.login ? `@${person.login}` : null;
-    const note = person.admin
-      ? "Admin"
-      : person.member
-        ? `Invited${person.joinedAt ? `, joined ${timeAgo(person.joinedAt, now)}` : ""}`
-        : "Write access on GitHub";
-    return { key: `p:${person.userId}`, kind: "person", id: person.userId, image: person.image, name: person.name || handle || "Someone", handle, note, actionable: person.member };
-  });
+  const people = team.people
+    .map((person): TeamRow => {
+      const handle = person.login ? `@${person.login}` : null;
+      const role = person.admin ? "admin" : "member";
+      // GitHub's admin role can't be changed here; an invite's role can.
+      const note = person.githubAdmin
+        ? "on GitHub"
+        : person.member
+          ? `invited${person.joinedAt ? ` ${timeAgo(person.joinedAt, now)}` : ""}`
+          : "on GitHub";
+      return {
+        key: `p:${person.userId}`,
+        kind: "person",
+        id: person.userId,
+        image: person.image,
+        name: person.name || handle || "Someone",
+        handle,
+        role,
+        note,
+        actionable: person.member,
+        roleEditable: person.member && !person.githubAdmin,
+      };
+    })
+    .sort((a, b) => (a.role === b.role ? 0 : a.role === "admin" ? -1 : 1));
   const invites = team.invites.map((invite): TeamRow => {
     const expired = invite.expiresAt.getTime() <= now;
     const who = invite.email ?? `@${invite.githubLogin}`;
@@ -24,8 +39,10 @@ export function teamRows(team: OrgTeam | undefined, now = Date.now()): TeamRow[]
       image: invite.githubLogin ? `https://avatars.githubusercontent.com/${encodeURIComponent(invite.githubLogin)}` : null,
       name: who,
       handle: invite.email ? null : who,
-      note: expired ? "Invite expired" : `Expires ${timeUntil(invite.expiresAt, now)}`,
+      role: invite.role,
+      note: expired ? "invite expired" : `invite expires ${timeUntil(invite.expiresAt, now)}`,
       actionable: true,
+      roleEditable: false,
       expired,
     };
   });

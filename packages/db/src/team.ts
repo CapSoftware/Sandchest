@@ -1,8 +1,10 @@
 /**
  * Teams: people an org's admins invite, on top of everyone GitHub already
- * lets in. A member sees every enabled repo of the org through the same
- * `permission_cache` rows every read is scoped by (`via` "invite"), so no
- * screen, API call or email needs to know about members.
+ * lets in, as a member or an admin. Both see every enabled repo of the org
+ * through the same `permission_cache` rows every read is scoped by (`via`
+ * "invite"); an admin also gets an `org_admins` row (`via` "invite"), which
+ * every admin check reads. So no screen, API call or email needs to know
+ * about invited people.
  *
  * Access rows for one person are only ever rewritten under a lock on their
  * user row (`lockUser`): reading access from GitHub, joining and leaving
@@ -10,7 +12,7 @@
  */
 import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { orgAdmins, orgInvites, orgMembers, orgs, permissionCache, repos, users } from "./schema";
+import { orgAdmins, orgInvites, orgMembers, orgs, permissionCache, repos, users, type TeamRole } from "./schema";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -32,16 +34,33 @@ export async function lockUser(tx: Tx, userId: string): Promise<void> {
   await tx.execute(sql`select 1 from ${users} where id = ${userId} for update`);
 }
 
-/** Gives a member every enabled repo of the org, where GitHub hasn't already. */
-async function grantOrg(tx: Tx, userId: string, orgId: string, at: Date): Promise<void> {
+/** Gives an invited person every enabled repo of the org, and the admin role if theirs, where GitHub hasn't already. */
+async function grantOrg(tx: Tx, userId: string, orgId: string, role: TeamRole, at: Date): Promise<void> {
   await tx.execute(sql`
     insert into ${permissionCache} (user_id, repo_id, permission, via, checked_at)
     select ${userId}, r.id, 'write', 'invite', ${at.toISOString()}::timestamptz from ${repos} r where r.org_id = ${orgId} and r.enabled
     on conflict (user_id, repo_id) do nothing
   `);
+  if (role === "admin") await grantAdmin(tx, userId, orgId, at);
 }
 
-/** Re-adds the rows a person's memberships give, after their GitHub rows were replaced. Part of `replaceAccess`. */
+async function grantAdmin(tx: Tx, userId: string, orgId: string, at: Date): Promise<void> {
+  await tx.execute(sql`
+    insert into ${orgAdmins} (user_id, org_id, via, checked_at) values (${userId}, ${orgId}, 'invite', ${at.toISOString()}::timestamptz)
+    on conflict (user_id, org_id) do nothing
+  `);
+}
+
+/** Takes away the admin role an invite gave; GitHub's stays. */
+async function revokeAdmin(tx: Tx, userId: string, orgId: string): Promise<void> {
+  await tx.execute(sql`delete from ${orgAdmins} where user_id = ${userId} and org_id = ${orgId} and via = 'invite'`);
+}
+
+/**
+ * Re-adds what a person's memberships give (repos, and the admin role for
+ * admins), after their GitHub rows were replaced. Part of `replaceAccess`.
+ * Orgs no longer installed give nothing, as on GitHub's side.
+ */
 export async function grantMemberships(tx: Tx, userId: string, at: Date): Promise<void> {
   await tx.execute(sql`
     insert into ${permissionCache} (user_id, repo_id, permission, via, checked_at)
@@ -51,6 +70,14 @@ export async function grantMemberships(tx: Tx, userId: string, at: Date): Promis
     join ${repos} r on r.org_id = m.org_id and r.enabled
     where m.user_id = ${userId}
     on conflict (user_id, repo_id) do nothing
+  `);
+  await tx.execute(sql`
+    insert into ${orgAdmins} (user_id, org_id, via, checked_at)
+    select ${userId}, m.org_id, 'invite', ${at.toISOString()}::timestamptz
+    from ${orgMembers} m
+    join ${orgs} o on o.id = m.org_id and o.installation_id is not null
+    where m.user_id = ${userId} and m.role = 'admin'
+    on conflict (user_id, org_id) do nothing
   `);
 }
 
@@ -63,10 +90,14 @@ export interface TeamPerson {
   name: string;
   login: string | null;
   image: string | null;
-  /** Can change the org's settings (GitHub says so). */
+  /** Can change the org's settings, billing and team, by either route. */
   admin: boolean;
-  /** Joined by invite; an admin can remove them. */
+  /** GitHub says they're an admin: nobody can take that away in Sandchest. */
+  githubAdmin: boolean;
+  /** Joined by invite: an admin can change their role or remove them. */
   member: boolean;
+  /** Their role by invite; null when they didn't join by invite. */
+  role: TeamRole | null;
   /** Can push to at least one of the org's repos on GitHub. */
   github: boolean;
   /** When they joined by invite. */
@@ -77,6 +108,7 @@ export interface TeamInvite {
   id: string;
   email: string | null;
   githubLogin: string | null;
+  role: TeamRole;
   invitedBy: string | null;
   createdAt: Date;
   expiresAt: Date;
@@ -94,17 +126,19 @@ export interface OrgTeam {
  */
 export async function adminTeams(database: Db, userId: string): Promise<Map<string, OrgTeam>> {
   const [people, invites] = await Promise.all([
-    database.execute<{ org_id: string; user_id: string; name: string; login: string | null; image: string | null; admin: boolean; member: boolean; github: boolean; joined_at: string | null }>(sql`
+    database.execute<{ org_id: string; user_id: string; name: string; login: string | null; image: string | null; admin: boolean; github_admin: boolean; member: boolean; role: TeamRole | null; github: boolean; joined_at: string | null }>(sql`
       with mine as (select org_id from ${orgAdmins} where user_id = ${userId})
       select x.org_id, u.id as user_id, u.name, u.login, u.image,
-        bool_or(x.kind = 'admin') as admin, bool_or(x.kind = 'member') as member, bool_or(x.kind = 'github') as github,
+        bool_or(x.kind in ('admin', 'github_admin')) as admin, bool_or(x.kind = 'github_admin') as github_admin,
+        bool_or(x.kind = 'member') as member, max(x.role) as role, bool_or(x.kind = 'github') as github,
         max(x.joined_at) as joined_at
       from (
-        select oa.org_id, oa.user_id, 'admin' as kind, null::timestamptz as joined_at from ${orgAdmins} oa where oa.org_id in (select org_id from mine)
+        select oa.org_id, oa.user_id, case when oa.via = 'github' then 'github_admin' else 'admin' end as kind, null::text as role, null::timestamptz as joined_at
+          from ${orgAdmins} oa where oa.org_id in (select org_id from mine)
         union all
-        select m.org_id, m.user_id, 'member', m.created_at from ${orgMembers} m where m.org_id in (select org_id from mine)
+        select m.org_id, m.user_id, 'member', m.role, m.created_at from ${orgMembers} m where m.org_id in (select org_id from mine)
         union all
-        select distinct r.org_id, pc.user_id, 'github', null::timestamptz from ${permissionCache} pc
+        select distinct r.org_id, pc.user_id, 'github', null::text, null::timestamptz from ${permissionCache} pc
           join ${repos} r on r.id = pc.repo_id and r.enabled
           where pc.via = 'github' and r.org_id in (select org_id from mine)
       ) x
@@ -112,8 +146,8 @@ export async function adminTeams(database: Db, userId: string): Promise<Map<stri
       group by x.org_id, u.id
       order by bool_or(x.kind = 'admin') desc, lower(coalesce(u.login, u.name))
     `),
-    database.execute<{ id: string; org_id: string; email: string | null; github_login: string | null; invited_by: string | null; created_at: string; expires_at: string }>(sql`
-      select i.id, i.org_id, i.email, i.github_login, coalesce(u.login, u.name) as invited_by, i.created_at, i.expires_at
+    database.execute<{ id: string; org_id: string; email: string | null; github_login: string | null; role: TeamRole; invited_by: string | null; created_at: string; expires_at: string }>(sql`
+      select i.id, i.org_id, i.email, i.github_login, i.role, coalesce(u.login, u.name) as invited_by, i.created_at, i.expires_at
       from ${orgInvites} i
       left join ${users} u on u.id = i.invited_by
       where i.accepted_at is null and i.revoked_at is null and ${isAdmin(userId, sql`i.org_id`)}
@@ -133,13 +167,15 @@ export async function adminTeams(database: Db, userId: string): Promise<Map<stri
       login: row.login,
       image: row.image,
       admin: row.admin,
+      githubAdmin: row.github_admin,
       member: row.member,
+      role: row.role,
       github: row.github,
       joinedAt: row.joined_at ? new Date(row.joined_at) : null,
     });
   }
   for (const row of invites) {
-    team(row.org_id).invites.push({ id: row.id, email: row.email, githubLogin: row.github_login, invitedBy: row.invited_by, createdAt: new Date(row.created_at), expiresAt: new Date(row.expires_at) });
+    team(row.org_id).invites.push({ id: row.id, email: row.email, githubLogin: row.github_login, role: row.role, invitedBy: row.invited_by, createdAt: new Date(row.created_at), expiresAt: new Date(row.expires_at) });
   }
   return teams;
 }
@@ -159,6 +195,7 @@ export interface InviteDetails {
   email: string | null;
   githubUserId: number | null;
   githubLogin: string | null;
+  role: TeamRole;
   inviterLogin: string | null;
   expiresAt: Date;
   /** Neither accepted nor revoked (it may still have expired). */
@@ -177,6 +214,7 @@ export async function inviteByTokenHash(database: Db, tokenHash: string): Promis
       email: orgInvites.email,
       githubUserId: orgInvites.githubUserId,
       githubLogin: orgInvites.githubLogin,
+      role: orgInvites.role,
       inviterLogin: users.login,
       expiresAt: orgInvites.expiresAt,
       acceptedAt: orgInvites.acceptedAt,
@@ -208,7 +246,7 @@ export type InviteResult = { ok: true; id: string; orgLogin: string } | { ok: fa
  */
 export async function createInvite(
   database: Db,
-  input: { userId: string; orgId: string; invitee: Invitee; tokenHash: string; now?: Date },
+  input: { userId: string; orgId: string; invitee: Invitee; role?: TeamRole; tokenHash: string; now?: Date },
 ): Promise<InviteResult> {
   const now = input.now ?? new Date();
   const at = now.toISOString();
@@ -254,6 +292,7 @@ export async function createInvite(
         orgId: input.orgId,
         tokenHash: input.tokenHash,
         ...("email" in input.invitee ? { email: input.invitee.email } : { githubUserId: input.invitee.githubUserId, githubLogin: input.invitee.githubLogin }),
+        role: input.role ?? "member",
         invitedBy: input.userId,
         expiresAt: new Date(now.getTime() + INVITE_TTL_DAYS * 86_400_000),
         createdAt: now,
@@ -263,15 +302,15 @@ export async function createInvite(
   });
 }
 
-/** Who a pending invite is for, if the user administers its org: to send it again. */
-export async function pendingInvitee(database: Db, userId: string, inviteId: string): Promise<{ orgId: string; invitee: Invitee } | undefined> {
+/** Who a pending invite is for and as what, if the user administers its org: to send it again. */
+export async function pendingInvitee(database: Db, userId: string, inviteId: string): Promise<{ orgId: string; invitee: Invitee; role: TeamRole } | undefined> {
   const [row] = await database
-    .select({ orgId: orgInvites.orgId, email: orgInvites.email, githubUserId: orgInvites.githubUserId, githubLogin: orgInvites.githubLogin })
+    .select({ orgId: orgInvites.orgId, email: orgInvites.email, githubUserId: orgInvites.githubUserId, githubLogin: orgInvites.githubLogin, role: orgInvites.role })
     .from(orgInvites)
     .where(and(eq(orgInvites.id, inviteId), isNull(orgInvites.acceptedAt), isNull(orgInvites.revokedAt), isAdmin(userId, orgInvites.orgId)));
   if (!row) return undefined;
   const invitee: Invitee = row.email !== null ? { email: row.email } : { githubUserId: row.githubUserId!, githubLogin: row.githubLogin ?? "" };
-  return { orgId: row.orgId, invitee };
+  return { orgId: row.orgId, invitee, role: row.role };
 }
 
 /** Revokes a pending invite if the user administers its org. The org's id, or undefined. */
@@ -287,7 +326,7 @@ export async function revokeInvite(database: Db, userId: string, inviteId: strin
 // ---- Joining and leaving -----------------------------------------------------
 
 export type AcceptResult =
-  | { ok: true; orgId: string; orgLogin: string }
+  | { ok: true; orgId: string; orgLogin: string; role: TeamRole }
   | { ok: false; reason: "not_found" | "expired" | "no_installation" | "wrong_person" | "inviter_gone"; orgId?: string };
 
 /**
@@ -306,7 +345,7 @@ export async function acceptInvite(
   return database.transaction(async (tx) => {
     await lockUser(tx, input.userId);
     const [invite] = await tx
-      .select({ id: orgInvites.id, orgId: orgInvites.orgId, email: orgInvites.email, githubUserId: orgInvites.githubUserId, expiresAt: orgInvites.expiresAt, invitedBy: orgInvites.invitedBy, orgLogin: orgs.githubLogin, installationId: orgs.installationId })
+      .select({ id: orgInvites.id, orgId: orgInvites.orgId, email: orgInvites.email, githubUserId: orgInvites.githubUserId, role: orgInvites.role, expiresAt: orgInvites.expiresAt, invitedBy: orgInvites.invitedBy, orgLogin: orgs.githubLogin, installationId: orgs.installationId })
       .from(orgInvites)
       .innerJoin(orgs, eq(orgs.id, orgInvites.orgId))
       .where(and(eq(orgInvites.tokenHash, input.tokenHash), isNull(orgInvites.acceptedAt), isNull(orgInvites.revokedAt)))
@@ -322,10 +361,15 @@ export async function acceptInvite(
     const matches = invite.email !== null ? emails.has(invite.email) : invite.githubUserId === input.identity.githubUserId;
     if (!matches) return { ok: false, reason: "wrong_person", orgId: invite.orgId } as const;
 
-    await tx.insert(orgMembers).values({ orgId: invite.orgId, userId: input.userId, invitedBy: invite.invitedBy, createdAt: now }).onConflictDoNothing();
+    // Joining again (an admin invited someone already in) takes the new invite's role.
+    await tx
+      .insert(orgMembers)
+      .values({ orgId: invite.orgId, userId: input.userId, role: invite.role, invitedBy: invite.invitedBy, createdAt: now })
+      .onConflictDoUpdate({ target: [orgMembers.orgId, orgMembers.userId], set: { role: invite.role } });
     await tx.update(orgInvites).set({ acceptedAt: now, acceptedBy: input.userId }).where(eq(orgInvites.id, invite.id));
-    await grantOrg(tx, input.userId, invite.orgId, now);
-    return { ok: true, orgId: invite.orgId, orgLogin: invite.orgLogin } as const;
+    if (invite.role === "member") await revokeAdmin(tx, input.userId, invite.orgId);
+    await grantOrg(tx, input.userId, invite.orgId, invite.role, now);
+    return { ok: true, orgId: invite.orgId, orgLogin: invite.orgLogin, role: invite.role } as const;
   });
 }
 
@@ -341,7 +385,30 @@ async function endMembership(tx: Tx, orgId: string, memberId: string): Promise<b
     delete from ${permissionCache} pc using ${repos} r
     where pc.user_id = ${memberId} and pc.via = 'invite' and r.id = pc.repo_id and r.org_id = ${orgId}
   `);
+  await revokeAdmin(tx, memberId, orgId);
   return true;
+}
+
+/**
+ * An admin makes someone who joined by invite a member or an admin. Takes
+ * effect at once; GitHub's admin role, where they have it, stays whatever
+ * this says. False if the user isn't an admin or they didn't join by invite.
+ */
+export async function setMemberRole(database: Db, adminId: string, orgId: string, memberId: string, role: TeamRole, now = new Date()): Promise<boolean> {
+  return database.transaction(async (tx) => {
+    const [admin] = await tx.select({ orgId: orgAdmins.orgId }).from(orgAdmins).where(and(eq(orgAdmins.userId, adminId), eq(orgAdmins.orgId, orgId)));
+    if (!admin) return false;
+    await lockUser(tx, memberId);
+    const changed = await tx
+      .update(orgMembers)
+      .set({ role })
+      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, memberId)))
+      .returning({ userId: orgMembers.userId });
+    if (changed.length === 0) return false;
+    if (role === "admin") await grantAdmin(tx, memberId, orgId, now);
+    else await revokeAdmin(tx, memberId, orgId);
+    return true;
+  });
 }
 
 /** An admin removes someone who joined by invite. False if the user isn't an admin or they aren't a member. */

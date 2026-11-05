@@ -79,6 +79,13 @@ export function RepoView({
         </div>
       </dl>
 
+      <section id="review-settings" className="block review-settings-block" aria-labelledby="settings-title">
+        <h2 id="settings-title" className="block-title">
+          Reviews and schedule
+        </h2>
+        <RepoSettingsForm repoId={repo.id} branch={repo.defaultBranch} prReviews={repo.prReviews} schedule={repo.deepScanSchedule} nextDeepScanAt={repo.nextDeepScanAt} price={price} />
+      </section>
+
       <section className="block" aria-labelledby="open-title">
         <div className="panel-head">
           <h2 id="open-title" className="block-title">
@@ -130,13 +137,6 @@ export function RepoView({
           </a>
         </div>
         {pulls}
-      </section>
-
-      <section id="review-settings" className="block" aria-labelledby="settings-title">
-        <h2 id="settings-title" className="block-title">
-          Reviews and schedule
-        </h2>
-        <RepoSettingsForm repoId={repo.id} branch={repo.defaultBranch} prReviews={repo.prReviews} schedule={repo.deepScanSchedule} nextDeepScanAt={repo.nextDeepScanAt} price={price} />
       </section>
 
       <section className="block" aria-labelledby="history-title">

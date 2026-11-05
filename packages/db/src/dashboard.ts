@@ -70,7 +70,7 @@ export async function replaceAccess(
     await tx.delete(permissionCache).where(eq(permissionCache.userId, userId));
     await tx.delete(orgAdmins).where(eq(orgAdmins.userId, userId));
     if (access.repos.length > 0) await tx.insert(permissionCache).values(access.repos.map((repo) => ({ userId, ...repo, via: "github" as const, checkedAt: at })));
-    if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, checkedAt: at })));
+    if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, via: "github" as const, checkedAt: at })));
     await grantMemberships(tx, userId, at);
     await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
   });

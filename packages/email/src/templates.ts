@@ -255,12 +255,12 @@ export function scanPausedEmail(input: { org: string; repo: string; kind: "recon
  * and hyphens), never free-form display names, so the email can't be made to
  * say anything else.
  */
-export function teamInviteEmail(input: { org: string; inviter: string; url: string; days: number }): RenderedEmail {
+export function teamInviteEmail(input: { org: string; inviter: string; role?: "member" | "admin"; url: string; days: number }): RenderedEmail {
   return render({
     subject: `@${input.inviter} invited you to ${input.org} on Sandchest`,
     title: `Join ${input.org} on Sandchest.`,
     paragraphs: [
-      `@${input.inviter} invited you to see what Sandchest finds in ${input.org}’s code: real vulnerabilities, how they’re exploited, and how to fix them.`,
+      `@${input.inviter} invited you to see what Sandchest finds in ${input.org}’s code: real vulnerabilities, how they’re exploited, and how to fix them.${input.role === "admin" ? ` You’ll be an admin, so you can also change ${input.org}’s settings, billing and team.` : ""}`,
       `Sign in with a GitHub account that has this email address verified. The link works for ${input.days} days.`,
     ],
     button: { url: input.url, label: `Join ${input.org}` },

@@ -262,19 +262,21 @@ export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow;
     billing,
     repos: sampleRepos().map((repo) => ({ id: repo.id, fullName: repo.fullName, private: repo.private })),
   };
-  const person = (n: number, login: string, kind: "admin" | "github" | "member") => ({
+  const person = (n: number, login: string, kind: "github_admin" | "github" | "admin" | "member") => ({
     userId: `00000000-0000-4000-8000-00000000010${n}`,
     name: login[0]!.toUpperCase() + login.slice(1),
     login,
     image: null,
-    admin: kind === "admin",
-    member: kind === "member",
-    github: kind !== "member",
-    joinedAt: kind === "member" ? ago(60 * 24 * 3) : null,
+    admin: kind === "github_admin" || kind === "admin",
+    githubAdmin: kind === "github_admin",
+    member: kind === "admin" || kind === "member",
+    role: kind === "admin" || kind === "member" ? kind : null,
+    github: kind.startsWith("github"),
+    joinedAt: kind === "admin" || kind === "member" ? ago(60 * 24 * 3) : null,
   });
   const team: OrgTeam = {
-    people: [person(1, "you", "admin"), person(2, "maya", "github"), person(3, "sam", "member")],
-    invites: [{ id: "00000000-0000-4000-8000-000000000201", email: "jo@example.com", githubLogin: null, invitedBy: "you", createdAt: ago(60 * 5), expiresAt: ago(-60 * 24 * 6) }],
+    people: [person(1, "you", "github_admin"), person(2, "rae", "admin"), person(3, "maya", "github"), person(4, "sam", "member")],
+    invites: [{ id: "00000000-0000-4000-8000-000000000201", email: "jo@example.com", githubLogin: null, role: "member", invitedBy: "you", createdAt: ago(60 * 5), expiresAt: ago(-60 * 24 * 6) }],
   };
   return { orgs: [org], billing, team };
 }

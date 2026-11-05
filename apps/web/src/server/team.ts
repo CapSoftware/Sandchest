@@ -6,7 +6,7 @@
  * the dashboard's actions and the agent API.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { acceptInvite, createInvite, INVITE_TTL_DAYS, inviteByTokenHash, orgForAdmin, pendingInvitee, userById, type AcceptResult, type Invitee } from "@sandchest/db";
+import { acceptInvite, createInvite, INVITE_TTL_DAYS, inviteByTokenHash, orgForAdmin, pendingInvitee, userById, type AcceptResult, type Invitee, type TeamRole } from "@sandchest/db";
 import { teamInviteEmail } from "@sandchest/email";
 import { findGithubUser, GitHubError, readIdentity, type HttpOptions } from "@sandchest/github";
 import { withUtm } from "@/lib/analytics";
@@ -54,6 +54,7 @@ export type InviteOutcome =
       inviteId: string;
       /** Who it's for, as the admin will recognise them. */
       who: string;
+      role: TeamRole;
       /** The link: shown to the admin once, to send themselves when there's no email (or it didn't go). */
       link: string;
       emailed: boolean;
@@ -72,10 +73,11 @@ const REFUSED: Record<"not_admin" | "already_member" | "limited" | "self", strin
  * invite id: its old link stops working). Emails the link when the invitee
  * is an address and email is set up.
  */
-export async function inviteTeammate(userId: string, request: { orgId: string; invitee: string } | { resend: string }, github: GithubAccess = {}): Promise<InviteOutcome> {
+export async function inviteTeammate(userId: string, request: { orgId: string; invitee: string; role?: TeamRole } | { resend: string }, github: GithubAccess = {}): Promise<InviteOutcome> {
   const resend = "resend" in request;
+  let role: TeamRole = (!resend && request.role) || "member";
   const fail = async (outcome: string, error: string, orgId: string | null = null, kind: string | null = null): Promise<InviteOutcome> => {
-    await track("team_invite_sent", { userId, orgId, props: { kind, resend, outcome } });
+    await track("team_invite_sent", { userId, orgId, props: { kind, role, resend, outcome } });
     return { ok: false, error };
   };
   // Bounds GitHub lookups and emails per person on this instance; the database keeps the real limits.
@@ -86,7 +88,7 @@ export async function inviteTeammate(userId: string, request: { orgId: string; i
   if (resend) {
     const pending = await pendingInvitee(db(), userId, request.resend);
     if (!pending) return fail("not_admin", "That invite is no longer pending.");
-    ({ orgId, invitee } = pending);
+    ({ orgId, invitee, role } = pending);
   } else {
     orgId = request.orgId;
     const parsed = parseInvitee(request.invitee);
@@ -109,7 +111,7 @@ export async function inviteTeammate(userId: string, request: { orgId: string; i
   const kind = "email" in invitee ? "email" : "github";
 
   const token = randomBytes(32).toString("base64url");
-  const created = await createInvite(db(), { userId, orgId, invitee, tokenHash: hashToken(token) });
+  const created = await createInvite(db(), { userId, orgId, invitee, role, tokenHash: hashToken(token) });
   if (!created.ok) return fail(created.reason, REFUSED[created.reason], created.reason === "not_admin" ? null : orgId, kind);
 
   const link = inviteUrl(token);
@@ -117,14 +119,14 @@ export async function inviteTeammate(userId: string, request: { orgId: string; i
   if ("email" in invitee && mailer().enabled) {
     const inviter = await inviterLogin(userId);
     try {
-      await mailer().send({ to: [invitee.email], ...teamInviteEmail({ org: created.orgLogin, inviter, url: withUtm(link, "email", "team_invite"), days: INVITE_TTL_DAYS }) });
+      await mailer().send({ to: [invitee.email], ...teamInviteEmail({ org: created.orgLogin, inviter, role, url: withUtm(link, "email", "team_invite"), days: INVITE_TTL_DAYS }) });
       emailed = true;
     } catch (error) {
       logError("team: invite email failed", error);
     }
   }
-  await track("team_invite_sent", { userId, orgId, props: { kind, resend, outcome: "ok", emailed } });
-  return { ok: true, inviteId: created.id, who: "email" in invitee ? invitee.email : `@${invitee.githubLogin}`, link, emailed };
+  await track("team_invite_sent", { userId, orgId, props: { kind, role, resend, outcome: "ok", emailed } });
+  return { ok: true, inviteId: created.id, who: "email" in invitee ? invitee.email : `@${invitee.githubLogin}`, role, link, emailed };
 }
 
 function logError(what: string, error: unknown): void {

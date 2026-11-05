@@ -74,8 +74,8 @@ export function SettingsView({
           </div>
           <div className="settings-form">
             {billing && <BillingPanel org={org} billing={billing[index] ?? null} />}
-            <OrgSettingsForm orgId={org.id} threshold={org.settings.checkThreshold} email={org.settings.emailNotifications !== false} admin={org.admin} />
             <OrgReviewsForm orgId={org.id} mode={org.settings.prReviewsDefault ?? "auto"} admin={org.admin} />
+            <OrgSettingsForm orgId={org.id} threshold={org.settings.checkThreshold} email={org.settings.emailNotifications !== false} admin={org.admin} />
             {org.admin ? <TeamPanel orgId={org.id} org={org.login} rows={teams[org.id] ?? []} /> : memberOf.includes(org.id) && <LeaveTeam orgId={org.id} org={org.login} />}
             <div>
               <p className="field-legend">Hacker</p>

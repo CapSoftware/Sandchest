@@ -108,7 +108,8 @@ Every tool is also an HTTP endpoint under `https://www.sandchest.com/api/v1`, wi
 | `get_account` | `GET /accounts/{account}` | An account's settings, hacker and repositories |
 | `update_account` | `PATCH /accounts/{account}` | Check threshold, emails, company details, first target, PR reviews for new repositories (or all) |
 | `list_team` | `GET /accounts/{account}/team` | Who can see the account's repositories and how, and pending invites |
-| `invite_teammate` | `POST /accounts/{account}/team/invites` | Invite someone by email or GitHub username |
+| `invite_teammate` | `POST /accounts/{account}/team/invites` | Invite someone by email or GitHub username, as a member or an admin |
+| `set_teammate_role` | `PATCH /accounts/{account}/team/members/{user_id}` | Make someone who joined by invite a member or an admin |
 | `revoke_invite` | `DELETE /accounts/{account}/team/invites/{id}` | Revoke a pending invite |
 | `remove_teammate` | `DELETE /accounts/{account}/team/members/{user_id}` | Remove someone who joined by invite |
 | `update_hacker` | `PATCH /accounts/{account}/hacker` | The hacker's name, look and voice |

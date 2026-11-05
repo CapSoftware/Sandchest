@@ -2,7 +2,7 @@ export { createDb, db, type Db, type DbOptions } from "./client";
 export * from "./queries";
 export * as schema from "./schema";
 export type { EventName, EventProps, HackerProfile, OrgSettings } from "./schema";
-export { DEEP_SCAN_SCHEDULES, EVENT_NAMES, PR_REVIEW_MODES, type DeepScanSchedule, type PrReviewMode } from "./schema";
+export { DEEP_SCAN_SCHEDULES, EVENT_NAMES, PR_REVIEW_MODES, TEAM_ROLES, type DeepScanSchedule, type PrReviewMode, type TeamRole } from "./schema";
 export * from "./dashboard";
 export * from "./billing";
 export * from "./recruit";

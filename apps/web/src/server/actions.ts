@@ -178,10 +178,7 @@ export async function saveOrgReviews(orgId: string, _previous: OrgReviewsOutcome
   });
   if (changed === undefined) return { error: "Only an admin of this account can change its settings." };
   revalidatePath("/dashboard/settings");
-  if (changed > 0) {
-    revalidatePath("/dashboard/repos");
-    revalidatePath("/dashboard/repos/[id]", "page");
-  }
+  revalidatePath("/dashboard", "layout");
   return { saved: true, changed };
 }
 

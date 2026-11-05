@@ -5,7 +5,7 @@
  * action checks who may do it itself (the database writes are scoped to
  * the org's admins, or to the person).
  */
-import { leaveOrg, removeMember, revokeInvite } from "@sandchest/db";
+import { leaveOrg, removeMember, revokeInvite, setMemberRole, TEAM_ROLES, type TeamRole } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -17,6 +17,7 @@ import { db } from "./db";
 import { inviteTeammate, joinTeam, type InviteOutcome, type JoinOutcome } from "./team";
 
 const Id = z.uuid();
+const Role = z.enum(TEAM_ROLES);
 
 export type InviteState = { outcome?: InviteOutcome };
 
@@ -24,8 +25,9 @@ export type InviteState = { outcome?: InviteOutcome };
 export async function invitePerson(orgId: string, _previous: InviteState, form: FormData): Promise<InviteState> {
   const user = await viewer();
   const invitee = form.get("invitee");
-  if (!Id.safeParse(orgId).success || typeof invitee !== "string") return { outcome: { ok: false, error: "Enter an email address or a GitHub username." } };
-  const outcome = await inviteTeammate(user.id, { orgId, invitee });
+  const role = Role.safeParse(form.get("role") ?? "member");
+  if (!Id.safeParse(orgId).success || typeof invitee !== "string" || !role.success) return { outcome: { ok: false, error: "Enter an email address or a GitHub username." } };
+  const outcome = await inviteTeammate(user.id, { orgId, invitee, role: role.data });
   if (outcome.ok) revalidatePath("/dashboard/settings");
   return { outcome };
 }
@@ -53,6 +55,16 @@ export async function removeTeammate(orgId: string, memberId: string): Promise<v
   const ok = await removeMember(db(), user.id, orgId, memberId);
   await track("team_member_removed", { userId: user.id, orgId: ok ? orgId : null, props: { self: false, outcome: ok ? "ok" : "not_found" } });
   revalidatePath("/dashboard/settings");
+}
+
+/** An admin makes someone who joined by invite a member or an admin. */
+export async function changeTeammateRole(orgId: string, memberId: string, role: TeamRole): Promise<void> {
+  const user = await viewer();
+  const parsed = Role.safeParse(role);
+  if (!Id.safeParse(orgId).success || !Id.safeParse(memberId).success || !parsed.success) return;
+  const ok = await setMemberRole(db(), user.id, orgId, memberId, parsed.data);
+  await track("team_role_changed", { userId: user.id, orgId: ok ? orgId : null, props: { role: parsed.data, self: memberId === user.id, outcome: ok ? "ok" : "not_found" } });
+  revalidatePath("/dashboard", "layout");
 }
 
 export async function leaveTeam(orgId: string): Promise<void> {

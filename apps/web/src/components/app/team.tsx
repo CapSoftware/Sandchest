@@ -1,7 +1,7 @@
 "use client";
 import { useActionState, useEffect, useState } from "react";
 import type { InviteOutcome } from "@/server/team";
-import { invitePerson, leaveTeam, removeTeammate, resendInvite, revokeTeamInvite, type InviteState } from "@/server/team-actions";
+import { changeTeammateRole, invitePerson, leaveTeam, removeTeammate, resendInvite, revokeTeamInvite, type InviteState } from "@/server/team-actions";
 import { Avatar } from "./avatar";
 import { CopyText } from "./copy-text";
 import { Submit } from "./submit";
@@ -16,9 +16,14 @@ export interface TeamRow {
   name: string;
   /** "@login", or an invite's address. */
   handle: string | null;
+  /** What they can do: an admin also changes settings, billing and the team. For an invite, the role it gives. */
+  role: "admin" | "member";
+  /** Where the role comes from, and when: "on GitHub", "invited 3 days ago", "invite expires in 6 days". */
   note: string;
   /** Removable (joined by invite) or, for invites, pending. */
   actionable: boolean;
+  /** Joined by invite and not an admin on GitHub: an admin can switch them between member and admin. */
+  roleEditable: boolean;
   expired?: boolean;
 }
 
@@ -27,15 +32,15 @@ function Sent({ outcome }: { outcome: Extract<InviteOutcome, { ok: true }> }) {
   if (outcome.emailed) {
     return (
       <p className="team-status" role="status">
-        Invite sent to {outcome.who}. It works for 7 days.
+        Invited {outcome.who} as {outcome.role === "admin" ? "an admin" : "a member"}. The email’s link works for 7 days.
       </p>
     );
   }
   return (
     <div className="team-link" role="status">
       <p className="field-help">
-        {outcome.who.startsWith("@") ? `Send ${outcome.who} this link.` : `Email isn’t set up here, so send ${outcome.who} this link.`} It works for 7 days, only for them, and
-        won’t be shown again.
+        {outcome.who.startsWith("@") ? `Send ${outcome.who} this link` : `Email isn’t set up here, so send ${outcome.who} this link`} to join as {outcome.role === "admin" ? "an admin" : "a member"}. It works
+        for 7 days, only for them, and won’t be shown again.
       </p>
       <code className="team-link-url">{outcome.link}</code>
       <CopyText text={outcome.link} label="Copy invite link" />
@@ -54,6 +59,14 @@ function InviteForm({ orgId, org }: { orgId: string; org: string }) {
           <span className="sr-only">Email or GitHub username</span>
           <input name="invitee" type="text" inputMode="email" autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={254} placeholder="Email or GitHub username" required aria-label={`Invite someone to ${org}`} />
         </label>
+        <div className="segments team-roles" role="radiogroup" aria-label="Role">
+          {(["member", "admin"] as const).map((role) => (
+            <label key={role} className="segment">
+              <input type="radio" name="role" value={role} defaultChecked={role === "member"} />
+              <span>{role === "admin" ? "Admin" : "Member"}</span>
+            </label>
+          ))}
+        </div>
         <Submit className="key key-primary" pending="Inviting…" track="team-invite">
           Invite
         </Submit>
@@ -132,8 +145,8 @@ export function TeamPanel({ orgId, org, rows }: { orgId: string; org: string; ro
     <div className="team">
       <p className="field-legend">Team</p>
       <p className="field-help">
-        Anyone who can push to a repository on GitHub sees it here once they sign in. Invite anyone else: they’ll see every repository Sandchest watches on {org}, and can
-        scan, review and resolve findings. Settings and billing stay with admins.
+        Members see every repository Sandchest watches on {org}, and scan, review and resolve findings. Admins can also change settings, billing and the team. People who can push
+        to a repository on GitHub see it once they sign in; invite anyone else.
       </p>
       <InviteForm orgId={orgId} org={org} />
       {rows.length > 0 && (
@@ -145,11 +158,19 @@ export function TeamPanel({ orgId, org, rows }: { orgId: string; org: string; ro
                 <span className="team-name">{row.name}</span>
                 {row.handle && row.handle !== row.name && <span className="team-handle">{row.handle}</span>}
               </span>
-              <span className="team-note">{row.note}</span>
+              <span className="team-note">
+                <span className={row.role === "admin" ? "team-role team-role-admin" : "team-role"}>{row.role === "admin" ? "Admin" : "Member"}</span> {row.note}
+              </span>
               {row.kind === "invite" ? (
                 <InviteActions row={row} />
               ) : row.actionable ? (
                 <span className="team-actions">
+                  {row.roleEditable &&
+                    (row.role === "admin" ? (
+                      <Confirm label="Make member" confirm="Make member?" track="team-role-member" action={() => changeTeammateRole(orgId, row.id, "member")} />
+                    ) : (
+                      <Confirm label="Make admin" confirm="Make admin?" track="team-role-admin" action={() => changeTeammateRole(orgId, row.id, "admin")} />
+                    ))}
                   <Confirm label="Remove" confirm={`Remove ${row.handle ?? row.name}?`} track="team-member-remove" action={() => removeTeammate(orgId, row.id)} />
                 </span>
               ) : (

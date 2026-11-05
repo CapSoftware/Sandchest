@@ -1,3 +1,5 @@
+-- Live database: never wait long for a lock (and stall everything queued behind it); fail and retry instead.
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
 CREATE TABLE "org_invites" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,
@@ -5,6 +7,7 @@ CREATE TABLE "org_invites" (
 	"email" text,
 	"github_user_id" bigint,
 	"github_login" text,
+	"role" text DEFAULT 'member' NOT NULL,
 	"invited_by" uuid,
 	"expires_at" timestamp with time zone NOT NULL,
 	"accepted_at" timestamp with time zone,
@@ -12,17 +15,21 @@ CREATE TABLE "org_invites" (
 	"revoked_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "org_invites_token_hash_unique" UNIQUE("token_hash"),
-	CONSTRAINT "org_invites_one_invitee" CHECK (("org_invites"."email" is null) <> ("org_invites"."github_user_id" is null))
+	CONSTRAINT "org_invites_one_invitee" CHECK (("org_invites"."email" is null) <> ("org_invites"."github_user_id" is null)),
+	CONSTRAINT "org_invites_role" CHECK ("org_invites"."role" in ('member', 'admin'))
 );
 --> statement-breakpoint
 CREATE TABLE "org_members" (
 	"org_id" uuid NOT NULL,
 	"user_id" uuid NOT NULL,
+	"role" text DEFAULT 'member' NOT NULL,
 	"invited_by" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "org_members_org_id_user_id_pk" PRIMARY KEY("org_id","user_id")
+	CONSTRAINT "org_members_org_id_user_id_pk" PRIMARY KEY("org_id","user_id"),
+	CONSTRAINT "org_members_role" CHECK ("org_members"."role" in ('member', 'admin'))
 );
 --> statement-breakpoint
+ALTER TABLE "org_admins" ADD COLUMN "via" text DEFAULT 'github' NOT NULL;--> statement-breakpoint
 ALTER TABLE "permission_cache" ADD COLUMN "via" text DEFAULT 'github' NOT NULL;--> statement-breakpoint
 ALTER TABLE "org_invites" ADD CONSTRAINT "org_invites_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invites" ADD CONSTRAINT "org_invites_invited_by_users_id_fk" FOREIGN KEY ("invited_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint

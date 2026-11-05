@@ -575,9 +575,9 @@ describe.skipIf(!available)("team and review settings", () => {
 
     const team = await api(aliceKey, "GET", "/accounts/acme/team");
     expect(team.status).toBe(200);
-    expect(team.body.people.map((p: { login: string; access: string }) => [p.login, p.access])).toEqual([
-      ["alice", "admin"],
-      ["bob", "github"],
+    expect(team.body.people.map((p: { login: string; role: string; via: string }) => [p.login, p.role, p.via])).toEqual([
+      ["alice", "admin", "github"],
+      ["bob", "member", "github"],
     ]);
 
     const invited = await api(aliceKey, "POST", "/accounts/acme/team/invites", { invitee: "Dana@Example.com" });

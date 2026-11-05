@@ -22,6 +22,9 @@ import {
   leaveOrg,
   memberOrgIds,
   notificationRecipients,
+  orgAdminContacts,
+  orgForAdmin,
+  setMemberRole,
   removeInstallation,
   removeMember,
   repoForUser,
@@ -41,6 +44,11 @@ import { resetConfig } from "@/server/config";
 import { setMailer } from "@/server/mailer";
 import { resetLimits } from "@/server/rate-limit";
 import { hashToken, inviteTeammate, joinTeam, parseInvitee } from "@/server/team";
+
+/** Whether `person` may change acme's settings right now. */
+const isAcmeAdmin = async (person: string) => !!(await orgForAdmin(database, person, ids.acme));
+/** Where each of a person's admin roles comes from. */
+const adminVia = async (person: string) => (await database.select().from(schema.orgAdmins)).filter((row) => row.userId === person).map((row) => row.via);
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
 const NAME = `sandchest_team_test_${process.pid}`;
@@ -185,6 +193,7 @@ beforeEach(async () => {
   await database.delete(schema.orgInvites);
   await database.delete(schema.orgMembers);
   await database.$client`delete from permission_cache where via = 'invite'`;
+  await database.$client`delete from org_admins where via = 'invite'`;
 });
 
 const tokenOf = (link: string) => link.slice(`${BASE}/invite/`.length);
@@ -350,7 +359,7 @@ describe("joining", () => {
     expect(await repoNames(ids.carol)).toEqual([]);
     const token = await invite("carol@work.example");
     const joined = await joinTeam(ids.carol, token, github("carol"));
-    expect(joined).toEqual({ ok: true, orgId: ids.acme, orgLogin: "acme" });
+    expect(joined).toEqual({ ok: true, orgId: ids.acme, orgLogin: "acme", role: "member" });
     expect(await repoNames(ids.carol)).toEqual(["acme/api", "acme/secret", "acme/web"]);
     expect((await dashboardRepos(database, ids.carol)).map((r) => r.fullName).sort()).toEqual(["acme/api", "acme/secret", "acme/web"]);
     expect(await findingForUser(database, ids.carol, ids.apiFinding)).toBeDefined();
@@ -539,5 +548,107 @@ describe("the team as admins see it", () => {
     expect((await adminTeams(database, ids.bob)).size).toBe(0);
     expect((await adminTeams(database, ids.carol)).size).toBe(0);
     expect([...(await adminTeams(database, ids.erin)).keys()]).toEqual([ids.globex]);
+  });
+});
+
+describe("admins and members", () => {
+  test.skipIf(!available)("an invite as an admin gives the admin role: settings, billing and the team", async () => {
+    const outcome = await inviteTeammate(ids.alice, { orgId: ids.acme, invitee: "@carol", role: "admin" }, github("alice"));
+    expect(outcome).toMatchObject({ ok: true, role: "admin" });
+    if (!outcome.ok) return;
+    expect(await joinTeam(ids.carol, tokenOf(outcome.link), github("carol"))).toMatchObject({ ok: true, role: "admin" });
+    expect(await isAcmeAdmin(ids.carol)).toBe(true);
+    expect(await adminVia(ids.carol)).toEqual(["invite"]);
+    expect(await updateOrgSettings(database, ids.carol, ids.acme, { checkThreshold: "low" })).toBe(true);
+    await updateOrgSettings(database, ids.alice, ids.acme, { checkThreshold: "high" });
+    expect((await adminTeams(database, ids.carol)).has(ids.acme)).toBe(true);
+    // They can invite and manage people in turn.
+    const next = await inviteTeammate(ids.carol, { orgId: ids.acme, invitee: "@dave" }, github("carol"));
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect((await joinTeam(ids.dave, tokenOf(next.link), github("dave"))).ok).toBe(true);
+    expect(await setMemberRole(database, ids.carol, ids.acme, ids.dave, "admin")).toBe(true);
+    expect(await removeMember(database, ids.carol, ids.acme, ids.dave)).toBe(true);
+    // Billing and finding emails reach them like any admin.
+    expect((await orgAdminContacts(database, ids.acme)).find((a) => a.userId === ids.carol)).toMatchObject({ fresh: true });
+    // Still an admin after GitHub is read again, and nothing of globex.
+    await readGithubAccess();
+    expect(await isAcmeAdmin(ids.carol)).toBe(true);
+    expect(!!(await orgForAdmin(database, ids.carol, ids.globex))).toBe(false);
+  });
+
+  test.skipIf(!available)("only an admin of the org changes roles: not members, not pushers, not another org's admin, not yourself as a member", async () => {
+    await joinTeam(ids.carol, await invite("@carol"), github("carol"));
+    await joinTeam(ids.dave, await invite("@dave"), github("dave"));
+    expect(await setMemberRole(database, ids.carol, ids.acme, ids.carol, "admin")).toBe(false);
+    expect(await setMemberRole(database, ids.carol, ids.acme, ids.dave, "admin")).toBe(false);
+    expect(await setMemberRole(database, ids.bob, ids.acme, ids.carol, "admin")).toBe(false);
+    expect(await setMemberRole(database, ids.erin, ids.acme, ids.carol, "admin")).toBe(false);
+    expect(await isAcmeAdmin(ids.carol)).toBe(false);
+    expect(await isAcmeAdmin(ids.dave)).toBe(false);
+    // Nobody invited, nothing to change.
+    expect(await setMemberRole(database, ids.alice, ids.acme, ids.erin, "admin")).toBe(false);
+    expect(await isAcmeAdmin(ids.erin)).toBe(false);
+  });
+
+  test.skipIf(!available)("making someone a member, or removing them, takes the admin role away at once and for good", async () => {
+    await joinTeam(ids.carol, await invite("@carol", "alice"), github("carol"));
+    expect(await setMemberRole(database, ids.alice, ids.acme, ids.carol, "admin")).toBe(true);
+    expect(await isAcmeAdmin(ids.carol)).toBe(true);
+    expect(await setMemberRole(database, ids.alice, ids.acme, ids.carol, "member")).toBe(true);
+    expect(await isAcmeAdmin(ids.carol)).toBe(false);
+    expect(await repoNames(ids.carol)).toHaveLength(3);
+    await readGithubAccess();
+    expect(await isAcmeAdmin(ids.carol)).toBe(false);
+
+    expect(await setMemberRole(database, ids.alice, ids.acme, ids.carol, "admin")).toBe(true);
+    expect(await removeMember(database, ids.alice, ids.acme, ids.carol)).toBe(true);
+    expect(await isAcmeAdmin(ids.carol)).toBe(false);
+    expect(await repoNames(ids.carol)).toEqual([]);
+    expect((await orgAdminContacts(database, ids.acme)).some((a) => a.userId === ids.carol)).toBe(false);
+    await readGithubAccess();
+    expect(await isAcmeAdmin(ids.carol)).toBe(false);
+  });
+
+  test.skipIf(!available)("leaving as an admin takes the role too", async () => {
+    await joinTeam(ids.carol, await invite("@carol"), github("carol"));
+    await setMemberRole(database, ids.alice, ids.acme, ids.carol, "admin");
+    expect(await leaveOrg(database, ids.carol, ids.acme)).toBe(true);
+    expect(await isAcmeAdmin(ids.carol)).toBe(false);
+  });
+
+  test.skipIf(!available)("GitHub's admin role never goes, whatever the invite says", async () => {
+    // Alice is acme's admin on GitHub, and also joins by invite (from Erin's side of things: someone added her).
+    expect(await adminVia(ids.alice)).toEqual(["github"]);
+    await database.$client`insert into org_members (org_id, user_id, role) values (${ids.acme}, ${ids.alice}, 'admin')`;
+    await readGithubAccess();
+    expect(await adminVia(ids.alice)).toEqual(["github"]);
+    expect(await setMemberRole(database, ids.alice, ids.acme, ids.alice, "member")).toBe(true);
+    expect(await isAcmeAdmin(ids.alice)).toBe(true);
+    expect(await removeMember(database, ids.alice, ids.acme, ids.alice)).toBe(true);
+    expect(await isAcmeAdmin(ids.alice)).toBe(true);
+    expect(await repoNames(ids.alice)).toHaveLength(3);
+  });
+
+  test.skipIf(!available)("an invite sent again keeps its role; an invite from an admin who was made a member stops working", async () => {
+    await joinTeam(ids.carol, await invite("@carol"), github("carol"));
+    await setMemberRole(database, ids.alice, ids.acme, ids.carol, "admin");
+    const sent = await inviteTeammate(ids.carol, { orgId: ids.acme, invitee: "@dave", role: "admin" }, github("carol"));
+    expect(sent).toMatchObject({ ok: true, role: "admin" });
+    const [row] = (await database.select().from(schema.orgInvites)).filter((invite) => invite.githubUserId === 504 && !invite.revokedAt);
+    const again = await inviteTeammate(ids.carol, { resend: row!.id }, github("carol"));
+    expect(again).toMatchObject({ ok: true, role: "admin" });
+    if (!again.ok) return;
+    await setMemberRole(database, ids.alice, ids.acme, ids.carol, "member");
+    expect(await joinTeam(ids.dave, tokenOf(again.link), github("dave"))).toMatchObject({ ok: false, reason: "inviter_gone" });
+    expect(await isAcmeAdmin(ids.dave)).toBe(false);
+  });
+
+  test.skipIf(!available)("a member can't invite, as a member or an admin", async () => {
+    await joinTeam(ids.carol, await invite("@carol"), github("carol"));
+    for (const role of ["member", "admin"] as const) {
+      expect(await inviteTeammate(ids.carol, { orgId: ids.acme, invitee: "@dave", role }, github("carol"))).toMatchObject({ ok: false });
+    }
+    expect((await database.select().from(schema.orgInvites)).filter((invite) => invite.githubUserId === 504)).toHaveLength(0);
   });
 });

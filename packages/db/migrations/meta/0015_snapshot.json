@@ -1273,6 +1273,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "via": {
+          "name": "via",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'github'"
+        },
         "checked_at": {
           "name": "checked_at",
           "type": "timestamp with time zone",
@@ -1497,6 +1504,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
+        },
         "invited_by": {
           "name": "invited_by",
           "type": "uuid",
@@ -1694,6 +1708,10 @@
         "org_invites_one_invitee": {
           "name": "org_invites_one_invitee",
           "value": "(\"org_invites\".\"email\" is null) <> (\"org_invites\".\"github_user_id\" is null)"
+        },
+        "org_invites_role": {
+          "name": "org_invites_role",
+          "value": "\"org_invites\".\"role\" in ('member', 'admin')"
         }
       },
       "isRLSEnabled": false
@@ -1713,6 +1731,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
         },
         "invited_by": {
           "name": "invited_by",
@@ -1797,7 +1822,12 @@
       },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "org_members_role": {
+          "name": "org_members_role",
+          "value": "\"org_members\".\"role\" in ('member', 'admin')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.org_notices": {
