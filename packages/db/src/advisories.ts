@@ -293,10 +293,10 @@ export function matchKey(pkg: PackageVersion): string {
   return `${pkg.ecosystem}\0${pkg.name}\0${pkg.version}`;
 }
 
-/** Every followed change feed and how far it has been read (ms since the epoch). */
-export async function feedCursors(database: Db): Promise<Array<{ ecosystem: string; cursor: number }>> {
-  const rows = await database.select({ ecosystem: advisoryFeeds.ecosystem, cursor: advisoryFeeds.cursor }).from(advisoryFeeds);
-  return rows.map((row) => ({ ecosystem: row.ecosystem, cursor: Number(row.cursor) }));
+/** Every followed change feed: how far it has been read (ms since the epoch), and what was handled near there. */
+export async function feedCursors(database: Db): Promise<Array<{ ecosystem: string; cursor: number; handled: Set<string> }>> {
+  const rows = await database.select({ ecosystem: advisoryFeeds.ecosystem, cursor: advisoryFeeds.cursor, handled: advisoryFeeds.handled }).from(advisoryFeeds);
+  return rows.map((row) => ({ ecosystem: row.ecosystem, cursor: Number(row.cursor), handled: new Set(row.handled) }));
 }
 
 /** Runs `fn` unless another feed sync is running, so syncs started a minute apart never overlap. */
@@ -307,11 +307,11 @@ export async function exclusiveFeedSync<T>(database: Db, fn: () => Promise<T>): 
   });
 }
 
-export async function setFeedCursor(database: Db, ecosystem: string, cursor: number): Promise<void> {
+export async function setFeedCursor(database: Db, ecosystem: string, cursor: number, handled: string[]): Promise<void> {
   await database
     .insert(advisoryFeeds)
-    .values({ ecosystem, cursor: String(cursor) })
-    .onConflictDoUpdate({ target: advisoryFeeds.ecosystem, set: { cursor: String(cursor), syncedAt: sql`now()` } });
+    .values({ ecosystem, cursor: String(cursor), handled })
+    .onConflictDoUpdate({ target: advisoryFeeds.ecosystem, set: { cursor: String(cursor), handled, syncedAt: sql`now()` } });
 }
 
 // ---- What people see ----------------------------------------------------------

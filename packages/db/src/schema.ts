@@ -948,6 +948,8 @@ export const advisoryFeeds = pgTable("advisory_feeds", {
   ecosystem: text("ecosystem").primaryKey(),
   /** The newest change already handled (ms since the epoch, as text: OSV stamps are finer than Postgres keeps). */
   cursor: text("cursor").notNull(),
+  /** `id@modified` of the changes already handled within the overlap behind the cursor, so a re-read skips them. */
+  handled: jsonb("handled").$type<string[]>().notNull().default([]),
   syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

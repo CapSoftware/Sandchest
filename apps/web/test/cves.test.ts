@@ -241,8 +241,12 @@ describe("CVE directory", () => {
       ["acme/web", "product"],
       ["acme/api", "none"],
     ]);
-    // Syncing again with nothing new changes nothing.
-    expect((await syncAdvisories()).added).toEqual([]);
+    // Syncing again with nothing new fetches, checks and writes nothing, though the change is still in the re-read overlap.
+    const [records, matches] = [osv.calls.records, osv.calls.matches];
+    const feedsBefore = await database.select().from(schema.advisoryFeeds);
+    expect(await syncAdvisories()).toEqual({ changed: 0, packages: 0, added: [], errors: [] });
+    expect([osv.calls.records, osv.calls.matches]).toEqual([records, matches]);
+    expect(await database.select().from(schema.advisoryFeeds)).toEqual(feedsBefore);
   });
 
   test("a withdrawn advisory is resolved everywhere at the next feed sync", async () => {

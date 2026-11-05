@@ -19,6 +19,7 @@ CREATE TABLE "advisories" (
 CREATE TABLE "advisory_feeds" (
 	"ecosystem" text PRIMARY KEY NOT NULL,
 	"cursor" text NOT NULL,
+	"handled" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"synced_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint

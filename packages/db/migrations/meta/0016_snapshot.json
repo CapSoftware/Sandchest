@@ -1,5 +1,5 @@
 {
-  "id": "16351562-4857-43ed-b5b4-2eddce84d11e",
+  "id": "85fa1a4f-0176-4872-be14-c7aaa25ae36b",
   "prevId": "1d7bfaf8-ae89-4820-b7ff-9c366f91dac4",
   "version": "7",
   "dialect": "postgresql",
@@ -301,6 +301,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "handled": {
+          "name": "handled",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "synced_at": {
           "name": "synced_at",

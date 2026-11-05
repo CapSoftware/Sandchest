@@ -230,14 +230,18 @@ export interface SyncResult {
  */
 export async function syncAdvisories(): Promise<SyncResult> {
   const result: SyncResult = { changed: 0, packages: 0, added: [], errors: [] };
-  await mapLimit(await feedCursors(db()), FEED_CONCURRENCY, async ({ ecosystem, cursor }) => {
+  await mapLimit(await feedCursors(db()), FEED_CONCURRENCY, async ({ ecosystem, cursor, handled }) => {
     try {
+      // The overlap behind the cursor is read again for records OSV stamped late; what was handled there is skipped.
       const read = await catalog().changedSince(ecosystem, cursor - FEED_OVERLAP_MS);
-      // Newest first. A burst bigger than one sweep should take (OSV re-stamping an ecosystem) is handled up
+      const unseen = read.changes.filter((change) => !handled.has(seenKey(change)));
+      // Nothing new: nothing is fetched, checked or written.
+      if (unseen.length === 0) return;
+      // Newest first. A burst bigger than one sync should take (OSV re-stamping an ecosystem) is handled up
       // to the cap and the cursor moves past the rest: the daily full check of every inventory covers them.
-      const changes = read.changes.slice(0, FEED_MAX_CHANGES);
-      const newestRead = Math.max(cursor, ...read.changes.slice(0, 1).map((change) => stampMs(change.modified) ?? 0));
-      if (changes.length === 0) return setFeedCursor(db(), ecosystem, cursor);
+      const changes = unseen.slice(0, FEED_MAX_CHANGES);
+      const newestRead = Math.max(cursor, ...unseen.slice(0, 1).map((change) => stampMs(change.modified) ?? 0));
+      const window = read.changes.filter((change) => (stampMs(change.modified) ?? 0) >= newestRead - FEED_OVERLAP_MS).map(seenKey);
       result.changed += changes.length;
       const records = new Map<string, OsvRecord>();
       await mapLimit(changes, RECORD_CONCURRENCY, async (change) => {
@@ -263,12 +267,16 @@ export async function syncAdvisories(): Promise<SyncResult> {
         result.packages += installed.length;
         result.added.push(...(await checkPackages(installed, "feed", records)));
       }
-      await setFeedCursor(db(), ecosystem, newestRead);
+      await setFeedCursor(db(), ecosystem, newestRead, window);
     } catch (error) {
       result.errors.push(`${ecosystem}: ${describeError(error)}`);
     }
   });
   return result;
+}
+
+function seenKey(change: Change): string {
+  return `${change.id}@${change.modified}`;
 }
 
 /** Checks these installed versions against OSV across every repository that installs them. */
