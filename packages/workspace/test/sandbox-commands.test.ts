@@ -21,6 +21,19 @@ function stubbed(): { workspace: SandboxWorkspace; commands: RunCommandParams[] 
   return { workspace: new Ctor(sandbox), commands };
 }
 
+describe("SandboxWorkspace.installIndexer", () => {
+  test("downloads once, however many times it is asked, and never into the checkout", async () => {
+    const { workspace, commands } = stubbed();
+    const binary = { url: "https://example.com/sandchest-index", sha256: "0".repeat(64) };
+    await Promise.all([workspace.installIndexer(binary), workspace.installIndexer(binary)]);
+    await workspace.installIndexer(binary);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ cmd: "sh", cwd: "/vercel/sandbox" });
+    expect(commands[0]!.args).toContain("/vercel/sandbox/bin/sandchest-index");
+    expect(commands[0]!.args!.some((arg) => arg.includes("--retry 6"))).toBe(true);
+  });
+});
+
 describe("SandboxWorkspace.startDetached", () => {
   test("runs in the checkout with the base environment, like exec", async () => {
     const { workspace, commands } = stubbed();

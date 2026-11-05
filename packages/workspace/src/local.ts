@@ -34,6 +34,7 @@ export class LocalWorkspace implements Workspace {
   private readonly env: Record<string, string>;
   private readonly running = new Set<ChildProcess>();
   private indexer: { close(): Promise<void> } | undefined;
+  private installing: Promise<string> | undefined;
   private destroyed = false;
 
   private constructor(private readonly dir: string) {
@@ -94,12 +95,22 @@ export class LocalWorkspace implements Workspace {
     return readFile(real, "utf8");
   }
 
+  installIndexer(binary: IndexerBinary): Promise<void> {
+    return this.install(binary).then(() => undefined);
+  }
+
   async startIndexer(binary: IndexerBinary): Promise<IndexerHandle> {
+    const path = await this.install(binary);
     this.assertUsable();
-    const path = "path" in binary ? binary.path : await this.download(binary);
     const daemon = await spawnIndexer(path, this.root);
     this.indexer = daemon;
     return { url: daemon.url, token: daemon.token };
+  }
+
+  private install(binary: IndexerBinary): Promise<string> {
+    this.assertUsable();
+    this.installing ??= "path" in binary ? Promise.resolve(binary.path) : this.download(binary);
+    return this.installing;
   }
 
   /** Fetches a release binary into the workspace and checks its digest before it is ever executed. */

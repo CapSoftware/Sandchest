@@ -20,8 +20,14 @@ export interface Workspace extends AsyncDisposable {
   /** Reads a UTF-8 file by checkout-relative path. Refuses paths that resolve outside the checkout. */
   readFile(path: string): Promise<string>;
   /**
+   * Puts the indexer binary in place without starting it. Safe to call while
+   * `clone` runs, so the download is off the critical path; `startIndexer`
+   * reuses it. Repeat calls share one install.
+   */
+  installIndexer(binary: IndexerBinary): Promise<void>;
+  /**
    * Starts the indexer daemon on the checkout and resolves once it answers.
-   * `destroy()` stops it.
+   * Installs the binary first unless `installIndexer` already has. `destroy()` stops it.
    */
   startIndexer(binary: IndexerBinary): Promise<IndexerHandle>;
   /** Stops anything still running and deletes everything. Idempotent. */

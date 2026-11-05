@@ -15,6 +15,7 @@ import {
   markDeepScanned,
   markFixed,
   markStale,
+  newerPrReview,
   noteScanEvent,
   notificationRecipients,
   openFindings,
@@ -52,7 +53,7 @@ import {
   type ThreatModel,
 } from "@sandchest/engine/scan";
 import { checkResult, GitHubError, notReviewed, parsePatch, prSummary, prSummaryUnfinished, reviewComment, shown, type Installation, type PullFile, type ReviewComment } from "@sandchest/github";
-import type { IndexerBinary, Workspace } from "@sandchest/workspace";
+import type { IndexerBinary, IndexerHandle, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
@@ -64,8 +65,15 @@ import { captureException } from "./sentry";
 
 /** Concurrent scans per org (SPEC §4), in each lane: recon, PR reviews, and everything else (see `claimScanSlot`). */
 export const ORG_CONCURRENCY = 2;
-/** The engine's wall-clock budget inside a workflow step: under Vercel's 800 s function limit. */
+/** PR reviews are short and someone is waiting on each one, so their lane is wider. */
+export const PR_REVIEW_CONCURRENCY = 4;
+/** The step's wall-clock budget for setup plus the engine: under Vercel's 800 s function limit. */
 const SCAN_BUDGET_MS = 12 * 60_000;
+/** Setup (sandbox, clone, indexer) spends no model calls, so it is retried in the step, with backoff, before a scan fails. */
+const SETUP_RETRY_DELAYS_MS = [10_000, 30_000];
+/** No new setup attempt starts after this long, so the engine keeps most of the budget. */
+const SETUP_DEADLINE_MS = 4 * 60_000;
+const CLONE_TIMEOUT_MS = 4 * 60_000;
 const CHECK_NAME = "Sandchest";
 
 /** A scan's job is done; retries and duplicate starts must not redo it. */
@@ -80,6 +88,12 @@ export type BeginResult = { state: "running" | "queued" | "done" };
 export async function beginScan(scanId: string): Promise<BeginResult> {
   const scan = await requireScan(scanId);
   if (["completed", "failed", "cancelled", "refused", "publishing"].includes(scan.status)) return { state: "done" };
+  // A push that lands while this review is still queued makes it moot: the newer head is reviewed instead.
+  if (scan.status === "queued" && scan.kind === "pr_review" && scan.prNumber && (await newerPrReview(db(), { id: scan.id, repoId: scan.repoId, prNumber: scan.prNumber, headSha: scan.headSha, createdAt: scan.createdAt }))) {
+    await settleScan(scan, "release").catch((error: unknown) => console.error(`Releasing superseded scan ${scan.id} failed: ${describeError(error)}`));
+    await updateScan(db(), scan.id, { status: "cancelled", error: "A newer push to this pull request is reviewed instead.", finishedAt: new Date() });
+    return { state: "done" };
+  }
   if (scan.status === "queued" && scan.billing === null && billingEnabled()) {
     const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, await scanCredits(scan), true, { evenWhenEmpty: scan.kind === "fix_check" });
     if (!gate.ok) {
@@ -93,13 +107,14 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
     await noteScanEvent(db(), scan.id, RECON_WAIT, `Waiting for recon to map ${scan.repo.fullName} first, usually under a minute. The deep scan starts from that map as soon as it’s done.`);
     return { state: "queued" };
   }
-  if (!(await claimScanSlot(db(), scan.id, scan.orgId, ORG_CONCURRENCY))) {
+  const limit = scan.kind === "pr_review" ? PR_REVIEW_CONCURRENCY : ORG_CONCURRENCY;
+  if (!(await claimScanSlot(db(), scan.id, scan.orgId, limit))) {
     // Said once (a repeat of the last line is skipped), so the feed explains the wait.
-    const what = scan.kind === "recon" ? "repositories are being mapped" : "scans are already running";
+    const what = scan.kind === "recon" ? "repositories are being mapped" : scan.kind === "pr_review" ? "reviews are already running" : "scans are already running";
     const message =
       scan.kind === "fix_check"
         ? `Waiting for a free slot: a repository's fix checks run one at a time, at most one a minute, with up to ${ORG_CONCURRENCY} scans at once for ${scan.repo.org.githubLogin}. Later pushes are checked in this one.`
-        : `Waiting for a free slot: ${ORG_CONCURRENCY} ${what} for ${scan.repo.org.githubLogin}. This starts as soon as one finishes.`;
+        : `Waiting for a free slot: ${limit} ${what} for ${scan.repo.org.githubLogin}. This starts as soon as one finishes.`;
     await noteScanEvent(db(), scan.id, "queue", message);
     return { state: "queued" };
   }
@@ -166,22 +181,28 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     events.write(event.type === "stage" ? `stage:${event.stage}` : event.type, event.type === "finding" ? `Found: ${event.finding.title}` : event.message);
   events.write("stage:setup", "Starting a fresh sandbox and fetching the code…");
   const settings = config();
-  const workspace: Workspace =
-    settings.workspace === "sandbox" ? await SandboxWorkspace.create({ timeoutMs: SCAN_BUDGET_MS + 5 * 60_000 }) : await LocalWorkspace.create();
+  const started = Date.now();
+  const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`;
+  // "HEAD" is the remote's default branch as it is now, so a renamed default branch still clones.
+  const preparing = prepareWorkspace({
+    open: () => (settings.workspace === "sandbox" ? SandboxWorkspace.create({ timeoutMs: SCAN_BUDGET_MS + 5 * 60_000 }) : LocalWorkspace.create()),
+    clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
+    binary: indexerBinary(settings.workspace),
+    started,
+    onRetry: (message) => onEvent({ type: "progress", message }),
+  });
 
   try {
-    const ref = scan.headSha === "HEAD" ? scan.repo.defaultBranch : scan.headSha;
-    // Clone while the diff and the stored threat model load.
-    const [, pullFiles, memory] = await Promise.all([
-      installation.cloneToken(scan.repo.githubRepoId).then((token) => workspace.clone({ url: `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`, ref }, { depth: 1, token })),
+    // Set up while the diff and the stored threat model load.
+    const [{ headSha, handle }, pullFiles, memory] = await Promise.all([
+      preparing,
       scan.kind === "pr_review" && scan.prNumber ? installation.pullFiles(scan.repo.fullName, scan.prNumber) : Promise.resolve(undefined),
       storedThreatModel(db(), scan.repo.id),
     ]);
-    const headSha = (await workspace.exec(["git", "rev-parse", "HEAD"])).stdout.trim();
-    const handle = await workspace.startIndexer(indexerBinary(settings.workspace));
     const indexer = createIndexerClient({ url: handle.url, token: handle.token });
     const model = parseThreatModel(memory?.threatModel);
-    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS } };
+    // Setup already spent part of the step's time.
+    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };
 
     if (scan.kind === "recon") {
       const result = await runRecon(common);
@@ -236,9 +257,10 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     if (scan.kind === "deep") await markDeepScanned(db(), scan.repo.id, new Date(), report.repo.loc);
     return { findings: ids.length };
   } catch (error) {
-    if (error instanceof ScanRefusedError) {
-      await updateScan(db(), scan.id, { status: "refused", error: error.message, finishedAt: new Date() });
-      throw new ScanFinished(error.message);
+    if (error instanceof ScanRefusedError || (scan.headSha === "HEAD" && isEmptyRepoError(error))) {
+      const message = error instanceof ScanRefusedError ? error.message : "Nothing to scan yet: the repository has no commits.";
+      await updateScan(db(), scan.id, { status: "refused", error: message, finishedAt: new Date() });
+      throw new ScanFinished(message);
     }
     if (error instanceof LlmQuotaError) {
       // The fail step that follows gives the credits back. Email is best effort and at most once per scan.
@@ -247,7 +269,47 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     }
     throw error;
   } finally {
-    await Promise.allSettled([events.flush(), workspace.destroy()]);
+    // A setup that failed has already destroyed its own workspace.
+    const prepared = await preparing.catch(() => undefined);
+    await Promise.allSettled([events.flush(), prepared?.workspace.destroy()]);
+  }
+}
+
+/** What a fetch of a branch with no commits says. Retrying never helps. */
+function isEmptyRepoError(error: unknown): boolean {
+  return error instanceof Error && /couldn't find remote ref HEAD\b/.test(error.message);
+}
+
+/**
+ * A fresh workspace with the code checked out and the indexer answering. The
+ * indexer downloads while the code is fetched. A failed attempt is thrown away
+ * and retried with backoff, until `SETUP_DEADLINE_MS`: setup costs no model
+ * calls, and a blip at GitHub or the sandbox host shouldn't fail a review.
+ */
+export async function prepareWorkspace(input: {
+  open: () => Promise<Workspace>;
+  clone: (workspace: Workspace) => Promise<void>;
+  binary: IndexerBinary;
+  started: number;
+  onRetry: (message: string) => void;
+  wait?: (ms: number) => Promise<void>;
+}): Promise<{ workspace: Workspace; headSha: string; handle: IndexerHandle }> {
+  const wait = input.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; ; attempt++) {
+    let workspace: Workspace | undefined;
+    try {
+      workspace = await input.open();
+      const ready = workspace;
+      await Promise.all([input.clone(ready), ready.installIndexer(input.binary)]);
+      const [rev, handle] = await Promise.all([ready.exec(["git", "rev-parse", "HEAD"]), ready.startIndexer(input.binary)]);
+      return { workspace: ready, headSha: rev.stdout.trim(), handle };
+    } catch (error) {
+      await workspace?.destroy().catch(() => {});
+      const delay = SETUP_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || isEmptyRepoError(error) || Date.now() + delay - input.started > SETUP_DEADLINE_MS) throw error;
+      input.onRetry(`Setup failed (${describeError(error)}); trying again in ${delay / 1000} s.`);
+      await wait(delay);
+    }
   }
 }
 

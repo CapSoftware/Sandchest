@@ -52,6 +52,7 @@ async function waitForHealth(url: string, token: string, timeoutMs: number): Pro
 export class SandboxWorkspace implements Workspace {
   readonly root: string;
   private destroying: Promise<void> | undefined;
+  private installing: Promise<string> | undefined;
 
   private constructor(private readonly sandbox: Sandbox) {
     this.root = `${sandbox.cwd}/repo`;
@@ -103,17 +104,13 @@ export class SandboxWorkspace implements Workspace {
    * Puts the indexer in the microVM, runs it detached on the exposed port
    * with a random token, and waits until it answers over HTTPS.
    */
-  async startIndexer(binary: IndexerBinary, options: { readyTimeoutMs?: number } = {}): Promise<IndexerHandle> {
-    this.assertUsable();
-    const path = `${this.sandbox.cwd}/bin/sandchest-index`;
-    if ("path" in binary) {
-      await this.sandbox.writeFiles([{ path, content: await readFile(binary.path), mode: 0o755 }]);
-    } else {
-      // Downloaded inside the VM (fast, in-region) and verified before it runs.
-      const result = await this.run(["sh", "-c", DOWNLOAD_SCRIPT, "download", binary.url, path, binary.sha256], this.sandbox.cwd, { timeoutMs: 180_000 });
-      if (result.exitCode !== 0) throw new WorkspaceError(`Indexer download failed: ${result.stderr.trim()}`);
-    }
+  installIndexer(binary: IndexerBinary): Promise<void> {
+    return this.install(binary).then(() => undefined);
+  }
 
+  async startIndexer(binary: IndexerBinary, options: { readyTimeoutMs?: number } = {}): Promise<IndexerHandle> {
+    const path = await this.install(binary);
+    this.assertUsable();
     const token = crypto.randomUUID();
     await this.sandbox.runCommand({
       cmd: path,
@@ -124,6 +121,22 @@ export class SandboxWorkspace implements Workspace {
     const url = this.sandbox.domain(INDEXER_PORT);
     await waitForHealth(url, token, options.readyTimeoutMs ?? 30_000);
     return { url, token };
+  }
+
+  private install(binary: IndexerBinary): Promise<string> {
+    this.assertUsable();
+    this.installing ??= (async () => {
+      const path = `${this.sandbox.cwd}/bin/sandchest-index`;
+      if ("path" in binary) {
+        await this.sandbox.writeFiles([{ path, content: await readFile(binary.path), mode: 0o755 }]);
+      } else {
+        // Downloaded inside the VM (fast, in-region) and verified before it runs.
+        const result = await this.run(["sh", "-c", DOWNLOAD_SCRIPT, "download", binary.url, path, binary.sha256], this.sandbox.cwd, { timeoutMs: 180_000 });
+        if (result.exitCode !== 0) throw new WorkspaceError(`Indexer download failed: ${result.stderr.trim()}`);
+      }
+      return path;
+    })();
+    return this.installing;
   }
 
   destroy(): Promise<void> {

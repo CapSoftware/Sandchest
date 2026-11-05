@@ -323,6 +323,29 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(recorded.comments.get("acme/private-app#5")).toEqual(before);
   });
 
+  test("a review still queued when a newer push lands is cancelled, uncharged and never posts a Check", async () => {
+    const repo = await repoByGithubId(database, repos[0]!.id);
+    const latest = await database.query.scans.findFirst({ where: (scans, { and, eq }) => and(eq(scans.repoId, repo!.id), eq(scans.prNumber, 5)), orderBy: (scans, { desc }) => desc(scans.createdAt) });
+    const [stale] = await database
+      .insert(schema.scans)
+      .values({ repoId: repo!.id, orgId: repo!.orgId, kind: "pr_review", trigger: "webhook", status: "queued", prNumber: 5, headSha: "5ta1e00", createdAt: new Date(latest!.createdAt.getTime() - 60_000) })
+      .returning();
+    const checks = recorded.checks.length;
+    expect((await beginScan(stale!.id)).state).toBe("done");
+    expect(await scanById(database, stale!.id)).toMatchObject({ status: "cancelled", credits: 0, billing: null, checkRunId: null });
+    expect(recorded.checks.length).toBe(checks);
+  });
+
+  test("recon of a repository with no commits is refused once, not failed and retried", async () => {
+    const repo = await repoByGithubId(database, repos[0]!.id);
+    execFileSync("git", ["init", "-q", "--bare", join(gitRoot, "acme", "empty-app.git")]);
+    const [empty] = await database.insert(schema.repos).values({ orgId: repo!.orgId, githubRepoId: 4242, fullName: "acme/empty-app", private: true, defaultBranch: "main" }).returning();
+    const [recon] = await database.insert(schema.scans).values({ repoId: empty!.id, orgId: empty!.orgId, kind: "recon", trigger: "webhook", headSha: "HEAD" }).returning();
+    expect((await beginScan(recon!.id)).state).toBe("running");
+    await expect(executeScan(recon!.id)).rejects.toThrow("Nothing to scan yet: the repository has no commits.");
+    expect(await scanById(database, recon!.id)).toMatchObject({ status: "refused", error: "Nothing to scan yet: the repository has no commits." });
+  });
+
   test("a finding the repo already knows is still commented inline on a PR that hasn't reported it", async () => {
     const reviews = recorded.reviews.length;
     const event = prEvent(repos[0]!, git(join(gitRoot, "acme", "private-app.git"), "rev-parse", "HEAD"));

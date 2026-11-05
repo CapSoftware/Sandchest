@@ -120,6 +120,17 @@ export async function earlierPrFindings(database: Db, scan: { id: string; repoId
   return new Set(rows.map((row) => row.id));
 }
 
+/** Whether a later review of the same pull request is for a different head: this one is then out of date. */
+export async function newerPrReview(database: Db, scan: { id: string; repoId: string; prNumber: number; headSha: string; createdAt: Date }): Promise<boolean> {
+  const rows = await database.execute<{ id: string }>(sql`
+    select ${scans.id} as id from ${scans}
+    where ${scans.repoId} = ${scan.repoId} and ${scans.kind} = 'pr_review' and ${scans.prNumber} = ${scan.prNumber}
+      and ${scans.id} <> ${scan.id} and ${scans.headSha} <> ${scan.headSha} and ${scans.createdAt} > ${scan.createdAt.toISOString()}
+    limit 1
+  `);
+  return rows.length > 0;
+}
+
 export async function savePrComment(database: Db, input: { repoId: string; prNumber: number; commentId: number; scanId: string }): Promise<void> {
   await database
     .insert(prComments)
