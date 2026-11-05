@@ -16,11 +16,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
 import {
   acceptInvite,
+  applyMatches,
   createDb,
   createInvite,
+  matchKey,
   removeMember,
+  saveInventory,
   schema,
   setMemberRole,
+  upsertAdvisories,
   upsertFindings,
   upsertInstallation,
   type Db,
@@ -158,6 +162,15 @@ beforeAll(async () => {
   ids.apiFinding = (await upsertFindings(database, ids.api, apiScan, [finding("api-1")])).ids[0]!;
   ids.webFinding = (await upsertFindings(database, ids.web, webScan, [finding("web-1")])).ids[0]!;
   ids.coreFinding = (await upsertFindings(database, ids.core, coreScan, [finding("core-1")])).ids[0]!;
+  // A CVE installed in acme/api only.
+  const next = { ecosystem: "npm", name: "next", version: "15.0.0" };
+  await saveInventory(database, ids.api, "abc", new Date(), [
+    { ...next, key: "next", manifest: "package-lock.json", direct: true, dev: false, usage: "product", approximate: false, importedAt: ["src/app/page.tsx:1"] },
+  ]);
+  await upsertAdvisories(database, [
+    { id: "GHSA-role-test", vulnKey: "CVE-2026-0001", aliases: ["CVE-2026-0001"], summary: "s", details: "", severity: "high", score: null, vector: null, malicious: false, affected: [], references: [], publishedAt: null, modifiedAt: new Date(), withdrawnAt: null },
+  ]);
+  await applyMatches(database, { checked: [next], matches: new Map([[matchKey(next), ["GHSA-role-test"]]]), origin: "inventory", repoId: ids.api });
 
   await refreshAll();
   await join("ivy", "admin");
@@ -262,6 +275,8 @@ const CASES: Record<string, Case> = {
     request: async () => (await database.$client`update findings set status = 'open' where id = ${ids.apiFinding}`, { method: "PATCH", path: `/findings/${ids.apiFinding}`, body: { status: "fixed" } }),
   },
   get_overview: { need: "own", request: () => ({ method: "GET", path: "/overview" }) },
+  list_cves: { need: "own", request: () => ({ method: "GET", path: "/cves" }) },
+  get_cve: { need: "repo", request: () => ({ method: "GET", path: "/cves/CVE-2026-0001" }) },
 };
 
 /** Who passes each kind of check. */
