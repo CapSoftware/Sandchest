@@ -19,7 +19,8 @@
     "restage": "bun --env-file=../.env.local src/restage.ts",
     "coverage": "bun --env-file=../.env.local src/coverage.ts",
     "gate": "bun --env-file=../.env.local src/gate.ts",
-    "fixeval": "bun --env-file=../.env.local src/fixeval.ts"
+    "fixeval": "bun --env-file=../.env.local src/fixeval.ts",
+    "harness": "bun --env-file=../.env.local src/harness.ts"
   },
   "dependencies": {
     "@sandchest/db": "workspace:*",

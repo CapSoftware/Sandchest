@@ -9,7 +9,9 @@
  *
  * Options: --parallel <n> scans at once (default 1), --no-patched (skip
  * scanning fixed commits), --note "<what changed>", --baseline <run>|none,
- * --hunters <n>, --hunter-turns <n>, --concurrency <n>, --no-osv.
+ * --hunters <n>, --hunter-turns <n>, --access-routes <n> (per access-control hunter),
+ * --access-hunters <n>, --roaming <n> (hunters with a focus and no route list),
+ * --roaming-turns <n>, --concurrency <n>, --no-osv.
  *
  * Runs are written to runs/<id>/ in the private eval data repository. Judge
  * unmatched findings with `bun run judge <run>`; judgements carry over.
@@ -40,6 +42,10 @@ const { values, positionals } = parseArgs({
     baseline: { type: "string" },
     hunters: { type: "string" },
     "hunter-turns": { type: "string" },
+    "access-routes": { type: "string" },
+    "access-hunters": { type: "string" },
+    roaming: { type: "string" },
+    "roaming-turns": { type: "string" },
     concurrency: { type: "string" },
     "no-osv": { type: "boolean", default: false },
   },
@@ -64,6 +70,10 @@ async function scanAll(): Promise<string> {
   const limits: Partial<ScanLimits> = {
     ...(values.hunters && { maxHunters: Number(values.hunters) }),
     ...(values["hunter-turns"] && { hunterTurns: Number(values["hunter-turns"]) }),
+    ...(values["access-routes"] && { accessRoutesPerHunter: Number(values["access-routes"]) }),
+    ...(values["access-hunters"] && { maxAccessHunters: Number(values["access-hunters"]) }),
+    ...(values.roaming && { roamingHunters: Number(values.roaming) }),
+    ...(values["roaming-turns"] && { roamingTurns: Number(values["roaming-turns"]) }),
     ...(values.concurrency && { concurrency: Number(values.concurrency) }),
   };
   const meta: RunMeta = {
