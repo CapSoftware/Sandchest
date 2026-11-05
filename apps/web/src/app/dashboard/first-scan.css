@@ -303,3 +303,14 @@
   color: var(--color-muted);
   font-size: 0.8125rem;
 }
+
+.first-scan-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-gold-light);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}

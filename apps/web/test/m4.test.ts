@@ -11,7 +11,7 @@ import { createDb, orgBillingRow, scanById, schema, upsertInstallation, type Db 
 import { migrate } from "@sandchest/db/migrate";
 import type { GitHubApp } from "@sandchest/github";
 import { GET as sweep } from "@/app/api/cron/sweep/route";
-import { applyAutoTopUp, canScan, hasPlan, reserveScan, setAutumn, settleScan, syncBilling } from "@/server/billing";
+import { applyAutoTopUp, buyCredits, canScan, hasPlan, reserveScan, setAutumn, settleScan, syncBilling } from "@/server/billing";
 import { requestDeepScan } from "@/server/dig";
 import { beginScan, failScan, publishScan } from "@/server/scans";
 import { resetConfig } from "@/server/config";
@@ -221,6 +221,30 @@ describe.skipIf(!available)("billing", () => {
     autumn.failNext.add("customer");
     expect(await reserveScan("00000000-0000-4000-8000-00000000f00d", acme, 1, false)).toEqual({ ok: false, reason: "out_of_credits", credits: 1 });
     expect(autumn.failNext.size).toBe(0);
+  });
+
+  test("credits added where they ran short: charged once on a paid plan however often it's sent; without one, Stripe joins the plan", async () => {
+    const customer = autumn.get(acme.id);
+    const before = { planId: customer.planId, credits: customer.credits, card: customer.card };
+    try {
+      Object.assign(customer, { planId: "standard", card: true, credits: 3 });
+      const purchase = crypto.randomUUID();
+      expect(await buyCredits(acme, 25, purchase, "https://sandchest.test/return")).toMatchObject({ paymentUrl: null, joins: false, credits: 28 });
+      // Pressed again, or retried after a timeout: the same purchase, charged once.
+      expect(await buyCredits(acme, 25, purchase, "https://sandchest.test/return")).toMatchObject({ paymentUrl: null, repeated: true });
+      expect(customer.credits).toBe(28);
+      // A new opening of the dialog is a new purchase.
+      expect(await buyCredits(acme, 10, crypto.randomUUID(), "https://sandchest.test/return")).toMatchObject({ credits: 38 });
+
+      // Free credits only: buying more joins the plan with them, on Stripe.
+      Object.assign(customer, { planId: "trial", card: false, credits: 3 });
+      const joined = await buyCredits(acme, 25, crypto.randomUUID(), "https://sandchest.test/return");
+      expect(joined.joins).toBe(true);
+      expect(joined.paymentUrl).toBeTruthy();
+    } finally {
+      Object.assign(customer, before);
+      await syncBilling(acme);
+    }
   });
 
   test("an org's first Dig is paid like any other: without the credits it holds, nothing runs and no scan is left", async () => {

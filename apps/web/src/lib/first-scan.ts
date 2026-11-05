@@ -26,6 +26,8 @@ export interface FirstScanOrg {
   hacker: Pick<HackerProfile, "handle" | "hoodie" | "phosphor">;
   /** Credits left, or null when billing is off. */
   credits: number | null;
+  /** Whether the person can buy credits for it. */
+  admin: boolean;
 }
 
 export interface FirstScan {
@@ -64,6 +66,7 @@ export function firstScan(
     login: repo.orgLogin,
     hacker: readHacker(hackers.find((h) => h.orgId === repo.orgId)?.hacker),
     credits: plans.get(repo.orgId)?.credits ?? null,
+    admin: repo.orgAdmin,
   }));
   return { repos: ranked, orgs, suggested: ranked[0]!.id };
 }

@@ -10,14 +10,14 @@
  * purchase id the charge is made under, so confirming it again (a second
  * tab, a retry after a timeout) never charges twice.
  */
-import { DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, MAX_PURCHASE_CREDITS, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
+import { DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, MAX_PURCHASE_CREDITS, PLAN, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
 import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser, viewer } from "./access";
 import { track } from "./analytics";
-import { autumn, chargePurchase, saveAutoTopUpChoice, syncBilling } from "./billing";
+import { autumn, buyCredits, chargePurchase, saveAutoTopUpChoice, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
@@ -154,6 +154,56 @@ async function checkout(org: { id: string; githubLogin: string }, input: Purchas
   // Checkout, or a card step (3-D Secure, a declined card): Stripe sends them back to the return page.
   if (paymentUrl) redirect(paymentUrl);
   redirect(`/dashboard/billing/return?org=${org.id}`);
+}
+
+/** What the add-credits dialog is told: the price today, or why it can't be bought here. */
+export type CreditsQuote = { dueToday?: number; joins?: boolean; error?: string };
+export type AddCreditsOutcome = { error?: string; added?: number; credits?: number };
+
+/**
+ * What buying `credits` charges today. On a paid plan it's credits alone, charged to the card on file;
+ * without one (no plan, or free credits) it's joining the plan with them, on Stripe.
+ */
+export async function quoteCredits(orgId: string, credits: number): Promise<CreditsQuote> {
+  const amount = Credits.safeParse(credits);
+  if (!amount.success) return { error: "That isn’t something you can buy." };
+  const row = await adminOrg(orgId);
+  if (!row) return { error: NOT_ADMIN };
+  try {
+    const { planId } = await syncBilling(row.org);
+    const joins = !planId || isTrial(planId);
+    const preview = await autumn()!.preview({ customerId: row.org.id, planId: joins ? PLAN.id : TOP_UP.id, credits: amount.data });
+    return { dueToday: preview.dueToday, joins };
+  } catch (error) {
+    console.error(`Pricing credits for org ${orgId} failed: ${describeError(error)}`);
+    return { error: "Billing couldn’t price this right now. Try again in a minute." };
+  }
+}
+
+/**
+ * Buys credits from the add-credits dialog, which showed the price first. On a paid plan they're charged to
+ * the card on file at once, under `purchaseId`, so a retry or a second press never charges twice; without
+ * one, Stripe Checkout joins the plan with them. A card that needs a check (3-D Secure) goes to Stripe too.
+ */
+export async function addCredits(orgId: string, credits: number, purchaseId: string): Promise<AddCreditsOutcome> {
+  const amount = Credits.safeParse(credits);
+  const id = Id.safeParse(purchaseId);
+  if (!amount.success || !id.success) return { error: "That isn’t something you can buy." };
+  const row = await adminOrg(orgId);
+  if (!row) return { error: NOT_ADMIN };
+  let bought: Awaited<ReturnType<typeof buyCredits>>;
+  try {
+    bought = await buyCredits(row.org, amount.data, id.data, `${appUrl()}/dashboard/billing/return?org=${orgId}`);
+  } catch (error) {
+    console.error(`Adding credits for org ${orgId} failed: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "add_credits" }, handled: true });
+    return tracked("purchase_confirmed", { orgId, input: { kind: "top_up", credits: amount.data } }, { error: UNCONFIRMED }, "checkout_failed");
+  }
+  const input: PurchaseInput = bought.joins ? { kind: "plan", plan: PLAN.id as PlanId, credits: amount.data } : { kind: "top_up", credits: amount.data };
+  await tracked(bought.joins ? "purchase_started" : "purchase_confirmed", { orgId, input, route: bought.repeated ? "repeated" : bought.paymentUrl ? "stripe" : "dialog" }, {}, "ok");
+  if (bought.paymentUrl) redirect(bought.paymentUrl);
+  revalidatePath("/dashboard", "layout");
+  return { added: amount.data, credits: bought.credits };
 }
 
 /** Opens Stripe's billing portal: card, invoices and cancelling. */

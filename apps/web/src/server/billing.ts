@@ -22,13 +22,14 @@ import {
   DEFAULT_CREDITS,
   DEFAULT_TOP_UP_LIMIT_USD,
   isTrial,
+  PLAN,
   planById,
   type AttachResult,
   type Autumn,
   type BillingState,
   type PlanId,
   type Stripe,
-  type TOP_UP,
+  TOP_UP,
 } from "@sandchest/billing";
 import {
   markScanReserved,
@@ -259,6 +260,29 @@ async function matchAutoTopUp(orgId: string, state: BillingState): Promise<Billi
 export function chargePurchase(org: BillingOrg, purchaseId: string, input: { planId: PlanId | typeof TOP_UP.id; credits?: number; successUrl: string }): Promise<AttachResult> {
   const idempotencyKey = `purchase:${org.id}:${purchaseId}:${input.planId}:${input.credits ?? 0}`;
   return autumn()!.attach({ customerId: org.id, ...input, idempotencyKey });
+}
+
+/**
+ * Credits bought where they ran short. On a paid plan they're charged at once to the card on file under
+ * `purchaseId`, so the same purchase sent again charges nothing more; without one (no plan, or free credits),
+ * the answer is a Stripe Checkout link that joins the plan with them. A card that needs a check also answers
+ * with a link. `credits` is the balance after, when it was charged here.
+ */
+export async function buyCredits(
+  org: BillingOrg,
+  credits: number,
+  purchaseId: string,
+  successUrl: string,
+): Promise<{ paymentUrl: string | null; joins: boolean; repeated?: boolean; credits?: number }> {
+  const { planId } = await syncBilling(org);
+  if (!planId || isTrial(planId)) {
+    const { paymentUrl } = await autumn()!.attach({ customerId: org.id, planId: PLAN.id as PlanId, credits, successUrl });
+    return { paymentUrl, joins: true };
+  }
+  const { paymentUrl, repeated } = await chargePurchase(org, purchaseId, { planId: TOP_UP.id, credits, successUrl });
+  if (paymentUrl) return { paymentUrl, joins: false, repeated };
+  const after = await syncBilling(org).catch(() => undefined);
+  return { paymentUrl: null, joins: false, repeated, credits: after?.credits };
 }
 
 // ---- The scan gate -----------------------------------------------------------

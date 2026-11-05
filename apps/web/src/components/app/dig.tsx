@@ -44,17 +44,18 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
       if (!plan) return <DigButton repoId={repo.id} label={label} note="Whole repository" />;
       // An unsized repo holds the top tier and is charged what it measures.
       const cost = state.credits ?? MAX_DEEP_SCAN_CREDITS;
-      if (plan.credits < cost)
+      const account = { id: repo.orgId, login: repo.orgLogin, credits: plan.credits, admin: repo.orgAdmin };
+      // Too few to hold the most it can cost: recon prices it within a minute, often for less.
+      if (plan.credits < cost && state.credits === undefined)
         return (
           <div className="repo-dig">
-            <HoverLink href="/dashboard/settings/billing" className="repo-dig-note">
-              {state.credits === undefined ? `Needs ${MAX_DEEP_SCAN_CREDITS} credits until sized: top up` : `Needs ${plural(cost, "credit")}: top up`}
-            </HoverLink>
+            <span className="repo-dig-note">Priced once mapped, about a minute</span>
           </div>
         );
+      if (plan.credits < cost) return <DigButton repoId={repo.id} label={label} note={`Needs ${plural(cost, "credit")}; ${plan.credits} left`} account={account} need={cost} short />;
       const upTo = state.credits === undefined;
       const note = `${upTo ? "Up to " : ""}${cost} of your ${plural(plan.credits, "credit")}`;
-      return <DigButton repoId={repo.id} label={label} note={note} confirm={`Scan for ${upTo ? "up to " : ""}${plural(cost, "credit")}`} />;
+      return <DigButton repoId={repo.id} label={label} note={note} confirm={`Scan for ${upTo ? "up to " : ""}${plural(cost, "credit")}`} account={account} need={cost} />;
     }
   }
 }

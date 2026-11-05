@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { startTransition, useActionState, useEffect, useMemo, useState } from "react";
+import { AddCredits } from "@/components/app/add-credits";
 import { HackerMark } from "@/components/hacker/hacker-mark";
 import { Submit } from "@/components/app/submit";
 import { linesLabel } from "@/lib/briefing";
@@ -34,6 +35,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
   // Not sized yet and more than the account holds: recon prices it within a minute or so of joining.
   const pricing = short && repo.unsized;
   const many = data.orgs.length > 1;
+  const [topping, setTopping] = useState(false);
   const router = useRouter();
   useEffect(() => {
     if (!pricing) return;
@@ -100,13 +102,24 @@ export function FirstScan({ data }: { data: FirstScanData }) {
           </fieldset>
 
           <div className="first-scan-go">
-            <Submit className="key key-primary key-large key-glow" pending="Starting…" track="first-scan-start" disabled={pricing}>
-              Start deep scan
-            </Submit>
+            {short && !pricing ? (
+              <button type="button" className="key key-primary key-large key-glow" onClick={() => setTopping(true)} data-track="first-scan-top-up">
+                <span className="key-face">Start deep scan</span>
+              </button>
+            ) : (
+              <Submit className="key key-primary key-large key-glow" pending="Starting…" track="first-scan-start" disabled={pricing}>
+                Start deep scan
+              </Submit>
+            )}
             <p className="first-scan-note" aria-live="polite">
               {state.error ? (
                 <span className="first-scan-error" role="alert">
-                  {state.error} {state.topUp && <a href="/dashboard/settings/billing">Top up</a>}
+                  {state.error}{" "}
+                  {state.topUp && org.credits !== null && (
+                    <button type="button" className="first-scan-link" onClick={() => setTopping(true)}>
+                      Add credits
+                    </button>
+                  )}
                 </span>
               ) : org.credits === null ? (
                 <>The whole of {repo.fullName}</>
@@ -117,7 +130,10 @@ export function FirstScan({ data }: { data: FirstScanData }) {
                 </>
               ) : short ? (
                 <>
-                  Needs {plural(repo.credits, "credit")}; {org.login} has {org.credits}. <a href="/dashboard/settings/billing">Top up</a>
+                  Needs {plural(repo.credits, "credit")}; {org.login} has {org.credits}.{" "}
+                  <button type="button" className="first-scan-link" onClick={() => setTopping(true)}>
+                    Add credits
+                  </button>
                 </>
               ) : (
                 <>
@@ -130,6 +146,15 @@ export function FirstScan({ data }: { data: FirstScanData }) {
           </div>
         </form>
       </div>
+      {org.credits !== null && (
+        <AddCredits
+          account={{ id: org.id, login: org.login, credits: org.credits, admin: org.admin }}
+          need={repo.credits}
+          open={topping}
+          onClose={() => setTopping(false)}
+          then={{ label: "start the scan", run: () => startTransition(() => action()) }}
+        />
+      )}
     </section>
   );
 }

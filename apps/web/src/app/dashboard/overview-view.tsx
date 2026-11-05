@@ -1,4 +1,5 @@
 import type { DashboardRepo, FindingListItem, Overview, OverviewWindow, ScanListItem } from "@sandchest/db";
+import { AddCreditsLink } from "@/components/app/add-credits";
 import { ActivityChart, SeverityStrip, Spark } from "@/components/app/charts";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
@@ -102,9 +103,15 @@ export function OverviewView({
             <dd className="kpi-value">{compactNumber(credits)}</dd>
             <dd className="kpi-foot">
               {now.credits} used in {DAYS} days ·{" "}
-              <HoverLink href="/dashboard/settings/billing" className="quiet">
-                Top up
-              </HoverLink>
+              {paid.length === 1 ? (
+                <AddCreditsLink account={{ id: paid[0]!.orgId, login: paid[0]!.orgLogin, credits, admin: paid[0]!.orgAdmin }} className="quiet link-button">
+                  Top up
+                </AddCreditsLink>
+              ) : (
+                <HoverLink href="/dashboard/settings/billing" className="quiet">
+                  Top up
+                </HoverLink>
+              )}
             </dd>
           </div>
         ) : (

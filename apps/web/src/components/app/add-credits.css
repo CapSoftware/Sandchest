@@ -1,0 +1,233 @@
+/* Adding credits where they ran short: a dialog over a dithered dark, packs as keys, one glowing action. */
+
+.add-credits {
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  background: transparent;
+  color: var(--color-sand);
+}
+
+.add-credits::backdrop {
+  background:
+    repeating-conic-gradient(rgb(0 0 0 / 0.35) 0 25%, transparent 0 50%) 0 0 / 4px 4px,
+    rgb(13 10 7 / 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.add-credits[open] {
+  animation: add-credits-in 180ms ease-out;
+}
+
+@keyframes add-credits-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.add-credits-body {
+  position: relative;
+  padding: 2.25rem 2rem 2rem;
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in oklab, var(--color-gold) 7%, transparent), transparent 70%),
+    var(--color-soot);
+  box-shadow:
+    inset 0 0 0 1px var(--color-edge),
+    inset 0 3px 0 var(--color-gold),
+    0 30px 80px rgb(0 0 0 / 0.6);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.add-credits-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-dust);
+  cursor: pointer;
+}
+
+.add-credits-close:hover {
+  color: var(--color-bright);
+}
+
+.add-credits-title {
+  padding-right: 2rem;
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  line-height: 0.95;
+  color: var(--color-bright);
+  text-wrap: balance;
+}
+
+.add-credits-lede {
+  margin-top: 0.75rem;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.add-credits-note {
+  margin-top: 1.5rem;
+  padding: 0.85rem 1rem;
+  box-shadow: inset 2px 0 0 var(--color-edge);
+  background: var(--color-void);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.add-credits-packs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 1.75rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.add-credits-pack {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 0.2rem;
+  padding: 0.85rem 0.9rem 0.8rem;
+  background: var(--color-void);
+  box-shadow: inset 0 0 0 1px var(--color-seam);
+  cursor: pointer;
+  transition:
+    box-shadow 120ms,
+    background-color 120ms;
+}
+
+.add-credits-pack input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.add-credits-pack:hover {
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+}
+
+.add-credits-pack[data-on] {
+  background: color-mix(in oklab, var(--color-gold) 9%, var(--color-void));
+  box-shadow:
+    inset 0 0 0 2px var(--color-gold),
+    0 0 18px color-mix(in oklab, var(--color-amber) 22%, transparent);
+}
+
+.add-credits-pack:has(input:focus-visible) {
+  outline: 2px solid var(--color-gold-light);
+  outline-offset: 2px;
+}
+
+.add-credits-pack-n {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.add-credits-pack[data-on] .add-credits-pack-n {
+  color: var(--color-gold);
+}
+
+.add-credits-pack-price {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.add-credits-pack-tag {
+  color: var(--color-gold-light);
+  font-size: 0.6875rem;
+}
+
+.add-credits-pack-fits {
+  color: var(--color-sand);
+}
+
+.add-credits-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-seam);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.add-credits-total strong {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: normal;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.add-credits-fine {
+  margin-top: 0.4rem;
+  color: var(--color-dust);
+  font-size: 0.75rem;
+}
+
+.add-credits-go {
+  width: 100%;
+  margin-top: 1.5rem;
+}
+
+.add-credits-go .key-face {
+  justify-content: center;
+  width: 100%;
+}
+
+.add-credits-error {
+  margin-top: 0.85rem;
+  color: var(--color-ember);
+  font-size: 0.8125rem;
+}
+
+.add-credits-done {
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+}
+
+.add-credits-done-n {
+  font-family: var(--font-display);
+  font-size: 3.5rem;
+  line-height: 0.9;
+  color: var(--color-gold);
+  text-shadow: 0 0 22px color-mix(in oklab, var(--color-amber) 50%, transparent);
+}
+
+.add-credits-done .key {
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 30rem) {
+  .add-credits-body {
+    padding: 2rem 1.25rem 1.5rem;
+  }
+
+  .add-credits-packs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .add-credits[open] {
+    animation: none;
+  }
+}
