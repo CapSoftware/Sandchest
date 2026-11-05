@@ -2,7 +2,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { BloomEffect, EffectComposer, EffectPass, RenderPass, VignetteEffect, type Effect } from "postprocessing";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ACESFilmicToneMapping, Color, DirectionalLight, Fog, Group, HalfFloatType, HemisphereLight, MathUtils, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PMREMGenerator, Vector3 } from "three";
+import { ACESFilmicToneMapping, Color, DirectionalLight, Fog, Group, HalfFloatType, HemisphereLight, MathUtils, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PMREMGenerator, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { HackerProfile } from "@/lib/hacker";
 import { PHOSPHORS, ROOMS, swatch } from "@/lib/hacker";
@@ -101,17 +101,56 @@ function useAssetsLoaded(): boolean {
   return loaded;
 }
 
+/** The longest a round of compiling holds the clock. */
+const WARM_MS = 1500;
+
+/** The newest shader program the renderer has built, by id: unchanged across a compile means it built nothing. */
+const newestProgram = (gl: WebGLRenderer) => gl.info.programs?.reduce((newest, program) => Math.max(newest, program.id), -1) ?? -1;
+
 /**
  * Starts the clock at 0 on the first frame after the files are in, so the
  * first frames shown are always the same moment (the one the still shows).
  * Runs before everything else in the frame. The master holds it there.
+ *
+ * In between, while nothing is drawn (`warming`), the scene's shaders are
+ * compiled in the background where the browser can (KHR_parallel_shader_compile);
+ * otherwise the first frame compiles them all and holds up the page for a
+ * few hundred milliseconds on a phone. What the files bring (the textured
+ * surfaces, the dressed hacker) can reach the scene a frame or two after
+ * they're in, so it goes round again until a round builds nothing new. The
+ * canvas is hidden all the while: this only changes how soon the page can
+ * answer a tap.
  */
-function Start({ loaded, started, master }: { loaded: boolean; started: RefObject<boolean>; master: boolean }) {
+function Start({ loaded, started, warming, master }: { loaded: boolean; started: RefObject<boolean>; warming: RefObject<boolean>; master: boolean }) {
   // Development only: `?rig-hold` holds the live scene at that moment too, for comparing it with the still.
   const [hold] = useState(() => master || (process.env.NODE_ENV === "development" && new URLSearchParams(location.search).has("rig-hold")));
+  const warmed = useRef(false);
+  const before = useRef(-2);
   useFrame((state) => {
     if (!started.current) {
-      if (!loaded) return;
+      if (!loaded || warming.current) return;
+      if (!warmed.current) {
+        const newest = newestProgram(state.gl);
+        if (newest !== before.current) {
+          before.current = newest;
+          warming.current = true;
+          // The next round (or the start) waits for the ticker's next frame, so only while the scene is on screen.
+          const done = () => {
+            warming.current = false;
+          };
+          // Compiled as the effect passes draw the scene: into a target, which changes the tone mapping and output.
+          const target = new WebGLRenderTarget(1, 1);
+          const drawingTo = state.gl.getRenderTarget();
+          state.gl.setRenderTarget(target);
+          const compiled = state.gl.compileAsync(state.scene, state.camera);
+          state.gl.setRenderTarget(drawingTo);
+          target.dispose();
+          // Never wait on it for long (a lost context never finishes): drawing compiles whatever is left.
+          void Promise.race([compiled, new Promise((resolve) => setTimeout(resolve, WARM_MS))]).then(done, done);
+          return;
+        }
+        warmed.current = true;
+      }
       state.clock.start();
       started.current = true;
     }
@@ -138,6 +177,8 @@ export default function RigScene(props: RigSceneProps) {
   const loaded = useAssetsLoaded();
   // Set on the frame the clock starts: from then on everything moves and the screen is painted.
   const started = useRef(false);
+  // Set while the shaders compile, before the clock starts: nothing is drawn meanwhile.
+  const warming = useRef(false);
   return (
     <Canvas
       key={tier}
@@ -148,13 +189,13 @@ export default function RigScene(props: RigSceneProps) {
       camera={{ position: SHOTS[props.shot].position, fov: SHOTS[props.shot].fov, near: 0.02, far: 20 }}
       aria-hidden="true"
     >
-      <Start loaded={loaded} started={started} master={!!props.master} />
+      <Start loaded={loaded} started={started} warming={warming} master={!!props.master} />
       <Ticker fast={budget.fps} rest={props.still ? budget.screenFps : budget.rest} pace={pace} active={props.active !== false} />
       <Watchdog pace={pace} started={started} onReady={props.onReady} onSlow={props.onSlow} />
       {budget.shadowFps > 0 && <ShadowPace fps={budget.shadowFps} />}
       <Reflections />
       <World {...props} pace={pace} started={started} />
-      <Post bloom={tier === "high"} light={props.light ?? 1} still={!!props.still} master={!!props.master} />
+      <Post bloom={tier === "high"} light={props.light ?? 1} still={!!props.still} master={!!props.master} warming={warming} />
       {process.env.NODE_ENV === "development" && <DevCapture shot={props.shot} started={started} />}
     </Canvas>
   );
@@ -324,7 +365,7 @@ function Reflections() {
  * The finish: bloom on the screen's glow (high tier only), a vignette, then
  * the landing page's ordered dither over everything, in 3-pixel cells.
  */
-function Post({ bloom, light, still, master }: { bloom: boolean; light: number; still: boolean; master: boolean }) {
+function Post({ bloom, light, still, master, warming }: { bloom: boolean; light: number; still: boolean; master: boolean; warming: RefObject<boolean> }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
@@ -352,6 +393,8 @@ function Post({ bloom, light, still, master }: { bloom: boolean; light: number; 
   // Priority 1: this renders the frame in place of the default render.
   useFrame((_, delta) => {
     dither.light = still ? light : MathUtils.damp(dither.light, light, 3, Math.min(delta, 0.1));
+    // Drawing now would wait on the shaders compiling in the background.
+    if (warming.current) return;
     composer.render(delta);
   }, 1);
   return null;

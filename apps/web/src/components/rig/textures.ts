@@ -6,16 +6,54 @@
  * so each can tile it differently.
  */
 import { useEffect, useState } from "react";
-import { RepeatWrapping, SRGBColorSpace, TextureLoader, type Texture } from "three";
+import { RepeatWrapping, SRGBColorSpace, Texture, TextureLoader } from "three";
 import { RIG_SURFACES, surfaceUrls } from "./assets";
 
 const loader = new TextureLoader();
 const loaded = new Map<string, Promise<Texture>>();
 
+/**
+ * Where the image is decoded off the main thread, as an ImageBitmap: Chromium,
+ * and Safari from 17, where it has been checked to give the same texels as an
+ * <img>. An <img> handed to WebGL is decoded again, on the main thread, as it
+ * is uploaded: a long stall on the scene's first frame.
+ */
+function bitmaps(): boolean {
+  const agent = navigator.userAgent;
+  const safari = /^((?!chrome|android).)*safari/i.test(agent) ? Number(agent.match(/Version\/(\d+)/)?.[1] ?? 0) : 0;
+  return typeof createImageBitmap !== "undefined" && (/Chrome\//.test(agent) || safari >= 17);
+}
+
+/**
+ * Fetched once (the page preloads it as a fetch), then decoded. The bitmap is
+ * decoded the way WebGL would have read the <img> (flipped, no premultiplying,
+ * no colour conversion), so the texture is the same texel for texel.
+ */
+function decode(url: string): Promise<Texture> {
+  return fetch(url, { credentials: "same-origin" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`${url}: ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      if (!bitmaps()) {
+        const src = URL.createObjectURL(blob);
+        return loader.loadAsync(src).finally(() => URL.revokeObjectURL(src));
+      }
+      return createImageBitmap(blob, { imageOrientation: "flipY", premultiplyAlpha: "none", colorSpaceConversion: "none" }).then((bitmap) => {
+        const texture = new Texture(bitmap);
+        // Already flipped; WebGL ignores the flag for bitmaps anyway.
+        texture.flipY = false;
+        texture.needsUpdate = true;
+        return texture;
+      });
+    });
+}
+
 function load(url: string): Promise<Texture> {
   let promise = loaded.get(url);
   if (!promise) {
-    promise = loader.loadAsync(url);
+    promise = decode(url);
     loaded.set(url, promise);
   }
   return promise;

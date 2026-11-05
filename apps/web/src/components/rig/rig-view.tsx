@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { preload } from "react-dom";
-import { RIG_IMAGE_URLS, RIG_MODEL_URL, RIG_STILL_MASTERS, type StillKind } from "./assets";
+import { RIG_BITMAP_URLS, RIG_IMAGE_URLS, RIG_MODEL_URL, RIG_STILL_MASTERS, type StillKind } from "./assets";
 import { drawStill, STILL_SCRIPT, VIGNETTE, type StillSpec } from "./still";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RigSceneProps, Tier } from "./rig-scene";
@@ -75,6 +75,7 @@ export function RigView({ className, poster, opening, profile, ...props }: Props
   // not after three.js has loaded and the scene has mounted. The options match how three.js requests them.
   preload(RIG_MODEL_URL, { as: "fetch", crossOrigin: "anonymous" });
   for (const url of RIG_IMAGE_URLS) preload(url, { as: "image", crossOrigin: "anonymous" });
+  for (const url of RIG_BITMAP_URLS) preload(url, { as: "fetch", crossOrigin: "anonymous" });
   // The still's master first of all, from the HTML's head, so it's in before the inline script asks for it.
   // The high tier's, where its media query matches: most screens that open on the still.
   if (opening) {

@@ -9,7 +9,10 @@ export const RIG_HOODIE_MASK_URL = "/rig/hacker-hoodie.webp";
 /** The photographed surfaces, as `/rig/<surface>-<map>.webp`. */
 export const RIG_SURFACES = ["desk", "wall"] as const;
 export const surfaceUrls = (surface: (typeof RIG_SURFACES)[number]) => (["color", "normal", "rough"] as const).map((map) => `/rig/${surface}-${map}.webp`);
-export const RIG_IMAGE_URLS = [RIG_HOODIE_MASK_URL, ...RIG_SURFACES.flatMap(surfaceUrls)];
+/** Loaded as <img>s. */
+export const RIG_IMAGE_URLS = [RIG_HOODIE_MASK_URL];
+/** Fetched and decoded as ImageBitmaps (textures.ts). */
+export const RIG_BITMAP_URLS = RIG_SURFACES.flatMap(surfaceUrls);
 
 /**
  * The stills (see still.ts), one per view that opens on the default hacker,
