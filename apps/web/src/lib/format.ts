@@ -128,3 +128,10 @@ const DAY_MONTH = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "sho
 export function dayMonth(day: string): string {
   return DAY_MONTH.format(new Date(`${day}T00:00:00Z`));
 }
+
+/** An address shown to whoever holds a link, not spelled out in full: "j•••@example.com". */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return "•••";
+  return `${email[0]}•••${email.slice(at)}`;
+}

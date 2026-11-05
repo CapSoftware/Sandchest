@@ -79,6 +79,10 @@ export function repoView(repo: DashboardRepo, appUrl: string) {
     last_deep_scan_at: iso(repo.lastDeepScanAt),
     running_deep_scan_id: repo.activeDeepScanId,
     pr_reviews_last_30_days: repo.reviews30d,
+    /** When pull requests are reviewed: "auto" every push, "command" only on /sandchest review, "off" never. */
+    pr_reviews: repo.prReviews,
+    deep_scan_schedule: repo.deepScanSchedule,
+    next_deep_scan_at: iso(repo.nextDeepScanAt),
     deep_scan: deepScanPrice(repo),
     url: `${appUrl}/dashboard/repos/${repo.id}`,
   };

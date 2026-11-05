@@ -12,6 +12,7 @@ import {
   recordPromptCopied,
   recordPromptsCopied,
   repoForUser,
+  setOrgPrReviews,
   updateOrgSettings,
   updateRepoSettings,
   type FindingAction,
@@ -155,6 +156,33 @@ export async function saveOrgSettings(orgId: string, _previous: SettingsOutcome,
   if (!ok) return { error: "Only an admin of this account can change its settings." };
   revalidatePath("/dashboard/settings");
   return { saved: true };
+}
+
+const OrgReviewsForm = z.object({
+  prReviews: z.enum(PR_REVIEW_MODES),
+  applyToAll: z.literal("on").optional(),
+});
+
+export type OrgReviewsOutcome = { saved?: boolean; changed?: number; error?: string };
+
+/** An admin sets how new repositories review pull requests, and optionally every repository already installed. */
+export async function saveOrgReviews(orgId: string, _previous: OrgReviewsOutcome, form: FormData): Promise<OrgReviewsOutcome> {
+  const user = await viewer();
+  const parsed = OrgReviewsForm.safeParse(Object.fromEntries(form));
+  if (!parsed.success || !Id.safeParse(orgId).success) return { error: "Those settings aren’t valid." };
+  const changed = await setOrgPrReviews(db(), user.id, orgId, parsed.data.prReviews, parsed.data.applyToAll === "on");
+  await track("org_settings_saved", {
+    userId: user.id,
+    orgId: changed === undefined ? null : orgId,
+    props: { pr_reviews_default: parsed.data.prReviews, repos_changed: changed ?? 0, outcome: changed === undefined ? "not_admin" : "ok" },
+  });
+  if (changed === undefined) return { error: "Only an admin of this account can change its settings." };
+  revalidatePath("/dashboard/settings");
+  if (changed > 0) {
+    revalidatePath("/dashboard/repos");
+    revalidatePath("/dashboard/repos/[id]", "page");
+  }
+  return { saved: true, changed };
 }
 
 const RepoSettingsForm = z.object({

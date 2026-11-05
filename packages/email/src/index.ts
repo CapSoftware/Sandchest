@@ -7,6 +7,7 @@ export {
   criticalFindingEmail,
   deepScanEmail,
   scanPausedEmail,
+  teamInviteEmail,
   type CreditsInput,
   type FindingSummary,
   type RenderedEmail,

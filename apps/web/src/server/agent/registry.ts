@@ -4,9 +4,10 @@ import { accountsOps } from "./ops/accounts";
 import { billingOps } from "./ops/billing";
 import { findingOps } from "./ops/findings";
 import { scanOps } from "./ops/scans";
+import { teamOps } from "./ops/team";
 import type { Operation } from "./operation";
 
-export const OPERATIONS: readonly Operation[] = [...accountOps, ...accountsOps, ...billingOps, ...scanOps, ...findingOps];
+export const OPERATIONS: readonly Operation[] = [...accountOps, ...accountsOps, ...teamOps, ...billingOps, ...scanOps, ...findingOps];
 
 const byName = new Map(OPERATIONS.map((op) => [op.name, op]));
 

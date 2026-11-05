@@ -98,19 +98,22 @@ export function readAgainOnInstall(installationId: string | undefined, checkedAt
 export function refreshAccess(userId: string, http?: HttpOptions): Promise<void> {
   let pending = inFlight.get(userId);
   if (!pending) {
-    pending = (async () => {
-      const accountId = await githubAccountRowId(db(), userId);
-      if (!accountId) throw new GitHubError("No GitHub account for this user", 401, false);
-      // A refresh token that expired or was revoked means signing in again, like a 401 from GitHub.
-      const { accessToken } = await auth()
-        .api.getAccessToken({ body: { accountId, userId } })
-        .catch(() => ({ accessToken: undefined }));
-      if (!accessToken) throw new GitHubError("No usable GitHub token for this user", 401, false);
-      await storeAccess(userId, accessToken, http);
-    })().finally(() => inFlight.delete(userId));
+    pending = (async () => storeAccess(userId, await githubToken(userId), http))().finally(() => inFlight.delete(userId));
     inFlight.set(userId, pending);
   }
   return pending;
+}
+
+/** The user's GitHub token, refreshed if it expired. A GitHubError 401 when there's none: they sign in again. */
+export async function githubToken(userId: string): Promise<string> {
+  const accountId = await githubAccountRowId(db(), userId);
+  if (!accountId) throw new GitHubError("No GitHub account for this user", 401, false);
+  // A refresh token that expired or was revoked means signing in again, like a 401 from GitHub.
+  const { accessToken } = await auth()
+    .api.getAccessToken({ body: { accountId, userId } })
+    .catch(() => ({ accessToken: undefined }));
+  if (!accessToken) throw new GitHubError("No usable GitHub token for this user", 401, false);
+  return accessToken;
 }
 
 /** The part of a refresh after the token: GitHub → database. Exposed for tests. */

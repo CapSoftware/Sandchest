@@ -7,6 +7,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -41,6 +42,8 @@ export interface OrgSettings {
   company?: { name: string; email: string };
   /** The repository the org chose for its hacker's first Dig (a repos.id in this org). */
   firstTarget?: string;
+  /** How pull requests are reviewed on repositories added from now on. Unset means "auto". Each repo can change its own. */
+  prReviewsDefault?: "auto" | "command" | "off";
 }
 
 /** The hacker an org recruits: a name, a look and a way of talking. Validated by the web app before it is stored. */
@@ -474,8 +477,10 @@ export const deviceGrants = pgTable("device_grants", {
 });
 
 /**
- * Repositories a user may see: GitHub reports push access or higher. Replaced
- * as a whole each time access is read from GitHub (at most every 5 minutes).
+ * Repositories a user may see: GitHub reports push access or higher, or an
+ * admin invited them to the repo's org (`via` "invite", see `orgMembers`).
+ * Replaced as a whole each time access is read from GitHub (at most every 5
+ * minutes); joining or leaving an org changes its rows at once.
  */
 export const permissionCache = pgTable(
   "permission_cache",
@@ -487,6 +492,8 @@ export const permissionCache = pgTable(
       .notNull()
       .references(() => repos.id, { onDelete: "cascade" }),
     permission: text("permission", { enum: ["admin", "maintain", "write"] }).notNull(),
+    /** Where the access comes from. GitHub wins when both grant it, so removing a member never takes GitHub's away. */
+    via: text("via", { enum: ["github", "invite"] }).notNull().default("github"),
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.userId, table.repoId] }), index("permission_cache_repo_idx").on(table.repoId)],
@@ -505,6 +512,65 @@ export const orgAdmins = pgTable(
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.userId, table.orgId] }), index("org_admins_org_idx").on(table.orgId)],
+);
+
+/**
+ * People an admin invited to an org. They see every enabled repo of it, as
+ * if GitHub reported write access, whatever GitHub says; settings and billing
+ * stay with the org's admins. Removing the row removes the access at once.
+ */
+export const orgMembers = pgTable(
+  "org_members",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => orgs.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.orgId, table.userId] }), index("org_members_user_idx").on(table.userId)],
+);
+
+/**
+ * An invitation to an org, for one person: an email address they have
+ * verified on GitHub, or one GitHub account. The link carries a random
+ * token; only its SHA-256 is stored. Pending until accepted, revoked or
+ * expired; a resend revokes the old row and adds a new one, so each row is
+ * one email sent (which is what the send limits count).
+ */
+export const orgInvites = pgTable(
+  "org_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => orgs.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    /** Lowercased. Set for email invites. */
+    email: text("email"),
+    /** Set for invites to a GitHub account; the login is only for display. */
+    githubUserId: bigint("github_user_id", { mode: "number" }),
+    githubLogin: text("github_login"),
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedBy: uuid("accepted_by").references(() => users.id, { onDelete: "set null" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // One pending invite per person per org.
+    uniqueIndex("org_invites_pending_email").on(table.orgId, table.email).where(sql`${table.acceptedAt} is null and ${table.revokedAt} is null and ${table.email} is not null`),
+    uniqueIndex("org_invites_pending_github").on(table.orgId, table.githubUserId).where(sql`${table.acceptedAt} is null and ${table.revokedAt} is null and ${table.githubUserId} is not null`),
+    index("org_invites_org_idx").on(table.orgId),
+    // The send limits: invites an admin sent lately, and invites an address got lately.
+    index("org_invites_sender_idx").on(table.invitedBy, table.createdAt),
+    index("org_invites_email_idx").on(table.email, table.createdAt),
+    check("org_invites_one_invitee", sql`(${table.email} is null) <> (${table.githubUserId} is null)`),
+  ],
 );
 
 /**
@@ -667,7 +733,7 @@ export const EVENT_NAMES = [
   "deep_scan_requested",
   /** The hacker's look was saved. props: outcome. */
   "hacker_saved",
-  /** An account's settings were saved. props: check_threshold, email_notifications, outcome ("ok" | "not_admin"). */
+  /** An account's settings were saved. props: check_threshold, email_notifications, or pr_reviews_default and repos_changed (the review default), outcome ("ok" | "not_admin"). */
   "org_settings_saved",
   /** A repository's review settings were saved. org_id set. props: repo_id, pr_reviews ("auto" | "command" | "off"), deep_scan_schedule ("off" | "daily" | "weekly" | "monthly"), outcome ("ok" | "no_access" | "invalid"). */
   "repo_settings_saved",
@@ -677,6 +743,16 @@ export const EVENT_NAMES = [
   "scheduled_deep_scan",
   /** The findings list was copied out or opened in a coding agent. props: format ("prompt" | "claude" | "codex" copied for an agent; "open_t3" | "open_claude" | "open_codex" | "open_cursor" opened in one; "markdown" | "json"), status, findings (how many), repos (how many; documents only), filtered (a severity or repository filter was on), low_confidence. */
   "findings_copied",
+
+  // ---- Team ----
+  /** An admin invited someone (or sent an invite again). org_id set. props: kind ("email" | "github"), resend, emailed, outcome ("ok" | "not_admin" | "invalid" | "no_such_user" | "already_member" | "self" | "limited" | "error"). */
+  "team_invite_sent",
+  /** An admin revoked a pending invite. org_id set. props: outcome ("ok" | "not_found"). */
+  "team_invite_revoked",
+  /** An invite was accepted (or refused). org_id set when known. props: kind, outcome ("ok" | "not_found" | "expired" | "wrong_person" | "inviter_gone" | "no_installation" | "github_error" | "signed_out" | "limited"). */
+  "team_invite_accepted",
+  /** An admin removed an invited member, or a member left. org_id set. props: self (left on their own), outcome ("ok" | "not_found"). */
+  "team_member_removed",
 
   // ---- Agents ----
   /** An agent was connected: a device code or an MCP client's consent was approved (or denied). props: method ("device" | "oauth"), outcome ("ok" | "denied" | "expired" | "invalid"). */

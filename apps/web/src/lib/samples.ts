@@ -1,4 +1,4 @@
-import type { DashboardRepo, FindingListItem, findingForUser, OrgBillingRow, Overview, scanForUser, ScanListItem, SettingsOrg } from "@sandchest/db";
+import type { DashboardRepo, FindingListItem, findingForUser, OrgBillingRow, OrgTeam, Overview, scanForUser, ScanListItem, SettingsOrg } from "@sandchest/db";
 import type { Severity } from "./format";
 import type { PullRow } from "@/server/pulls";
 
@@ -234,8 +234,8 @@ export function sampleScan(): NonNullable<Awaited<ReturnType<typeof scanForUser>
   };
 }
 
-/** One account on the plan, with its repositories, as Settings reads it. */
-export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow } {
+/** One account on the plan, with its repositories and team, as Settings reads it. */
+export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow; team: OrgTeam } {
   const billing: OrgBillingRow = {
     orgId: SAMPLE_ORG_ID,
     planId: "standard",
@@ -262,7 +262,21 @@ export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow 
     billing,
     repos: sampleRepos().map((repo) => ({ id: repo.id, fullName: repo.fullName, private: repo.private })),
   };
-  return { orgs: [org], billing };
+  const person = (n: number, login: string, kind: "admin" | "github" | "member") => ({
+    userId: `00000000-0000-4000-8000-00000000010${n}`,
+    name: login[0]!.toUpperCase() + login.slice(1),
+    login,
+    image: null,
+    admin: kind === "admin",
+    member: kind === "member",
+    github: kind !== "member",
+    joinedAt: kind === "member" ? ago(60 * 24 * 3) : null,
+  });
+  const team: OrgTeam = {
+    people: [person(1, "you", "admin"), person(2, "maya", "github"), person(3, "sam", "member")],
+    invites: [{ id: "00000000-0000-4000-8000-000000000201", email: "jo@example.com", githubLogin: null, invitedBy: "you", createdAt: ago(60 * 5), expiresAt: ago(-60 * 24 * 6) }],
+  };
+  return { orgs: [org], billing, team };
 }
 
 const PULLS: Array<[title: string, author: string, review: "completed" | "running" | "none" | "older", findings: number]> = [

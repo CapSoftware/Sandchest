@@ -33,11 +33,17 @@ From then on pull requests are reviewed automatically (except drafts, some pull 
 
 - **On the pull request.** A Check called **Sandchest** and one summary comment report what the review found, or that nothing was. On private repositories each new finding is also posted as a review comment on the vulnerable line. On public repositories, where Checks and comments are visible to everyone, Sandchest only posts a count with a link to view the details privately. See [PR reviews](/docs/scans#pr-reviews).
 - **In the dashboard.** [Findings](/dashboard/findings) lists everything across your repositories. Each finding has the full attack path, a proof of concept and a fix prompt.
-- **By email.** People who have signed in and can push to the repository get an email about new critical findings and finished deep scans. An admin can turn these emails off for the account in [Settings](/dashboard/settings).
+- **By email.** People who have signed in and can push to the repository (or were invited to its account) get an email about new critical findings and finished deep scans. An admin can turn these emails off for the account in [Settings](/dashboard/settings).
 
 ## Who can see what
 
-Sandchest follows GitHub. You can see a repository's findings, and deep scan it, if GitHub says you have push access or higher. Billing belongs to the GitHub account: organization admins, or the owner of a personal account, can change the plan. There are no separate Sandchest invites or roles.
+Sandchest follows GitHub. You can see a repository's findings, and deep scan it, if GitHub says you have push access or higher. Billing belongs to the GitHub account: organization admins, or the owner of a personal account, can change the plan.
+
+To bring in someone GitHub doesn't, an admin invites them under **Team** in [Settings](/dashboard/settings), by email address or GitHub username. They see every repository Sandchest watches on that account and can scan, review and resolve findings, like someone with push access. Settings and billing stay with admins.
+
+- An invite link works once, for 7 days, and only for the person it was sent to: they sign in with GitHub, which must list the email address as verified, or be that GitHub account.
+- An invite also stops working if whoever sent it stops being an admin.
+- Removing someone, or them leaving, takes away what the invite gave them at once. Access GitHub gives them stays.
 
 ## Next steps
 

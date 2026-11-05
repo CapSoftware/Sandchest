@@ -1,11 +1,13 @@
 /**
  * What the dashboard reads and writes. Every read is scoped to a user through
  * `permission_cache`, which the web app refreshes from GitHub before it is
- * trusted (SPEC §3): a row there means GitHub reported push access or higher.
+ * trusted (SPEC §3): a row there means GitHub reported push access or higher,
+ * or an admin invited the person to the repo's org (see team.ts).
  */
 import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
 import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type DeepScanSchedule, type OrgSettings, type PrReviewMode } from "./schema";
+import { grantMemberships, lockUser } from "./team";
 
 type Severity = "critical" | "high" | "medium" | "low";
 export type RepoPermission = (typeof permissionCache.$inferSelect)["permission"];
@@ -53,7 +55,10 @@ async function linkGithub(tx: Tx, userId: string, github: { id: number; login?: 
     .where(eq(users.id, userId));
 }
 
-/** Replaces everything a user may see with what GitHub just reported, including who they are on GitHub. */
+/**
+ * Replaces everything a user may see with what GitHub just reported, including who they are on GitHub,
+ * then adds back what the orgs they joined by invite give (under the same lock as joining and leaving).
+ */
 export async function replaceAccess(
   database: Db,
   userId: string,
@@ -61,10 +66,12 @@ export async function replaceAccess(
   at = new Date(),
 ): Promise<void> {
   await database.transaction(async (tx) => {
+    await lockUser(tx, userId);
     await tx.delete(permissionCache).where(eq(permissionCache.userId, userId));
     await tx.delete(orgAdmins).where(eq(orgAdmins.userId, userId));
-    if (access.repos.length > 0) await tx.insert(permissionCache).values(access.repos.map((repo) => ({ userId, ...repo, checkedAt: at })));
+    if (access.repos.length > 0) await tx.insert(permissionCache).values(access.repos.map((repo) => ({ userId, ...repo, via: "github" as const, checkedAt: at })));
     if (access.adminOrgIds.length > 0) await tx.insert(orgAdmins).values(access.adminOrgIds.map((orgId) => ({ userId, orgId, checkedAt: at })));
+    await grantMemberships(tx, userId, at);
     await linkGithub(tx, userId, access.github, { accessCheckedAt: at });
   });
 }

@@ -10,3 +10,4 @@ export * from "./events";
 export * from "./learning";
 export * from "./agents";
 export * from "./reviews";
+export * from "./team";

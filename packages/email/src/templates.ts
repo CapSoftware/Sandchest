@@ -249,3 +249,21 @@ export function scanPausedEmail(input: { org: string; repo: string; kind: "recon
     footer: adminFooter(input.org, true),
   });
 }
+
+/**
+ * An invite to an org's team. Names are GitHub logins only (letters, digits
+ * and hyphens), never free-form display names, so the email can't be made to
+ * say anything else.
+ */
+export function teamInviteEmail(input: { org: string; inviter: string; url: string; days: number }): RenderedEmail {
+  return render({
+    subject: `@${input.inviter} invited you to ${input.org} on Sandchest`,
+    title: `Join ${input.org} on Sandchest.`,
+    paragraphs: [
+      `@${input.inviter} invited you to see what Sandchest finds in ${input.org}’s code: real vulnerabilities, how they’re exploited, and how to fix them.`,
+      `Sign in with a GitHub account that has this email address verified. The link works for ${input.days} days.`,
+    ],
+    button: { url: input.url, label: `Join ${input.org}` },
+    footer: `You got this because @${input.inviter} invited this address. If you weren’t expecting it, ignore it: nothing happens until you join.`,
+  });
+}

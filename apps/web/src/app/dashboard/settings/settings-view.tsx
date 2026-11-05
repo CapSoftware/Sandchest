@@ -5,7 +5,9 @@ import { Avatar } from "@/components/app/avatar";
 import { BillingPanel } from "@/components/app/billing-panel";
 import { Link } from "@/components/app/hover-link";
 import { InstallKey } from "@/components/app/install-key";
+import { OrgReviewsForm } from "@/components/app/org-reviews";
 import { OrgSettingsForm } from "@/components/app/org-settings";
+import { LeaveTeam, TeamPanel, type TeamRow } from "@/components/app/team";
 import { ForgetShapesForm } from "@/components/app/skeleton";
 import { timeAgo } from "@/lib/format";
 import { readHacker } from "@/lib/hacker";
@@ -32,12 +34,18 @@ export function SettingsView({
   billing,
   access,
   appUrl,
+  teams,
+  memberOf,
 }: {
   user: { image: string | null; login: string | null; name: string };
   orgs: SettingsOrg[];
   billing: Array<OrgBillingRow | null> | null;
   access: AgentAccess;
   appUrl: string;
+  /** Each administered org's team, by org id. */
+  teams: Record<string, TeamRow[]>;
+  /** Orgs the person joined by invite. */
+  memberOf: string[];
 }) {
   return (
     <>
@@ -67,6 +75,8 @@ export function SettingsView({
           <div className="settings-form">
             {billing && <BillingPanel org={org} billing={billing[index] ?? null} />}
             <OrgSettingsForm orgId={org.id} threshold={org.settings.checkThreshold} email={org.settings.emailNotifications !== false} admin={org.admin} />
+            <OrgReviewsForm orgId={org.id} mode={org.settings.prReviewsDefault ?? "auto"} admin={org.admin} />
+            {org.admin ? <TeamPanel orgId={org.id} org={org.login} rows={teams[org.id] ?? []} /> : memberOf.includes(org.id) && <LeaveTeam orgId={org.id} org={org.login} />}
             <div>
               <p className="field-legend">Hacker</p>
               <p className="field-help">
@@ -79,7 +89,7 @@ export function SettingsView({
             <div>
               <p className="field-legend">Repositories</p>
               <p className="field-help">
-                {org.repos.length === 0 ? "None you can push to." : "The ones you can push to."}{" "}
+                {org.repos.length === 0 ? "None you can see." : memberOf.includes(org.id) ? "All of them: you joined by invite." : "The ones you can push to."}{" "}
                 {org.admin && (
                   <a className="quiet" href={installationUrl(org)}>
                     Choose repositories on GitHub

@@ -73,3 +73,29 @@ function roleOf(repo: ApiRepo): RepoRole {
   const p = repo.permissions ?? {};
   return p.admin ? "admin" : p.maintain ? "maintain" : p.push ? "write" : p.triage ? "triage" : "read";
 }
+
+/**
+ * Who a user token belongs to and, when asked, the email addresses they have
+ * verified on GitHub (the App's "Email addresses" permission). Used to check
+ * an invite is accepted by the person it was sent to.
+ */
+export async function readIdentity(token: string, options: { emails: boolean; http?: HttpOptions }): Promise<{ id: number; login: string; verifiedEmails: string[] }> {
+  const auth = async () => token;
+  const http = options.http ?? {};
+  const [user, emails] = await Promise.all([
+    githubRequest<{ id: number; login: string }>(auth, "/user", {}, http),
+    options.emails ? githubPaginate(auth, "/user/emails", (page: Array<{ email: string; verified: boolean }>) => page, { limit: 100 }, http) : Promise.resolve([]),
+  ]);
+  return { id: user.id, login: user.login, verifiedEmails: emails.filter((email) => email.verified).map((email) => email.email.toLowerCase()) };
+}
+
+/** A GitHub person by login, or undefined if there's no such person (organizations and bots aren't people). */
+export async function findGithubUser(token: string, login: string, http: HttpOptions = {}): Promise<{ id: number; login: string } | undefined> {
+  try {
+    const user = await githubRequest<{ id: number; login: string; type: string }>(async () => token, `/users/${encodeURIComponent(login)}`, {}, http);
+    return user.type === "User" ? { id: user.id, login: user.login } : undefined;
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 404) return undefined;
+    throw error;
+  }
+}

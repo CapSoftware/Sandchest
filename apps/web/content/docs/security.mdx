@@ -96,7 +96,8 @@ To have your findings, threat models or account deleted too, write to the contac
 
 ## Who can see findings
 
-- A person can see a repository's findings only if GitHub says they have push access or higher to it. Sandchest checks with GitHub using their own sign-in, and re-checks at least every five minutes.
+- A person can see a repository's findings only if GitHub says they have push access or higher to it, or an admin of its account invited them. Sandchest checks with GitHub using their own sign-in, and re-checks at least every five minutes.
+- An invite is for one person: an email address GitHub must list as verified on their account, or one GitHub account. Its link carries a random token, of which Sandchest stores only a hash. It works once, for 7 days, and only while whoever sent it is still an admin. Removing someone takes their invited access away at once.
 - On public repositories, nothing about a finding is posted to GitHub beyond a count by severity, because Checks and comments there are public. See [PR reviews](/docs/scans#public-repositories).
 - Billing and settings can only be changed by admins of the GitHub organization, or the owner of a personal account.
 - Agents act as the person who connected them, with the same access, re-checked with GitHub the same way. Connecting always needs that person's approval in their browser, signed in with GitHub: an MCP client's OAuth consent (with PKCE), or a device code they confirm. A first card payment is always made by the person on Stripe; agents never see card details. Revoke any agent in **Settings → Agents**. See [Use it from your agent](/docs/agents).
@@ -104,7 +105,7 @@ To have your findings, threat models or account deleted too, write to the contac
 ## Analytics, email and payments
 
 - **Analytics are first-party.** Usage events (page views with IDs removed from the address, time on page, clicks, sign-up steps and actions) go to Sandchest's own database. A random ID in a cookie ties them to a browser, and to an account after sign-in. They record opaque IDs, counts and categories, never code, finding contents, repository names, names, email addresses or IP addresses. The hosting provider's cookieless web analytics count page views and measure page speed. There are no advertising or tracking scripts.
-- **Finding emails** cover new critical findings and finished deep scans. They go to people who have signed in and had push access to the repository when Sandchest last checked, within the past 30 days. An admin can turn these emails off for the account in [Settings](/dashboard/settings).
+- **Finding emails** cover new critical findings and finished deep scans. They go to people who have signed in and had push access to the repository (or were invited to its account) when Sandchest last checked, within the past 30 days. An admin can turn these emails off for the account in [Settings](/dashboard/settings).
 - **Billing emails** go to the account's admins and can't be turned off: credits running low or out (only while auto top-up is off), an auto top-up that went through or failed, and a scan stopped because the model provider refused it. Admins are people GitHub confirmed as admins in the last 30 days; if there are none, Sandchest asks GitHub before sending. The scan-stopped email names the repository, so it follows the account's email setting and only goes to admins confirmed in the last 30 days.
 - There is no marketing email.
 - **Payments** are processed by Stripe, through the billing service Autumn. Sandchest never sees your card number.

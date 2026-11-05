@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, gt, inArray, isNull, like, lt, ne, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries } from "./schema";
+import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries, type PrReviewMode } from "./schema";
 
 export type Org = typeof orgs.$inferSelect;
 export type Repo = typeof repos.$inferSelect;
@@ -53,7 +53,8 @@ export async function upsertRepos(database: Db, orgId: string, repoList: RepoInp
   if (repoList.length === 0) return [];
   return database
     .insert(repos)
-    .values(repoList.map((repo) => ({ ...repo, orgId, enabled: true })))
+    // New repos take the org's default review mode; repos already known keep their own.
+    .values(repoList.map((repo) => ({ ...repo, orgId, enabled: true, prReviews: sql`coalesce((select o.settings ->> 'prReviewsDefault' from ${orgs} o where o.id = ${orgId} and o.settings ->> 'prReviewsDefault' in ('auto', 'command', 'off')), 'auto')` as unknown as PrReviewMode })))
     .onConflictDoUpdate({
       target: repos.githubRepoId,
       set: {

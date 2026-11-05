@@ -1,9 +1,10 @@
 /** Repositories and scans: what's installed, deep scans on demand, and following a scan live. */
-import { canSeeScan, dashboardRepos, dashboardScans, feedSince, scanForUser, scanStatusOnly, threatModel } from "@sandchest/db";
+import { canSeeScan, dashboardRepos, dashboardScans, DEEP_SCAN_SCHEDULES, feedSince, PR_REVIEW_MODES, scanForUser, scanStatusOnly, threatModel, updateRepoSettings } from "@sandchest/db";
 import { z } from "zod";
 import { track } from "../../analytics";
 import { db } from "../../db";
 import { describeError } from "../../log";
+import { firstRun } from "@/lib/schedule";
 import { captureException } from "../../sentry";
 import { ApiError, notFound } from "../errors";
 import { AccountRef, int, operation, RepoRef, Uuid } from "../operation";
@@ -81,6 +82,40 @@ export const scanOps = [
         recent_scans: scans.map((scan) => scanListView(scan, context.appUrl)),
         threat_model: model ? { commit: model.commitSha, model: model.threatModel } : null,
       };
+    },
+  }),
+
+  operation({
+    name: "update_repo",
+    title: "Change a repository's review settings",
+    description:
+      "Changes how a repository is reviewed (anyone who can push to it). pr_reviews: \"auto\" reviews every push to a pull request (1 to 3 credits each), \"command\" only when someone comments /sandchest review, \"off\" never. deep_scan_schedule: \"off\", \"daily\", \"weekly\" or \"monthly\" deep scans, each paid like a manual one and skipped when nothing changed.",
+    method: "PATCH",
+    path: "/repos/{repo}",
+    input: z.object({
+      repo: RepoRef,
+      pr_reviews: z.enum(PR_REVIEW_MODES).optional(),
+      deep_scan_schedule: z.enum(DEEP_SCAN_SCHEDULES).optional(),
+    }),
+    idempotent: true,
+    async run(context, input) {
+      const { repo, org } = await resolveRepo(context, input.repo);
+      if (!input.pr_reviews && !input.deep_scan_schedule) throw new ApiError(400, "nothing_to_change", "Pass pr_reviews or deep_scan_schedule.");
+      const scheduleChanged = input.deep_scan_schedule !== undefined && input.deep_scan_schedule !== repo.deepScanSchedule;
+      const patch = {
+        ...(input.pr_reviews && { prReviews: input.pr_reviews }),
+        ...(scheduleChanged && { deepScanSchedule: input.deep_scan_schedule, nextDeepScanAt: firstRun(input.deep_scan_schedule!, repo.lastDeepScanAt) }),
+      };
+      const ok = await updateRepoSettings(db(), context.principal.userId, repo.id, patch);
+      await track("repo_settings_saved", {
+        userId: context.principal.userId,
+        orgId: org.id,
+        props: { repo_id: repo.id, pr_reviews: input.pr_reviews ?? repo.prReviews, deep_scan_schedule: input.deep_scan_schedule ?? repo.deepScanSchedule, outcome: ok ? "ok" : "no_access", via: context.surface },
+      });
+      if (!ok) throw notFound("repository");
+      const [row] = await dashboardRepos(db(), context.principal.userId, { repoId: repo.id });
+      if (!row) throw notFound("repository");
+      return repoView(row, context.appUrl);
     },
   }),
 

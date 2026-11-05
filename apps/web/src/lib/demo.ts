@@ -1,9 +1,9 @@
-import type { DashboardRepo, FindingListItem, findingForUser, HackerRecord, Overview, scanForUser, ScanListItem, SettingsOrg, OrgBillingRow } from "@sandchest/db";
+import type { DashboardRepo, FindingListItem, findingForUser, HackerRecord, Overview, scanForUser, ScanListItem, SettingsOrg, OrgBillingRow, OrgTeam } from "@sandchest/db";
 import type { FeedEvent } from "@/components/app/scan-live";
 import { DEFAULT_HACKER, type HackerProfile } from "./hacker";
 import type { Severity } from "./format";
 import type { PullRow } from "@/server/pulls";
-import { samplePulls } from "./samples";
+import { samplePulls, sampleSettings } from "./samples";
 
 /**
  * The demo: a made-up account, `acme`, that anyone can click around at /demo
@@ -734,7 +734,7 @@ export function demoRecord(): HackerRecord {
 }
 
 /** The account on the plan, with its repositories, as Settings reads it. */
-export function demoSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow } {
+export function demoSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow; team: OrgTeam } {
   const billing: OrgBillingRow = {
     orgId: DEMO_ORG_ID,
     planId: "standard",
@@ -761,7 +761,7 @@ export function demoSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow } 
     billing,
     repos: REPOS.map((repo) => ({ id: id(repo.n), fullName: `${DEMO_LOGIN}/${repo.name}`, private: repo.privateRepo })),
   };
-  return { orgs: [org], billing };
+  return { orgs: [org], billing, team: sampleSettings().team };
 }
 
 /**

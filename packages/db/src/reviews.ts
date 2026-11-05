@@ -29,6 +29,29 @@ export async function updateRepoSettings(database: Db, userId: string, repoId: s
   return rows.length === 1;
 }
 
+/**
+ * An admin sets how pull requests are reviewed on the org's repositories
+ * added from now on and, with `applyToAll`, on every one already installed.
+ * The number of repos changed, or undefined if the user isn't an admin.
+ */
+export async function setOrgPrReviews(database: Db, userId: string, orgId: string, mode: PrReviewMode, applyToAll: boolean): Promise<number | undefined> {
+  return database.transaction(async (tx) => {
+    const [org] = await tx
+      .update(orgs)
+      .set({ settings: sql`${orgs.settings} || ${JSON.stringify({ prReviewsDefault: mode })}::jsonb` })
+      .where(and(eq(orgs.id, orgId), sql`exists (select 1 from org_admins oa where oa.user_id = ${userId} and oa.org_id = ${orgs.id})`))
+      .returning({ id: orgs.id });
+    if (!org) return undefined;
+    if (!applyToAll) return 0;
+    const changed = await tx
+      .update(repos)
+      .set({ prReviews: mode })
+      .where(and(eq(repos.orgId, orgId), eq(repos.enabled, true), sql`${repos.prReviews} <> ${mode}`))
+      .returning({ id: repos.id });
+    return changed.length;
+  });
+}
+
 /** Installed repos whose scheduled deep scan is due, oldest first. */
 export async function dueScheduledRepos(database: Db, now = new Date(), limit = 25): Promise<Array<Repo & { org: Org }>> {
   const rows = await database

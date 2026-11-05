@@ -90,7 +90,7 @@ curl -s https://www.sandchest.com/api/v1/me -H "Authorization: Bearer $SANDCHEST
 
 ## API keys
 
-API keys act as the person who made them, with exactly their access: the repositories GitHub says they can push to, and the accounts they administer. Make one for CI or a script in **Settings → Agents**, or with `create_api_key` from an agent connected with a key (MCP clients' OAuth tokens can't create keys). A key is shown once; Sandchest keeps only a hash of it. Revoke keys, and disconnect MCP clients, in **Settings → Agents** or with `revoke_api_key` (`"current"` revokes the key making the request).
+API keys act as the person who made them, with exactly their access: the repositories GitHub says they can push to (and every repository of an account they were invited to), and the accounts they administer. Make one for CI or a script in **Settings → Agents**, or with `create_api_key` from an agent connected with a key (MCP clients' OAuth tokens can't create keys). A key is shown once; Sandchest keeps only a hash of it. Revoke keys, and disconnect MCP clients, in **Settings → Agents** or with `revoke_api_key` (`"current"` revokes the key making the request).
 
 If the person's GitHub sign-in expires or is revoked, calls answer `403 github_reauth_required`: they sign in once at [sandchest.com/sign-in](/sign-in) and the key works again.
 
@@ -106,7 +106,11 @@ Every tool is also an HTTP endpoint under `https://www.sandchest.com/api/v1`, wi
 | `revoke_api_key` | `DELETE /keys/{id}` | Revoke a key or disconnect a client |
 | `list_accounts` | `GET /accounts` | GitHub accounts Sandchest is installed on; `wait` while the person installs |
 | `get_account` | `GET /accounts/{account}` | An account's settings, hacker and repositories |
-| `update_account` | `PATCH /accounts/{account}` | Check threshold, emails, company details, first target |
+| `update_account` | `PATCH /accounts/{account}` | Check threshold, emails, company details, first target, PR reviews for new repositories (or all) |
+| `list_team` | `GET /accounts/{account}/team` | Who can see the account's repositories and how, and pending invites |
+| `invite_teammate` | `POST /accounts/{account}/team/invites` | Invite someone by email or GitHub username |
+| `revoke_invite` | `DELETE /accounts/{account}/team/invites/{id}` | Revoke a pending invite |
+| `remove_teammate` | `DELETE /accounts/{account}/team/members/{user_id}` | Remove someone who joined by invite |
 | `update_hacker` | `PATCH /accounts/{account}/hacker` | The hacker's name, look and voice |
 | `get_billing` | `GET /accounts/{account}/billing` | Plan, credits, auto top-up, free credits, prices; `wait` while the person pays |
 | `quote_credits` | `POST /accounts/{account}/billing/quote` | Price a purchase without charging |
@@ -117,6 +121,7 @@ Every tool is also an HTTP endpoint under `https://www.sandchest.com/api/v1`, wi
 | `set_invoice_details` | `PUT /accounts/{account}/billing/invoice-details` | Business name, address and tax ID on invoices |
 | `list_repos` | `GET /repos` | Repositories, open findings, deep scan price |
 | `get_repo` | `GET /repos/{repo}` | One repository, its recent scans and threat model |
+| `update_repo` | `PATCH /repos/{repo}` | PR reviews (every push, when asked, off) and the deep scan schedule |
 | `start_deep_scan` | `POST /repos/{repo}/scans` | Deep scan a whole repository |
 | `list_scans` | `GET /scans` | Scans, newest first |
 | `get_scan` | `GET /scans/{id}` | A scan and its findings; `wait` up to 50 seconds |

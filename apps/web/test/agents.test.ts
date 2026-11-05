@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
 import postgres from "postgres";
-import { createDb, decideDeviceGrant, schema, upsertFindings, upsertInstallation, type Db, type FindingInput } from "@sandchest/db";
+import { createDb, decideDeviceGrant, disableRepos, schema, upsertFindings, upsertInstallation, upsertRepos, type Db, type FindingInput } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { GitHubApp } from "@sandchest/github";
 import { POST as mcpPost } from "@/app/api/mcp/route";
@@ -565,6 +565,61 @@ describe.skipIf(!available)("anonymous endpoints are limited", () => {
     await database.insert(schema.oauthClients).values(noise.map((i) => ({ id: `scc_old${i}`, name: "old", redirectUris: ["https://noise.example/cb"], createdAt: new Date(Date.now() - 2 * 3_600_000) })));
     expect((await registerPost(from("198.51.100.2", { redirect_uris: ["https://client.example/cb"] }))).status).toBe(201);
     await database.$client`delete from oauth_clients where name = 'old'`;
+  });
+});
+
+describe.skipIf(!available)("team and review settings", () => {
+  test("only admins see the team or invite; an invite's link comes back when no email goes", async () => {
+    expect((await api(bobKey, "GET", "/accounts/acme/team")).status).toBe(403);
+    expect((await api(bobKey, "POST", "/accounts/acme/team/invites", { invitee: "dana@example.com" })).status).toBe(403);
+
+    const team = await api(aliceKey, "GET", "/accounts/acme/team");
+    expect(team.status).toBe(200);
+    expect(team.body.people.map((p: { login: string; access: string }) => [p.login, p.access])).toEqual([
+      ["alice", "admin"],
+      ["bob", "github"],
+    ]);
+
+    const invited = await api(aliceKey, "POST", "/accounts/acme/team/invites", { invitee: "Dana@Example.com" });
+    expect(invited.status).toBe(200);
+    expect(invited.body).toMatchObject({ invitee: "dana@example.com", emailed: false });
+    expect(invited.body.link).toMatch(new RegExp(`^${BASE}/invite/[A-Za-z0-9_-]{43}$`));
+    expect((await api(aliceKey, "POST", "/accounts/acme/team/invites", { invitee: "not an address" })).status).toBe(422);
+
+    const listed = await api(aliceKey, "GET", "/accounts/acme/team");
+    expect(listed.body.invites.map((i: { email: string }) => i.email)).toEqual(["dana@example.com"]);
+    expect(JSON.stringify(listed.body)).not.toContain(invited.body.link.split("/").at(-1));
+
+    expect((await api(bobKey, "DELETE", `/accounts/acme/team/invites/${invited.body.invite_id}`)).status).toBe(403);
+    expect((await api(aliceKey, "DELETE", `/accounts/acme/team/invites/${invited.body.invite_id}`)).status).toBe(200);
+    expect((await api(aliceKey, "DELETE", `/accounts/acme/team/invites/${invited.body.invite_id}`)).status).toBe(404);
+    expect((await api(aliceKey, "DELETE", `/accounts/acme/team/members/${ids.bob}`)).status).toBe(404);
+  });
+
+  test("anyone who can push changes a repo's PR reviews; an admin sets the account's default and can apply it everywhere", async () => {
+    const changed = await api(bobKey, "PATCH", "/repos/acme/api", { pr_reviews: "command" });
+    expect(changed.status).toBe(200);
+    expect(changed.body.pr_reviews).toBe("command");
+    expect((await api(bobKey, "PATCH", "/repos/acme/secret", { pr_reviews: "off" })).status).toBe(404);
+    expect((await api(bobKey, "PATCH", "/repos/acme/api", { pr_reviews: "sometimes" })).status).toBe(422);
+    expect((await api(bobKey, "PATCH", "/repos/acme/api", {})).status).toBe(400);
+
+    expect((await api(bobKey, "PATCH", "/accounts/acme", { pr_reviews_default: "off" })).status).toBe(403);
+    const fresh = await api(aliceKey, "PATCH", "/accounts/acme", { pr_reviews_default: "off" });
+    expect(fresh.body).toMatchObject({ settings: { pr_reviews_default: "off" }, repos_changed: 0 });
+    expect((await api(aliceKey, "GET", "/repos/acme/api")).body.pr_reviews).toBe("command");
+    // New repos start from the default; ones already known keep their own.
+    const [added] = await upsertRepos(database, ids.acme, [{ githubRepoId: 77, fullName: "acme/added", private: true, defaultBranch: "main" }]);
+    expect(added!.prReviews).toBe("off");
+    const [again] = await upsertRepos(database, ids.acme, [{ githubRepoId: 1, fullName: "acme/api", private: true, defaultBranch: "main" }]);
+    expect(again!.prReviews).toBe("command");
+
+    const all = await api(aliceKey, "PATCH", "/accounts/acme", { pr_reviews_default: "auto", apply_to_all_repos: true });
+    expect(all.status).toBe(200);
+    expect(all.body.repos_changed).toBe(2);
+    expect((await api(aliceKey, "GET", "/repos/acme/api")).body.pr_reviews).toBe("auto");
+    expect((await api(aliceKey, "PATCH", "/accounts/acme", { apply_to_all_repos: true })).status).toBe(422);
+    await disableRepos(database, [77]);
   });
 });
 

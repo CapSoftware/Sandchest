@@ -1,5 +1,5 @@
 /** The GitHub accounts Sandchest is installed on: their settings and their hacker. */
-import { orgRepos, updateOrgSettings } from "@sandchest/db";
+import { orgRepos, PR_REVIEW_MODES, setOrgPrReviews, updateOrgSettings } from "@sandchest/db";
 import { z } from "zod";
 import { HOODIES, MAX_STICKERS, PHOSPHORS, readHacker, ROOMS, SHELLS, STICKERS, validHandle, VOICES } from "@/lib/hacker";
 import { isUuid } from "@/lib/uuid";
@@ -65,6 +65,7 @@ export const accountsOps = [
         settings: {
           check_threshold: org.settings.checkThreshold,
           email_notifications: org.settings.emailNotifications !== false,
+          pr_reviews_default: org.settings.prReviewsDefault ?? "auto",
           // The billing contact is the admins' business, as in the dashboard.
           company: org.admin ? (org.settings.company ?? null) : null,
           first_target_repo_id: org.settings.firstTarget ?? null,
@@ -78,7 +79,7 @@ export const accountsOps = [
     name: "update_account",
     title: "Change an account's settings",
     description:
-      "Changes an account's settings (admins only). check_threshold: the lowest severity that fails the Sandchest Check on pull requests. email_notifications: email people with access about critical findings and finished deep scans. company: name and billing email for receipts. first_target: the repository to deep scan first once the account joins the plan.",
+      "Changes an account's settings (admins only). check_threshold: the lowest severity that fails the Sandchest Check on pull requests. email_notifications: email people with access about critical findings and finished deep scans. company: name and billing email for receipts. first_target: the repository to deep scan first once the account joins the plan. pr_reviews_default: how repositories added from now on review pull requests (\"auto\", \"command\" or \"off\"); with apply_to_all_repos=true, every installed repository is set to it too.",
     method: "PATCH",
     path: "/accounts/{account}",
     input: z.object({
@@ -87,6 +88,8 @@ export const accountsOps = [
       email_notifications: flag().optional(),
       company: z.object({ name: z.string().trim().min(1).max(120), email: z.union([z.literal(""), z.email().max(254)]) }).optional(),
       first_target: RepoRef.optional(),
+      pr_reviews_default: z.enum(PR_REVIEW_MODES).optional(),
+      apply_to_all_repos: flag().optional().describe("With pr_reviews_default: set every installed repository to it too."),
     }),
     idempotent: true,
     async run(context, input) {
@@ -103,22 +106,39 @@ export const accountsOps = [
         if (!target) throw new ApiError(422, "invalid_first_target", `${input.first_target} isn't one of ${org.login}'s installed repositories.`);
         patch.firstTarget = target.id;
       }
-      if (Object.keys(patch).length === 0) throw new ApiError(400, "nothing_to_change", "Pass at least one setting to change.");
-      if (!(await updateOrgSettings(db(), context.principal.userId, org.id, patch))) throw notAdmin(org.login);
+      if (input.apply_to_all_repos && !input.pr_reviews_default) throw new ApiError(422, "invalid_input", "apply_to_all_repos needs pr_reviews_default.");
+      if (Object.keys(patch).length === 0 && !input.pr_reviews_default) throw new ApiError(400, "nothing_to_change", "Pass at least one setting to change.");
+      if (Object.keys(patch).length > 0 && !(await updateOrgSettings(db(), context.principal.userId, org.id, patch))) throw notAdmin(org.login);
+      let reposChanged = 0;
+      if (input.pr_reviews_default) {
+        const changed = await setOrgPrReviews(db(), context.principal.userId, org.id, input.pr_reviews_default, !!input.apply_to_all_repos);
+        if (changed === undefined) throw notAdmin(org.login);
+        reposChanged = changed;
+        patch.prReviewsDefault = input.pr_reviews_default;
+      }
       const settings = { ...org.settings, ...patch };
       await track("org_settings_saved", {
         userId: context.principal.userId,
         orgId: org.id,
-        props: { check_threshold: settings.checkThreshold, email_notifications: settings.emailNotifications !== false, outcome: "ok", via: context.surface },
+        props: {
+          check_threshold: settings.checkThreshold,
+          email_notifications: settings.emailNotifications !== false,
+          pr_reviews_default: settings.prReviewsDefault ?? "auto",
+          repos_changed: reposChanged,
+          outcome: "ok",
+          via: context.surface,
+        },
       });
       return {
         account: { id: org.id, login: org.login },
         settings: {
           check_threshold: settings.checkThreshold,
           email_notifications: settings.emailNotifications !== false,
+          pr_reviews_default: settings.prReviewsDefault ?? "auto",
           company: settings.company ?? null,
           first_target_repo_id: settings.firstTarget ?? null,
         },
+        ...(input.pr_reviews_default && { repos_changed: reposChanged }),
       };
     },
   }),
