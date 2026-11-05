@@ -4,6 +4,10 @@
 # Enable once per clone: `git config core.hooksPath .githooks`.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# A deploy never migrates: refuse to ship code ahead of its migrations (read-only; skipped without .env.local).
+if [ -f .env.local ]; then
+  echo "pre-push: migrations" && (cd packages/db && bun --env-file=../../.env.local run check:migrations)
+fi
 echo "pre-push: type check" && bun run typecheck >/dev/null
 echo "pre-push: tests" && bun run test >/dev/null
 echo "pre-push: clean build" && scripts/check-build.sh >/dev/null
