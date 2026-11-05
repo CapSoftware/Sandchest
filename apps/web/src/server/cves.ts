@@ -17,7 +17,7 @@
 import {
   applyMatches,
   claimInventoryRefresh,
-  feedCursor,
+  feedCursors,
   installedVersions,
   inventoriesDue,
   inventoriesUnchecked,
@@ -35,14 +35,14 @@ import {
   type NewMatch,
   type PackageVersion,
 } from "@sandchest/db";
-import { ECOSYSTEMS, packageKey, stampMs, toAdvisoryRecord, toInventory, type AdvisoryRecord, type Change, type OsvRecord } from "@sandchest/engine/advisories";
+import { affectedNames, packageKey, resolveMaven, stampMs, toAdvisoryRecord, toInventory, type AdvisoryRecord, type Change, type JvmImport, type Managed, type OsvRecord } from "@sandchest/engine/advisories";
 import { createIndexerClient, type IndexerClient } from "@sandchest/engine/indexer";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { config } from "./config";
 import { describeError } from "./log";
 import { indexerBinary, prepareWorkspace } from "./scans";
-import { catalog, db, githubApp } from "./services";
+import { catalog, db, githubApp, maven } from "./services";
 
 /** The feed is re-read this far behind its cursor: OSV can publish a record stamped a little earlier than one already read. */
 const FEED_OVERLAP_MS = 2 * 3_600_000;
@@ -52,12 +52,24 @@ const FEED_MAX_CHANGES = 2_000;
 const RECHECK_MS = 24 * 3_600_000;
 /** Records are fetched from OSV's public bucket, which serves this many at once without strain. */
 const RECORD_CONCURRENCY = 24;
+/** Ecosystem feeds read at once. */
+const FEED_CONCURRENCY = 4;
 /** Per sweep (every ten minutes): inventories read, and inventories checked in full. */
 const REFRESHES_PER_SWEEP = 5;
 const RECHECKS_PER_SWEEP = 12;
 const REFRESH_BUDGET_MS = 8 * 60_000;
+/** Reading the versions a JVM project's parent and BOMs set, and what its artifacts pull in, from Maven Central. */
+const MAVEN_BUDGET_MS = 3 * 60_000;
 
 type Dependency = Parameters<typeof toInventory>[0][number];
+/** The indexer's `deps`: what the files pin, and what only Maven Central can put a version on. */
+type Read = { dependencies: Dependency[]; managed?: Managed[]; jvmImports?: JvmImport[] };
+
+/** Everything a read says is installed, Maven artifacts resolved. */
+async function installed({ dependencies, managed = [], jvmImports = [] }: Read): Promise<Dependency[]> {
+  const resolved = await resolveMaven(maven(), { dependencies, managed, imports: jvmImports }, AbortSignal.timeout(MAVEN_BUDGET_MS));
+  return [...dependencies, ...resolved];
+}
 
 // ---- Inventories ------------------------------------------------------------
 
@@ -82,9 +94,10 @@ export async function saveDependencies(repoId: string, commitSha: string, starte
  */
 export function captureFromScan(repoId: string, commitSha: string, pinnedAt: Date, indexer: IndexerClient): { read: Promise<unknown>; done: Promise<void> } {
   const startedAt = pinnedAt;
-  const read = indexer.call<{ dependencies: Dependency[] }>("deps", {});
+  const read = indexer.call<Read>("deps", {});
   const done = read
-    .then(({ dependencies }) => saveDependencies(repoId, commitSha, startedAt, dependencies))
+    .then(installed)
+    .then((dependencies) => saveDependencies(repoId, commitSha, startedAt, dependencies))
     .then(
       () => undefined,
       (error: unknown) => console.error(`Inventory for repo ${repoId} not saved: ${describeError(error)}`),
@@ -131,12 +144,13 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
       started: startedAt.getTime(),
       onRetry: () => {},
     });
-    let dependencies: Dependency[];
+    let read: Read;
     try {
-      ({ dependencies } = await createIndexerClient({ url: handle.url, token: handle.token }).call<{ dependencies: Dependency[] }>("deps", {}));
+      read = await createIndexerClient({ url: handle.url, token: handle.token }).call<Read>("deps", {});
     } finally {
       await workspace.destroy().catch(() => {});
     }
+    const dependencies = await installed(read);
     await saveDependencies(repoId, headSha, startedAt, dependencies);
     await releaseInventoryRefresh(db(), repoId);
     return { state: "done", dependencies: dependencies.length };
@@ -209,29 +223,20 @@ export interface SyncResult {
 }
 
 /**
- * Reads each ecosystem's OSV change feed from where the last sync stopped,
- * refreshes the stored records that changed, and checks every installed
- * version of the packages they name. The first sync of an ecosystem only
- * marks where to start: inventories are checked in full on their own.
+ * Reads the OSV change feed of every ecosystem an inventory installs from, from where the last sync
+ * stopped, refreshes the stored records that changed, and checks every installed version of the packages
+ * they name.
  */
-export async function syncAdvisories(now = Date.now()): Promise<SyncResult> {
+export async function syncAdvisories(): Promise<SyncResult> {
   const result: SyncResult = { changed: 0, packages: 0, added: [], errors: [] };
-  for (const ecosystem of ECOSYSTEMS) {
+  await mapLimit(await feedCursors(db()), FEED_CONCURRENCY, async ({ ecosystem, cursor }) => {
     try {
-      const cursor = await feedCursor(db(), ecosystem);
-      if (cursor === undefined) {
-        await setFeedCursor(db(), ecosystem, now);
-        continue;
-      }
       const read = await catalog().changedSince(ecosystem, cursor - FEED_OVERLAP_MS);
       // Newest first. A burst bigger than one sweep should take (OSV re-stamping an ecosystem) is handled up
       // to the cap and the cursor moves past the rest: the daily full check of every inventory covers them.
       const changes = read.changes.slice(0, FEED_MAX_CHANGES);
       const newestRead = Math.max(cursor, ...read.changes.slice(0, 1).map((change) => stampMs(change.modified) ?? 0));
-      if (changes.length === 0) {
-        await setFeedCursor(db(), ecosystem, cursor);
-        continue;
-      }
+      if (changes.length === 0) return setFeedCursor(db(), ecosystem, cursor);
       result.changed += changes.length;
       const records = new Map<string, OsvRecord>();
       await mapLimit(changes, RECORD_CONCURRENCY, async (change) => {
@@ -241,9 +246,8 @@ export async function syncAdvisories(now = Date.now()): Promise<SyncResult> {
       // Which installed packages the changes name, by the name advisories use.
       const keys = new Map<string, { ecosystem: string; key: string }>();
       for (const record of records.values()) {
-        for (const affected of record.affected ?? []) {
-          if (affected.package?.ecosystem !== ecosystem || !affected.package.name) continue;
-          const key = packageKey(ecosystem, affected.package.name);
+        for (const name of affectedNames(record, ecosystem)) {
+          const key = packageKey(ecosystem, name);
           keys.set(key, { ecosystem, key });
         }
       }
@@ -262,7 +266,7 @@ export async function syncAdvisories(now = Date.now()): Promise<SyncResult> {
     } catch (error) {
       result.errors.push(`${ecosystem}: ${describeError(error)}`);
     }
-  }
+  });
   return result;
 }
 
@@ -282,7 +286,7 @@ async function checkPackages(packages: PackageVersion[], origin: "feed" | "inven
 /** The CVE directory's share of the ten-minute sweep. */
 export async function sweepCves(startInventory: (repoId: string) => Promise<void>, now = new Date()): Promise<{ changed: number; added: number; refreshed: number; rechecked: number; errors: number }> {
   // The feed and the daily checks run side by side, so a slow feed never holds back the safety net.
-  const syncing = syncAdvisories(now.getTime()).catch((error: unknown): SyncResult => ({ changed: 0, packages: 0, added: [], errors: [describeError(error)] }));
+  const syncing = syncAdvisories().catch((error: unknown): SyncResult => ({ changed: 0, packages: 0, added: [], errors: [describeError(error)] }));
   const [due, unchecked] = await Promise.all([inventoriesDue(db(), REFRESHES_PER_SWEEP), inventoriesUnchecked(db(), new Date(now.getTime() - RECHECK_MS), RECHECKS_PER_SWEEP)]);
   const started = await Promise.allSettled(due.map((repoId) => startInventory(repoId)));
   // A first check that failed when the inventory was read is still the inventory's; later ones find new advisories.

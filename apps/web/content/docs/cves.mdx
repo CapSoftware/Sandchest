@@ -7,8 +7,28 @@ The CVEs page lists every known vulnerability that affects a version your reposi
 
 ## Where the data comes from
 
-- **What you install.** Sandchest reads each repository's manifests and lockfiles on its default branch: npm, pnpm, Yarn and Bun lockfiles, Python requirements, Pipfile, Poetry and uv lockfiles, Go modules, Maven and Gradle, Cargo, Composer and Bundler. It reads them when it maps or scans a repository, and again whenever a push to the default branch changes a manifest or lockfile. Reading them is free.
-- **What is known.** Advisories come from [OSV](https://osv.dev), which collects GitHub's advisory database, the Python, Go and Rust advisory databases and reports of malicious packages. Only package names and versions are sent; never code.
+- **What you install.** Sandchest reads each repository's manifests and lockfiles on its default branch. It reads them when it maps or scans a repository, and again whenever a push to the default branch changes a manifest or lockfile. Reading them is free.
+- **What is known.** Advisories come from [OSV](https://osv.dev), which collects GitHub's advisory database, the language advisory databases, CVEs with the commits they affect, and reports of malicious packages. Only package names, versions and commits are sent; never code.
+
+| Language | Read from |
+| --- | --- |
+| JavaScript, TypeScript | npm, pnpm, Yarn and Bun lockfiles |
+| Python | requirements files, Pipfile, Poetry, uv and PDM lockfiles, pyproject.toml |
+| Go | go.mod |
+| Java, Kotlin, Scala | Maven and Gradle builds, Gradle lockfiles and version catalogs, with versions set by parent POMs and BOMs and everything your artifacts pull in, read from Maven Central |
+| Rust | Cargo.lock |
+| PHP | composer.lock |
+| Ruby | Gemfile.lock |
+| C#, F#, Visual Basic | NuGet lockfiles, project files, central package management, packages.config |
+| Dart, Flutter | pubspec.lock |
+| Elixir, Erlang | mix.lock, rebar.lock |
+| Julia | Manifest.toml |
+| R | renv.lock |
+| Swift | Package.resolved |
+| Haskell | cabal.project.freeze, stack.yaml.lock |
+| OCaml | opam lockfiles |
+| C, C++ and anything vendored as a git submodule | the commit each submodule is pinned to |
+| GitHub Actions | the actions your workflows use |
 
 When OSV publishes or changes an advisory, Sandchest checks every repository that installs the package within about ten minutes. Every repository is also checked in full once a day.
 
@@ -17,7 +37,7 @@ When OSV publishes or changes an advisory, Sandchest checks every repository tha
 Each vulnerability is listed once, however many advisories describe it, and sorted by how exposed you are, then by severity.
 
 - **In your code**: shipped code imports the affected version.
-- **Installed**: the affected version is installed, but only as a dev dependency, pulled in by another package, imported only by tests, config or tooling, or in a language whose imports aren't traced yet (Rust, PHP, Ruby).
+- **Installed**: the affected version is installed, but only as a dev dependency, pulled in by another package, imported only by tests, config or tooling, a git submodule, or in a language whose imports name modules rather than packages (Swift, Haskell, OCaml).
 - **Resolved**: an upgrade removed the affected version, or the advisory no longer applies to it.
 
 In a monorepo, each file counts for the version its own workspace resolves. When a lockfile holds three versions of a package, only the one your code actually loads is listed as in your code.

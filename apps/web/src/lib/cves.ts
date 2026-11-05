@@ -20,7 +20,8 @@ export const CVE_SEVERITY_LABEL: Record<AdvisorySeverity, string> = { critical: 
 /** How close an installed version is to shipped code, in a few words. */
 export function evidence(match: Pick<CveMatch, "usage" | "dev" | "direct" | "approximate" | "ecosystem" | "resolvedAt">): string {
   if (match.resolvedAt) return "No longer installed";
-  if (match.approximate) return "Allowed by a package.json range; no lockfile was read";
+  if (match.approximate) return "Allowed by a manifest's version range; no lockfile pins it";
+  if (match.ecosystem === "GIT") return "A git submodule pinned at an affected commit";
   if (match.dev) return match.usage === "product" ? "A dev dependency, though shipped code imports it" : "A dev dependency";
   switch (match.usage) {
     case "product":
@@ -30,7 +31,7 @@ export function evidence(match: Pick<CveMatch, "usage" | "dev" | "direct" | "app
     case "none":
       return match.direct ? "Declared, but no code imports it" : "Installed by another package";
     default:
-      return `Installed; ${match.ecosystem} imports aren't traced yet`;
+      return "Installed; its imports name modules, not packages, so they can't be traced";
   }
 }
 
@@ -41,7 +42,13 @@ export function whereLine(item: CveListItem): { repo: string; text: string; site
   const repos = new Set((open.length ? open : item.matches).map((m) => m.repoId));
   const site = inCode(shown) ? shown.importedAt[0] : undefined;
   const why = site ? undefined : evidence(shown).toLowerCase();
-  return { repo: shown.repoFullName, text: `${shown.name}@${shown.version}`, site, why, more: repos.size - 1 };
+  return { repo: shown.repoFullName, text: packageLabel(shown), site, why, more: repos.size - 1 };
+}
+
+/** An installed package as people read it: `name@version`, or a submodule's repository at its commit. */
+export function packageLabel(match: Pick<CveMatch, "ecosystem" | "name" | "version">): string {
+  if (match.ecosystem !== "GIT") return `${match.name}@${match.version}`;
+  return `${match.name.replace(/^https:\/\/(github\.com\/)?/, "")} at ${match.version.slice(0, 12)}`;
 }
 
 /** A link to an import site, at the commit the inventory was read from (the default branch when unknown). */
@@ -68,8 +75,8 @@ export function upgradePrompt(input: { key: string; summary: string; repoFullNam
     "Affected versions installed:",
     ...input.matches.map((m) => {
       const where = m.importedAt.length ? ` Imported at ${m.importedAt.slice(0, 5).join(", ")}.` : "";
-      const fix = m.fixed ? `upgrade to ${m.fixed} or later` : "no fixed version is published yet: remove it or replace it";
-      return `- ${m.ecosystem} ${m.name}@${m.version}, from ${m.manifest ?? "the lockfile"}: ${fix}.${where}`;
+      const fix = m.ecosystem === "GIT" ? "update the submodule to a commit that includes the fix" : m.fixed ? `upgrade to ${m.fixed} or later` : "no fixed version is published yet: remove it or replace it";
+      return `- ${m.ecosystem} ${packageLabel(m)}, from ${m.manifest ?? "the lockfile"}: ${fix}.${where}`;
     }),
     "",
     "Steps:",

@@ -222,12 +222,12 @@ describe("CVE directory", () => {
   test("a new advisory reaches every repository installing the package through the change feed, flagged new", async () => {
     if (!available) return;
     await saveDependencies(webId, "sha-w1", T0, [dep({ name: "lodash", version: "4.17.20", importedAt: ["lib/merge.ts:2"] })]);
-    // The first sync only marks where the feed starts.
     const now = new Date("2026-11-05T12:00:00Z");
-    await syncAdvisories(now.getTime() - 10 * 60_000);
+    // Each ecosystem's feed is followed from the first inventory installing from it.
+    expect((await database.select().from(schema.advisoryFeeds)).map((f) => f.ecosystem).sort()).toEqual(["Go", "npm"]);
     osv.add({ id: "GHSA-lodash-new", modified: "x", published: "2026-11-05T11:30:00Z", aliases: ["CVE-2026-4000"], summary: "Command injection in template", database_specific: { severity: "HIGH" } }, "npm", "lodash", ["4.17.20"]);
     osv.publish("GHSA-lodash-new", "npm", new Date("2026-11-05T11:55:00Z"));
-    const result = await syncAdvisories(now.getTime());
+    const result = await syncAdvisories();
     expect(result.errors).toEqual([]);
     expect(result.added.map((m) => [m.advisoryId, m.repoId === apiId ? "api" : "web"]).sort()).toEqual([
       ["GHSA-lodash-new", "api"],
@@ -242,7 +242,7 @@ describe("CVE directory", () => {
       ["acme/api", "none"],
     ]);
     // Syncing again with nothing new changes nothing.
-    expect((await syncAdvisories(now.getTime() + 60_000)).added).toEqual([]);
+    expect((await syncAdvisories()).added).toEqual([]);
   });
 
   test("a withdrawn advisory is resolved everywhere at the next feed sync", async () => {
@@ -250,7 +250,7 @@ describe("CVE directory", () => {
     const at = new Date("2026-11-05T12:20:00Z");
     osv.records.set("GHSA-lodash-new", { ...osv.records.get("GHSA-lodash-new")!, withdrawn: at.toISOString() });
     osv.publish("GHSA-lodash-new", "npm", at);
-    await syncAdvisories(at.getTime() + 60_000);
+    await syncAdvisories();
     const found = await cveForUser(database, userId, "CVE-2026-4000");
     // Withdrawn records leave the directory entirely.
     expect(found).toBeUndefined();

@@ -68,6 +68,15 @@ export async function saveInventory(database: Db, repoId: string, commitSha: str
       .insert(repoInventories)
       .values({ repoId, commitSha, capturedAt: startedAt, dependencies: entries.length, error: null })
       .onConflictDoUpdate({ target: repoInventories.repoId, set: { commitSha, capturedAt: startedAt, dependencies: entries.length, requestedAt: requested, error: null } });
+    // An ecosystem's change feed is followed from the first inventory that installs from it; until then the
+    // inventory's own full check covers it.
+    const ecosystems = [...new Set(entries.map((entry) => entry.ecosystem))];
+    if (ecosystems.length > 0) {
+      await tx
+        .insert(advisoryFeeds)
+        .values(ecosystems.map((ecosystem) => ({ ecosystem, cursor: String(startedAt.getTime()) })))
+        .onConflictDoNothing();
+    }
     // Upgraded or removed: the version is gone, so are its advisories.
     await tx.execute(sql`
       update ${repoAdvisories} ra set resolved_at = now()
@@ -284,10 +293,10 @@ export function matchKey(pkg: PackageVersion): string {
   return `${pkg.ecosystem}\0${pkg.name}\0${pkg.version}`;
 }
 
-/** How far an ecosystem's change feed has been read (ms since the epoch), or undefined before the first sync. */
-export async function feedCursor(database: Db, ecosystem: string): Promise<number | undefined> {
-  const [row] = await database.select({ cursor: advisoryFeeds.cursor }).from(advisoryFeeds).where(eq(advisoryFeeds.ecosystem, ecosystem));
-  return row ? Number(row.cursor) : undefined;
+/** Every followed change feed and how far it has been read (ms since the epoch). */
+export async function feedCursors(database: Db): Promise<Array<{ ecosystem: string; cursor: number }>> {
+  const rows = await database.select({ ecosystem: advisoryFeeds.ecosystem, cursor: advisoryFeeds.cursor }).from(advisoryFeeds);
+  return rows.map((row) => ({ ecosystem: row.ecosystem, cursor: Number(row.cursor) }));
 }
 
 export async function setFeedCursor(database: Db, ecosystem: string, cursor: number): Promise<void> {

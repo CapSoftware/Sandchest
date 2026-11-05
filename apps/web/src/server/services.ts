@@ -2,7 +2,7 @@
 import type { Db } from "@sandchest/db";
 import type { Mailer } from "@sandchest/email";
 import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig, type Classifier, type LlmClient } from "@sandchest/engine/llm";
-import { createOsvCatalog, type OsvCatalog } from "@sandchest/engine/advisories";
+import { createMavenRepository, createOsvCatalog, type MavenRepository, type OsvCatalog } from "@sandchest/engine/advisories";
 import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import type { GitHubApp } from "@sandchest/github";
 import { db, setDb } from "./db";
@@ -18,6 +18,7 @@ interface Services {
   classifier: Classifier | undefined;
   osv: OsvClient | undefined;
   catalog: OsvCatalog;
+  maven: MavenRepository;
   pricing: Pricing | undefined;
   mailer: Mailer;
 }
@@ -52,6 +53,11 @@ export function osvClient(): OsvClient | undefined {
 /** OSV, as the CVE directory reads it. */
 export function catalog(): OsvCatalog {
   return (instances.catalog ??= createOsvCatalog());
+}
+
+/** Maven Central, for the versions a JVM project's parent POM or BOMs set. Holds every POM it reads. */
+export function maven(): MavenRepository {
+  return (instances.maven ??= createMavenRepository());
 }
 
 export function pricing(): Pricing | undefined {
