@@ -1,7 +1,8 @@
 /** The CVE directory: known vulnerabilities in what the person's repositories install, and exactly where. */
-import { ADVISORY_SEVERITIES, cveCoverage, cveForUser, dashboardCves, inCode, type CveListItem, type CveMatch } from "@sandchest/db";
+import { ADVISORY_SEVERITIES, cveCoverage, cveForUser, cveUnchecked, dashboardCves, inCode, type CveListItem, type CveMatch } from "@sandchest/db";
 import { z } from "zod";
 import { evidence, fixFor, osvUrl, siteLink, upgradePrompt } from "@/lib/cves";
+import { queueCveCheck } from "../../cve-check";
 import { db } from "../../db";
 import { ApiError } from "../errors";
 import { int, operation, RepoRef } from "../operation";
@@ -9,6 +10,8 @@ import { resolveRepo } from "../resolve";
 import { iso } from "../views";
 
 const STATE = z.enum(["in_code", "installed", "resolved"]);
+/** Repositories not read yet, listed by name in `list_cves` before the rest are only counted. */
+const NOT_CHECKED_SHOWN = 100;
 const SEVERITY = z.enum(ADVISORY_SEVERITIES);
 
 function matchView(match: CveMatch, fixed: string | undefined) {
@@ -60,7 +63,7 @@ export const cveOps = [
     name: "list_cves",
     title: "List CVEs in your code",
     description:
-      'Known vulnerabilities (OSV advisories, so CVEs, GHSAs, PYSECs, Go and RustSec ids, and malicious packages) affecting a version your repositories install, one entry per vulnerability however many advisories describe it. State "in_code" (default): shipped code imports the affected version; "installed": installed but only a dev dependency, pulled in by another package, or imported only by tests and tooling; "resolved": the version is gone. Each match names the repository, package@version, lockfile and import sites. Pass `query` to ask whether a given CVE affects you: an empty answer means none of your repositories installs an affected version. Call get_cve for the advisory text, fixed versions and an upgrade prompt.',
+      'Known vulnerabilities (OSV advisories, so CVEs, GHSAs, PYSECs, Go and RustSec ids, and malicious packages) affecting a version your repositories install, one entry per vulnerability however many advisories describe it. State "in_code" (default): shipped code imports the affected version; "installed": installed but only a dev dependency, pulled in by another package, or imported only by tests and tooling; "resolved": the version is gone. Each match names the repository, package@version, lockfile and import sites. Pass `query` to ask whether a given CVE affects you: an empty answer means none of your repositories installs an affected version. Call get_cve for the advisory text, fixed versions and an upgrade prompt. Repositories in use are read on their own; the rest are listed in `coverage.not_checked` until check_cves reads them.',
     method: "GET",
     path: "/cves",
     input: z.object({
@@ -74,14 +77,23 @@ export const cveOps = [
     async run(context, input) {
       const repo = input.repo ? (await resolveRepo(context, input.repo)).repo : undefined;
       const severities = input.severity === undefined ? undefined : Array.isArray(input.severity) ? input.severity : [input.severity];
-      const [{ list, counts }, coverage] = await Promise.all([
+      const [{ list, counts }, coverage, unchecked] = await Promise.all([
         dashboardCves(db(), context.principal.userId, { state: input.state ?? "in_code", severities, repoId: repo?.id, query: input.query }),
         cveCoverage(db(), context.principal.userId),
+        cveUnchecked(db(), context.principal.userId),
       ]);
       return {
         cves: list.slice(0, input.limit ?? 100).map((item) => listView(item, context.appUrl)),
         counts,
-        coverage: { repos: coverage.repos, repos_read: coverage.inventoried, last_full_check_at: iso(coverage.checkedAt) },
+        coverage: {
+          repos: coverage.repos,
+          repos_read: coverage.inventoried,
+          repos_queued: coverage.queued,
+          last_full_check_at: iso(coverage.checkedAt),
+          // Queued first, then the ones only check_cves reads, then the ones GitHub no longer lets Sandchest read.
+          not_checked: unchecked.slice(0, NOT_CHECKED_SHOWN).map((row) => ({ repo: row.fullName, state: row.state })),
+          not_checked_total: unchecked.length,
+        },
       };
     },
   }),
@@ -114,6 +126,25 @@ export const cveOps = [
           prompt: upgradePrompt({ key: item.key, summary: advisory.summary, repoFullName: repo, matches: withFix.filter((m) => m.repoFullName === repo && m.resolvedAt === null) }),
         })),
       };
+    },
+  }),
+
+  operation({
+    name: "check_cves",
+    title: "Check a repository for CVEs",
+    description:
+      "Reads what a repository installs and matches it against known vulnerabilities, for one that hasn't been read yet (see `coverage.not_checked` in list_cves) or to read it again now. Free, about a minute; then call list_cves with this repo. Repositories in use are read on their own.",
+    method: "POST",
+    path: "/repos/{repo}/cves/check",
+    status: 202,
+    input: z.object({ repo: RepoRef }),
+    idempotent: true,
+    openWorld: true,
+    async run(context, input) {
+      const row = await resolveRepo(context, input.repo);
+      if (!row.org.installationId) throw new ApiError(409, "not_installed", `Sandchest is no longer installed on ${row.repo.fullName}.`);
+      await queueCveCheck(row.repo.id);
+      return { repo: row.repo.fullName, state: "queued", message: "Reading what it installs, about a minute. Then call list_cves with this repo." };
     },
   }),
 ];

@@ -40,7 +40,7 @@ import { issueKey } from "@/server/agent/tokens";
 import { setAutumn, setStripe } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
-import { setScanStarter } from "@/server/start";
+import { setInventoryStarter, setScanStarter } from "@/server/start";
 import { resetLimits } from "@/server/rate-limit";
 import { FakeAutumn } from "./fake-autumn";
 
@@ -137,6 +137,7 @@ beforeAll(async () => {
   // A Stripe that fails every call: enough to show who gets past the admin check to it.
   setStripe(new Proxy({}, { get: () => new Proxy({}, { get: () => async () => Promise.reject(new Error("fake stripe")) }) }) as unknown as Parameters<typeof setStripe>[0]);
   setScanStarter(async () => {});
+  setInventoryStarter(async () => {});
 
   const acme = await upsertInstallation(database, 11, { githubAccountId: 110, githubLogin: "acme", type: "Organization" }, [
     { githubRepoId: 1, fullName: "acme/api", private: true, defaultBranch: "main" },
@@ -188,6 +189,7 @@ afterAll(async () => {
   setAutumn(undefined);
   setStripe(undefined);
   setScanStarter(undefined);
+  setInventoryStarter(undefined);
   if (!available) return;
   await database.$client.end();
   await admin!.unsafe(`drop database if exists ${NAME} with (force)`);
@@ -277,6 +279,7 @@ const CASES: Record<string, Case> = {
   get_overview: { need: "own", request: () => ({ method: "GET", path: "/overview" }) },
   list_cves: { need: "own", request: () => ({ method: "GET", path: "/cves" }) },
   get_cve: { need: "repo", request: () => ({ method: "GET", path: "/cves/CVE-2026-0001" }) },
+  check_cves: { need: "repo", request: () => ({ method: "POST", path: "/repos/acme/api/cves/check" }) },
 };
 
 /** Who passes each kind of check. */

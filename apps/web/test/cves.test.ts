@@ -15,6 +15,7 @@ import { GitHubError, type GitHubApp } from "@sandchest/github";
 import { resetConfig } from "@/server/config";
 import { checkRepository, followFeeds, readUnreadFirst, refreshInventory, saveDependencies, syncAdvisories } from "@/server/cves";
 import { setServices } from "@/server/services";
+import { setInventoryStarter } from "@/server/start";
 import { operationByName } from "@/server/agent/registry";
 import { handleWebhook } from "@/server/webhooks";
 
@@ -388,6 +389,33 @@ describe("CVE directory", () => {
     expect(await inventoriesDue(database, 10)).toContain(quiet!.id);
     await database.$client`update repo_inventories set requested_at = null, failures = 6 where repo_id = ${quiet!.id}`;
     expect((await cveUnchecked(database, userId))[0]).toMatchObject({ state: "unreachable" });
+  });
+
+  test("agents see what isn't checked yet and check it with check_cves", async () => {
+    if (!available) return;
+    const context = (user: string) => ({ principal: { userId: user, login: "dev", name: "Dev", githubUserId: 1, tokenId: "t", tokenKind: "key" as const, accessCheckedAt: new Date() }, surface: "api" as const, appUrl: "https://sandchest.test" });
+    const [quiet] = await database.$client<Array<{ id: string }>>`select r.id from repos r where r.full_name = 'acme/new'`;
+    await database.$client`delete from scans where repo_id = ${quiet!.id}`;
+    await database.$client`delete from repo_inventories where repo_id = ${quiet!.id}`;
+    type Listed = { coverage: { repos_queued: number; not_checked: Array<{ repo: string; state: string }>; not_checked_total: number } };
+    const before = (await operationByName("list_cves")!.run(context(userId), {})) as Listed;
+    expect(before.coverage.not_checked).toContainEqual({ repo: "acme/new", state: "unchecked" });
+    expect(before.coverage.not_checked_total).toBe(before.coverage.not_checked.length);
+
+    const started: string[] = [];
+    setInventoryStarter(async (id) => void started.push(id));
+    try {
+      const outcome = await operationByName("check_cves")!.run(context(userId), { repo: "acme/new" });
+      expect(outcome).toMatchObject({ repo: "acme/new", state: "queued" });
+    } finally {
+      setInventoryStarter(undefined);
+    }
+    expect(started).toEqual([quiet!.id]);
+    const after = (await operationByName("list_cves")!.run(context(userId), {})) as Listed;
+    expect(after.coverage.not_checked).toContainEqual({ repo: "acme/new", state: "queued" });
+    expect(after.coverage.repos_queued).toBe(before.coverage.repos_queued + 1);
+    expect(await inventoriesDue(database, 10)).toContain(quiet!.id);
+    await expect(operationByName("check_cves")!.run(context(outsiderId), { repo: "acme/new" })).rejects.toThrow("No repository");
   });
 
   test("feed syncs a minute apart never overlap: one started while another runs is skipped", async () => {
