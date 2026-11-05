@@ -63,7 +63,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
   }
 
   const model = useRef<RecruitModel>(null!);
-  model.current = { step: editing ? "customize" : "hacker", profile, viewer: login, accounts: [], repos: [], target: null, org: login, credits: 0, autoTopUp: false, currentPlan: null, billing: false };
+  model.current = { step: editing ? "customize" : "hacker", profile, viewer: login, accounts: [], repos: [], org: login, credits: 0, autoTopUp: false, currentPlan: null, billing: false };
   const [paint] = useState<{ current: Painter | null }>(() => ({ current: recruitPainter(model) }));
 
   const changed = JSON.stringify(profile) !== JSON.stringify(base);

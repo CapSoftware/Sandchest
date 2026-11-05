@@ -305,24 +305,6 @@ async function sessionUserFor(userId: string) {
   }
 }
 
-describe("free first dig", () => {
-  test("the repos list says whether an org's next Dig is its free one", async () => {
-    if (!available) return;
-    const freeFor = async () => (await dashboardRepos(database, ids.alice)).find((r) => r.fullName === "acme/api")!.freeDig;
-    await database.$client`update orgs set free_dig_scan_id = null where id = ${ids.org}`;
-    expect(await freeFor()).toBe(true);
-    // Used while its scan is queued, running or done; free again once it failed or is gone.
-    await database.$client`update orgs set free_dig_scan_id = ${ids.scan} where id = ${ids.org}`;
-    expect(await freeFor()).toBe(false);
-    await database.$client`update scans set status = 'failed' where id = ${ids.scan}`;
-    expect(await freeFor()).toBe(true);
-    await database.$client`update scans set status = 'completed' where id = ${ids.scan}`;
-    await database.$client`update orgs set free_dig_scan_id = gen_random_uuid() where id = ${ids.org}`;
-    expect(await freeFor()).toBe(true);
-    await database.$client`update orgs set free_dig_scan_id = null where id = ${ids.org}`;
-  });
-});
-
 describe("overview and scan history", () => {
   test("count and list only the runs the user can see, with what each found and cost", async () => {
     if (!available) return;

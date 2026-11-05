@@ -11,7 +11,7 @@
  * pages (a card step on the charge, or no keys) falls back to them.
  */
 import { AutumnError, DEFAULT_TOP_UP_LIMIT_USD, MAX_PURCHASE_CREDITS, PLAN, StripeError } from "@sandchest/billing";
-import { orgForAdmin, orgRepos, updateOrgSettings, userById } from "@sandchest/db";
+import { orgForAdmin, updateOrgSettings, userById } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -39,7 +39,7 @@ const Company = z.object({
   email: z.union([z.literal(""), z.email().max(254)]),
 });
 
-const Recruitment = z.object({ hacker: HackerSchema, company: Company, firstTarget: z.uuid().nullable() });
+const Recruitment = z.object({ hacker: HackerSchema, company: Company });
 export type RecruitInput = z.input<typeof Recruitment>;
 
 /** What joining buys: credits to start on, and whether auto top-up buys that many again when they run low. */
@@ -59,14 +59,8 @@ async function save(userId: string, orgId: string, raw: unknown): Promise<Recrui
     if (where === "company") return { error: "Check the company name and billing email." };
     return { error: "Something about this hacker isn’t valid. Check the name: letters, numbers, spaces, dots and dashes, up to 16." };
   }
-  const { hacker, company, firstTarget } = input.data;
-  // The first target must be one of this org's repositories.
-  const target = firstTarget && (await orgRepos(db(), orgId)).some((repo) => repo.id === firstTarget) ? firstTarget : undefined;
-  const ok = await updateOrgSettings(db(), userId, orgId, {
-    hacker: { ...hacker, stickers: [...new Set(hacker.stickers)] },
-    company,
-    ...(target ? { firstTarget: target } : {}),
-  });
+  const { hacker, company } = input.data;
+  const ok = await updateOrgSettings(db(), userId, orgId, { hacker: { ...hacker, stickers: [...new Set(hacker.stickers)] }, company });
   if (!ok) return { error: NOT_ADMIN };
   revalidatePath("/dashboard", "layout");
   return {};
@@ -125,9 +119,8 @@ export async function recruit(orgId: string, _previous: RecruitOutcome, form: Fo
       }
     }
     (await cookies()).delete(CLAIM_COOKIE);
-    const row = await orgForAdmin(db(), user.id, orgId);
-    const { startFirstTarget } = await import("./first-target");
-    redirect(row ? await startFirstTarget(user.id, row.org) : "/dashboard?plan=started");
+    // Joined: the dashboard is where they choose what their hacker deep scans first.
+    redirect("/dashboard?plan=started");
   }
 
   if (billingEnabled() && order.success) {
@@ -143,12 +136,7 @@ export async function recruit(orgId: string, _previous: RecruitOutcome, form: Fo
       return purchase(orgId, {}, purchaseForm);
     }
   }
-  // No billing (a self-hosted server, or local dev): nothing to pay, so the hacker starts on the first target now.
-  if (!billingEnabled()) {
-    const row = await orgForAdmin(db(), user.id, orgId);
-    const { startFirstTarget } = await import("./first-target");
-    redirect(row ? await startFirstTarget(user.id, row.org, "/dashboard?recruited=1") : "/dashboard?recruited=1");
-  }
+  // No billing (a self-hosted server, or local dev): nothing to pay.
   redirect("/dashboard?recruited=1");
 }
 
@@ -335,6 +323,5 @@ export async function completePayment(orgId: string, rawOrder: RecruitOrder, set
     // Once the charge was asked for, it may have gone through: send them to look rather than pay again.
     return charging ? { next: `/dashboard/billing/return?org=${row.org.id}` } : { error: PAYMENT_FAILED };
   }
-  const { startFirstTarget } = await import("./first-target");
-  return { next: await startFirstTarget(user.id, row.org) };
+  return { next: "/dashboard?plan=started" };
 }

@@ -1,14 +1,13 @@
 /** The GitHub accounts Sandchest is installed on: their settings and their hacker. */
-import { orgRepos, PR_REVIEW_MODES, setOrgPrReviews, updateOrgSettings } from "@sandchest/db";
+import { PR_REVIEW_MODES, setOrgPrReviews, updateOrgSettings } from "@sandchest/db";
 import { z } from "zod";
 import { HOODIES, MAX_STICKERS, PHOSPHORS, readHacker, ROOMS, SHELLS, STICKERS, validHandle, VOICES } from "@/lib/hacker";
-import { isUuid } from "@/lib/uuid";
 import { ensureAccess } from "../../access";
 import { track } from "../../analytics";
 import { db } from "../../db";
 import { HackerSchema } from "../../hacker-schema";
 import { ApiError, notAdmin } from "../errors";
-import { AccountRef, flag, int, operation, RepoRef } from "../operation";
+import { AccountRef, flag, int, operation } from "../operation";
 import { resolveAccount, visibleAccounts } from "../resolve";
 import { accountView, installUrl } from "../views";
 
@@ -52,7 +51,7 @@ export const accountsOps = [
   operation({
     name: "get_account",
     title: "Get an account",
-    description: "One account's settings (Check threshold, emails, company details, first target), its hacker and its repositories.",
+    description: "One account's settings (Check threshold, emails, company details), its hacker and its repositories.",
     method: "GET",
     path: "/accounts/{account}",
     input: z.object({ account: AccountRef }),
@@ -68,7 +67,6 @@ export const accountsOps = [
           pr_reviews_default: org.settings.prReviewsDefault ?? "auto",
           // The billing contact is the admins' business, as in the dashboard.
           company: org.admin ? (org.settings.company ?? null) : null,
-          first_target_repo_id: org.settings.firstTarget ?? null,
         },
         hacker: { ...hacker, recruited: !!org.settings.hacker },
       };
@@ -79,7 +77,7 @@ export const accountsOps = [
     name: "update_account",
     title: "Change an account's settings",
     description:
-      "Changes an account's settings (admins only). check_threshold: the lowest severity that fails the Sandchest Check on pull requests. email_notifications: email people with access about critical findings and finished deep scans. company: name and billing email for receipts. first_target: the repository to deep scan first once the account joins the plan. pr_reviews_default: how repositories added from now on review pull requests (\"auto\", \"command\" or \"off\"); with apply_to_all_repos=true, every installed repository is set to it too.",
+      "Changes an account's settings (admins only). check_threshold: the lowest severity that fails the Sandchest Check on pull requests. email_notifications: email people with access about critical findings and finished deep scans. company: name and billing email for receipts. pr_reviews_default: how repositories added from now on review pull requests (\"auto\", \"command\" or \"off\"); with apply_to_all_repos=true, every installed repository is set to it too.",
     method: "PATCH",
     path: "/accounts/{account}",
     input: z.object({
@@ -87,7 +85,6 @@ export const accountsOps = [
       check_threshold: z.enum(["critical", "high", "medium", "low"]).optional(),
       email_notifications: flag().optional(),
       company: z.object({ name: z.string().trim().min(1).max(120), email: z.union([z.literal(""), z.email().max(254)]) }).optional(),
-      first_target: RepoRef.optional(),
       pr_reviews_default: z.enum(PR_REVIEW_MODES).optional(),
       apply_to_all_repos: flag().optional().describe("With pr_reviews_default: set every installed repository to it too."),
     }),
@@ -99,13 +96,6 @@ export const accountsOps = [
       if (input.check_threshold) patch.checkThreshold = input.check_threshold;
       if (input.email_notifications !== undefined) patch.emailNotifications = input.email_notifications;
       if (input.company) patch.company = input.company;
-      if (input.first_target) {
-        const repos = await orgRepos(db(), org.id);
-        const wanted = input.first_target.toLowerCase();
-        const target = repos.find((repo) => (isUuid(wanted) ? repo.id === wanted : repo.fullName.toLowerCase() === wanted));
-        if (!target) throw new ApiError(422, "invalid_first_target", `${input.first_target} isn't one of ${org.login}'s installed repositories.`);
-        patch.firstTarget = target.id;
-      }
       if (input.apply_to_all_repos && !input.pr_reviews_default) throw new ApiError(422, "invalid_input", "apply_to_all_repos needs pr_reviews_default.");
       if (Object.keys(patch).length === 0 && !input.pr_reviews_default) throw new ApiError(400, "nothing_to_change", "Pass at least one setting to change.");
       if (Object.keys(patch).length > 0 && !(await updateOrgSettings(db(), context.principal.userId, org.id, patch))) throw notAdmin(org.login);
@@ -136,7 +126,6 @@ export const accountsOps = [
           email_notifications: settings.emailNotifications !== false,
           pr_reviews_default: settings.prReviewsDefault ?? "auto",
           company: settings.company ?? null,
-          first_target_repo_id: settings.firstTarget ?? null,
         },
         ...(input.pr_reviews_default && { repos_changed: reposChanged }),
       };

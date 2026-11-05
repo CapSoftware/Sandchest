@@ -115,19 +115,12 @@ export interface DashboardRepo {
   activeDeepScanId: string | null;
   /** Whether that deep scan is queued behind the repo's recon, to start from its map (see `pendingRecon`). */
   activeDeepScanWaitsForRecon: boolean;
-  /** Whether the org's next Dig is its free first one. */
-  freeDig: boolean;
   defaultBranch: string;
   /** When pull requests are reviewed: on every push, on request only, or never. */
   prReviews: PrReviewMode;
   deepScanSchedule: DeepScanSchedule;
   nextDeepScanAt: Date | null;
 }
-
-/** Whether an org's free first Dig is still to come: SQL over `orgs` as `o`. Mirrors `claimFreeDig`. */
-export const FREE_DIG_AVAILABLE = sql`(o.free_dig_scan_id is null or not exists (
-  select 1 from scans fd where fd.id = o.free_dig_scan_id and fd.status in ('queued', 'running', 'publishing', 'completed')
-))`;
 
 /**
  * Enabled repos the user can see, with open findings by severity, their latest
@@ -156,7 +149,6 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     scan_at: string | null;
     active_deep_id: string | null;
     deep_waits: boolean;
-    free_dig: boolean;
     reviews_30d: number;
     default_branch: string;
     pr_reviews: PrReviewMode;
@@ -170,7 +162,7 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
       coalesce(f.critical, 0)::int as critical, coalesce(f.high, 0)::int as high,
       coalesce(f.medium, 0)::int as medium, coalesce(f.low, 0)::int as low,
       s.id as scan_id, s.kind as scan_kind, s.status as scan_status, coalesce(s.finished_at, s.started_at, s.created_at) as scan_at,
-      d.id as active_deep_id, ${FREE_DIG_AVAILABLE} as free_dig,
+      d.id as active_deep_id,
       (d.status = 'queued' and exists (
         select 1 from ${scans} rc where rc.repo_id = r.id and rc.kind = 'recon' and rc.status in ('queued', 'running')
           and rc.created_at > now() - interval '30 minutes'
@@ -212,7 +204,6 @@ export async function dashboardRepos(database: Db, userId: string, options: { re
     reviews30d: row.reviews_30d,
     activeDeepScanId: row.active_deep_id,
     activeDeepScanWaitsForRecon: row.deep_waits,
-    freeDig: row.free_dig,
     defaultBranch: row.default_branch,
     prReviews: row.pr_reviews,
     deepScanSchedule: row.deep_scan_schedule,

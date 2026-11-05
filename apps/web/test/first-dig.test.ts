@@ -1,17 +1,18 @@
 /**
  * The first deep scan, against a real Postgres with GitHub faked and billing
- * off (a self-hosted server, or local dev): joining starts it on the first
- * target, and it waits for that repository's recon to finish rather than
- * mapping the code again beside it.
+ * off (a self-hosted server, or local dev): the dashboard offers it until
+ * anything has been deep scanned, and once started it waits for that
+ * repository's recon to finish rather than mapping the code again beside it.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { createDb, dashboardRepos, feedSince, scanById, schema, updateOrgSettings, upsertInstallation, type Db } from "@sandchest/db";
+import { createDb, dashboardRepos, feedSince, repoForUser, scanById, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { GitHubApp } from "@sandchest/github";
 import { setAutumn } from "@/server/billing";
 import { resetConfig } from "@/server/config";
-import { startFirstTarget } from "@/server/first-target";
+import { firstScan } from "@/lib/first-scan";
+import { requestDeepScan } from "@/server/dig";
 import { beginScan } from "@/server/scans";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
@@ -73,16 +74,18 @@ const recon = async (repoId: string) => {
 };
 const finish = (scanId: string) => database.$client`update scans set status = 'completed', finished_at = now() where id = ${scanId}`;
 const deepScanned = (repoId: string, at: Date | null) => database.$client`update repos set last_deep_scan_at = ${at?.toISOString() ?? null} where id = ${repoId}`;
-const orgRow = async () => (await database.query.orgs.findFirst({ where: (o, { eq }) => eq(o.id, org.id) }))!;
+/** The Start key on the dashboard: a deep scan of one repository. */
+const start = async (repoId: string) => {
+  const row = (await repoForUser(database, userId, repoId))!;
+  const result = await requestDeepScan({ ...row.repo, org: row.org });
+  if (!result.ok) throw new Error(result.reason);
+  return result.scanId;
+};
 
 describe.skipIf(!available)("the first deep scan", () => {
   test("waits for its repository's recon, says so, then starts", async () => {
     const mapping = await recon(repoIds[0]!);
-    await updateOrgSettings(database, userId, org.id, { firstTarget: repoIds[0]! });
-    const row = await orgRow();
-
-    const next = await startFirstTarget(userId, row);
-    const deepId = next.replace("/dashboard/scans/", "");
+    const deepId = await start(repoIds[0]!);
     expect(await scanById(database, deepId)).toMatchObject({ kind: "deep", status: "queued" });
     expect(started).toContain(deepId);
 
@@ -108,8 +111,7 @@ describe.skipIf(!available)("the first deep scan", () => {
   test("another repository's recon doesn't hold it up", async () => {
     await recon(repoIds[1]!);
     await deepScanned(repoIds[0]!, null);
-    const row = await orgRow();
-    const deepId = (await startFirstTarget(userId, row)).replace("/dashboard/scans/", "");
+    const deepId = await start(repoIds[0]!);
     expect((await beginScan(deepId)).state).toBe("running");
     await finish(deepId);
   });
@@ -118,18 +120,25 @@ describe.skipIf(!available)("the first deep scan", () => {
     const stale = await recon(repoIds[0]!);
     await database.$client`update scans set created_at = now() - interval '31 minutes' where id = ${stale}`;
     await deepScanned(repoIds[0]!, null);
-    const deepId = (await startFirstTarget(userId, await orgRow())).replace("/dashboard/scans/", "");
+    const deepId = await start(repoIds[0]!);
     expect((await dashboardRepos(database, userId, { repoId: repoIds[0]! }))[0]!.activeDeepScanWaitsForRecon).toBe(false);
     expect((await beginScan(deepId)).state).toBe("running");
     await finish(deepId);
     await finish(stale);
   });
 
-  test("a target already deep scanned isn't scanned again on joining again", async () => {
+  test("the dashboard offers it until anything is deep scanned, suggesting the busiest repository", async () => {
+    await deepScanned(repoIds[0]!, null);
+    await deepScanned(repoIds[1]!, null);
+    // acme/web gets a pull request reviewed: it's the one people work on.
+    await database.insert(schema.scans).values({ repoId: repoIds[1]!, orgId: org.id, kind: "pr_review", status: "completed", trigger: "webhook", headSha: "abc" });
+    const offer = async () => firstScan(await dashboardRepos(database, userId), new Map(), []);
+    const offered = await offer();
+    expect(offered?.repos.map((repo) => repo.fullName).sort()).toEqual(["acme/api", "acme/web"]);
+    expect(offered?.suggested).toBe(repoIds[1]);
+    // Unmeasured, a repository holds the most a deep scan can cost, and says so.
+    expect(offered?.repos.every((repo) => repo.unsized && repo.credits === 25)).toBe(true);
     await deepScanned(repoIds[0]!, new Date());
-    const row = await orgRow();
-    const before = started.length;
-    expect(await startFirstTarget(userId, row, "/dashboard?recruited=1")).toBe("/dashboard?recruited=1");
-    expect(started).toHaveLength(before);
+    expect(await offer()).toBeUndefined();
   });
 });

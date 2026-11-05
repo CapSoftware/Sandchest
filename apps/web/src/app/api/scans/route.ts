@@ -16,7 +16,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const repo = await repoByFullName(db(), parsed.data.repo);
   if (!repo) return Response.json({ error: "repository not installed" }, { status: 404 });
-  const result = await requestDeepScan(repo, "manual", { operator: true });
+  const result = await requestDeepScan(repo);
   if (result.ok) return Response.json({ scanId: result.scanId }, { status: 202 });
   switch (result.reason) {
     case "not_installed":

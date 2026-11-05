@@ -1,7 +1,6 @@
 /**
  * Recruiting in progress, kept in the browser per org so a reload picks up
- * where it left off: the step, the company, the first repository, the
- * hacker and the credits. Nothing here is trusted: it's read back through
+ * where it left off: the step, the company, the hacker and the credits. Nothing here is trusted: it's read back through
  * the same checks as anything typed, and dropped once the org has joined.
  */
 import { CREDIT_AMOUNTS, DEFAULT_CREDITS } from "@sandchest/billing/plans";
@@ -14,7 +13,6 @@ export interface RecruitDraft {
   step: RecruitStepId;
   hacker: HackerProfile;
   company: { name: string; email: string };
-  firstTarget: string | null;
   credits: number;
   autoTopUp: boolean;
 }
@@ -26,8 +24,8 @@ export const draftKey = (orgId: string) => `sandchest:recruit:${orgId}`;
 
 const text = (value: unknown, max = MAX_TEXT) => (typeof value === "string" ? value.slice(0, max) : "");
 
-/** A stored draft, checked; undefined when there's nothing usable. `repos` are the org's repository ids. */
-export function readDraft(raw: string | null, repos: readonly string[]): RecruitDraft | undefined {
+/** A stored draft, checked; undefined when there's nothing usable. */
+export function readDraft(raw: string | null): RecruitDraft | undefined {
   if (!raw) return undefined;
   let value: unknown;
   try {
@@ -44,7 +42,6 @@ export function readDraft(raw: string | null, repos: readonly string[]): Recruit
     // The handle is kept as typed, even half done, so it reads back as it was left; the look is checked.
     hacker: { ...readHacker(hacker), handle: text(hacker.handle, 32) },
     company: { name: text(company.name), email: text(company.email) },
-    firstTarget: typeof draft.firstTarget === "string" && repos.includes(draft.firstTarget) ? draft.firstTarget : null,
     credits: (CREDIT_AMOUNTS as readonly number[]).includes(draft.credits as number) ? (draft.credits as number) : DEFAULT_CREDITS,
     autoTopUp: typeof draft.autoTopUp === "boolean" ? draft.autoTopUp : true,
   };

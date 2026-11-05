@@ -180,7 +180,6 @@ for (const [i, repo] of extra.entries()) {
 const allRepos = [...repos, ...extra];
 
 // A plan with credits, stored as fresh so the dashboard never asks the billing service about this made-up org.
-await sql`update orgs set free_dig_scan_id = ${deep.id} where id = ${org.id}`;
 await db
   .insert(schema.orgBilling)
   .values({ orgId: org.id, planId: "standard", credits: 42, checkedAt: new Date(Date.now() + 365 * 86_400_000) })

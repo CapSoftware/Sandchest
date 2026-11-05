@@ -6,6 +6,7 @@ import { DEEP_SCAN_TIERS, deepScanCredits } from "@sandchest/billing/costs";
 import { isTrial, planById } from "@sandchest/billing/plans";
 import type { DashboardRepo, FindingListItem, ScanListItem, SettingsOrg } from "@sandchest/db";
 import { readHacker } from "@/lib/hacker";
+import { installationSettingsUrl } from "@/lib/installation";
 import { config } from "../config";
 
 const iso = (date: Date | string | null | undefined) => (date ? new Date(date).toISOString() : null);
@@ -13,14 +14,6 @@ const iso = (date: Date | string | null | undefined) => (date ? new Date(date).t
 export function installUrl(): string | null {
   const slug = config().GITHUB_APP_SLUG;
   return slug ? `https://github.com/apps/${slug}/installations/new` : null;
-}
-
-/** Where an installation's repositories are chosen on GitHub. */
-export function installationSettingsUrl(org: { login: string; type: "User" | "Organization"; installationId: number | null }): string | null {
-  if (!org.installationId) return null;
-  return org.type === "Organization"
-    ? `https://github.com/organizations/${encodeURIComponent(org.login)}/settings/installations/${org.installationId}`
-    : `https://github.com/settings/installations/${org.installationId}`;
 }
 
 export function planView(planId: string | null | undefined) {
@@ -54,15 +47,14 @@ export function accountView(org: SettingsOrg, appUrl: string, billing: StoredBil
   };
 }
 
-/** What a deep scan of a repository would cost now: credits, or free when it's the account's first. */
-export function deepScanPrice(repo: { loc: number | null; freeDig: boolean }) {
+/** What a deep scan of a repository would cost now, in credits. */
+export function deepScanPrice(repo: { loc: number | null }) {
   const credits = repo.loc === null ? null : deepScanCredits(repo.loc);
   const tooLarge = repo.loc !== null && credits === undefined;
   return {
-    credits: repo.freeDig ? 0 : (credits ?? null),
-    free_first_deep_scan: repo.freeDig,
+    credits: credits ?? null,
     /** Before recon has sized the repo, the largest price is held and only what it measures is charged. */
-    held_until_sized: repo.loc === null && !repo.freeDig ? DEEP_SCAN_TIERS.at(-1)!.credits : null,
+    held_until_sized: repo.loc === null ? DEEP_SCAN_TIERS.at(-1)!.credits : null,
     too_large: tooLarge,
   };
 }

@@ -714,6 +714,51 @@ button.onboard-leave {
   color: var(--color-muted);
 }
 
+/* How many repositories the hacker will work on; a whole account connected stands out, with the way to narrow it. */
+.onboard-scope {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1.75rem 0 0;
+  padding: 0.9rem 1rem;
+  background: rgb(254 194 66 / 0.04);
+  box-shadow: inset 2px 0 0 var(--color-edge);
+}
+
+.onboard-scope[data-many] {
+  background: rgb(215 104 57 / 0.08);
+  box-shadow: inset 2px 0 0 var(--color-ember);
+}
+
+.onboard-scope-count {
+  margin: 0;
+  color: var(--color-sand);
+  font-size: 0.875rem;
+}
+
+.onboard-scope-n {
+  margin-right: 0.15rem;
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  line-height: 1;
+  color: var(--color-bright);
+}
+
+.onboard-scope[data-many] .onboard-scope-n {
+  color: var(--color-ember);
+}
+
+.onboard-scope-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--color-muted);
+}
+
+.onboard-scope .onboard-link {
+  justify-self: start;
+  margin-top: 0.25rem;
+}
+
 /*
  * The GitHub step before anything is connected: a short path, ticked off as
  * it's walked, with the read-only promise at the foot of the panel.

@@ -37,10 +37,7 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
   // than the wait); or a change on a paid plan (credits, the portal).
   const outcome = !hadPlan && state?.planId ? "first_plan" : hadPaid ? "unchanged" : paying(state?.planId) ? "paid" : "pending";
   await track("billing_returned", { userId: user.id, orgId: row.org.id, props: { had_plan: hadPlan, had_paid_plan: hadPaid, plan_now: planNow, outcome } });
-  if (!hadPlan && state?.planId) {
-    // A first plan: the hacker starts on the repository chosen while recruiting, if there was one.
-    const { startFirstTarget } = await import("@/server/first-target");
-    redirect(await startFirstTarget(user.id, row.org));
-  }
+  // A first plan: the dashboard is where they choose what their hacker deep scans first.
+  if (!hadPlan && state?.planId) redirect("/dashboard?plan=started");
   redirect("/dashboard/settings/billing");
 }

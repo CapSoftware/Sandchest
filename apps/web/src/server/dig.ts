@@ -1,7 +1,7 @@
 /** Manual deep scans ("Dig"): one at a time per repo, as often as the org's credits allow (SPEC §4). */
 import { randomUUID } from "node:crypto";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
-import { activeDeepScan, claimFreeDig, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
+import { activeDeepScan, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
 import { digState } from "@/lib/dig-state";
 import { autumn, reserveScan } from "./billing";
 import { describeError } from "./log";
@@ -15,14 +15,10 @@ export type DigResult =
 /**
  * Starts a deep scan of a repo the caller is allowed to scan. Its credits are
  * held before the scan exists, so a refusal leaves nothing behind and the
- * person hears about it at once.
+ * person hears about it at once. `headSha`: the default branch's commit when
+ * the caller has just read it.
  */
-/**
- * `operator`: started with the admin token, not by the org. It never uses the org's free first Dig, and
- * neither does a scheduled scan: the free one is for a person's first press. `headSha`: the default branch's
- * commit when the caller has just read it.
- */
-export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" | "schedule" = "manual", options: { operator?: boolean; headSha?: string } = {}): Promise<DigResult> {
+export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" | "schedule" = "manual", options: { headSha?: string } = {}): Promise<DigResult> {
   if (!repo.enabled || !repo.org.installationId) return { ok: false, reason: "not_installed" };
   const active = await activeDeepScan(db(), repo.id);
   const state = digState({ loc: repo.loc, activeDeepScanId: active?.id ?? null });
@@ -40,11 +36,10 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   let gate: Awaited<ReturnType<typeof reserveScan>>;
   let credits = 0;
   try {
-    // An org's first Dig is free (it still needs a plan). Otherwise a repo recon has not sized yet holds the
-    // most a deep scan can cost, and is charged what the scan measures (never more than it held).
-    // Inside the try: a failure here cleans up like any other, and never leaves a scan to be charged later.
-    const free = trigger === "manual" && !options.operator && (await claimFreeDig(db(), repo.orgId, scan.id));
-    credits = free ? 0 : (state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
+    // A repo recon has not sized yet holds the most a deep scan can cost, and is charged what the scan
+    // measures (never more than it held). Inside the try: a failure here cleans up like any other, and never
+    // leaves a scan to be charged later.
+    credits = state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits;
     gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits);
   } catch (error) {
     // Give back anything Autumn may hold, and the slot.
@@ -53,7 +48,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     throw error;
   }
   if (!gate.ok) {
-    // Refused: the scan never started, so it leaves nothing behind (a free Dig it claimed is free again).
+    // Refused: the scan never started, so it leaves nothing behind.
     await deleteUnstartedScan(db(), scan.id);
     return { ok: false, reason: gate.reason, credits };
   }

@@ -49,7 +49,7 @@ export const scanOps = [
     name: "list_repos",
     title: "List repositories",
     description:
-      "Repositories Sandchest can scan for this person (installed, with push access), most exposed first: open findings by severity, the latest scan, and what a deep scan costs now (or whether it's the account's free first one).",
+      "Repositories Sandchest can scan for this person (installed, with push access), most exposed first: open findings by severity, the latest scan, and what a deep scan costs now.",
     method: "GET",
     path: "/repos",
     input: z.object({ account: AccountRef.optional().describe("Only this account's repositories.") }),
@@ -123,7 +123,7 @@ export const scanOps = [
     name: "start_deep_scan",
     title: "Start a deep scan",
     description:
-      "Starts a deep scan of a whole repository: the hacker reads it end to end for exploitable vulnerabilities (a few minutes). Credits are held now and only what the scan measures is charged; each account's first deep scan is free. One at a time per repository. Then call get_scan with wait to follow it.",
+      "Starts a deep scan of a whole repository: the hacker reads it end to end for exploitable vulnerabilities (a few minutes). Credits are held now and only what the scan measures is charged. One at a time per repository. Then call get_scan with wait to follow it.",
     method: "POST",
     path: "/repos/{repo}/scans",
     status: 202,

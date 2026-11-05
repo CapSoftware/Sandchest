@@ -1,24 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { coveringAmount, digAllCredits, linesLabel, websiteUrl } from "../src/lib/briefing";
+import { digAllCredits, linesLabel, websiteUrl } from "../src/lib/briefing";
 
 describe("briefing", () => {
   test("a dig of everything counts unmeasured repositories at the top tier", () => {
     expect(digAllCredits([{ loc: 50_000 }, { loc: 200_000 }, { loc: null }])).toBe(5 + 10 + 25);
     expect(digAllCredits([])).toBe(0);
-  });
-
-  test("the covering amount pays for a Dig of everything but the free first one", () => {
-    const amounts = [10, 25, 50, 100];
-    const repos = [
-      { id: "a", loc: 50_000 },
-      { id: "b", loc: 200_000 },
-      { id: "c", loc: null },
-    ];
-    // 5 + 10 + 25 = 40; with c's Dig free, 15.
-    expect(coveringAmount(amounts, repos, "c")).toBe(25);
-    expect(coveringAmount(amounts, repos, null)).toBe(50);
-    expect(coveringAmount(amounts, [{ id: "a", loc: 50_000 }], "a")).toBeUndefined();
-    expect(coveringAmount(amounts, Array.from({ length: 10 }, (_, i) => ({ id: String(i), loc: 900_000 })), null)).toBeUndefined();
   });
 
   test("lines read the way people say them", () => {

@@ -9,6 +9,7 @@ import { adminOrgs, orgForAdmin, orgRepos } from "@sandchest/db";
 import type { AccountProfile, InstalledRepository } from "@sandchest/github";
 import { type Briefing, type RecruitAccount, websiteUrl } from "@/lib/briefing";
 import { readHacker } from "@/lib/hacker";
+import { installationSettingsUrl } from "@/lib/installation";
 import { db } from "./db";
 import { githubApp } from "./github-app";
 import { describeError } from "./log";
@@ -77,8 +78,8 @@ export async function briefing(user: { id: string; email: string | null }, orgId
       const details = github.repos.get(repo.githubRepoId);
       return { id: repo.id, fullName: repo.fullName, private: repo.private, loc: repo.loc, language: details?.language ?? null, description: details?.description?.trim() || null };
     }),
+    chooseRepos: installationSettingsUrl({ login: org.githubLogin, type: org.type, installationId: org.installationId }),
     company: saved ?? { name, email: user.email && !user.email.endsWith("@users.noreply.github.com") ? user.email : "" },
-    firstTarget: org.settings.firstTarget && repos.some((repo) => repo.id === org.settings.firstTarget) ? org.settings.firstTarget : (repos[0]?.id ?? null),
     hacker: org.settings.hacker ? readHacker(org.settings.hacker) : null,
     currentPlan: row.billing?.planId ?? null,
   };

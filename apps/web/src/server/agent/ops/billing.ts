@@ -69,7 +69,7 @@ function billingView(context: Context, org: { id: string; login: string; admin: 
       credit_usd_by_purchase_size: CREDIT_TIERS.map((tier) => ({ from_credits: tier.from, usd_per_credit: tier.price })),
       deep_scan_credits_by_lines_of_code: DEEP_SCAN_TIERS.map((tier) => ({ below_loc: Number.isFinite(tier.maxLoc) ? tier.maxLoc : null, credits: tier.credits })),
       pr_review_credits_by_changed_lines: PR_REVIEW_TIERS.map((tier) => ({ up_to_lines: Number.isFinite(tier.maxLines) ? tier.maxLines : null, credits: tier.credits })),
-      free: ["recon (mapping each repository)", "fix checks (pushes to the default branch)", "each account's first deep scan"],
+      free: ["recon (mapping each repository)", "fix checks (pushes to the default branch)"],
     },
     links: { settings: `${context.appUrl}/dashboard/settings/billing` },
   };
@@ -279,7 +279,7 @@ export const billingOps = [
         status: "claimed",
         credits: state?.credits ?? FREE_CREDITS.credits,
         plan: planView(state?.planId),
-        message: "Claimed. Recon is mapping the account's repositories now (free); start_deep_scan runs a full scan, and the account's first one is free.",
+        message: "Claimed. Recon is mapping the account's repositories now (free); start_deep_scan runs a full scan from these credits.",
       };
     },
   }),

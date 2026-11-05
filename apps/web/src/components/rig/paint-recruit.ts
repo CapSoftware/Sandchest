@@ -25,7 +25,6 @@ export interface RecruitModel {
   accounts: string[];
   repos: BriefingRepo[];
   /** The repository to scan first. */
-  target: string | null;
   org: string;
   /** Credits bought to start with, and whether auto top-up buys that many again when they run low. */
   credits: number;
@@ -113,7 +112,7 @@ function authStatus(kit: Kit, t: number, since: number, m: RecruitModel) {
   kit.cursor(last + 4, y, t, PX);
 }
 
-/** `gh repo list`: the org's own repositories, with the one to scan first marked. */
+/** `gh repo list`: the org's own repositories. */
 function repoList(kit: Kit, t: number, since: number, m: RecruitModel) {
   const user = shellUser(m.profile.handle);
   let y = PAD + 40;
@@ -125,18 +124,13 @@ function repoList(kit: Kit, t: number, since: number, m: RecruitModel) {
   const nameWidth = Math.min(560, kit.W * 0.48);
   shown.forEach((repo, i) => {
     if (since < 0.85 + i * 0.07) return;
-    const target = repo.id === m.target;
     y += ROW;
-    kit.text(PAD, y, target ? "\u25b6" : " ", { px: PX, kind: "bold" });
-    kit.text(PAD + 26, y, repo.fullName, { px: PX, kind: target ? "bold" : "mono", alpha: target ? 1 : 0.85, max: nameWidth - 34 });
+    kit.text(PAD + 26, y, repo.fullName, { px: PX, kind: "mono", alpha: 0.85, max: nameWidth - 34 });
     kit.text(PAD + nameWidth, y, repo.language ?? "-", { px: PX, alpha: 0.65, max: 200 });
     kit.text(kit.W - PAD, y, linesLabel(repo.loc) ?? (repo.private ? "private" : "public"), { px: PX, alpha: 0.65, align: "right" });
   });
-  const pick = m.repos.find((repo) => repo.id === m.target);
-  if (!pick || since < 1.5) return;
-  const end = prompt(kit, user, (y += ROW * 1.8), `echo ${pick.fullName} > TARGET`, since - 1.5, 30);
-  if (since < 2.4) return kit.cursor(end + 4, y, t, PX);
-  const next = prompt(kit, user, (y += ROW), "", 0);
+  if (since < 1.5) return;
+  const next = prompt(kit, user, (y += ROW * 1.8), "", 0);
   kit.cursor(next + 4, y, t, PX);
 }
 
@@ -230,21 +224,17 @@ function contract(kit: Kit, t: number, since: number, m: RecruitModel) {
   if (!m.billing) {
     section("TERMS", ["Self-hosted. No plan, no credits, no limit but your own servers."]);
   } else if (!m.currentPlan && m.claim) {
-    const first = m.repos.find((repo) => repo.id === m.target);
     section("SYNOPSIS", [`${m.claim} credits on the house. No card, nothing to pay.`]);
     section("DESCRIPTION", [
       `A pull request review: ${PR_REVIEW_TIERS[0]!.credits} credit, most of the time.`,
       `A deep scan of a whole repository: ${DEEP_SCAN_TIERS[0]!.credits} to ${DEEP_SCAN_TIERS.at(-1)!.credits} by size.`,
-      first ? `First deep scan, ${first.fullName.split("/")[1] ?? first.fullName}: free.` : "The first deep scan: free.",
     ]);
     section("AFTER", [`Work stops when they run out. $${PLAN.price} a month keeps it going.`]);
   } else if (!m.currentPlan) {
-    const first = m.repos.find((repo) => repo.id === m.target);
     section("SYNOPSIS", [`$${PLAN.price} a month. Credits $${CREDIT_PRICE} each, ${m.credits} to start.`]);
     section("DESCRIPTION", [
       `A pull request review: ${PR_REVIEW_TIERS[0]!.credits} credit, most of the time.`,
       `A deep scan of a whole repository: ${DEEP_SCAN_TIERS[0]!.credits} to ${DEEP_SCAN_TIERS.at(-1)!.credits} by size.`,
-      first ? `First deep scan, ${first.fullName.split("/")[1] ?? first.fullName}: free.` : "The first deep scan: free.",
     ]);
     section("TOP-UP", [m.autoTopUp ? `${m.credits} more whenever fewer than ${TOP_UP_BELOW} are left.` : "Off. Reviews stop when credits run out."]);
   }
@@ -255,12 +245,9 @@ function contract(kit: Kit, t: number, since: number, m: RecruitModel) {
   kit.rect(PAD + 84, lineY, 420, 2, { fill: true, alpha: 0.6 });
   if (m.step === "signing") signature(kit, PAD + 90, lineY - 6, Math.min(1, since / 1.1));
 
-  const first = m.repos.find((repo) => repo.id === m.target);
   const status =
     m.step === "signing"
-      ? first
-        ? `Signed. Scanning ${first.fullName}…`
-        : "Signed."
+      ? "Signed."
       : m.step === "pay"
         ? " Awaiting payment (press q to quit)"
         : ` Manual page contract(7) line 1 (press q to quit)`;

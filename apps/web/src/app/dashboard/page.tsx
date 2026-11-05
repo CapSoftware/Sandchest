@@ -7,6 +7,9 @@ import { safeToken } from "@/lib/analytics";
 import { ensureAccess, readAgainOnInstall, viewer } from "@/server/access";
 import { track } from "@/server/analytics";
 import { db } from "@/server/db";
+import { firstScan } from "@/lib/first-scan";
+import { installationSettingsUrl, MANY_REPOS } from "@/lib/installation";
+import { myHackers } from "@/server/hackers";
 import { orgPlans } from "@/server/org-plans";
 import { DAYS, OverviewView } from "./overview-view";
 
@@ -73,10 +76,19 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     );
   }
 
-  const [overview, attention, recent] = await reads;
+  const [[overview, attention, recent], hackers, admin] = await Promise.all([reads, myHackers(user.id).catch(() => []), adminOrgs(db(), user.id)]);
+  // Accounts this person runs that connected more repositories than anyone needs scanned.
+  const crowded = admin.flatMap((org) => {
+    const count = repos.filter((repo) => repo.orgId === org.id).length;
+    const url = installationSettingsUrl(org);
+    return count > MANY_REPOS && url ? [{ orgId: org.id, login: org.login, count, url }] : [];
+  });
   return (
     <PageShape id="overview">
-      <OverviewView repos={repos} plans={plans} overview={overview} attention={attention} recent={recent} notice={params.recruited === "1" ? "recruited" : params.plan === "started" ? "plan_started" : undefined} />
+      <OverviewView repos={repos} plans={plans} overview={overview} attention={attention} recent={recent} notice={params.recruited === "1" ? "recruited" : params.plan === "started" ? "plan_started" : undefined}
+        first={firstScan(repos, plans, hackers)}
+        crowded={crowded}
+      />
     </PageShape>
   );
 }

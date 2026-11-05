@@ -223,67 +223,18 @@ describe.skipIf(!available)("billing", () => {
     expect(autumn.failNext.size).toBe(0);
   });
 
-  test("with no credits at all, even the free first Dig doesn't run, and stays free for later", async () => {
-    expect(autumn.get(acme.id).credits).toBe(0);
-    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
-    const before = (await database.query.scans.findMany()).length;
-    expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 0 });
-    expect((await database.query.scans.findMany()).length).toBe(before);
-    // The free Dig it claimed points at no scan, which leaves it free (the next test uses it).
-    const org = await database.$client<Array<{ live: number }>>`select count(s.id)::int as live from orgs o join scans s on s.id = o.free_dig_scan_id where o.id = ${acme.id}`;
-    expect(org[0]!.live).toBe(0);
-  });
-
-  test("an org's first Dig is free, once: a failed one hands it on, a finished one uses it up", async () => {
-    // One credit left: enough for free work, not for a paid Dig.
-    autumn.get(acme.id).credits = 1;
-    const credits = autumn.get(acme.id).credits;
-    const [first, second] = await Promise.all(
-      [repoIds[0]!, repoIds[1]!].map((id) => database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, id), with: { org: true } })),
-    );
-    started.length = 0;
-    // Two Digs at once on different repos: exactly one is free, and the other is a paid (here refused) Dig.
-    const results = await Promise.all([requestDeepScan(first!), requestDeepScan(second!)]);
-    const free = results.filter((r) => r.ok);
-    expect(free).toHaveLength(1);
-    const freeId = (free[0] as { scanId: string }).scanId;
-    expect(await scanById(database, freeId)).toMatchObject({ billing: "reserved", creditsReserved: 0 });
-    expect(autumn.get(acme.id).credits).toBe(credits);
-    const loser = results.find((r) => !r.ok);
-    expect(loser).toMatchObject({ ok: false, reason: "out_of_credits", credits: 25 }); // unsized: holds the top tier
-    // Either may win the race; the rest follows whichever did.
-    const [winner, other] = results[0]!.ok ? [first!, second!] : [second!, first!];
-
-    // An operator's Dig (admin token) is never the org's free one, and is held like any paid Dig.
-    expect(await requestDeepScan({ ...winner, loc: 50_000 }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "running" });
-
-    // It fails: the next Dig is free again.
-    await database.$client`update scans set status = 'failed' where id = ${freeId}`;
-    await settleScan((await scanById(database, freeId))!, "release");
-    const again = await requestDeepScan(winner);
-    expect(again.ok).toBe(true);
-    const againId = (again as { scanId: string }).scanId;
-    expect(await scanById(database, againId)).toMatchObject({ creditsReserved: 0 });
-
-    // It finishes and measures 340,000 lines: still charged nothing. After that, Digs are paid.
-    await database.$client`update scans set status = 'completed', credits = 25 where id = ${againId}`;
-    await settleScan((await scanById(database, againId))!, "charge", 25);
-    expect(await scanById(database, againId)).toMatchObject({ billing: "charged", credits: 0 });
-    expect(await requestDeepScan(other)).toMatchObject({ ok: false, reason: "out_of_credits" });
-    expect(autumn.get(acme.id).credits).toBe(credits);
+  test("an org's first Dig is paid like any other: without the credits it holds, nothing runs and no scan is left", async () => {
+    for (const credits of [0, 1]) {
+      autumn.get(acme.id).credits = credits;
+      const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
+      expect(repo!.lastDeepScanAt).toBeNull();
+      const before = (await database.query.scans.findMany()).length;
+      // Not sized yet: it holds the top tier, 25, first Dig or not.
+      expect(await requestDeepScan(repo!)).toEqual({ ok: false, reason: "out_of_credits", credits: 25 });
+      expect((await database.query.scans.findMany()).length).toBe(before);
+      expect(autumn.get(acme.id).credits).toBe(credits);
+    }
     autumn.get(acme.id).credits = 0;
-  });
-
-  test("an operator's Dig never uses an org's free first Dig", async () => {
-    const before = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
-    await database.$client`update orgs set free_dig_scan_id = null where id = ${acme.id}`;
-    const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[2] ?? repoIds[1]!), with: { org: true } });
-    await database.$client`update scans set status = 'completed' where repo_id = ${repo!.id} and kind = 'deep' and status in ('queued', 'running')`;
-    // No credits: an operator Dig is refused as paid, and the free one is still to come.
-    expect(await requestDeepScan({ ...repo!, loc: 50_000, lastDeepScanAt: null }, "manual", { operator: true })).toMatchObject({ ok: false, reason: "out_of_credits", credits: 5 });
-    const after = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
-    expect(after[0]!.free).toBeNull();
-    await database.$client`update orgs set free_dig_scan_id = ${before[0]!.free} where id = ${acme.id}`;
   });
 
   test("Dig: refused without credits leaves no scan; with credits it holds the cost shown", async () => {
@@ -501,19 +452,17 @@ describe.skipIf(!available)("billing", () => {
     runs.delete("run-wedged");
   });
 
-  test("the sweep gives up on a start that never got its workflow, freeing the repo's Dig, its credits and the free Dig", async () => {
+  test("the sweep gives up on a start that never got its workflow, freeing the repo's Dig and its credits", async () => {
     await database.$client`update scans set status = 'completed' where repo_id = ${repoIds[0]!} and kind = 'deep' and status in ('queued', 'running', 'publishing')`;
     await cron();
     autumn.get(acme.id).credits = 40;
-    const before = await database.$client<Array<{ free: string | null }>>`select free_dig_scan_id as free from orgs where id = ${acme.id}`;
     const [scan] = await database
       .insert(schema.scans)
       .values({ repoId: repoIds[0]!, orgId: acme.id, kind: "deep", trigger: "manual", headSha: "wedged", createdAt: new Date(Date.now() - 40 * 60_000) })
       .returning();
     expect(await reserveScan(scan!.id, acme, 15)).toEqual({ ok: true });
-    // The start was claimed, then the instance died before the workflow's run was recorded. It was the org's free Dig.
+    // The start was claimed, then the instance died before the workflow's run was recorded.
     await database.$client`update scans set workflow_run_id = ${"starting:lost"} where id = ${scan!.id}`;
-    await database.$client`update orgs set free_dig_scan_id = ${scan!.id} where id = ${acme.id}`;
     const repo = await database.query.repos.findFirst({ where: (repos, { eq }) => eq(repos.id, repoIds[0]!), with: { org: true } });
     expect(await requestDeepScan({ ...repo!, loc: 50_000 })).toMatchObject({ ok: false, reason: "running", scanId: scan!.id });
 
@@ -521,10 +470,9 @@ describe.skipIf(!available)("billing", () => {
     expect(await response.json()).toMatchObject({ errors: 0 });
     expect(await scanById(database, scan!.id)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
     expect(autumn.get(acme.id).credits).toBe(40);
-    // The repo can be dug again, and the free Dig is free again.
+    // The repo can be dug again, paid like any Dig.
     const again = await requestDeepScan({ ...repo!, loc: 50_000 });
     expect(again.ok).toBe(true);
-    expect(await scanById(database, (again as { scanId: string }).scanId)).toMatchObject({ creditsReserved: 0 });
-    await database.$client`update orgs set free_dig_scan_id = ${before[0]!.free} where id = ${acme.id}`;
+    expect(await scanById(database, (again as { scanId: string }).scanId)).toMatchObject({ creditsReserved: 5 });
   });
 });

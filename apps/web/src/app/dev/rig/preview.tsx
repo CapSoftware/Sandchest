@@ -48,7 +48,7 @@ const BRIEFING = {
     { id: "00000000-0000-4000-8000-0000000000a4", fullName: "acme/docs", private: false, loc: 6_000, language: "MDX", description: null },
   ],
   company: { name: "Acme", email: "billing@example.com" },
-  firstTarget: "00000000-0000-4000-8000-0000000000a2",
+  chooseRepos: null,
   hacker: null,
   currentPlan: null,
 };

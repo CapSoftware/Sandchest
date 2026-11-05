@@ -1,3 +1,4 @@
+import { DEEP_SCAN_TIERS } from "@sandchest/billing/costs";
 import type { CSSProperties, ReactNode } from "react";
 import { PlayOnView } from "@/components/play-on-view";
 
@@ -345,8 +346,8 @@ function ScanVisual() {
         </li>
       </ul>
       <p className="scan-foot">
-        <span>First deep scan</span>
-        <span className="tag">Free</span>
+        <span>Whole repository</span>
+        <span className="tag">From {DEEP_SCAN_TIERS[0]!.credits} credits</span>
         <span className="key-mini scan-again">Deep scan</span>
       </p>
     </Win>
@@ -396,8 +397,8 @@ export function HowItWorks() {
           Give them a name, a look and a voice. They sign everything they find.
         </Step>
         <Step n={3} title="Scan your codebase" visual={<ScanVisual />}>
-          When you sign up, your hacker deep scans a whole repo, every file. The first one is free. Run another
-          whenever you like.
+          Pick a repository and your hacker deep scans it, every file, end to end. Run another whenever you
+          like.
         </Step>
         <Step n={4} title="Open pull requests as usual" visual={<ReviewVisual />}>
           Each one gets reviewed. Findings land on the exact lines, with a fix prompt for your agent.

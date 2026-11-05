@@ -6,8 +6,11 @@ import { PlanPicker } from "@/components/app/plan-picker";
 import { ScanRows } from "@/components/app/scan-rows";
 import { Tally } from "@/components/app/tally";
 import { compactNumber, plural, SEVERITIES, SEVERITY_LABEL } from "@/lib/format";
+import { MANY_REPOS } from "@/lib/installation";
 import { PRICES } from "@/lib/pricing";
+import type { FirstScan as FirstScanData } from "@/lib/first-scan";
 import type { OrgPlan } from "@/server/org-plans";
+import { FirstScan } from "./first-scan";
 import "../rig.css";
 
 /** The overview's window, in days. */
@@ -21,6 +24,8 @@ export function OverviewView({
   attention,
   recent,
   notice,
+  first,
+  crowded = [],
 }: {
   repos: DashboardRepo[];
   plans: Map<string, OrgPlan>;
@@ -29,6 +34,10 @@ export function OverviewView({
   recent: ScanListItem[];
   /** Back from recruiting or paying. */
   notice?: "recruited" | "plan_started";
+  /** Nothing deep scanned yet: the choice of what to scan first. */
+  first?: FirstScanData;
+  /** Accounts the person runs with more repositories connected than recommended. */
+  crowded?: Crowded[];
 }) {
   const orgs = [...new Map(repos.map((repo) => [repo.orgId, repo])).values()];
   const unpaid = orgs.filter((repo) => plans.get(repo.orgId) && !plans.get(repo.orgId)!.planId);
@@ -50,12 +59,16 @@ export function OverviewView({
         </div>
       </div>
 
-      {notice === "recruited" && (
+      {crowded.map((org) => (
+        <ManyRepos key={org.orgId} org={org} />
+      ))}
+      {first && <FirstScan data={first} />}
+      {notice === "recruited" && !first && (
         <p className="notice" role="status">
           Your hacker has joined. Open any scan to watch them work.
         </p>
       )}
-      {notice === "plan_started" && unpaid.length === 0 && (
+      {notice === "plan_started" && unpaid.length === 0 && !first && (
         <p className="notice" role="status">
           You’re all set. Recon is mapping each repository now, about a minute each; then Deep scan is ready.
         </p>
@@ -235,6 +248,30 @@ function versus(now: OverviewWindow, before: OverviewWindow, key: keyof Overview
   return `${compactNumber(before[key])} the ${DAYS} days before`;
 }
 
+type Crowded = { orgId: string; login: string; count: number; url: string };
+
+/**
+ * A whole account connected, likely by accident: the hacker maps and reviews every repository it can see,
+ * so the ones that matter should be chosen on GitHub.
+ */
+function ManyRepos({ org }: { org: Crowded }) {
+  return (
+    <section className="many-repos" aria-labelledby={`many-${org.orgId}`}>
+      <div>
+        <h2 id={`many-${org.orgId}`} className="many-repos-title">
+          {org.login} connected {org.count.toLocaleString("en-US")} repositories
+        </h2>
+        <p className="many-repos-note">
+          Your hacker maps and reviews every repository it can see. Connect the ones that matter most, {MANY_REPOS} or fewer, and add more whenever you need them.
+        </p>
+      </div>
+      <a className="key key-secondary" href={org.url} target="_blank" rel="noreferrer" data-track="many-repos-choose">
+        <span className="key-face">Choose repositories on GitHub</span>
+      </a>
+    </section>
+  );
+}
+
 function Paywall({ repo }: { repo: DashboardRepo }) {
   return (
     <section className="paywall" aria-labelledby={`plan-${repo.orgId}`}>
@@ -242,7 +279,7 @@ function Paywall({ repo }: { repo: DashboardRepo }) {
         Recruit a hacker for {repo.orgLogin}
       </h2>
       <p className="field-help">
-        Sandchest maps each repository and reviews every pull request once {repo.orgLogin} joins: {PRICES.plan} {PRICES.review} Your first deep scan is free.
+        Sandchest maps each repository and reviews every pull request once {repo.orgLogin} joins: {PRICES.plan} {PRICES.review}
         {!repo.orgAdmin && ` Only an admin of ${repo.orgLogin} can join.`}
       </p>
       {repo.orgAdmin && (

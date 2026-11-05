@@ -41,8 +41,6 @@ export interface OrgSettings {
   hacker?: HackerProfile;
   /** Who the org is, for receipts: given while recruiting, prefilled from GitHub. */
   company?: { name: string; email: string };
-  /** The repository the org chose for its hacker's first Dig (a repos.id in this org). */
-  firstTarget?: string;
   /** How pull requests are reviewed on repositories added from now on. Unset means "auto". Each repo can change its own. */
   prReviewsDefault?: "auto" | "command" | "off";
 }
@@ -68,9 +66,8 @@ export const orgs = pgTable("orgs", {
   installationId: bigint("installation_id", { mode: "number" }).unique(),
   settings: jsonb("settings").$type<OrgSettings>().notNull().default({ checkThreshold: "high" }),
   /**
-   * The deep scan that used the org's free first Dig. It stays used while
-   * that scan is queued, running or completed; if it failed, was refused or
-   * is gone, the next Dig is free again. (No foreign key: scans point here.)
+   * Unused: every deep scan is paid for with credits. It held the scan that used an org's free first one.
+   * Kept until no deployed code reads it, then dropped.
    */
   freeDigScanId: uuid("free_dig_scan_id"),
   createdAt: createdAt(),

@@ -6,7 +6,8 @@ import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransi
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
 import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
-import { linesLabel, restCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
+import { digAllCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
+import { MANY_REPOS } from "@/lib/installation";
 import { closedMessage, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
 import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
 import { site } from "@/lib/site";
@@ -67,8 +68,6 @@ const ROOM_LIGHT: Record<StepId, number> = { connect: 0.55, company: 0.55, hacke
 
 /** The brand's gold, for the card form's focus rings: the page is lit in gold, only the room in the screen's colour. */
 const GOLD = "#fec242";
-/** Repositories listed before "Show all". */
-const REPOS_SHOWN = 8;
 /** An image that loads nothing, for pictures in a loading state's sample. */
 const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -119,7 +118,6 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   // The room opens on a still of its first frame, where there is one for this hacker's look.
   const [still] = useState(() => (looksDefault(profile) ? ("onboard" as const) : undefined));
   const [company, setCompany] = useState(initial?.company ?? { name: "", email: "" });
-  const [target, setTarget] = useState<string | null>(initial?.firstTarget ?? null);
   const [credits, setCredits] = useState<number>(DEFAULT_CREDITS);
   const [autoTopUp, setAutoTopUp] = useState(true);
   // Business invoices: a name and address from Stripe's Address Element, and a tax ID typed here.
@@ -219,7 +217,6 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     viewer,
     accounts: accounts.map((a) => a.login),
     repos: brief?.repos ?? [],
-    target,
     org,
     credits,
     autoTopUp,
@@ -257,7 +254,6 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
       if (!next) return;
       setBrief(next);
       setCompany(next.company);
-      setTarget(next.firstTarget);
       if (next.hacker) setProfile(next.hacker);
       setPayment({ state: "idle" });
       history.replaceState(null, "", `/dashboard/recruit?org=${next.orgId}`);
@@ -275,11 +271,10 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     const key = draftKey(brief.orgId);
     try {
       if (brief.currentPlan) return localStorage.removeItem(key);
-      const draft = readDraft(localStorage.getItem(key), brief.repos.map((repo) => repo.id));
+      const draft = readDraft(localStorage.getItem(key));
       if (!draft) return;
       setProfile(draft.hacker);
       setCompany(draft.company);
-      setTarget(draft.firstTarget ?? brief.firstTarget);
       setCredits(draft.credits);
       setAutoTopUp(draft.autoTopUp);
       // The step it was left on, on first load only (choosing another account stays on the first step), and no
@@ -291,13 +286,13 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
   }, [brief]);
   useEffect(() => {
     if (demo || !brief || brief.currentPlan || restored.current !== brief.orgId || signed) return;
-    const draft: RecruitDraft = { step: current, hacker: profile, company, firstTarget: target, credits, autoTopUp };
+    const draft: RecruitDraft = { step: current, hacker: profile, company, credits, autoTopUp };
     try {
       localStorage.setItem(draftKey(brief.orgId), JSON.stringify(draft));
     } catch {
       // Full or off: nothing to remember with.
     }
-  }, [demo, brief, current, profile, company, target, credits, autoTopUp, signed]);
+  }, [demo, brief, current, profile, company, credits, autoTopUp, signed]);
   const forget = () => {
     try {
       if (brief) localStorage.removeItem(draftKey(brief.orgId));
@@ -317,7 +312,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     return stop < 0 ? to : stop;
   };
 
-  const recruitment = (): RecruitInput => ({ hacker: profile, company: { name: company.name.trim(), email: company.email.trim() }, firstTarget: target });
+  const recruitment = (): RecruitInput => ({ hacker: profile, company: { name: company.name.trim(), email: company.email.trim() } });
   const order: RecruitOrder = { credits, autoTopUp };
 
   // A new step moves focus to its heading, so keyboard and screen reader users start at its top.
@@ -528,7 +523,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
               />
             )}
             {current === "company" && brief && (
-              <Company heading={heading} brief={brief} company={company} setCompany={setCompany} target={target} setTarget={setTarget} billing={billing} claiming={claiming} nudge={nudge} />
+              <Company heading={heading} brief={brief} company={company} setCompany={setCompany} billing={billing} />
             )}
             {current === "hacker" && <Hacker heading={heading} profile={profile} update={update} look={look} setLook={setLook} />}
             {current === "plan" && (
@@ -538,7 +533,6 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
                 billing={billing}
                 name={name}
                 org={org}
-                target={target}
                 credits={credits}
                 setCredits={setCredits}
                 autoTopUp={autoTopUp}
@@ -723,7 +717,7 @@ function Connect({
   if (accounts.length === 0) {
     const path: Array<{ label: string; state: "done" | "now" | "next" }> = [
       { label: signedOut ? "Sign in with GitHub" : `Signed in as ${viewer}`, state: signedOut ? "now" : "done" },
-      { label: "Pick the repositories it may read", state: signedOut ? "next" : "now" },
+      { label: "Pick the repositories that matter most", state: signedOut ? "next" : "now" },
       { label: "Come back here to brief your hacker", state: "next" },
     ];
     return (
@@ -738,6 +732,7 @@ function Connect({
             </li>
           ))}
         </ol>
+        <p className="onboard-help">Choose only the repositories you want scanned, not the whole account: {MANY_REPOS} or fewer works best. You can add more any time.</p>
         <ReadOnlyNote />
       </div>
     );
@@ -795,24 +790,14 @@ function Company({
   brief,
   company,
   setCompany,
-  target,
-  setTarget,
   billing,
-  claiming,
-  nudge,
 }: {
   heading: RefObject<HTMLHeadingElement | null>;
   brief: Briefing;
   company: { name: string; email: string };
   setCompany: (company: { name: string; email: string }) => void;
-  target: string | null;
-  setTarget: (id: string) => void;
   billing: boolean;
-  claiming: boolean;
-  nudge: (seconds: number) => void;
 }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? brief.repos : brief.repos.slice(0, REPOS_SHOWN);
   const { profile } = brief;
   const skeleton = useInSkeleton();
   return (
@@ -852,53 +837,37 @@ function Company({
         </label>
       </div>
 
-      <fieldset className="onboard-set">
-        <legend className="onboard-label">Where to look first</legend>
-        {brief.repos.length === 0 ? (
-          <p className="onboard-note">No repositories yet. Add some to the installation on GitHub and they’ll show here.</p>
-        ) : (
-          <>
-            <ul className="onboard-menu onboard-repos">
-              {shown.map((repo) => {
-                const [owner, repoName] = repo.fullName.split("/");
-                return (
-                  <li key={repo.id}>
-                    <label className="onboard-option onboard-repo" data-on={target === repo.id || undefined}>
-                      <input
-                        type="radio"
-                        name="target"
-                        checked={target === repo.id}
-                        onChange={() => {
-                          setTarget(repo.id);
-                          nudge(0.8);
-                        }}
-                      />
-                      <span className="onboard-option-name">
-                        <span className="onboard-dim">{owner}/</span>
-                        {repoName}
-                      </span>
-                      <span className="onboard-option-note">{[repo.language, linesLabel(repo.loc), repo.private ? "private" : "public"].filter(Boolean).join(", ")}</span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-            {brief.repos.length > REPOS_SHOWN && !all && (
-              <button type="button" className="onboard-link" onClick={() => setAll(true)} data-track="recruit-show-all-repos">
-                Show all {brief.repos.length}
-              </button>
-            )}
-            <p className="onboard-help">
-              {!billing
-                ? "Your hacker scans this one first."
-                : claiming
-                  ? "Your hacker scans this one as soon as you’ve claimed your credits. The first deep scan is free."
-                  : "Your hacker scans this one as soon as you’ve paid. The first deep scan is free."}
-            </p>
-          </>
-        )}
-      </fieldset>
+      <RepoScope brief={brief} />
     </>
+  );
+}
+
+/**
+ * How many repositories the hacker will work on. Sandchest maps and reviews every one it can see, so a whole
+ * account connected by accident is caught here, with the way to narrow it on GitHub.
+ */
+function RepoScope({ brief }: { brief: Briefing }) {
+  const count = brief.repos.length;
+  if (count === 0) return <p className="onboard-note">No repositories yet. Add some to the installation on GitHub and they’ll show here.</p>;
+  const many = count > MANY_REPOS;
+  return (
+    <div className="onboard-scope" data-many={many || undefined}>
+      <p className="onboard-scope-count">
+        <span className="onboard-scope-n">{count.toLocaleString("en-US")}</span> {count === 1 ? "repository" : "repositories"} connected
+      </p>
+      {many ? (
+        <p className="onboard-scope-note">
+          That’s a lot. Your hacker maps and reviews every repository it can see, so connect the ones that matter most: {MANY_REPOS} or fewer works best. You can add more any time.
+        </p>
+      ) : (
+        <p className="onboard-scope-note">You choose which one your hacker deep scans first, from your dashboard.</p>
+      )}
+      {many && brief.chooseRepos && (
+        <a className="onboard-link" href={brief.chooseRepos} target="_blank" rel="noreferrer" data-track="recruit-choose-repos">
+          <GitHubMark /> Choose repositories on GitHub
+        </a>
+      )}
+    </div>
   );
 }
 
@@ -962,7 +931,6 @@ function Credits({
   billing,
   name,
   org,
-  target,
   credits,
   setCredits,
   autoTopUp,
@@ -977,7 +945,6 @@ function Credits({
   billing: boolean;
   name: string;
   org: string;
-  target: string | null;
   credits: number;
   setCredits: (credits: number) => void;
   autoTopUp: boolean;
@@ -1013,7 +980,7 @@ function Credits({
   }
 
   const repos = brief?.repos ?? [];
-  const rest = restCredits(repos, target);
+  const all = digAllCredits(repos);
   const scans = DEEP_SCAN_TIERS.map((tier) => tier.credits);
   const rates = (
     <dl className="onboard-rates">
@@ -1026,10 +993,6 @@ function Credits({
         <dd>
           {scans[0]}–{scans.at(-1)} credits
         </dd>
-      </div>
-      <div>
-        <dt>First deep scan</dt>
-        <dd>Free</dd>
       </div>
     </dl>
   );
@@ -1056,7 +1019,7 @@ function Credits({
           </p>
         )}
         <p className="onboard-lead onboard-gift-lead">
-          On us, to test {name} on {org}’s code. They work like any credits, and the first deep scan doesn’t touch them.
+          On us, to test {name} on {org}’s code. They work like any credits.
         </p>
         {rates}
         <p className="onboard-help">
@@ -1085,10 +1048,9 @@ function Credits({
             </label>
           ))}
         </div>
-        {rest.credits > 0 && (
+        {all > 0 && repos.length <= MANY_REPOS && (
           <p className="onboard-help">
-            Deep scanning {org}’s {rest.repos < repos.length ? "other " : ""}
-            {rest.repos === 1 ? "repository" : `${rest.repos} repositories`} takes {rest.credits} credits.
+            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} takes {all} credits.
           </p>
         )}
       </fieldset>
@@ -1433,8 +1395,8 @@ const SAMPLE_BRIEF: Briefing = {
   type: "Organization",
   profile: { name: "Acme", about: "Billing for teams that ship every day.", website: "https://acme.example.com", location: null, avatar: BLANK },
   repos: SAMPLE_REPOS,
+  chooseRepos: null,
   company: { name: "Acme", email: "billing@example.com" },
-  firstTarget: SAMPLE_REPOS[0]!.id,
   hacker: null,
   currentPlan: null,
 };
@@ -1468,7 +1430,7 @@ export function RecruitSkeleton({ billing, payOnPage, install }: { billing: bool
           <div className="onboard-body">
             <PageSkeleton id="recruit" label="Loading">
               {company ? (
-                <Company heading={heading} brief={SAMPLE_BRIEF} company={SAMPLE_BRIEF.company} setCompany={noop} target={SAMPLE_BRIEF.firstTarget} setTarget={noop} billing={billing} claiming={false} nudge={noop} />
+                <Company heading={heading} brief={SAMPLE_BRIEF} company={SAMPLE_BRIEF.company} setCompany={noop} billing={billing} />
               ) : (
                 <Connect heading={heading} accounts={[account]} chosen={account.id} switching={false} choose={noop} installUrl={install ? "#" : null} signedOut={false} viewer="" claim={null} />
               )}

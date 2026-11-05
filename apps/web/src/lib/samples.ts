@@ -42,7 +42,6 @@ export function sampleRepos(): DashboardRepo[] {
     reviews30d: reviews,
     activeDeepScanId: null,
     activeDeepScanWaitsForRecon: false,
-    freeDig: false,
     defaultBranch: "main",
     prReviews: "auto",
     deepScanSchedule: i === 0 ? "weekly" : "off",

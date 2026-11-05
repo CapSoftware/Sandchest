@@ -15,6 +15,7 @@ export function Submit({
   value,
   bare = false,
   track,
+  disabled = false,
 }: {
   children: ReactNode;
   pending?: ReactNode;
@@ -23,12 +24,14 @@ export function Submit({
   value?: string;
   bare?: boolean;
   track?: string;
+  /** Not ready to be pressed yet. */
+  disabled?: boolean;
 }) {
   const status = useFormStatus();
   const busy = status.pending && (name === undefined || status.data?.get(name) === value);
   const label = busy && pending ? pending : children;
   return (
-    <button type="submit" className={className} name={name} value={value} disabled={status.pending} aria-busy={busy || undefined} data-track={track}>
+    <button type="submit" className={className} name={name} value={value} disabled={status.pending || disabled} aria-busy={busy || undefined} data-track={track}>
       {bare ? label : <span className="key-face">{label}</span>}
     </button>
   );

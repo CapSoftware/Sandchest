@@ -48,15 +48,14 @@ async function nextSteps(context: Context): Promise<{ steps: Step[]; accounts: A
       steps.push({ step: "buy_credits", account: org.login, do: `${org.login} is out of credits, so every scan is paused. Call buy_credits, or set_auto_top_up so it never runs out.` });
     }
   }
-  const unscanned = repos.filter((repo) => repo.billing?.planId && !repo.lastDeepScanAt && !repo.activeDeepScanId && (repo.billing.credits > 0 || repo.freeDig));
+  const unscanned = repos.filter((repo) => repo.billing?.planId && !repo.lastDeepScanAt && !repo.activeDeepScanId && repo.billing.credits > 0);
   if (unscanned.length > 0) {
     const names = unscanned.slice(0, 3).map((repo) => repo.fullName);
     const more = unscanned.length > names.length ? ` and ${unscanned.length - names.length} more` : "";
-    const free = unscanned.some((repo) => repo.freeDig) ? " An account's first deep scan is free." : "";
     steps.push({
       step: "start_deep_scan",
       repo: names[0],
-      do: `Never deep scanned: ${names.join(", ")}${more}. Call start_deep_scan for the ones the person cares about most (list_repos shows each one's price).${free}`,
+      do: `Never deep scanned: ${names.join(", ")}${more}. Call start_deep_scan for the ones the person cares about most (list_repos shows each one's price).`,
     });
   }
   const open = repos.reduce((sum, repo) => sum + repo.open.critical + repo.open.high, 0);

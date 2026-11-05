@@ -30,6 +30,7 @@ export const metadata: Metadata = {
  */
 export default function ClaimPage() {
   const reviews = Math.floor(CREDITS / PR_REVIEW_TIERS[0]!.credits);
+  const deepScans = Math.floor(CREDITS / DEEP_SCAN_TIERS[0]!.credits);
   return (
     <div className="page">
       <SiteHeader visitor="signed-out" />
@@ -67,10 +68,10 @@ export default function ClaimPage() {
               <span className="claim-perk-note">Most reviews cost {PR_REVIEW_TIERS[0]!.credits} credit. Each one reads the change the way an attacker would.</span>
             </li>
             <li className="claim-perk">
-              <span className="claim-perk-n">1st</span>
-              <span className="claim-perk-name">deep scan, free</span>
+              <span className="claim-perk-n">{deepScans}</span>
+              <span className="claim-perk-name">deep scans</span>
               <span className="claim-perk-note">
-                Your first scan of a whole repository costs nothing. After that, {DEEP_SCAN_TIERS[0]!.credits} to {DEEP_SCAN_TIERS.at(-1)!.credits} credits by size.
+                Each reads a whole repository, every file: {DEEP_SCAN_TIERS[0]!.credits} to {DEEP_SCAN_TIERS.at(-1)!.credits} credits by size.
               </span>
             </li>
             <li className="claim-perk">

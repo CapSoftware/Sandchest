@@ -689,7 +689,6 @@ export function demoRepos(): DashboardRepo[] {
       reviews30d: repo.reviews,
       activeDeepScanId: live ? DEMO_LIVE_SCAN_ID : null,
       activeDeepScanWaitsForRecon: false,
-      freeDig: false,
       defaultBranch: "main",
       prReviews: repo.privateRepo ? "auto" : "command",
       deepScanSchedule: live ? "weekly" : "off",

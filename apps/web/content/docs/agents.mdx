@@ -23,7 +23,7 @@ If you are an agent asked to set Sandchest up, do this:
 2. **Call `get_me`** (`GET /api/v1/me`). It returns who you act as, their GitHub accounts, and `next_steps`: what is left to do, in order. Work through them.
 3. **No accounts?** The person must install the GitHub App on their account and choose repositories: give them `links.install_github_app`. Then call `list_accounts` with `wait=50`: it returns as soon as the account shows (call it again if they're not done).
 4. **No plan?** If `free_credits` is open for the account, call `claim_free_credits`: no card needed. Otherwise call `quote_credits`, tell the person the price, and call `buy_credits`. The first purchase returns `checkout_url`: give it to the person to pay on Stripe, then call `get_billing` with `wait=50`, which returns once the plan is active. After that, `buy_credits` charges the saved card straight away.
-5. **Scan.** Recon maps every repository on its own once there is a plan. Call `start_deep_scan` for a repository (the account's first deep scan is free), then `get_scan` with `wait=50` until `done` is true.
+5. **Scan.** Recon maps every repository on its own once there is a plan. Call `start_deep_scan` for a repository (`list_repos` shows each one's price in credits), then `get_scan` with `wait=50` until `done` is true.
 6. **Fix.** In a checkout of a repository, `get_findings_prompt` with `repo` set gives one prompt that covers its open findings (or `get_fix_prompt` for one at a time). Fix them there. When the fix reaches the default branch, Sandchest checks it and marks the finding fixed.
 
 Accounts can be named by GitHub login (`acme`) and repositories by full name (`acme/api`) everywhere an id is accepted. Changing billing or settings needs the person to be an admin of the account: an organization admin, or the owner of a personal account.
@@ -106,7 +106,7 @@ Every tool is also an HTTP endpoint under `https://www.sandchest.com/api/v1`, wi
 | `revoke_api_key` | `DELETE /keys/{id}` | Revoke a key or disconnect a client |
 | `list_accounts` | `GET /accounts` | GitHub accounts Sandchest is installed on; `wait` while the person installs |
 | `get_account` | `GET /accounts/{account}` | An account's settings, hacker and repositories |
-| `update_account` | `PATCH /accounts/{account}` | Check threshold, emails, company details, first target, PR reviews for new repositories (or all) |
+| `update_account` | `PATCH /accounts/{account}` | Check threshold, emails, company details, PR reviews for new repositories (or all) |
 | `list_team` | `GET /accounts/{account}/team` | Who can see the account's repositories and how, and pending invites |
 | `invite_teammate` | `POST /accounts/{account}/team/invites` | Invite someone by email or GitHub username, as a member or an admin |
 | `set_teammate_role` | `PATCH /accounts/{account}/team/members/{user_id}` | Make someone who joined by invite a member or an admin |

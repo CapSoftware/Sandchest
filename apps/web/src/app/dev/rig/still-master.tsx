@@ -31,7 +31,7 @@ export function StillMaster({ kind, tier }: { kind: StillKind; tier: "high" | "l
       kind === "landing"
         ? demoPainter(DEFAULT_HACKER, signals)
         : recruitPainter({
-            current: { step: "connect", profile: DEFAULT_HACKER, viewer: "octocat", accounts: ["acme"], repos: [], target: null, org: "acme", credits: 10, autoTopUp: true, currentPlan: null, billing: true },
+            current: { step: "connect", profile: DEFAULT_HACKER, viewer: "octocat", accounts: ["acme"], repos: [], org: "acme", credits: 10, autoTopUp: true, currentPlan: null, billing: true },
           }),
   }));
   const [saved, setSaved] = useState<string | null>(null);

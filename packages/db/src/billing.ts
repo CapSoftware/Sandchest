@@ -274,23 +274,3 @@ export async function unsettledScans(database: Db, limit = 50) {
     .limit(limit);
 }
 
-/**
- * Gives a Dig the org's free first deep scan if it is still to come. The org
- * row is locked first and the scan it names is read afterwards (a fresh
- * snapshot), so two Digs at once cannot both have it. Used up while that scan
- * is queued, running or completed; free again if it failed, was refused or is
- * gone. True if `scanId` is (now) the free one.
- */
-export async function claimFreeDig(database: Db, orgId: string, scanId: string): Promise<boolean> {
-  return database.transaction(async (tx) => {
-    const [org] = await tx.execute<{ free_dig_scan_id: string | null }>(sql`select free_dig_scan_id from ${orgs} where id = ${orgId} for update`);
-    if (!org) return false;
-    if (org.free_dig_scan_id === scanId) return true;
-    if (org.free_dig_scan_id) {
-      const [held] = await tx.execute(sql`select 1 from ${scans} where id = ${org.free_dig_scan_id} and status in ('queued', 'running', 'publishing', 'completed')`);
-      if (held) return false;
-    }
-    await tx.update(orgs).set({ freeDigScanId: scanId }).where(eq(orgs.id, orgId));
-    return true;
-  });
-}

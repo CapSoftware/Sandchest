@@ -318,7 +318,8 @@ describe.skipIf(!available)("REST API", () => {
     const repo = await api(aliceKey, "GET", "/repos/acme/api");
     expect(repo.status).toBe(200);
     expect(repo.body.open_findings).toEqual({ critical: 1, high: 1, medium: 1, low: 0 });
-    expect(repo.body.deep_scan.free_first_deep_scan).toBe(true);
+    // Not sized yet: the price isn't known, and the most a deep scan can cost is held.
+    expect(repo.body.deep_scan).toEqual({ credits: null, held_until_sized: 25, too_large: false });
     expect((await api(aliceKey, "GET", `/repos/${ids.api}`)).body.full_name).toBe("acme/api");
     expect((await api(aliceKey, "GET", "/repos/ACME%2FAPI")).body.full_name).toBe("acme/api");
     expect((await api(bobKey, "GET", "/repos/acme/secret")).body.error.code).toBe("repo_not_found");
@@ -360,9 +361,8 @@ describe.skipIf(!available)("REST API", () => {
 
   test("account settings and the hacker: admins only, partial changes", async () => {
     expect((await api(bobKey, "PATCH", "/accounts/acme", { check_threshold: "low" })).body.error.code).toBe("not_admin");
-    const changed = (await api(aliceKey, "PATCH", "/accounts/acme", { check_threshold: "critical", email_notifications: false, first_target: "acme/secret" })).body;
-    expect(changed.settings).toMatchObject({ check_threshold: "critical", email_notifications: false, first_target_repo_id: ids.secret });
-    expect((await api(aliceKey, "PATCH", "/accounts/acme", { first_target: "other/repo" })).body.error.code).toBe("invalid_first_target");
+    const changed = (await api(aliceKey, "PATCH", "/accounts/acme", { check_threshold: "critical", email_notifications: false })).body;
+    expect(changed.settings).toMatchObject({ check_threshold: "critical", email_notifications: false });
 
     expect((await api(aliceKey, "PATCH", "/accounts/acme/hacker", { voice: "chatty" })).body.error.issues[0].field).toBe("voice");
     expect((await api(aliceKey, "PATCH", "/accounts/acme/hacker", { handle: "zero cool", voice: "paranoid" })).body.hacker).toMatchObject({ handle: "zero cool", voice: "paranoid" });
@@ -392,7 +392,10 @@ describe.skipIf(!available)("REST API", () => {
     // Claiming again (a retry) is harmless: still claimed, nothing granted twice.
     expect((await api(aliceKey, "POST", "/accounts/acme/billing/claim")).body).toMatchObject({ status: "claimed", credits: 20 });
 
-    // The first deep scan is free; a second one of the same repo while it runs is refused.
+    // Before recon sizes it, a deep scan holds the most one can cost, more than the free credits.
+    expect((await api(aliceKey, "POST", "/repos/acme/api/scans")).body.error.code).toBe("out_of_credits");
+    // Sized (recon mapped it): the first deep scan comes out of the credits; a second one of the same repo while it runs is refused.
+    await database.$client`update repos set loc = 50000 where full_name = 'acme/api'`;
     const scan = await api(aliceKey, "POST", "/repos/acme/api/scans");
     expect(scan.status).toBe(202);
     expect(scan.body.scan).toMatchObject({ kind: "deep", repo: { full_name: "acme/api" }, done: false });
