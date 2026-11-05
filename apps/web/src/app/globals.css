@@ -672,7 +672,7 @@ html:not([data-js]) .crawl-section {
   --cell: 2px;
   position: relative;
   width: 100vw;
-  height: clamp(26rem, 62vw, 34rem);
+  height: clamp(30rem, 72vw, 38rem);
   margin-top: clamp(1rem, 3vw, 2rem);
   margin-left: calc(50% - 50vw);
   overflow: hidden;
@@ -682,7 +682,7 @@ html:not([data-js]) .crawl-section {
 @media (min-width: 48rem) {
   .crawl-band {
     --cell: 3px;
-    height: clamp(30rem, 44vw, 38rem);
+    height: clamp(34rem, 48vw, 44rem);
   }
 }
 

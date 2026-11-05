@@ -11,15 +11,15 @@ const TILT = (48 * Math.PI) / 180;
 /** How far above the band the lines vanish, as a share of its height. */
 const VANISH = 0.2;
 /** How fast the text leaves the bottom edge, in CSS pixels a second. */
-const SPEED_PX = 30;
+const SPEED_PX = 58;
 /** While the pointer is over the band the crawl slows to this share, so a line can be read. */
 const HOVER_SPEED = 0.25;
 /** Keep this much of the plane written ahead of the bottom edge, in CSS pixels. */
 const AHEAD = 360;
 /** Space between two entries, at full size. */
-const GAP = 84;
+const GAP = 100;
 /** The text column at full size. Narrower screens scale everything down to fit. */
-const COLUMN = 880;
+const COLUMN = 1040;
 /** Texels of each entry checked a frame for having just crumbled. */
 const SAMPLES = 2400;
 const FRAME_MS = 1000 / 30;
@@ -68,9 +68,9 @@ interface Line {
 
 /** An entry's lines, wrapped to `width` and centred, at scale `f`. Measured with the page's own fonts, so the DOM and the canvas copy agree. */
 function layout(item: Item, ctx: CanvasRenderingContext2D, width: number, f: number, fonts: Fonts): Line[] {
-  const head = Math.round(54 * f);
-  const body = Math.max(13, Math.round(21 * f));
-  const small = Math.max(12, Math.round(16 * f));
+  const head = Math.round(76 * f);
+  const body = Math.max(15, Math.round(29 * f));
+  const small = Math.max(13, Math.round(21 * f));
   const display = (px: number) => `${px}px ${fonts.display}`;
   const mono = (px: number) => `${px}px ${fonts.mono}`;
 
@@ -370,7 +370,7 @@ export function LiveCrawl() {
       height = nextHeight;
       cols = Math.ceil(width / cell);
       rows = Math.ceil(height / cell);
-      column = Math.round(Math.min(COLUMN, width * 0.9));
+      column = Math.round(Math.min(COLUMN, width * 0.94));
       scale = Math.max(0.55, column / COLUMN);
       // Lines vanish VANISH above the band: perspective · cot(tilt) = height · (1 + VANISH).
       perspective = (height * (1 + VANISH) * sin) / cos;
