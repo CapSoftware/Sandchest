@@ -11,9 +11,9 @@ import postgres from "postgres";
 import { claimInventoryRefresh, createDb, cveCoverage, cveForUser, dashboardCves, inventoriesDue, releaseInventoryRefresh, requestInventory, saveThreatModel, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Change, OsvCatalog, OsvRecord, PackageVersion } from "@sandchest/engine/advisories";
-import type { GitHubApp } from "@sandchest/github";
+import { GitHubError, type GitHubApp } from "@sandchest/github";
 import { resetConfig } from "@/server/config";
-import { checkRepository, followFeeds, saveDependencies, syncAdvisories } from "@/server/cves";
+import { checkRepository, followFeeds, refreshInventory, saveDependencies, syncAdvisories } from "@/server/cves";
 import { setServices } from "@/server/services";
 import { operationByName } from "@/server/agent/registry";
 import { handleWebhook } from "@/server/webhooks";
@@ -313,6 +313,29 @@ describe("CVE directory", () => {
     await releaseInventoryRefresh(database, webId);
     const [row] = await database.$client`select failures, error, failed_at from repo_inventories where repo_id = ${webId}`;
     expect([row!.failures, row!.error, row!.failed_at]).toEqual([0, null, null]);
+  });
+
+  test("a repository the app can no longer reach is left alone, without opening a workspace, until a push asks again", async () => {
+    if (!available) return;
+    const due = async () => (await inventoriesDue(database, 10)).includes(webId);
+    let tokens = 0;
+    const unreachable = { installation: () => ({ cloneToken: async () => (tokens++, Promise.reject(new GitHubError("There is at least one repository that does not exist or is not accessible", 422, false))) }) };
+    // Any workspace opened would need the real config; asking for one fails the test.
+    setServices({ github: unreachable as unknown as GitHubApp });
+    try {
+      await requestInventory(database, webId);
+      expect(await refreshInventory(webId)).toEqual({ state: "gone" });
+      expect(tokens).toBe(1);
+      const [row] = await database.$client`select failures, error, running_since from repo_inventories where repo_id = ${webId}`;
+      expect([row!.failures, row!.running_since]).toEqual([6, null]);
+      expect(row!.error).toContain("can no longer reach");
+      expect(await due()).toBe(false);
+      // A push to it means the app can reach it again.
+      await requestInventory(database, webId);
+      expect(await due()).toBe(true);
+    } finally {
+      setServices({ github: fakeGithub });
+    }
   });
 
   test("feed syncs a minute apart never overlap: one started while another runs is skipped", async () => {

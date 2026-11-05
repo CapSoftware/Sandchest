@@ -140,13 +140,19 @@ export async function claimInventoryRefresh(database: Db, repoId: string): Promi
 }
 
 /** Ends a refresh. With `error`, it failed: the repository backs off before the next try. */
-export async function releaseInventoryRefresh(database: Db, repoId: string, error?: string): Promise<void> {
+export async function releaseInventoryRefresh(database: Db, repoId: string, error?: string, options: { final?: boolean } = {}): Promise<void> {
   await database
     .update(repoInventories)
     .set(
       error === undefined
         ? { runningSince: null, error: null, failures: 0, failedAt: null }
-        : { runningSince: null, error: error.slice(0, 500), failures: sql`${repoInventories.failures} + 1`, failedAt: new Date() },
+        : {
+            runningSince: null,
+            error: error.slice(0, 500),
+            // A failure retrying can't fix stops at once, until a push asks again.
+            failures: options.final ? MAX_REFRESH_FAILURES : sql`${repoInventories.failures} + 1`,
+            failedAt: new Date(),
+          },
     )
     .where(eq(repoInventories.repoId, repoId));
 }

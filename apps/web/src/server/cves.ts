@@ -38,6 +38,7 @@ import {
 } from "@sandchest/db";
 import { affectedNames, packageKey, resolveMaven, stampMs, toAdvisoryRecord, toInventory, type AdvisoryRecord, type Change, type JvmImport, type Managed, type OsvRecord } from "@sandchest/engine/advisories";
 import { createIndexerClient, type IndexerClient } from "@sandchest/engine/indexer";
+import { GitHubError } from "@sandchest/github";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { config } from "./config";
@@ -134,13 +135,22 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
       await releaseInventoryRefresh(db(), repoId);
       return { state: "gone" };
     }
-    const installation = githubApp().installation(repo.org.installationId);
+    // Asked before a sandbox opens: a repository the app can no longer reach (removed from the installation,
+    // deleted, transferred) costs one request, and is left alone until a push asks for it again.
+    let token: string;
+    try {
+      token = await githubApp().installation(repo.org.installationId).cloneToken(repo.githubRepoId);
+    } catch (error) {
+      if (!(error instanceof GitHubError && (error.status === 404 || error.status === 422))) throw error;
+      await releaseInventoryRefresh(db(), repoId, "The GitHub App can no longer reach this repository.", { final: true });
+      return { state: "gone" };
+    }
     const settings = config();
     const startedAt = new Date();
     const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${repo.fullName}.git`;
     const { workspace, headSha, handle } = await prepareWorkspace({
       open: () => (settings.workspace === "sandbox" ? SandboxWorkspace.create({ timeoutMs: REFRESH_BUDGET_MS }) : LocalWorkspace.create()),
-      clone: async (ready) => ready.clone({ url, ref: "HEAD" }, { depth: 1, token: await installation.cloneToken(repo.githubRepoId), timeoutMs: 4 * 60_000 }),
+      clone: async (ready) => ready.clone({ url, ref: "HEAD" }, { depth: 1, token, timeoutMs: 4 * 60_000 }),
       binary: indexerBinary(settings.workspace),
       started: startedAt.getTime(),
       onRetry: () => {},
