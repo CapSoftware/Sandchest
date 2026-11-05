@@ -140,6 +140,8 @@ impl Default for Limits {
 }
 
 pub struct Store {
+    /// The directory the files were read from.
+    pub root: std::path::PathBuf,
     /// Sorted by path.
     pub files: Vec<File>,
     pub skipped: Vec<Skipped>,
@@ -203,7 +205,7 @@ impl Store {
         files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         let mut skipped = skipped.into_inner().unwrap();
         skipped.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-        Store { files, skipped }
+        Store { root: root.to_path_buf(), files, skipped }
     }
 
     pub fn get(&self, path: &str) -> Option<&File> {

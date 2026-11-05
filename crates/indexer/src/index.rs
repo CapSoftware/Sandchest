@@ -7,7 +7,7 @@ use std::time::Instant;
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::deps::{self, Dep, ImportSite};
+use crate::deps::{self, Dep, ImportSite, Managed};
 use crate::extract::{self, Route, Symbol, SymbolKind};
 use crate::files::{Class, Store};
 use crate::modules::{self, Modules};
@@ -25,6 +25,10 @@ pub struct Index {
     pub secrets: Vec<At<Secret>>,
     pub markers: Vec<At<Marker>>,
     pub deps: Vec<Dep>,
+    /// Packages whose version only an outside POM sets (see [`Managed`]).
+    pub managed: Vec<Managed>,
+    /// JVM import paths by package, with a site each (see `deps::Inventory`).
+    pub jvm_imports: Vec<(String, String)>,
     /// Symbol ids by name.
     by_name: HashMap<String, Vec<u32>>,
     /// Call ids by the callee's last segment.
@@ -102,6 +106,8 @@ impl Index {
             secrets: Vec::new(),
             markers: Vec::new(),
             deps: Vec::new(),
+            managed: Vec::new(),
+            jvm_imports: Vec::new(),
             by_name: HashMap::new(),
             calls_by_name: HashMap::new(),
             calls_by_caller: HashMap::new(),
@@ -162,7 +168,10 @@ impl Index {
             .iter()
             .map(|(file, import)| ImportSite { spec: &import.spec, file: &store.files[*file as usize].path, line: import.line })
             .collect();
-        index.deps = deps::collect(store, &sites);
+        let inventory = deps::collect(store, &sites);
+        index.deps = inventory.dependencies;
+        index.managed = inventory.managed;
+        index.jvm_imports = inventory.jvm_imports;
         index.file_imports = resolve_imports(store, &imports);
         index.reachable = index.reachable_from_routes();
         for (id, sink) in index.sinks.iter().enumerate() {

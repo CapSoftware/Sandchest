@@ -593,7 +593,10 @@ fn deps(state: &State, args: DepsArgs) -> Value {
     let index = state.index();
     let deps: Vec<&crate::deps::Dep> =
         index.deps.iter().filter(|dep| !args.imported_only || dep.reachability == crate::deps::Reachability::Imported).collect();
-    json!({ "dependencies": deps })
+    let managed: Vec<&crate::deps::Managed> =
+        index.managed.iter().filter(|m| !args.imported_only || m.dep.reachability == crate::deps::Reachability::Imported).collect();
+    let jvm_imports: Vec<Value> = index.jvm_imports.iter().map(|(package, at)| json!({ "package": package, "at": at })).collect();
+    json!({ "dependencies": deps, "managed": managed, "jvmImports": jvm_imports })
 }
 
 /// Deterministic signals: committed secrets, text addressed to the scanner, and the sink inventory.
