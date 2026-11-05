@@ -27,7 +27,7 @@ const SIGKILL_EXIT = 137;
 // Arguments are positional, never interpolated into the script.
 const DOWNLOAD_SCRIPT = `set -e
 mkdir -p "$(dirname "$2")"
-curl -fsSL --retry 3 "$1" -o "$2"
+curl -fsSL --retry 6 --retry-max-time 90 --max-time 60 "$1" -o "$2"
 echo "$3  $2" | sha256sum -c - >/dev/null
 chmod 755 "$2"`;
 
@@ -110,7 +110,7 @@ export class SandboxWorkspace implements Workspace {
       await this.sandbox.writeFiles([{ path, content: await readFile(binary.path), mode: 0o755 }]);
     } else {
       // Downloaded inside the VM (fast, in-region) and verified before it runs.
-      const result = await this.run(["sh", "-c", DOWNLOAD_SCRIPT, "download", binary.url, path, binary.sha256], this.sandbox.cwd, { timeoutMs: 120_000 });
+      const result = await this.run(["sh", "-c", DOWNLOAD_SCRIPT, "download", binary.url, path, binary.sha256], this.sandbox.cwd, { timeoutMs: 180_000 });
       if (result.exitCode !== 0) throw new WorkspaceError(`Indexer download failed: ${result.stderr.trim()}`);
     }
 

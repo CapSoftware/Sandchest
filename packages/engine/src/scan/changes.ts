@@ -41,7 +41,9 @@ export function changedLines(files: ChangedFile[]): number {
 
 /**
  * Keeps files until `cap` changed lines, riskiest first. `risk` scores a path
- * (sinks and entry points in it); ties go to the larger change.
+ * (sinks and entry points in it); ties go to the larger change. A file too big
+ * for the cap on its own never crowds out the ones that fit, and is reviewed
+ * alone only when nothing else fits.
  */
 export function capChanges(files: ChangedFile[], cap: number, risk: (path: string) => number): { kept: ChangedFile[]; dropped: ChangedFile[] } {
   const ranked = [...files].sort((a, b) => risk(b.path) - risk(a.path) || b.additions + b.deletions - (a.additions + a.deletions));
@@ -50,12 +52,13 @@ export function capChanges(files: ChangedFile[], cap: number, risk: (path: strin
   let lines = 0;
   for (const file of ranked) {
     const size = file.additions + file.deletions;
-    if (kept.length > 0 && lines + size > cap) dropped.push(file);
+    if (lines + size > cap) dropped.push(file);
     else {
       kept.push(file);
       lines += size;
     }
   }
+  if (kept.length === 0 && dropped.length > 0) kept.push(dropped.shift()!);
   return { kept, dropped };
 }
 

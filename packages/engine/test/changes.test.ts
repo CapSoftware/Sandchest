@@ -22,6 +22,13 @@ describe("security-relevant changes", () => {
 
   test("always reviews at least one file, however large", () => {
     expect(capChanges([file("huge.ts", 9_000)], 5_000, () => 0).kept).toHaveLength(1);
+    expect(capChanges([file("huge.ts", 9_000), file("big.ts", 6_000)], 5_000, () => 0).kept.map((f) => f.path)).toEqual(["huge.ts"]);
+  });
+
+  test("a file too big for the cap doesn't crowd out the code that fits", () => {
+    const { kept, dropped } = capChanges([file("auth.ts", 127), file("domains.json", 10_145), file("route.ts", 23)], 5_000, () => 0);
+    expect(kept.map((f) => f.path)).toEqual(["auth.ts", "route.ts"]);
+    expect(dropped.map((f) => f.path)).toEqual(["domains.json"]);
   });
 
   test("a finding touches the change when a citation is in or next to a hunk", () => {
