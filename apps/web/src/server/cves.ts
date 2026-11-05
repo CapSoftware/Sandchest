@@ -61,7 +61,7 @@ const FEED_CONCURRENCY = 4;
 const UNREAD_QUEUED = 50;
 const UNREAD_STARTED_NOW = 3;
 /** Per sweep (every ten minutes): inventories read, and inventories checked in full. */
-const REFRESHES_PER_SWEEP = 5;
+const REFRESHES_PER_SWEEP = 25;
 const RECHECKS_PER_SWEEP = 12;
 const REFRESH_BUDGET_MS = 8 * 60_000;
 /** Reading the versions a JVM project's parent and BOMs set, and what its artifacts pull in, from Maven Central. */
