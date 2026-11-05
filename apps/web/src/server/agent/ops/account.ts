@@ -127,7 +127,7 @@ export const accountOps = [
     async run(context, input) {
       // An MCP client's day-long token must not turn itself into a key that outlives disconnecting it.
       if (context.principal.tokenKind !== "key") {
-        throw new ApiError(403, "key_required", `MCP clients can't create API keys. The person can make one in Settings (${context.appUrl}/dashboard/settings#agents), or an agent connected with the device flow can.`);
+        throw new ApiError(403, "key_required", `MCP clients can't create API keys. The person can make one in Settings (${context.appUrl}/dashboard/settings/agents), or an agent connected with the device flow can.`);
       }
       const created = await issueKey(context.principal.userId, cleanName(input.name, "API key"));
       await track("api_key_created", { userId: context.principal.userId, props: { via: context.surface, kind: "key", outcome: "ok" } });

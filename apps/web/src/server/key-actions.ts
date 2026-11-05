@@ -15,7 +15,7 @@ export async function createKey(_previous: KeyOutcome, form: FormData): Promise<
   const name = cleanName(String(form.get("name") ?? ""), "API key");
   const { key } = await issueKey(user.id, name);
   await track("api_key_created", { userId: user.id, props: { via: "settings", kind: "key", outcome: "ok" } });
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
   return { key };
 }
 
@@ -24,5 +24,5 @@ export async function revokeKey(id: string): Promise<void> {
   if (!z.uuid().safeParse(id).success) return;
   const revoked = await revokeUserToken(db(), user.id, id);
   if (revoked) await track("api_key_revoked", { userId: user.id, props: { via: "settings", kind: revoked.kind, outcome: "ok" } });
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
 }

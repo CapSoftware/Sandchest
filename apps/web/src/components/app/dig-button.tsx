@@ -34,7 +34,7 @@ export function DigButton({ repoId, label, note, confirm }: { repoId: string; la
           {state.topUp && (
             <>
               {" "}
-              <a href="/dashboard/settings#billing">Billing</a>
+              <a href="/dashboard/settings/billing">Billing</a>
             </>
           )}
         </span>

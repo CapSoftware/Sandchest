@@ -89,7 +89,7 @@ export function OverviewView({
             <dd className="kpi-value">{compactNumber(credits)}</dd>
             <dd className="kpi-foot">
               {now.credits} used in {DAYS} days ·{" "}
-              <HoverLink href="/dashboard/settings#billing" className="quiet">
+              <HoverLink href="/dashboard/settings/billing" className="quiet">
                 Top up
               </HoverLink>
             </dd>

@@ -28,7 +28,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const credits = amount(plan ? params.credits : params.topup);
   // Free credits aren't a plan anything is charged on: joining from them goes through Settings, to Stripe Checkout.
   const current = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
-  if ((plan ? !plan.offered : !credits) || !current || plan?.id === current.id) redirect("/dashboard/settings#billing");
+  if ((plan ? !plan.offered : !credits) || !current || plan?.id === current.id) redirect("/dashboard/settings/billing");
   // The purchase is charged under this id, kept in the address so a reload or a second tab can't charge it twice.
   const purchase = z.uuid().safeParse(params.purchase);
   if (!purchase.success) {

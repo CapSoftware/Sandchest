@@ -150,13 +150,13 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
   let checkRunId = scan.checkRunId;
   if (scan.kind === "pr_review" && scan.repo.org.installationId) {
     const installation = githubApp().installation(scan.repo.org.installationId);
-    const { conclusion, output } = notReviewed(gate.reason, withUtm(`${appUrl()}/dashboard/settings`, "github", "check"), gate.credits);
+    const { conclusion, output } = notReviewed(gate.reason, withUtm(`${appUrl()}/dashboard/settings/billing`, "github", "check"), gate.credits);
     checkRunId ??= await installation.createCheckRun(scan.repo.fullName, { name: CHECK_NAME, headSha: scan.headSha, externalId: scan.id, output });
     await installation.completeCheckRun(scan.repo.fullName, checkRunId, conclusion, output);
     // A PR with an earlier summary must not keep showing it as the latest result. One without gets the Check alone.
     // Best effort: a retry from here would post a second Check, since the first isn't recorded until below.
     if (scan.prNumber) {
-      await postSummary(scan, installation, prSummaryUnfinished({ headSha: scan.headSha, detailsUrl: withUtm(`${appUrl()}/dashboard/settings`, "github", "comment"), reason: gate.reason }), { create: false }).catch((error: unknown) =>
+      await postSummary(scan, installation, prSummaryUnfinished({ headSha: scan.headSha, detailsUrl: withUtm(`${appUrl()}/dashboard/settings/billing`, "github", "comment"), reason: gate.reason }), { create: false }).catch((error: unknown) =>
         console.error(`Summary for refused scan ${scan.id} failed: ${describeError(error)}`),
       );
     }

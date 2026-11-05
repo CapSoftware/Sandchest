@@ -28,7 +28,7 @@ export async function invitePerson(orgId: string, _previous: InviteState, form: 
   const role = Role.safeParse(form.get("role") ?? "member");
   if (!Id.safeParse(orgId).success || typeof invitee !== "string" || !role.success) return { outcome: { ok: false, error: "Enter an email address or a GitHub username." } };
   const outcome = await inviteTeammate(user.id, { orgId, invitee, role: role.data });
-  if (outcome.ok) revalidatePath("/dashboard/settings");
+  if (outcome.ok) revalidatePath("/dashboard/settings", "layout");
   return { outcome };
 }
 
@@ -37,7 +37,7 @@ export async function resendInvite(inviteId: string): Promise<InviteOutcome> {
   const user = await viewer();
   if (!Id.safeParse(inviteId).success) return { ok: false, error: "That invite is no longer pending." };
   const outcome = await inviteTeammate(user.id, { resend: inviteId });
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
   return outcome;
 }
 
@@ -46,7 +46,7 @@ export async function revokeTeamInvite(inviteId: string): Promise<void> {
   if (!Id.safeParse(inviteId).success) return;
   const orgId = await revokeInvite(db(), user.id, inviteId);
   await track("team_invite_revoked", { userId: user.id, orgId: orgId ?? null, props: { outcome: orgId ? "ok" : "not_found" } });
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
 }
 
 export async function removeTeammate(orgId: string, memberId: string): Promise<void> {
@@ -54,7 +54,7 @@ export async function removeTeammate(orgId: string, memberId: string): Promise<v
   if (!Id.safeParse(orgId).success || !Id.safeParse(memberId).success) return;
   const ok = await removeMember(db(), user.id, orgId, memberId);
   await track("team_member_removed", { userId: user.id, orgId: ok ? orgId : null, props: { self: false, outcome: ok ? "ok" : "not_found" } });
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
 }
 
 /** An admin makes someone who joined by invite a member or an admin. */
@@ -73,7 +73,7 @@ export async function leaveTeam(orgId: string): Promise<void> {
   const ok = await leaveOrg(db(), user.id, orgId);
   await track("team_member_removed", { userId: user.id, orgId: ok ? orgId : null, props: { self: true, outcome: ok ? "ok" : "not_found" } });
   revalidatePath("/dashboard", "layout");
-  redirect("/dashboard/settings");
+  redirect("/dashboard/settings/team");
 }
 
 export type JoinState = { outcome?: JoinOutcome };

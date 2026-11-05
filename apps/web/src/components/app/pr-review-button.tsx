@@ -42,7 +42,7 @@ export function PrReviewButton({ repoId, prNumber, again, priced }: { repoId: st
           {state.topUp && (
             <>
               {" "}
-              <a href="/dashboard/settings#billing">Billing</a>
+              <a href="/dashboard/settings/billing">Billing</a>
             </>
           )}
           {state.scanId && !state.topUp && (

@@ -168,7 +168,7 @@ export async function openPortal(orgId: string): Promise<void> {
     console.error(`Billing portal for org ${orgId} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "portal" }, handled: true });
     await track("billing_portal_opened", { userId, orgId, props: { outcome: "error" } });
-    redirect("/dashboard/settings?billing=unavailable#billing");
+    redirect("/dashboard/settings/billing?billing=unavailable");
   }
   await track("billing_portal_opened", { userId, orgId, props: { outcome: "ok" } });
   redirect(url);
@@ -206,6 +206,6 @@ export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, fo
   }
   if (!result.ok) return { error: result.reason === "no_plan" ? "Auto top-up needs a plan with a card: join Standard first." : NOT_ADMIN };
   await record("ok", result.choice);
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
   return { saved: true };
 }

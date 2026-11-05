@@ -49,7 +49,7 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
       if (plan.credits < cost)
         return (
           <div className="repo-dig">
-            <HoverLink href="/dashboard/settings#billing" className="repo-dig-note">
+            <HoverLink href="/dashboard/settings/billing" className="repo-dig-note">
               {state.credits === undefined ? `Needs ${MAX_DEEP_SCAN_CREDITS} credits until sized: top up` : `Needs ${plural(cost, "credit")}: top up`}
             </HoverLink>
           </div>

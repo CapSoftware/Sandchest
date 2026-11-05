@@ -154,7 +154,7 @@ export async function saveOrgSettings(orgId: string, _previous: SettingsOutcome,
     props: { check_threshold: parsed.data.checkThreshold, email_notifications: parsed.data.emailNotifications === "on", outcome: ok ? "ok" : "not_admin" },
   });
   if (!ok) return { error: "Only an admin of this account can change its settings." };
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
   return { saved: true };
 }
 
@@ -177,7 +177,7 @@ export async function saveOrgReviews(orgId: string, _previous: OrgReviewsOutcome
     props: { pr_reviews_default: parsed.data.prReviews, repos_changed: changed ?? 0, outcome: changed === undefined ? "not_admin" : "ok" },
   });
   if (changed === undefined) return { error: "Only an admin of this account can change its settings." };
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings", "layout");
   revalidatePath("/dashboard", "layout");
   return { saved: true, changed };
 }

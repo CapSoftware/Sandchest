@@ -42,5 +42,5 @@ export default async function BillingReturn({ searchParams }: { searchParams: Pr
     const { startFirstTarget } = await import("@/server/first-target");
     redirect(await startFirstTarget(user.id, row.org));
   }
-  redirect("/dashboard/settings#billing");
+  redirect("/dashboard/settings/billing");
 }

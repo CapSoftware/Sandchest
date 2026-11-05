@@ -71,7 +71,7 @@ function billingView(context: Context, org: { id: string; login: string; admin: 
       pr_review_credits_by_changed_lines: PR_REVIEW_TIERS.map((tier) => ({ up_to_lines: Number.isFinite(tier.maxLines) ? tier.maxLines : null, credits: tier.credits })),
       free: ["recon (mapping each repository)", "fix checks (pushes to the default branch)", "each account's first deep scan"],
     },
-    links: { settings: `${context.appUrl}/dashboard/settings#billing` },
+    links: { settings: `${context.appUrl}/dashboard/settings/billing` },
   };
 }
 

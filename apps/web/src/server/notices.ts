@@ -258,5 +258,5 @@ function appUrl(): string {
 
 /** Settings' billing section, tagged with which email the link was in. */
 function billingUrl(medium: string): string {
-  return withUtm(`${appUrl()}/dashboard/settings#billing`, "email", medium);
+  return withUtm(`${appUrl()}/dashboard/settings/billing`, "email", medium);
 }

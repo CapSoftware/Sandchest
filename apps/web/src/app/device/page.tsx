@@ -46,7 +46,7 @@ export default async function DevicePage({ searchParams }: { searchParams: Promi
           </>
         )}
         <p className="sign-in-note">
-          Disconnect it any time from <a href="/dashboard/settings#agents">Settings</a>.
+          Disconnect it any time from <a href="/dashboard/settings/agents">Settings</a>.
         </p>
       </SetupShell>
     );

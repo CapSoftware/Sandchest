@@ -140,7 +140,7 @@ export const PAGE_TEMPLATES: ReadonlyArray<readonly [string, string]> = [
   ["^/dashboard/repos$", "/dashboard/repos"],
   ["^/dashboard/repos/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/dashboard/repos/[id]"],
   ["^/dashboard/scans/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "/dashboard/scans/[id]"],
-  ["^/dashboard/settings$", "/dashboard/settings"],
+  ["^/dashboard/settings(/[a-z]+)?$", "/dashboard/settings"],
   ["^/dashboard/billing/confirm$", "/dashboard/billing/confirm"],
   ["^/dashboard/billing/return$", "/dashboard/billing/return"],
   ["^/sign-in$", "/sign-in"],

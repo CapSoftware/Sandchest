@@ -65,7 +65,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
         </form>
       </div>
       <p className="sign-in-note">
-        You’ll go back to <code>{destination}</code>. Disconnect it any time from <a href="/dashboard/settings#agents">Settings</a>.
+        You’ll go back to <code>{destination}</code>. Disconnect it any time from <a href="/dashboard/settings/agents">Settings</a>.
       </p>
     </SetupShell>
   );
