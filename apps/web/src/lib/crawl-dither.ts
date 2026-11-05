@@ -63,6 +63,8 @@ export function crumbleMask(cols: number, rows: number): Uint8Array {
 export interface Sand {
   /** Lets a grain fly off from a cell, at a brightness from 0 to 1. */
   spawn(x: number, y: number, bright: number, ramp: number): void;
+  /** Moves everything on by `dt` seconds without drawing: for running time on unseen. */
+  advance(time: number, dt: number): void;
   /** Moves everything on by `dt` seconds (0 for a still frame) and draws it into `out` (RGBA, cols × rows). */
   render(out: Uint8ClampedArray, time: number, dt: number): void;
 }
@@ -166,8 +168,13 @@ export function createSand(cols: number, rows: number): Sand {
       gRamp[i] = ramp;
     },
 
+    advance(time, dt) {
+      moveGrains(time, dt);
+      for (let i = 0; i < rAlong.length; i++) rAlong[i] = (rAlong[i]! + rSpeed[i]! * dt) % 1;
+    },
+
     render(out, time, dt) {
-      if (dt > 0) moveGrains(time, dt);
+      if (dt > 0) this.advance(time, dt);
       dust.fill(0);
       for (let i = 0; i < grains; i++) plot(gx[i]!, gy[i]!, gBright[i]! * (1 - gAge[i]! / gLife[i]!) ** 1.2, gRamp[i]!);
       for (let r = 0; r < RIBBONS; r++) {
@@ -175,9 +182,7 @@ export function createSand(cols: number, rows: number): Sand {
         const forward = r % 2 === 0;
         for (let k = 0; k < RIBBON_GRAINS; k++) {
           const i = r * RIBBON_GRAINS + k;
-          let along = rAlong[i]! + rSpeed[i]! * dt;
-          if (along > 1) along -= 1;
-          rAlong[i] = along;
+          const along = rAlong[i]!;
           const x = forward ? -0.1 * cols + along * 1.2 * cols : 1.1 * cols - along * 1.2 * cols;
           // Thick in the middle, thinning to a thread at each end, and breathing.
           const swell = Math.sin(Math.PI * along);

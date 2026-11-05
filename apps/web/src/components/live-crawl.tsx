@@ -23,6 +23,9 @@ const COLUMN = 1040;
 /** Texels of each entry checked a frame for having just crumbled. */
 const SAMPLES = 2400;
 const FRAME_MS = 1000 / 30;
+/** Seconds run unseen before the first frame, so it opens mid-flow, and the step they are run in. */
+const WARM_S = 3;
+const WARM_STEP_S = 1 / 12;
 /** A new copy of the feed is made every ten minutes. */
 const POLL_MS = 10 * 60_000;
 
@@ -96,7 +99,13 @@ function layout(item: Item, ctx: CanvasRenderingContext2D, width: number, f: num
   };
 
   if (item.kind === "advisory") {
-    const meta = `${item.ecosystem} · ${item.package} · ${ago(item.published)}`;
+    // One line: a package path too long for the column keeps its end, the part that names it.
+    ctx.font = mono(small);
+    const lead = item.severity ? `${SEVERITY[item.severity]} · ` : "";
+    const metaOf = (pkg: string) => `${item.ecosystem} · ${pkg} · ${ago(item.published)}`;
+    let pkg = item.package;
+    while (pkg.length > 8 && ctx.measureText(lead + metaOf(pkg)).width > width * 0.94) pkg = `…${pkg.slice(2)}`;
+    const meta = metaOf(pkg);
     return [
       { runs: [{ text: item.id, className: "crawl-id" }], font: display(head), advance: Math.round(head * 1.02) },
       ...wrap(item.summary, mono(body)).map((text) => ({ runs: [{ text, className: "crawl-summary" }], font: mono(body), advance: Math.round(body * 1.5) })),
@@ -125,11 +134,19 @@ function layout(item: Item, ctx: CanvasRenderingContext2D, width: number, f: num
   ];
 }
 
-/** How much of each pixel of an entry its text covers, 0–255, drawn the way the DOM lays it out. */
-function coverage(lines: Line[], ctx: CanvasRenderingContext2D, width: number, height: number): Uint8Array {
-  ctx.canvas.width = width;
-  ctx.canvas.height = height;
-  ctx.clearRect(0, 0, width, height);
+/** Coverage is kept at this fraction of the text's size: it only places grains, which needn't be exact. */
+const COVERAGE_SCALE = 0.5;
+
+/**
+ * How much of an entry its text covers, 0–255, drawn the way the DOM lays it
+ * out, at COVERAGE_SCALE: `ink[v * w + u]` covers the CSS pixel (u, v) / COVERAGE_SCALE.
+ */
+function coverage(lines: Line[], ctx: CanvasRenderingContext2D, width: number, height: number): { ink: Uint8Array; w: number; h: number } {
+  const w = Math.ceil(width * COVERAGE_SCALE);
+  const h = Math.ceil(height * COVERAGE_SCALE);
+  ctx.canvas.width = w;
+  ctx.canvas.height = h;
+  ctx.setTransform(COVERAGE_SCALE, 0, 0, COVERAGE_SCALE, 0, 0);
   ctx.fillStyle = "#fff";
   ctx.textBaseline = "middle";
   let y = 0;
@@ -143,10 +160,10 @@ function coverage(lines: Line[], ctx: CanvasRenderingContext2D, width: number, h
     });
     y += line.advance;
   }
-  const pixels = ctx.getImageData(0, 0, width, height).data;
-  const ink = new Uint8Array(width * height);
+  const pixels = ctx.getImageData(0, 0, w, h).data;
+  const ink = new Uint8Array(w * h);
   for (let i = 0; i < ink.length; i++) ink[i] = pixels[i * 4 + 3]!;
-  return ink;
+  return { ink, w, h };
 }
 
 function entryElement(item: Item, lines: Line[], top: number): HTMLElement {
@@ -286,7 +303,7 @@ export function LiveCrawl() {
 
     let travel = 0;
     let written = 0;
-    let placed: Array<{ top: number; height: number; ink: Uint8Array; ramp: number; el: HTMLElement }> = [];
+    let placed: Array<{ top: number; height: number; cover: { ink: Uint8Array; w: number; h: number }; ramp: number; el: HTMLElement }> = [];
     /** Which entries have been shown, so new ones in a fresh copy of the feed go first. */
     const shown = new Set<Item>();
     let cursor = 0;
@@ -324,7 +341,7 @@ export function LiveCrawl() {
         const h = lines.reduce((sum, line) => sum + line.advance, 0);
         const el = entryElement(item, lines, written);
         track.append(el);
-        placed.push({ top: written, height: h, ink: coverage(lines, measure, column, h), ramp: item.kind === "finding" ? RAMP.gold : RAMP.sand, el });
+        placed.push({ top: written, height: h, cover: coverage(lines, measure, column, h), ramp: item.kind === "finding" ? RAMP.gold : RAMP.sand, el });
         written += h + Math.round(GAP * scale);
       }
       // Entries that have crumbled away entirely are dropped.
@@ -341,9 +358,11 @@ export function LiveCrawl() {
         // Only entries reaching into the crumbling.
         if (travel - p.top < crumbleFrom * 0.9 || travel - (p.top + p.height) > crumbleGone) continue;
         for (let n = 0; n < SAMPLES; n++) {
-          const u = Math.floor(Math.random() * column);
-          const v = Math.floor(Math.random() * p.height);
-          if (p.ink[v * column + u]! < 150) continue;
+          const cu = Math.floor(Math.random() * p.cover.w);
+          const cv = Math.floor(Math.random() * p.cover.h);
+          if (p.cover.ink[cv * p.cover.w + cu]! < 150) continue;
+          const u = (cu + 0.5) / COVERAGE_SCALE;
+          const v = (cv + 0.5) / COVERAGE_SCALE;
           const now = project(travel - (p.top + v), u - column / 2);
           const then = project(before - (p.top + v), u - column / 2);
           const cx = Math.floor(now.x / cell);
@@ -390,13 +409,20 @@ export function LiveCrawl() {
       sand = createSand(cols, rows);
 
       // The crumbling edge, as a mask over the text: crisp cells, like the dither.
+      // Drawn one pixel per cell, then scaled up without smoothing.
       const mask = crumbleMask(cols, rows);
+      const cells = new ImageData(cols, rows);
+      for (let i = 0; i < mask.length; i++) cells.data[i * 4 + 3] = mask[i]!;
+      const small = document.createElement("canvas");
+      small.width = cols;
+      small.height = rows;
+      small.getContext("2d")!.putImageData(cells, 0, 0);
       const maskCanvas = document.createElement("canvas");
       maskCanvas.width = cols * cell;
       maskCanvas.height = rows * cell;
       const mctx = maskCanvas.getContext("2d")!;
-      mctx.fillStyle = "#000";
-      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (mask[y * cols + x]) mctx.fillRect(x * cell, y * cell, cell, cell);
+      mctx.imageSmoothingEnabled = false;
+      mctx.drawImage(small, 0, 0, cols * cell, rows * cell);
       maskCanvas.toBlob((blob) => {
         if (!blob || disposed) return;
         if (maskUrl) URL.revokeObjectURL(maskUrl);
@@ -408,14 +434,24 @@ export function LiveCrawl() {
         band.dataset.canvas = "ready";
       });
 
-      // Start full: the first lines already on their way up, short of the crumbling.
+      // Start mid-flow, as if it had always been running: run the last few seconds unseen, so the top line is
+      // already coming apart and its sand is in the air when the band first shows.
       for (const p of placed) p.el.remove();
       placed = [];
       written = 0;
       cursor = 0;
       shown.clear();
-      travel = crumbleFrom * 0.92;
+      const pace = SPEED_PX * scale;
+      travel = Math.max(0, crumbleGone * 0.97 - pace * WARM_S);
       fill();
+      for (let t = 0; t < WARM_S; t += WARM_STEP_S) {
+        const before = travel;
+        travel += pace * WARM_STEP_S;
+        time += WARM_STEP_S;
+        fill();
+        shed(before);
+        sand.advance(time, WARM_STEP_S);
+      }
       draw(0);
     };
 
