@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { claimWorkflowStart, releaseWorkflowStart, updateScan } from "@sandchest/db";
 import { getRun, start } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
+import { inventoryWorkflow } from "@/workflows/inventory";
 import { scanWorkflow } from "@/workflows/scan";
 import { db } from "./services";
 
@@ -27,6 +28,23 @@ export async function startScan(scanId: string): Promise<void> {
     await releaseWorkflowStart(db(), scanId, claim);
     throw error;
   }
+}
+
+let inventoryStarter: ((repoId: string) => Promise<void>) | undefined;
+
+/** For tests: start inventory refreshes with this instead of the workflow runtime. */
+export function setInventoryStarter(start: ((repoId: string) => Promise<void>) | undefined): void {
+  inventoryStarter = start;
+}
+
+/**
+ * Starts a repository's inventory refresh (see `refreshInventory`). Duplicate
+ * starts are harmless: the refresh claims the repository first, and a second
+ * one finds it taken and ends.
+ */
+export async function startInventory(repoId: string): Promise<void> {
+  if (inventoryStarter) return inventoryStarter(repoId);
+  await start(inventoryWorkflow, [repoId]);
 }
 
 let runStatus: ((runId: string) => Promise<string | undefined>) | undefined;

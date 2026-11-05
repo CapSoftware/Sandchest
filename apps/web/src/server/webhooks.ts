@@ -14,6 +14,7 @@ import {
   recordEvent,
   removeInstallation,
   repoByGithubId,
+  requestInventory,
   threatModel,
   upsertInstallation,
   upsertRepos,
@@ -28,6 +29,7 @@ import type {
   PullRequestEvent,
   PushEvent,
 } from "@sandchest/github";
+import { isDependencyManifest } from "@sandchest/engine/scan";
 
 export interface WebhookDeps {
   db: Db;
@@ -40,6 +42,8 @@ export interface WebhookDeps {
    * means billing is off.
    */
   canScan?(org: { id: string; githubLogin: string }): Promise<boolean>;
+  /** Starts a free re-read of a repository's dependency inventory (the CVE directory). Omitted: none. */
+  startInventory?(repoId: string): Promise<void>;
 }
 
 export type WebhookOutcome = { status: "duplicate" | "ignored" | "handled"; detail?: string; scans?: string[] };
@@ -190,7 +194,19 @@ async function onPush(deps: WebhookDeps, payload: PushEvent): Promise<WebhookOut
   if (open) {
     scans.push(await newScan(deps, { repoId: repo.id, orgId: repo.orgId, kind: "fix_check", headSha: payload.after, baseSha: payload.before }));
   }
+  // A mapped repository whose manifests or lockfiles changed: what it installs may have, so the CVE directory reads it again.
+  if (model && deps.startInventory && changesDependencies(payload)) {
+    await requestInventory(deps.db, repo.id);
+    await deps.startInventory(repo.id);
+  }
   return { status: scans.length ? "handled" : "ignored", detail: scans.length ? undefined : "nothing to check", scans: scans.filter(Boolean) };
+}
+
+/** Whether a push may have changed what is installed. GitHub lists at most 20 commits, so a longer push counts. */
+function changesDependencies(payload: PushEvent): boolean {
+  const commits = payload.commits ?? [];
+  if (payload.forced || commits.length === 0 || commits.length >= 20) return true;
+  return commits.some((commit) => [...(commit.added ?? []), ...(commit.modified ?? []), ...(commit.removed ?? [])].some(isDependencyManifest));
 }
 
 async function onIssueComment(deps: WebhookDeps, payload: IssueCommentEvent): Promise<WebhookOutcome> {

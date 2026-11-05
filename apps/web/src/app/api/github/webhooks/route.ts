@@ -3,7 +3,7 @@ import { billingEnabled, canScan } from "@/server/billing";
 import { config } from "@/server/config";
 import { describeError } from "@/server/log";
 import { db, githubApp } from "@/server/services";
-import { startScan } from "@/server/start";
+import { startInventory, startScan } from "@/server/start";
 import { handleWebhook } from "@/server/webhooks";
 import { captureException, webhookEventTag } from "@/server/sentry";
 
@@ -53,7 +53,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!event || !delivery) return Response.json({ error: "missing event headers" }, { status: 400 });
 
   try {
-    const outcome = await handleWebhook({ db: db(), github: githubApp(), startScan, canScan: billingEnabled() ? canScan : undefined }, event, delivery, JSON.parse(body));
+    const outcome = await handleWebhook({ db: db(), github: githubApp(), startScan, startInventory, canScan: billingEnabled() ? canScan : undefined }, event, delivery, JSON.parse(body));
     return Response.json(outcome, { status: 202 });
   } catch (error) {
     // Logged by delivery id and error class only: the payload and the error's message can include code and user data.

@@ -2,6 +2,7 @@
 import type { Db } from "@sandchest/db";
 import type { Mailer } from "@sandchest/email";
 import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig, type Classifier, type LlmClient } from "@sandchest/engine/llm";
+import { createOsvCatalog, type OsvCatalog } from "@sandchest/engine/advisories";
 import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import type { GitHubApp } from "@sandchest/github";
 import { db, setDb } from "./db";
@@ -16,6 +17,7 @@ interface Services {
   llm: LlmClient;
   classifier: Classifier | undefined;
   osv: OsvClient | undefined;
+  catalog: OsvCatalog;
   pricing: Pricing | undefined;
   mailer: Mailer;
 }
@@ -45,6 +47,11 @@ export function classifier(): Classifier | undefined {
 export function osvClient(): OsvClient | undefined {
   if (!("osv" in instances)) instances.osv = createOsvClient();
   return instances.osv;
+}
+
+/** OSV, as the CVE directory reads it. */
+export function catalog(): OsvCatalog {
+  return (instances.catalog ??= createOsvCatalog());
 }
 
 export function pricing(): Pricing | undefined {

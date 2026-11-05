@@ -59,6 +59,7 @@ import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
 import { config } from "./config";
 import { describeError } from "./log";
+import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
 import { classifier, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
@@ -192,6 +193,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     onRetry: (message) => onEvent({ type: "progress", message }),
   });
 
+  let inventory: ReturnType<typeof captureFromScan> | undefined;
   try {
     // Set up while the diff and the stored threat model load.
     const [{ headSha, handle }, pullFiles, memory] = await Promise.all([
@@ -200,6 +202,9 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       storedThreatModel(db(), scan.repo.id),
     ]);
     const indexer = createIndexerClient({ url: handle.url, token: handle.token });
+    // Recon, deep scans and fix checks have the default branch checked out: the CVE directory's inventory is read
+    // from it while the scan runs. A PR review's checkout is the PR's, not what is installed.
+    inventory = scan.kind === "pr_review" ? undefined : captureFromScan(scan.repo.id, headSha, indexer);
     const model = parseThreatModel(memory?.threatModel);
     // Setup already spent part of the step's time.
     const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };
@@ -269,9 +274,10 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     }
     throw error;
   } finally {
-    // A setup that failed has already destroyed its own workspace.
+    // A setup that failed has already destroyed its own workspace. The inventory is read before the indexer goes.
     const prepared = await preparing.catch(() => undefined);
-    await Promise.allSettled([events.flush(), prepared?.workspace.destroy()]);
+    await inventory?.read;
+    await Promise.allSettled([events.flush(), prepared?.workspace.destroy(), inventory?.done]);
   }
 }
 
@@ -499,7 +505,7 @@ async function postSummary(scan: LoadedScan, installation: Installation, body: s
   }
 }
 
-function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {
+export function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {
   const settings = config();
   if (workspace === "local") return { path: settings.SANDCHEST_INDEXER_BIN ?? "sandchest-index" };
   if (settings.SANDCHEST_INDEXER_LINUX_BIN) return { path: settings.SANDCHEST_INDEXER_LINUX_BIN };
