@@ -261,6 +261,18 @@
     margin: -2.5rem 0 0;
     padding: 0 1.25rem 1.75rem;
   }
+
+  .first-scan-repo {
+    grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "mark name cost"
+      ". meta cost";
+    row-gap: 0.15rem;
+  }
+
+  .first-scan-repo-cost {
+    align-self: center;
+  }
 }
 
 /* An account connected with far more repositories than it needs scanned. */
