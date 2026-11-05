@@ -9,5 +9,5 @@ export default async function DemoCvesPage({ searchParams }: { searchParams: Pro
   const current = parse(await searchParams);
   const { list, counts } = cveDirectory(demoRepoId, { state: current.state, severities: current.severities, repoId: current.repo, query: current.q });
   const repos = demoRepos().map(({ id, fullName }) => ({ id, fullName }));
-  return <CvesView current={current} list={list} counts={counts} repos={repos} coverage={{ repos: repos.length, inventoried: repos.length, checkedAt: new Date(Date.now() - 2 * 3_600_000) }} />;
+  return <CvesView current={current} list={list} counts={counts} repos={repos} coverage={{ repos: repos.length, inventoried: repos.length, queued: 0, checkedAt: new Date(Date.now() - 2 * 3_600_000) }} unchecked={[]} />;
 }

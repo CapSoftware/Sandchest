@@ -8,7 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { claimInventoryRefresh, createDb, cveCoverage, cveForUser, dashboardCves, inventoriesDue, releaseInventoryRefresh, requestInventory, saveThreatModel, schema, upsertInstallation, type Db } from "@sandchest/db";
+import { claimInventoryRefresh, createDb, cveCoverage, cveForUser, cveUnchecked, dashboardCves, inventoriesDue, releaseInventoryRefresh, requestInventory, saveThreatModel, schema, upsertInstallation, type Db } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import type { Change, OsvCatalog, OsvRecord, PackageVersion } from "@sandchest/engine/advisories";
 import { GitHubError, type GitHubApp } from "@sandchest/github";
@@ -269,11 +269,8 @@ describe("CVE directory", () => {
     const added = await checkRepository(webId, "feed");
     expect(added.map((m) => m.advisoryId)).toEqual(["GHSA-missed"]);
     expect(osv.calls.records - before).toBe(1);
-    // The directory covers mapped repositories: the ones it reads.
-    expect(await cveCoverage(database, userId)).toMatchObject({ repos: 0, inventoried: 0 });
-    for (const id of [apiId, webId]) await saveThreatModel(database, id, { summary: "x" } as never, "sha");
     const coverage = await cveCoverage(database, userId);
-    expect(coverage).toMatchObject({ repos: 2, inventoried: 2 });
+    expect(coverage).toMatchObject({ repos: 2, inventoried: 2, queued: 0 });
     expect(coverage.checkedAt).not.toBeNull();
   });
 
@@ -341,7 +338,7 @@ describe("CVE directory", () => {
     }
   });
 
-  test("opening the directory reads the user's unread repositories first, and a reload jumps no one", async () => {
+  test("repositories in use are read on their own, first for whoever opens the directory; the rest wait for Check", async () => {
     if (!available) return;
     const { repos } = await upsertInstallation(database, 71, { githubAccountId: 710, githubLogin: "acme", type: "Organization" }, [
       { githubRepoId: 7101, fullName: "acme/api", private: true, defaultBranch: "main" },
@@ -349,24 +346,48 @@ describe("CVE directory", () => {
       { githubRepoId: 7103, fullName: "acme/new", private: true, defaultBranch: "main" },
     ]);
     const newId = repos.find((r) => r.fullName === "acme/new")!.id;
-    await saveThreatModel(database, newId, { summary: "x" } as never, "sha");
     await database.insert(schema.permissionCache).values({ userId, repoId: newId, permission: "write" });
-    expect(await cveCoverage(database, userId)).toMatchObject({ repos: 3, inventoried: 2 });
-
-    // Someone who can't see it queues nothing.
+    const scan = (kind: "recon" | "pr_review") => database.insert(schema.scans).values({ repoId: newId, orgId: repos[0]!.orgId, kind, status: "completed", trigger: "webhook", headSha: "abc" });
     const started: string[] = [];
-    await readUnreadFirst(outsiderId, async (id) => void started.push(id));
-    expect(started).toEqual([]);
+    const open = (who: string) => readUnreadFirst(who, async (id) => void started.push(id));
 
-    await readUnreadFirst(userId, async (id) => void started.push(id));
+    // Connected and mapped, but nobody works on it: it waits for someone to press Check.
+    await scan("recon");
+    await open(userId);
+    expect(started).toEqual([]);
+    expect(await inventoriesDue(database, 10)).not.toContain(newId);
+    expect(await cveCoverage(database, userId)).toMatchObject({ repos: 3, inventoried: 2, queued: 0 });
+    expect(await cveUnchecked(database, userId)).toEqual([{ id: newId, fullName: "acme/new", state: "unchecked" }]);
+
+    // A pull request reviewed: it's in use, so it's read without asking, and first for the person looking.
+    await scan("pr_review");
+    expect(await cveUnchecked(database, userId)).toEqual([{ id: newId, fullName: "acme/new", state: "queued" }]);
+    await open(outsiderId);
+    expect(started).toEqual([]);
+    await open(userId);
     expect(started).toEqual([newId]);
     expect((await inventoriesDue(database, 10))[0]).toBe(newId);
     const [first] = await database.$client`select requested_at from repo_inventories where repo_id = ${newId}`;
     // Already waiting: a reload neither starts it again nor moves it.
-    await readUnreadFirst(userId, async (id) => void started.push(id));
+    await open(userId);
     expect(started).toEqual([newId]);
     const [again] = await database.$client`select requested_at from repo_inventories where repo_id = ${newId}`;
     expect(again!.requested_at).toEqual(first!.requested_at);
+    expect(await cveCoverage(database, userId)).toMatchObject({ queued: 1 });
+  });
+
+  test("Check reads any repository nobody works on, and one GitHub can't reach says so", async () => {
+    if (!available) return;
+    const [quiet] = await database.$client<Array<{ id: string }>>`select r.id from repos r where r.full_name = 'acme/new'`;
+    await database.$client`delete from scans where repo_id = ${quiet!.id}`;
+    await database.$client`delete from repo_inventories where repo_id = ${quiet!.id}`;
+    expect((await cveUnchecked(database, userId))[0]).toMatchObject({ state: "unchecked" });
+    // What the Check key stores: a request, read at the next sweep if the start is lost.
+    await requestInventory(database, quiet!.id);
+    expect((await cveUnchecked(database, userId))[0]).toMatchObject({ state: "queued" });
+    expect(await inventoriesDue(database, 10)).toContain(quiet!.id);
+    await database.$client`update repo_inventories set requested_at = null, failures = 6 where repo_id = ${quiet!.id}`;
+    expect((await cveUnchecked(database, userId))[0]).toMatchObject({ state: "unreachable" });
   });
 
   test("feed syncs a minute apart never overlap: one started while another runs is skipped", async () => {

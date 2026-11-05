@@ -8,7 +8,7 @@ export default function Loading() {
   const { list, counts } = cveDirectory(sampleRepoId);
   return (
     <PageSkeleton id="cves" label="Loading CVEs">
-      <CvesView current={parse({})} list={list} counts={counts} repos={sampleRepos()} coverage={{ repos: 6, inventoried: 6, checkedAt: new Date(Date.now() - 3 * 3_600_000) }} />
+      <CvesView current={parse({})} list={list} counts={counts} repos={sampleRepos()} coverage={{ repos: 6, inventoried: 6, queued: 0, checkedAt: new Date(Date.now() - 3 * 3_600_000) }} unchecked={[]} />
     </PageSkeleton>
   );
 }

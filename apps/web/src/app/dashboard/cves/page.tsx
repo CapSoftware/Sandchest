@@ -1,4 +1,4 @@
-import { cveCoverage, dashboardCves, visibleRepos } from "@sandchest/db";
+import { cveCoverage, cveUnchecked, dashboardCves, visibleRepos } from "@sandchest/db";
 import type { Metadata } from "next";
 import { after } from "next/server";
 import { PageShape } from "@/components/app/skeleton";
@@ -13,16 +13,17 @@ export const metadata: Metadata = { title: "CVEs · Sandchest" };
 export default async function CvesPage({ searchParams }: { searchParams: Promise<Query> }) {
   const [user, query] = await Promise.all([viewer(), searchParams]);
   const current = parse(query);
-  const [{ list, counts }, repos, coverage] = await Promise.all([
+  const [{ list, counts }, repos, coverage, unchecked] = await Promise.all([
     dashboardCves(db(), user.id, { state: current.state, severities: current.severities, repoId: current.repo, query: current.q }),
     visibleRepos(db(), user.id),
     cveCoverage(db(), user.id),
+    cveUnchecked(db(), user.id),
   ]);
-  // Repositories not read yet go first, once the page is on its way.
-  if (coverage.inventoried < coverage.repos) after(() => readUnreadFirst(user.id, startInventory));
+  // Repositories in use and not read yet go first, once the page is on its way.
+  if (coverage.queued > 0) after(() => readUnreadFirst(user.id, startInventory));
   return (
     <PageShape id="cves">
-      <CvesView current={current} list={list} counts={counts} repos={repos} coverage={coverage} />
+      <CvesView current={current} list={list} counts={counts} repos={repos} coverage={coverage} unchecked={unchecked} />
     </PageShape>
   );
 }

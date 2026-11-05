@@ -1,5 +1,6 @@
 import type { AdvisorySeverity, CveListItem, CveState } from "@sandchest/db";
 import { AutoSubmitSelect } from "@/components/app/auto-submit";
+import { CheckCves } from "@/components/app/check-cves";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
 import { When } from "@/components/app/when";
@@ -38,8 +39,19 @@ function href(current: CvesQuery, change: Partial<CvesQuery>): string {
 export interface Coverage {
   repos: number;
   inventoried: number;
+  /** Not read yet, but in use or asked for: being read now. */
+  queued: number;
   checkedAt: Date | null;
 }
+
+export interface UncheckedRepo {
+  id: string;
+  fullName: string;
+  state: "queued" | "unchecked" | "unreachable";
+}
+
+/** Not-yet-checked repositories listed before "Show more". */
+const UNCHECKED_SHOWN = 8;
 
 /** The CVE directory, drawn from what the page read; its loading state draws it from samples. */
 export function CvesView({
@@ -48,12 +60,14 @@ export function CvesView({
   counts,
   repos,
   coverage,
+  unchecked,
 }: {
   current: CvesQuery;
   list: CveListItem[];
   counts: Record<CveState, number>;
   repos: Array<{ id: string; fullName: string }>;
   coverage: Coverage;
+  unchecked: UncheckedRepo[];
 }) {
   const filtered = current.severities.length > 0 || current.repo !== undefined || current.q !== undefined;
   return (
@@ -156,27 +170,80 @@ export function CvesView({
           })}
         </ul>
       )}
+
+      <Unchecked repos={unchecked} />
     </>
   );
 }
 
-function stillReading(unread: number): string {
-  return `${unread} ${unread === 1 ? "is" : "are"} still being read; what affects ${unread === 1 ? "it" : "them"} shows up here within minutes.`;
+/** What isn't covered yet: being read now, or waiting for someone to ask. */
+function pending(coverage: Coverage): string {
+  const reading = coverage.queued;
+  const waiting = coverage.repos - coverage.inventoried - reading;
+  const them = (n: number) => (n === 1 ? "it" : "them");
+  if (reading > 0) return `${reading} ${reading === 1 ? "is" : "are"} still being read; what affects ${them(reading)} shows up here within minutes.`;
+  return `${waiting} ${waiting === 1 ? "isn’t" : "aren’t"} checked yet: check ${them(waiting)} below.`;
 }
 
 function CoverageNote({ coverage }: { coverage: Coverage }) {
   if (coverage.repos === 0) return null;
   if (coverage.inventoried === 0) return <>Nothing read yet.</>;
-  const missing = coverage.repos - coverage.inventoried;
   return (
     <>
+      {coverage.inventoried < coverage.repos && `${coverage.inventoried} of ${coverage.repos} repositories checked. `}
       {coverage.checkedAt && (
         <>
           Last full check <When date={coverage.checkedAt} />.
         </>
       )}
-      {missing > 0 && ` ${missing} of ${coverage.repos} repositories not read yet.`}
     </>
+  );
+}
+
+/**
+ * Repositories never checked. Ones in use are read without asking; any other is read when someone presses
+ * Check, so a whole account connected by accident costs nothing until it's wanted.
+ */
+function Unchecked({ repos }: { repos: UncheckedRepo[] }) {
+  if (repos.length === 0) return null;
+  const row = (repo: UncheckedRepo) => {
+    const [owner, name] = repo.fullName.split("/");
+    return (
+      <li key={repo.id} className="row cve-unchecked-row">
+        <span className="cve-unchecked-name">
+          <span className="repo-owner">{owner}/</span>
+          {name}
+        </span>
+        {repo.state === "queued" ? (
+          <span className="cve-check-state">
+            <span className="blink" aria-hidden="true" /> Reading now
+          </span>
+        ) : (
+          <span className="cve-unchecked-go">
+            {repo.state === "unreachable" && <span className="cve-check-state">GitHub couldn’t reach it last time</span>}
+            <CheckCves repoId={repo.id} />
+          </span>
+        )}
+      </li>
+    );
+  };
+  return (
+    <section className="cve-unchecked" aria-labelledby="cve-unchecked-title">
+      <div className="panel-head">
+        <h2 id="cve-unchecked-title" className="block-title">
+          Not checked yet
+        </h2>
+        <span className="cve-unchecked-count">{repos.length}</span>
+      </div>
+      <p className="cve-unchecked-note">Repositories in use are checked on their own. Check any other one whenever you want it covered; it takes about a minute.</p>
+      <ul className="rows">{repos.slice(0, UNCHECKED_SHOWN).map(row)}</ul>
+      {repos.length > UNCHECKED_SHOWN && (
+        <details className="cve-unchecked-more">
+          <summary>Show {repos.length - UNCHECKED_SHOWN} more</summary>
+          <ul className="rows">{repos.slice(UNCHECKED_SHOWN).map(row)}</ul>
+        </details>
+      )}
+    </section>
   );
 }
 
@@ -193,10 +260,15 @@ function Empty({ current, counts, coverage, filtered }: { current: CvesQuery; co
     );
   }
   if (coverage.inventoried === 0) {
-    return (
+    return coverage.queued > 0 ? (
       <div className="empty">
         <h2 className="empty-title">Reading your repositories</h2>
         <p>Sandchest is reading what your repositories install. Known vulnerabilities show up here as each one is read, within minutes.</p>
+      </div>
+    ) : (
+      <div className="empty">
+        <h2 className="empty-title">Nothing checked yet</h2>
+        <p>Repositories are checked on their own once they’re in use: a pull request reviewed, or a deep scan run. Check any of them below now.</p>
       </div>
     );
   }
@@ -206,7 +278,7 @@ function Empty({ current, counts, coverage, filtered }: { current: CvesQuery; co
       <div className="empty">
         <h2 className="empty-title">{unread > 0 ? "Nothing in your code so far" : "Nothing in your code"}</h2>
         <p>
-          {unread > 0 ? `No known vulnerability affects a version your shipped code imports in the ${coverage.inventoried} repositories read so far. ${stillReading(unread)}` : "No known vulnerability affects a version your shipped code imports."}
+          {unread > 0 ? `No known vulnerability affects a version your shipped code imports in the ${coverage.inventoried} repositories checked so far. ${pending(coverage)}` : "No known vulnerability affects a version your shipped code imports."}
           {counts.installed > 0 && ` ${counts.installed} affect packages that are installed but not imported by shipped code.`}
         </p>
         {counts.installed > 0 && (
@@ -221,7 +293,7 @@ function Empty({ current, counts, coverage, filtered }: { current: CvesQuery; co
     return (
       <div className="empty">
         <h2 className="empty-title">{unread > 0 ? "Nothing installed so far" : "Nothing installed"}</h2>
-        <p>{unread > 0 ? `No known vulnerability affects anything installed in the ${coverage.inventoried} repositories read so far. ${stillReading(unread)}` : "No known vulnerability affects anything your repositories install."}</p>
+        <p>{unread > 0 ? `No known vulnerability affects anything installed in the ${coverage.inventoried} repositories checked so far. ${pending(coverage)}` : "No known vulnerability affects anything your repositories install."}</p>
       </div>
     );
   }

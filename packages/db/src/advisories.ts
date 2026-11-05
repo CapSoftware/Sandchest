@@ -4,9 +4,9 @@
  * Reads for people are scoped through `permission_cache`, as every dashboard
  * read is (see dashboard.ts).
  */
-import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
-import { advisories, advisoryFeeds, permissionCache, repoAdvisories, repoDependencies, repoInventories, repoMemory, repos, orgs, type AdvisorySeverity, type DependencyUsage } from "./schema";
+import { advisories, advisoryFeeds, permissionCache, repoAdvisories, repoDependencies, repoInventories, repos, orgs, scans, type AdvisorySeverity, type DependencyUsage } from "./schema";
 
 export interface InventoryRow {
   ecosystem: string;
@@ -121,7 +121,7 @@ export async function markInventoriesChecked(database: Db, repoIds: string[], at
 
 /** A push changed a manifest or lockfile: the inventory should be read again. */
 /**
- * Puts a user's repositories that were never read at the front of the queue, oldest request first, and
+ * Puts a user's repositories in use that were never read at the front of the queue, oldest request first, and
  * returns them. Ones already waiting keep their place, so reloading a page never jumps anyone else.
  */
 export async function requestUnreadInventories(database: Db, userId: string, limit: number): Promise<string[]> {
@@ -130,10 +130,10 @@ export async function requestUnreadInventories(database: Db, userId: string, lim
     select r.id, now()
     from ${repos} r
     join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
-    join ${repoMemory} m on m.repo_id = r.id
     join ${orgs} o on o.id = r.org_id and o.installation_id is not null
     left join ${repoInventories} i on i.repo_id = r.id
     where r.enabled and i.captured_at is null and i.requested_at is null and coalesce(i.failures, 0) < ${MAX_REFRESH_FAILURES}
+      and ${active(sql`r.id`)}
     limit ${limit}
     on conflict (repo_id) do update set requested_at = excluded.requested_at
       where ${repoInventories}.captured_at is null and ${repoInventories}.requested_at is null
@@ -186,18 +186,26 @@ export const MAX_REFRESH_FAILURES = 6;
  * never read. Only repositories that are installed, enabled and already
  * mapped (recon ran, so the account has a plan), and not being read already.
  */
+/**
+ * A repository someone works on: a pull request reviewed, or a deep scan or fix check run, in the last 30
+ * days. Mapping doesn't count: it runs on everything connected. Only these are read without being asked.
+ */
+function active(repoId: SQL | typeof repos.id) {
+  return sql`exists (select 1 from ${scans} s where s.repo_id = ${repoId} and s.kind <> 'recon' and s.created_at > now() - interval '30 days')`;
+}
+
 export async function inventoriesDue(database: Db, limit: number): Promise<string[]> {
   const rows = await database
     .select({ id: repos.id })
     .from(repos)
     .innerJoin(orgs, eq(orgs.id, repos.orgId))
-    .innerJoin(repoMemory, eq(repoMemory.repoId, repos.id))
     .leftJoin(repoInventories, eq(repoInventories.repoId, repos.id))
     .where(
       and(
         eq(repos.enabled, true),
         isNotNull(orgs.installationId),
-        or(isNull(repoInventories.repoId), isNull(repoInventories.capturedAt), isNotNull(repoInventories.requestedAt)),
+        // Asked for (a push changed a lockfile, or someone pressed Check), or never read and in use.
+        or(isNotNull(repoInventories.requestedAt), and(isNull(repoInventories.capturedAt), active(repos.id))),
         or(isNull(repoInventories.runningSince), sql`${repoInventories.runningSince} < now() - ${REFRESH_LEASE}`),
         // Failing repositories back off: 20 minutes, then 40, 80… and stop until the next push.
         or(isNull(repoInventories.failedAt), sql`${repoInventories.failedAt} < now() - interval '20 minutes' * power(2, ${repoInventories.failures} - 1)`),
@@ -455,16 +463,42 @@ export async function cveForUser(database: Db, userId: string, key: string, now 
 }
 
 /** How current the directory is for the user: repositories with an inventory, of those they can see, and the oldest check. */
-/** The repositories the directory covers for a user (enabled, mapped), and how many have been read. */
-export async function cveCoverage(database: Db, userId: string): Promise<{ repos: number; inventoried: number; checkedAt: Date | null }> {
-  const [row] = await database.execute<{ repos: number; inventoried: number; checked_at: Date | null }>(sql`
-    select count(*)::int as repos, count(i.captured_at)::int as inventoried, min(i.checked_at) as checked_at
+/** How a repository stands in the directory before its first read. */
+export type UncheckedState = "queued" | "unchecked" | "unreachable";
+
+/**
+ * The repositories a user can see in the directory, how many have been read, and how many are queued to be
+ * (in use, or asked for). The rest are read only when someone asks.
+ */
+export async function cveCoverage(database: Db, userId: string): Promise<{ repos: number; inventoried: number; queued: number; checkedAt: Date | null }> {
+  const [row] = await database.execute<{ repos: number; inventoried: number; queued: number; checked_at: Date | null }>(sql`
+    select count(*)::int as repos, count(i.captured_at)::int as inventoried,
+      count(*) filter (where i.captured_at is null and coalesce(i.failures, 0) < ${MAX_REFRESH_FAILURES} and (i.requested_at is not null or ${active(sql`r.id`)}))::int as queued,
+      min(i.checked_at) as checked_at
     from ${repos} r
     join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
-    join ${repoMemory} m on m.repo_id = r.id
+    join ${orgs} o on o.id = r.org_id and o.installation_id is not null
     left join ${repoInventories} i on i.repo_id = r.id
     where r.enabled`);
-  return { repos: row?.repos ?? 0, inventoried: row?.inventoried ?? 0, checkedAt: row?.checked_at ? new Date(row.checked_at) : null };
+  return { repos: row?.repos ?? 0, inventoried: row?.inventoried ?? 0, queued: row?.queued ?? 0, checkedAt: row?.checked_at ? new Date(row.checked_at) : null };
+}
+
+/** A user's repositories never read, queued ones first, each with where it stands. */
+export async function cveUnchecked(database: Db, userId: string): Promise<Array<{ id: string; fullName: string; state: UncheckedState }>> {
+  const rows = await database.execute<{ id: string; full_name: string; state: UncheckedState }>(sql`
+    select * from (select r.id, r.full_name,
+      case
+        when coalesce(i.failures, 0) >= ${MAX_REFRESH_FAILURES} then 'unreachable'
+        when i.requested_at is not null or ${active(sql`r.id`)} then 'queued'
+        else 'unchecked'
+      end as state
+    from ${repos} r
+    join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
+    join ${orgs} o on o.id = r.org_id and o.installation_id is not null
+    left join ${repoInventories} i on i.repo_id = r.id
+    where r.enabled and i.captured_at is null) x
+    order by state = 'queued' desc, state = 'unchecked' desc, full_name`);
+  return [...rows].map((row) => ({ id: row.id, fullName: row.full_name, state: row.state }));
 }
 
 export type CveMatchRow = MatchRow;

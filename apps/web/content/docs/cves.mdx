@@ -7,7 +7,7 @@ The CVEs page lists every known vulnerability that affects a version your reposi
 
 ## Where the data comes from
 
-- **What you install.** Sandchest reads each repository's manifests and lockfiles on its default branch. It reads them when it maps or scans a repository, and again whenever a push to the default branch changes a manifest or lockfile. Reading them is free.
+- **What you install.** Sandchest reads each repository's manifests and lockfiles on its default branch: when a scan reads the repository, whenever a push to the default branch changes a manifest or lockfile, and on its own for every repository in use (a pull request reviewed, or a deep scan or fix check run, in the last 30 days). Any other repository is listed under **Not checked yet** with a **Check for CVEs** button. Reading them is free.
 - **What is known.** Advisories come from [OSV](https://osv.dev), which collects GitHub's advisory database, the language advisory databases, CVEs with the commits they affect, and reports of malicious packages. Only package names, versions and commits are sent; never code.
 
 | Language | Read from |

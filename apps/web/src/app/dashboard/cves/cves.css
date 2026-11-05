@@ -184,3 +184,69 @@
 .cve-more[open] summary {
   margin-bottom: 1rem;
 }
+
+/* Repositories never checked, each with its Check key. */
+.cve-unchecked {
+  margin-top: 3.5rem;
+}
+
+.cve-unchecked-count {
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+}
+
+.cve-unchecked-note {
+  max-width: 64ch;
+  margin-bottom: 1rem;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.cve-unchecked-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.5rem;
+  padding: 0.5rem 0;
+}
+
+.cve-unchecked-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-sand);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cve-unchecked-go,
+.cve-check {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.cve-check-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.cve-check-error {
+  color: var(--color-ember);
+  font-size: 0.8125rem;
+}
+
+.cve-unchecked-more summary {
+  padding: 0.85rem 0;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.cve-unchecked-more summary:hover {
+  color: var(--color-gold-light);
+}
