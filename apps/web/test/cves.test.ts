@@ -13,7 +13,7 @@ import { migrate } from "@sandchest/db/migrate";
 import type { Change, OsvCatalog, OsvRecord, PackageVersion } from "@sandchest/engine/advisories";
 import { GitHubError, type GitHubApp } from "@sandchest/github";
 import { resetConfig } from "@/server/config";
-import { checkRepository, followFeeds, refreshInventory, saveDependencies, syncAdvisories } from "@/server/cves";
+import { checkRepository, followFeeds, readUnreadFirst, refreshInventory, saveDependencies, syncAdvisories } from "@/server/cves";
 import { setServices } from "@/server/services";
 import { operationByName } from "@/server/agent/registry";
 import { handleWebhook } from "@/server/webhooks";
@@ -269,6 +269,9 @@ describe("CVE directory", () => {
     const added = await checkRepository(webId, "feed");
     expect(added.map((m) => m.advisoryId)).toEqual(["GHSA-missed"]);
     expect(osv.calls.records - before).toBe(1);
+    // The directory covers mapped repositories: the ones it reads.
+    expect(await cveCoverage(database, userId)).toMatchObject({ repos: 0, inventoried: 0 });
+    for (const id of [apiId, webId]) await saveThreatModel(database, id, { summary: "x" } as never, "sha");
     const coverage = await cveCoverage(database, userId);
     expect(coverage).toMatchObject({ repos: 2, inventoried: 2 });
     expect(coverage.checkedAt).not.toBeNull();
@@ -336,6 +339,34 @@ describe("CVE directory", () => {
     } finally {
       setServices({ github: fakeGithub });
     }
+  });
+
+  test("opening the directory reads the user's unread repositories first, and a reload jumps no one", async () => {
+    if (!available) return;
+    const { repos } = await upsertInstallation(database, 71, { githubAccountId: 710, githubLogin: "acme", type: "Organization" }, [
+      { githubRepoId: 7101, fullName: "acme/api", private: true, defaultBranch: "main" },
+      { githubRepoId: 7102, fullName: "acme/web", private: true, defaultBranch: "main" },
+      { githubRepoId: 7103, fullName: "acme/new", private: true, defaultBranch: "main" },
+    ]);
+    const newId = repos.find((r) => r.fullName === "acme/new")!.id;
+    await saveThreatModel(database, newId, { summary: "x" } as never, "sha");
+    await database.insert(schema.permissionCache).values({ userId, repoId: newId, permission: "write" });
+    expect(await cveCoverage(database, userId)).toMatchObject({ repos: 3, inventoried: 2 });
+
+    // Someone who can't see it queues nothing.
+    const started: string[] = [];
+    await readUnreadFirst(outsiderId, async (id) => void started.push(id));
+    expect(started).toEqual([]);
+
+    await readUnreadFirst(userId, async (id) => void started.push(id));
+    expect(started).toEqual([newId]);
+    expect((await inventoriesDue(database, 10))[0]).toBe(newId);
+    const [first] = await database.$client`select requested_at from repo_inventories where repo_id = ${newId}`;
+    // Already waiting: a reload neither starts it again nor moves it.
+    await readUnreadFirst(userId, async (id) => void started.push(id));
+    expect(started).toEqual([newId]);
+    const [again] = await database.$client`select requested_at from repo_inventories where repo_id = ${newId}`;
+    expect(again!.requested_at).toEqual(first!.requested_at);
   });
 
   test("feed syncs a minute apart never overlap: one started while another runs is skipped", async () => {

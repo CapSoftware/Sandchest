@@ -160,6 +160,10 @@ export function CvesView({
   );
 }
 
+function stillReading(unread: number): string {
+  return `${unread} ${unread === 1 ? "is" : "are"} still being read; what affects ${unread === 1 ? "it" : "them"} shows up here within minutes.`;
+}
+
 function CoverageNote({ coverage }: { coverage: Coverage }) {
   if (coverage.repos === 0) return null;
   if (coverage.inventoried === 0) return <>Nothing read yet.</>;
@@ -191,17 +195,18 @@ function Empty({ current, counts, coverage, filtered }: { current: CvesQuery; co
   if (coverage.inventoried === 0) {
     return (
       <div className="empty">
-        <h2 className="empty-title">Nothing read yet</h2>
-        <p>Sandchest reads what each repository installs when it maps or scans it, and again whenever a push changes a lockfile. Known vulnerabilities show up here a few minutes later.</p>
+        <h2 className="empty-title">Reading your repositories</h2>
+        <p>Sandchest is reading what your repositories install. Known vulnerabilities show up here as each one is read, within minutes.</p>
       </div>
     );
   }
+  const unread = coverage.repos - coverage.inventoried;
   if (current.state === "in_code") {
     return (
       <div className="empty">
-        <h2 className="empty-title">Nothing in your code</h2>
+        <h2 className="empty-title">{unread > 0 ? "Nothing in your code so far" : "Nothing in your code"}</h2>
         <p>
-          No known vulnerability affects a version your shipped code imports.
+          {unread > 0 ? `No known vulnerability affects a version your shipped code imports in the ${coverage.inventoried} repositories read so far. ${stillReading(unread)}` : "No known vulnerability affects a version your shipped code imports."}
           {counts.installed > 0 && ` ${counts.installed} affect packages that are installed but not imported by shipped code.`}
         </p>
         {counts.installed > 0 && (
@@ -215,8 +220,8 @@ function Empty({ current, counts, coverage, filtered }: { current: CvesQuery; co
   if (current.state === "installed") {
     return (
       <div className="empty">
-        <h2 className="empty-title">Nothing installed</h2>
-        <p>No known vulnerability affects anything your repositories install.</p>
+        <h2 className="empty-title">{unread > 0 ? "Nothing installed so far" : "Nothing installed"}</h2>
+        <p>{unread > 0 ? `No known vulnerability affects anything installed in the ${coverage.inventoried} repositories read so far. ${stillReading(unread)}` : "No known vulnerability affects anything your repositories install."}</p>
       </div>
     );
   }

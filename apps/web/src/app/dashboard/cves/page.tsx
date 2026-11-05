@@ -1,8 +1,11 @@
 import { cveCoverage, dashboardCves, visibleRepos } from "@sandchest/db";
 import type { Metadata } from "next";
+import { after } from "next/server";
 import { PageShape } from "@/components/app/skeleton";
 import { viewer } from "@/server/access";
+import { readUnreadFirst } from "@/server/cves";
 import { db } from "@/server/db";
+import { startInventory } from "@/server/start";
 import { CvesView, parse, type Query } from "./cves-view";
 
 export const metadata: Metadata = { title: "CVEs · Sandchest" };
@@ -15,6 +18,8 @@ export default async function CvesPage({ searchParams }: { searchParams: Promise
     visibleRepos(db(), user.id),
     cveCoverage(db(), user.id),
   ]);
+  // Repositories not read yet go first, once the page is on its way.
+  if (coverage.inventoried < coverage.repos) after(() => readUnreadFirst(user.id, startInventory));
   return (
     <PageShape id="cves">
       <CvesView current={current} list={list} counts={counts} repos={repos} coverage={coverage} />

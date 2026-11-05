@@ -27,6 +27,7 @@ import {
   markInventoriesChecked,
   matchKey,
   releaseInventoryRefresh,
+  requestUnreadInventories,
   saveInventory,
   setFeedCursor,
   storedAdvisories,
@@ -56,6 +57,9 @@ const RECHECK_MS = 24 * 3_600_000;
 const RECORD_CONCURRENCY = 24;
 /** Ecosystem feeds read at once. */
 const FEED_CONCURRENCY = 4;
+/** A user's never-read repositories queued when they open the directory, and how many of those start at once. */
+const UNREAD_QUEUED = 50;
+const UNREAD_STARTED_NOW = 3;
 /** Per sweep (every ten minutes): inventories read, and inventories checked in full. */
 const REFRESHES_PER_SWEEP = 5;
 const RECHECKS_PER_SWEEP = 12;
@@ -168,6 +172,19 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
   } catch (error) {
     await releaseInventoryRefresh(db(), repoId, describeError(error)).catch(() => {});
     throw error;
+  }
+}
+
+/**
+ * A user's repositories that were never read go to the front of the queue when they open the directory, and
+ * the first few are read now rather than at the next sweep. Never throws.
+ */
+export async function readUnreadFirst(userId: string, startInventory: (repoId: string) => Promise<void>): Promise<void> {
+  try {
+    const queued = await requestUnreadInventories(db(), userId, UNREAD_QUEUED);
+    await Promise.allSettled(queued.slice(0, UNREAD_STARTED_NOW).map((repoId) => startInventory(repoId)));
+  } catch (error) {
+    console.error(`Queueing unread inventories failed: ${describeError(error)}`);
   }
 }
 

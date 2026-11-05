@@ -120,6 +120,27 @@ export async function markInventoriesChecked(database: Db, repoIds: string[], at
 }
 
 /** A push changed a manifest or lockfile: the inventory should be read again. */
+/**
+ * Puts a user's repositories that were never read at the front of the queue, oldest request first, and
+ * returns them. Ones already waiting keep their place, so reloading a page never jumps anyone else.
+ */
+export async function requestUnreadInventories(database: Db, userId: string, limit: number): Promise<string[]> {
+  const rows = await database.execute<{ repo_id: string }>(sql`
+    insert into ${repoInventories} (repo_id, requested_at)
+    select r.id, now()
+    from ${repos} r
+    join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
+    join ${repoMemory} m on m.repo_id = r.id
+    join ${orgs} o on o.id = r.org_id and o.installation_id is not null
+    left join ${repoInventories} i on i.repo_id = r.id
+    where r.enabled and i.captured_at is null and i.requested_at is null and coalesce(i.failures, 0) < ${MAX_REFRESH_FAILURES}
+    limit ${limit}
+    on conflict (repo_id) do update set requested_at = excluded.requested_at
+      where ${repoInventories}.captured_at is null and ${repoInventories}.requested_at is null
+    returning repo_id`);
+  return [...rows].map((row) => row.repo_id);
+}
+
 export async function requestInventory(database: Db, repoId: string, at = new Date()): Promise<void> {
   // A new push is a new chance: whatever failed before may be fixed by it.
   await database.insert(repoInventories).values({ repoId, requestedAt: at }).onConflictDoUpdate({ target: repoInventories.repoId, set: { requestedAt: at, failures: 0, failedAt: null } });
@@ -434,11 +455,13 @@ export async function cveForUser(database: Db, userId: string, key: string, now 
 }
 
 /** How current the directory is for the user: repositories with an inventory, of those they can see, and the oldest check. */
+/** The repositories the directory covers for a user (enabled, mapped), and how many have been read. */
 export async function cveCoverage(database: Db, userId: string): Promise<{ repos: number; inventoried: number; checkedAt: Date | null }> {
   const [row] = await database.execute<{ repos: number; inventoried: number; checked_at: Date | null }>(sql`
     select count(*)::int as repos, count(i.captured_at)::int as inventoried, min(i.checked_at) as checked_at
     from ${repos} r
     join ${permissionCache} pc on pc.repo_id = r.id and pc.user_id = ${userId}
+    join ${repoMemory} m on m.repo_id = r.id
     left join ${repoInventories} i on i.repo_id = r.id
     where r.enabled`);
   return { repos: row?.repos ?? 0, inventoried: row?.inventoried ?? 0, checkedAt: row?.checked_at ? new Date(row.checked_at) : null };
