@@ -13,7 +13,7 @@ import { migrate } from "@sandchest/db/migrate";
 import type { Change, OsvCatalog, OsvRecord, PackageVersion } from "@sandchest/engine/advisories";
 import type { GitHubApp } from "@sandchest/github";
 import { resetConfig } from "@/server/config";
-import { checkRepository, saveDependencies, syncAdvisories } from "@/server/cves";
+import { checkRepository, followFeeds, saveDependencies, syncAdvisories } from "@/server/cves";
 import { setServices } from "@/server/services";
 import { operationByName } from "@/server/agent/registry";
 import { handleWebhook } from "@/server/webhooks";
@@ -309,5 +309,28 @@ describe("CVE directory", () => {
     await releaseInventoryRefresh(database, webId);
     const [row] = await database.$client`select failures, error, failed_at from repo_inventories where repo_id = ${webId}`;
     expect([row!.failures, row!.error, row!.failed_at]).toEqual([0, null, null]);
+  });
+
+  test("feed syncs a minute apart never overlap: one started while another runs is skipped", async () => {
+    if (!available) return;
+    const changedSince = osv.changedSince.bind(osv);
+    let entered!: () => void;
+    let release!: () => void;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    osv.changedSince = async (ecosystem, since) => {
+      entered();
+      await gate;
+      return changedSince(ecosystem, since);
+    };
+    try {
+      const first = followFeeds();
+      await inside;
+      expect(await followFeeds()).toEqual({ skipped: true });
+      release();
+      expect(await first).toMatchObject({ errors: [] });
+    } finally {
+      osv.changedSince = changedSince;
+    }
   });
 });

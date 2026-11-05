@@ -4,9 +4,9 @@
  * push changes a manifest or lockfile) and kept between scans, so OSV can be
  * asked about it at any time without the code:
  *
- * - every ten minutes, the OSV change feed says which advisories were
- *   published or changed; installed versions of the packages they name are
- *   checked again, so a new CVE shows up within minutes of OSV having it;
+ * - every minute, the OSV change feed says which advisories were published
+ *   or changed; installed versions of the packages they name are checked
+ *   again, so a new CVE shows up within a minute or two of OSV having it;
  * - once a day, every inventory is checked in full: the safety net for
  *   anything the feed missed;
  * - reading an inventory checks it at once.
@@ -17,6 +17,7 @@
 import {
   applyMatches,
   claimInventoryRefresh,
+  exclusiveFeedSync,
   feedCursors,
   installedVersions,
   inventoriesDue,
@@ -283,10 +284,16 @@ async function checkPackages(packages: PackageVersion[], origin: "feed" | "inven
 
 // ---- The sweep ----------------------------------------------------------------
 
-/** The CVE directory's share of the ten-minute sweep. */
-export async function sweepCves(startInventory: (repoId: string) => Promise<void>, now = new Date()): Promise<{ changed: number; added: number; refreshed: number; rechecked: number; errors: number }> {
-  // The feed and the daily checks run side by side, so a slow feed never holds back the safety net.
-  const syncing = syncAdvisories().catch((error: unknown): SyncResult => ({ changed: 0, packages: 0, added: [], errors: [describeError(error)] }));
+/** Follows the feeds, once a minute. Skipped while the previous sync is still running. */
+export async function followFeeds(): Promise<SyncResult | { skipped: true }> {
+  const result = await exclusiveFeedSync(db(), syncAdvisories);
+  if (!result) return { skipped: true };
+  for (const error of result.errors) console.error(`OSV feed: ${error}`);
+  return result;
+}
+
+/** The CVE directory's share of the ten-minute sweep: inventories to read, and inventories due their daily full check. */
+export async function sweepCves(startInventory: (repoId: string) => Promise<void>, now = new Date()): Promise<{ refreshed: number; rechecked: number; errors: number }> {
   const [due, unchecked] = await Promise.all([inventoriesDue(db(), REFRESHES_PER_SWEEP), inventoriesUnchecked(db(), new Date(now.getTime() - RECHECK_MS), RECHECKS_PER_SWEEP)]);
   const started = await Promise.allSettled(due.map((repoId) => startInventory(repoId)));
   // A first check that failed when the inventory was read is still the inventory's; later ones find new advisories.
@@ -299,14 +306,10 @@ export async function sweepCves(startInventory: (repoId: string) => Promise<void
       },
     ),
   );
-  const sync = await syncing;
-  for (const error of sync.errors) console.error(`OSV feed: ${error}`);
   return {
-    changed: sync.changed,
-    added: sync.added.length,
     refreshed: started.filter((r) => r.status === "fulfilled").length,
     rechecked: rechecked.filter(Boolean).length,
-    errors: sync.errors.length + started.filter((r) => r.status === "rejected").length + rechecked.filter((ok) => !ok).length,
+    errors: started.filter((r) => r.status === "rejected").length + rechecked.filter((ok) => !ok).length,
   };
 }
 

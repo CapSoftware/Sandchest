@@ -4,12 +4,12 @@
  * stopped, so no PR Check spins forever and no Dig stays blocked, and settles
  * credits a finished scan still holds (charging a completed scan whose charge
  * failed, releasing the rest). Also starts scheduled deep scans that are due,
- * clears out expired agent codes and tokens, and keeps the CVE directory
- * current (see `sweepCves`).
+ * clears out expired agent codes and tokens, and reads the CVE directory's
+ * inventories that are due (see `sweepCves`).
  */
-import { timingSafeEqual } from "node:crypto";
 import { deleteExpiredAgentGrants, strandedScans, unsettledScans, type Scan } from "@sandchest/db";
 import { settleScan } from "@/server/billing";
+import { fromCron } from "@/server/cron";
 import { sweepCves } from "@/server/cves";
 import { failScan } from "@/server/scans";
 import { db } from "@/server/services";
@@ -28,15 +28,12 @@ export const dynamic = "force-dynamic";
 const RUN_LIMIT_MS = 2 * 3_600_000;
 
 export async function GET(request: Request): Promise<Response> {
-  const secret = process.env.CRON_SECRET;
-  const given = Buffer.from(request.headers.get("authorization") ?? "");
-  const wanted = Buffer.from(`Bearer ${secret}`);
-  if (!secret || given.length !== wanted.length || !timingSafeEqual(given, wanted)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (!fromCron(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
 
   const [{ unstarted, unfinishedStarts, stuck }, unsettled] = await Promise.all([strandedScans(db()), unsettledScans(db())]);
   const now = Date.now();
   const schedules = runSchedules(new Date(now));
-  // New and changed advisories from OSV, inventories to read, and inventories due their daily full check.
+  // Inventories to read, and inventories due their daily full check.
   const cves = sweepCves(startInventory, new Date(now));
   const failing = [...unfinishedStarts.map((scan) => failScan(scan.id, "The scan could not start.").then(() => true)), ...stuck.map((scan) => failIfStopped(scan, now))];
   const results = await Promise.allSettled([
@@ -51,8 +48,8 @@ export async function GET(request: Request): Promise<Response> {
   const errors = results.filter((r) => r.status === "rejected").length;
   const failed = (await Promise.allSettled(failing)).filter((r) => r.status === "fulfilled" && r.value).length;
   const scheduled = await schedules.then((result) => result.started).catch(() => 0);
-  const advisories = await cves.catch(() => null);
-  return Response.json({ started: unstarted.length, failed, settled: unsettled.length, scheduled, errors, advisories });
+  const inventories = await cves.catch(() => null);
+  return Response.json({ started: unstarted.length, failed, settled: unsettled.length, scheduled, errors, inventories });
 }
 
 /**

@@ -9,7 +9,7 @@
  * blocked however the server is exposed, with or without a reverse proxy.
  *
  * It also stands in for Vercel Cron, calling the stranded-scan sweep every
- * ten minutes.
+ * ten minutes and the advisory feeds every minute.
  */
 import { randomBytes } from "node:crypto";
 import http from "node:http";
@@ -168,20 +168,24 @@ export function stopGateway(server) {
   server.closeAllConnections();
 }
 
-/** Calls the sweep on loopback, as Vercel Cron does in the cloud. Failures are logged and retried next time. */
-function scheduleSweep(port, secret) {
-  const sweep = async () => {
-    // Nothing to sweep until setup has given the server its GitHub App.
-    if (!process.env.GITHUB_APP_ID?.trim()) return;
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/cron/sweep`, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(120_000) });
-      if (!response.ok) console.error(`Sweep failed: HTTP ${response.status}`);
-    } catch (error) {
-      console.error(`Sweep failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
+/** Calls the cron routes on loopback, as Vercel Cron does in the cloud (see vercel.json). Failures are logged and retried next time. */
+function scheduleCrons(port, secret) {
+  const every = (path, ms) => {
+    const run = async () => {
+      // Nothing to do until setup has given the server its GitHub App.
+      if (!process.env.GITHUB_APP_ID?.trim()) return;
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(120_000) });
+        if (!response.ok) console.error(`${path} failed: HTTP ${response.status}`);
+      } catch (error) {
+        console.error(`${path} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    };
+    setTimeout(run, 60_000).unref();
+    setInterval(run, ms).unref();
   };
-  setTimeout(sweep, 60_000).unref();
-  setInterval(sweep, 10 * 60_000).unref();
+  every("/api/cron/sweep", 10 * 60_000);
+  every("/api/cron/advisories", 60_000);
 }
 
 async function main() {
@@ -195,14 +199,14 @@ async function main() {
   process.env.HOSTNAME = "127.0.0.1";
   // The World delivers work to Next directly, never through the gateway.
   process.env.WORKFLOW_LOCAL_BASE_URL = `http://127.0.0.1:${internalPort}`;
-  // Only this process calls the sweep, so a fresh secret per start is enough.
+  // Only this process calls the crons, so a fresh secret per start is enough.
   process.env.CRON_SECRET ||= randomBytes(32).toString("hex");
 
   await import(pathToFileURL(process.env.SANDCHEST_NEXT_SERVER || "/app/apps/web/server.js").href);
 
   const gateway = createGateway({ upstreamPort: internalPort });
   gateway.listen(publicPort, "0.0.0.0", () => console.log(`Sandchest is listening on port ${publicPort}.`));
-  scheduleSweep(internalPort, process.env.CRON_SECRET);
+  scheduleCrons(internalPort, process.env.CRON_SECRET);
 
   // Next's own handler, registered as it started, closes Next and exits once its connections end.
   const stop = () => stopGateway(gateway);

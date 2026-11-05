@@ -299,6 +299,14 @@ export async function feedCursors(database: Db): Promise<Array<{ ecosystem: stri
   return rows.map((row) => ({ ecosystem: row.ecosystem, cursor: Number(row.cursor) }));
 }
 
+/** Runs `fn` unless another feed sync is running, so syncs started a minute apart never overlap. */
+export async function exclusiveFeedSync<T>(database: Db, fn: () => Promise<T>): Promise<T | undefined> {
+  return database.transaction(async (tx) => {
+    const [row] = await tx.execute<{ locked: boolean }>(sql`select pg_try_advisory_xact_lock(hashtextextended('advisory_feeds', 5)) as locked`);
+    return row?.locked ? fn() : undefined;
+  });
+}
+
 export async function setFeedCursor(database: Db, ecosystem: string, cursor: number): Promise<void> {
   await database
     .insert(advisoryFeeds)
