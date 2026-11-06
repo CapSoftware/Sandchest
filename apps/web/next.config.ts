@@ -55,6 +55,8 @@ const nextConfig: NextConfig = {
       { source: "/device", headers: noFrames },
       { source: "/oauth/:path*", headers: noFrames },
       { source: "/radio/:file*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
+      // The keyboard's sounds, versioned the same way (switches.ts).
+      { source: "/keys/:file*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
     ];
   },
   async rewrites() {

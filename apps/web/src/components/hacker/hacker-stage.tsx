@@ -1,19 +1,26 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type CSSProperties } from "react";
+import type { HackerRecord } from "@sandchest/db";
 import { useDemo } from "@/components/app/demo";
-import { HoverLink } from "@/components/app/hover-link";
+import { accountPainter, type AccountModel } from "@/components/rig/paint-account";
 import { recruitPainter, type RecruitModel } from "@/components/rig/paint-recruit";
 import { RigView } from "@/components/rig/rig-view";
 import type { Painter } from "@/components/rig/screen";
 import type { ShotName } from "@/components/rig/shots";
 import { newSignals } from "@/components/rig/signals";
+import type { FeedItem, FeedJob } from "@/lib/account-feed";
+import { demoFeed } from "@/lib/demo-feed";
 import { PHOSPHORS, swatch, validHandle, type HackerProfile } from "@/lib/hacker";
 import { saveHacker, type SaveHackerOutcome } from "@/server/hacker-actions";
+import { serverFeed, useAccountLive } from "./account-live";
+import { FeedDrawer, nowDoing, type Crew } from "./feed-drawer";
 import { HandleField } from "./handle-field";
 import { Keycap } from "./keycap";
 import { LookMenu, LOOKS } from "./look-menu";
-import { RadioKeys, useRadio } from "./radio";
+import { useKeySounds } from "./key-sounds";
+import { useRadio } from "./radio";
+import { SoundMenu } from "./sound-menu";
 
 /** How far right the picture sits on wide screens: a little to clear the name, more while the customize panel covers the left. */
 const SHIFT = { resting: 0.12, editing: 0.17 };
@@ -24,17 +31,23 @@ interface Props {
   profile: HackerProfile;
   /** Whether this person may change the hacker. */
   admin: boolean;
-  /** What they're doing right now, if anything. */
-  job: { href: string; label: string; queued: boolean } | null;
+  /** The account's feed as the page opens; the page follows it live from there. */
+  feed: { items: FeedItem[]; jobs: FeedJob[] };
+  record: HackerRecord;
+  /** The person's other hackers, to switch to. */
+  crew: Crew[];
 }
 
 /**
- * The hacker at their desk, filling the top of their page: drag to look
- * around the room, their name and what they're up to over it. Admins can
- * customize them in place: a game menu over the room's dark side while the
- * camera turns to whatever is being changed, saved as one change.
+ * The hacker's page: them at their desk filling the window, live. Their
+ * name and what they're on over the room, a Live mark in the corner, their
+ * screen showing what's happening on the account as it happens, and the
+ * feed itself in a drawer that comes up from the foot on request. Drag to
+ * look around the room. Admins can customize them in place: a game menu
+ * over the room's dark side while the camera turns to whatever is being
+ * changed, saved as one change.
  */
-export function HackerStage({ orgId, login, profile: saved, admin, job }: Props) {
+export function HackerStage({ orgId, login, profile: saved, admin, feed: initial, record, crew }: Props) {
   const router = useRouter();
   const demo = useDemo();
   const [editing, setEditing] = useState(false);
@@ -51,6 +64,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
   const edit = useRef<HTMLButtonElement>(null);
   // Up here, not in the card, so the music carries on while they customize.
   const radio = useRadio();
+  const sounds = useKeySounds(signals);
 
   // The look as last saved: the server's, or ours the moment a save succeeds (before the page refreshes with it,
   // so the room never flicks back to the old look in between). A new one from the server is taken unless editing.
@@ -62,9 +76,19 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
     if (!editing) setProfile(saved);
   }
 
+  // The account, live: the demo's made up, everyone else's from the server.
+  const source = useMemo(() => (demo ? demoFeed() : serverFeed(orgId)), [demo, orgId]);
+  const live = useAccountLive(initial, source);
+  const [drawer, setDrawer] = useDrawer();
+
+  // The screen: the account's feed, or the customize menu while customizing.
   const model = useRef<RecruitModel>(null!);
-  model.current = { step: editing ? "customize" : "hacker", profile, viewer: login, accounts: [], repos: [], org: login, credits: 0, autoTopUp: false, currentPlan: null, billing: false };
-  const [paint] = useState<{ current: Painter | null }>(() => ({ current: recruitPainter(model) }));
+  model.current = { step: "customize", profile, viewer: login, accounts: [], repos: [], org: login, credits: 0, autoTopUp: false, currentPlan: null, billing: false };
+  const account = useRef<AccountModel>(null!);
+  account.current = { profile, login, items: live.items, jobs: live.jobs, state: live.state };
+  const [painters] = useState(() => ({ customize: recruitPainter(model), account: accountPainter(account, signals) }));
+  const [paint] = useState<{ current: Painter | null }>(() => ({ current: null }));
+  paint.current = editing ? painters.customize : painters.account;
 
   const changed = JSON.stringify(profile) !== JSON.stringify(base);
   const handleOk = validHandle(profile.handle);
@@ -104,8 +128,8 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
   useEffect(() => {
     if (editing) name.current?.focus({ preventScroll: true });
   }, [editing]);
-  const keys = useRef({ save, close, open, editing, admin, radio });
-  keys.current = { save, close, open, editing, admin, radio };
+  const keys = useRef({ save, close, open, editing, admin, radio, sounds, setDrawer });
+  keys.current = { save, close, open, editing, admin, radio, sounds, setDrawer };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -124,18 +148,27 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
       } else if (!k.editing && k.radio.supported && (event.key === "r" || event.key === "R") && !typing && !(at instanceof HTMLTextAreaElement)) {
         event.preventDefault();
         k.radio.toggle();
+      } else if (!k.editing && k.sounds.supported && (event.key === "k" || event.key === "K") && !typing && !(at instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        k.sounds.toggle();
+      } else if (!k.editing && (event.key === "l" || event.key === "L") && !typing && !(at instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        k.setDrawer((o) => !o);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const working = live.jobs.some((j) => j.status !== "queued");
+  const doing = nowDoing(live.jobs);
+
   // At rest: side on against the screen's glow where there's width for it; face to face on a tall phone screen.
   const shot: ShotName = editing && look >= 0 ? LOOKS[look]!.shot : wide ? "preview" : "hood";
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
 
   return (
-    <section className="hq-stage" data-editing={editing || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
+    <section className="hq-stage" data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
       <div className="hq-scene" onPointerDown={() => setDragged(true)}>
         <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={wide ? SHIFT[editing ? "editing" : "resting"] : 0} drag="look" poster />
         <div className="hq-shade" aria-hidden="true" />
@@ -178,40 +211,65 @@ export function HackerStage({ orgId, login, profile: saved, admin, job }: Props)
           </div>
         </div>
       ) : (
-        <div className="hq-card">
-          <p className="hq-of">{login}’s hacker</p>
-          <h1 id="hq-name" className="hq-name">
-            {profile.handle}
-          </h1>
-          <div className="hq-actions">
-            {job ? (
-              <HoverLink href={job.href} className="cap-key cap-key-gold">
-                <span className="cap-key-face">
-                  <span className="hq-live" aria-hidden="true" />
-                  {job.queued ? "Waiting to start " : "On "}
-                  {job.label}
-                  <span className="cap-key-go">Watch</span>
-                </span>
-              </HoverLink>
-            ) : (
-              <p className="hq-idle">
-                <span className="hq-idle-dot" aria-hidden="true" /> Off duty. Ready for the next pull request.
+        <>
+          <div className="hq-top">
+            <div className="hq-id">
+              <p className="hq-of">{login}’s hacker</p>
+              <h1 id="hq-name" className="hq-name">
+                {profile.handle}
+                <span className="hq-presence" data-working={working || undefined} title={working ? "Working" : "Off duty"} aria-hidden="true" />
+              </h1>
+              <p className="hq-now" aria-live="polite">
+                {doing}
               </p>
-            )}
-            {admin && (
-              <button ref={edit} type="button" className="cap-key" onClick={open} data-track="hacker-customize-open">
-                <span className="cap-key-face">
-                  Customize <Keycap>C</Keycap>
-                </span>
-              </button>
-            )}
-            <RadioKeys radio={radio} />
+            </div>
+            <div className="hq-corner">
+              <p className="hq-onair" data-state={live.state}>
+                <span className="hq-onair-dot" aria-hidden="true" />
+                {live.state === "live" ? "Live" : live.state === "connecting" ? "Reconnecting" : "Offline"}
+              </p>
+              <div className="hq-tools">
+                <SoundMenu radio={radio} keys={sounds} />
+                {admin && (
+                  <button ref={edit} type="button" className="cap-key" onClick={open} data-track="hacker-customize-open">
+                    <span className="cap-key-face">
+                      Customize <Keycap>C</Keycap>
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-          {!admin && <p className="hq-note">Only an admin of {login} can change how {profile.handle} looks.</p>}
-        </div>
+          <FeedDrawer open={drawer} onToggle={() => setDrawer((o) => !o)} items={live.items} jobs={live.jobs} record={record} login={login} handle={profile.handle} crew={crew} demo={demo} admin={admin} />
+        </>
       )}
     </section>
   );
+}
+
+const DRAWER_KEY = "sandchest:hacker-feed";
+
+/** Whether the feed drawer is up, remembered on this browser. */
+function useDrawer(): [boolean, (update: (open: boolean) => boolean) => void] {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    try {
+      setOpen(localStorage.getItem(DRAWER_KEY) === "open");
+    } catch {
+      // Down, then.
+    }
+  }, []);
+  const set = (update: (open: boolean) => boolean) =>
+    setOpen((current) => {
+      const next = update(current);
+      try {
+        localStorage.setItem(DRAWER_KEY, next ? "open" : "closed");
+      } catch {
+        // Not remembered, then.
+      }
+      return next;
+    });
+  return [open, set];
 }
 
 /** Wide enough for the panel beside the hacker. */

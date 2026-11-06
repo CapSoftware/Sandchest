@@ -1,6 +1,5 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Keycap } from "./keycap";
 
 /**
  * The station's tracks, in /public/radio: a few minutes each, cut from one long
@@ -9,7 +8,9 @@ import { Keycap } from "./keycap";
  */
 const RADIO_VERSION = "2";
 const TRACKS = Array.from({ length: 10 }, (_, i) => `/radio/${String(i + 1).padStart(2, "0")}.webm?v=${RADIO_VERSION}`);
+/** How loud the radio plays at full on its slider. */
 const VOLUME = 0.55;
+const LEVEL_KEY = "sandchest:radio-level";
 const FADE_MS = 400;
 
 export interface Radio {
@@ -20,6 +21,9 @@ export interface Radio {
   track: number | null;
   toggle: () => void;
   next: () => void;
+  /** Its slider, 0 to 1, remembered on this browser. */
+  level: number;
+  setLevel: (level: number) => void;
 }
 
 /**
@@ -35,9 +39,29 @@ export function useRadio(): Radio {
   const audio = useRef<HTMLAudioElement | null>(null);
   const queue = useRef<number[]>([]);
   const fade = useRef(0);
+  const [level, setLevelState] = useState(0.8);
+  const levelRef = useRef(0.8);
 
   useEffect(() => {
     setSupported(document.createElement("audio").canPlayType('audio/webm; codecs="opus"') !== "");
+    const saved = Number(safeGet(LEVEL_KEY));
+    if (saved >= 0 && saved <= 1 && safeGet(LEVEL_KEY) !== null) {
+      levelRef.current = saved;
+      setLevelState(saved);
+    }
+  }, []);
+
+  const setLevel = useCallback((next: number) => {
+    const value = Math.max(0, Math.min(1, next));
+    levelRef.current = value;
+    setLevelState(value);
+    cancelAnimationFrame(fade.current);
+    if (audio.current && !audio.current.paused) audio.current.volume = VOLUME * value;
+    try {
+      localStorage.setItem(LEVEL_KEY, String(value));
+    } catch {
+      // Not remembered, then.
+    }
   }, []);
 
   const ramp = useCallback((el: HTMLAudioElement, to: number, done?: () => void) => {
@@ -86,12 +110,12 @@ export function useRadio(): Radio {
     el.volume = 0;
     if (el.src && !el.ended) el.play().catch(() => setOn(false));
     else play(el);
-    ramp(el, VOLUME);
+    ramp(el, VOLUME * levelRef.current);
   }, [element, on, play, ramp]);
 
   const next = useCallback(() => {
     const el = element();
-    el.volume = VOLUME;
+    el.volume = VOLUME * levelRef.current;
     play(el);
   }, [element, play]);
 
@@ -108,7 +132,15 @@ export function useRadio(): Radio {
     [],
   );
 
-  return { supported, on, track, toggle, next };
+  return { supported, on, track, toggle, next, level, setLevel };
+}
+
+function safeGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 /** A shuffled order of every track, not starting on `last` so a new round never repeats the one just played. */
@@ -120,45 +152,4 @@ function shuffled(count: number, last: number | null): number[] {
   }
   if (count > 1 && order[0] === last) [order[0], order[1]] = [order[1]!, order[0]!];
   return order;
-}
-
-/** The radio's keys on the hacker's card: on and off, and a skip while it plays. */
-export function RadioKeys({ radio }: { radio: Radio }) {
-  if (!radio.supported) return null;
-  return (
-    <div className="hq-radio" role="group" aria-label="Radio">
-      <button type="button" className="cap-key" aria-pressed={radio.on} onClick={radio.toggle} data-track="hacker-radio-toggle">
-        <span className="cap-key-face">
-          <RadioBars on={radio.on} />
-          {radio.on && radio.track ? `Radio · ${String(radio.track).padStart(2, "0")}` : "Radio"} <Keycap>R</Keycap>
-        </span>
-      </button>
-      {radio.on && (
-        <button type="button" className="cap-key cap-key-icon" onClick={radio.next} aria-label="Next track" data-track="hacker-radio-next">
-          <span className="cap-key-face">
-            <SkipIcon />
-          </span>
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** Three pixel bars: still when off, bouncing like a level meter when on. */
-function RadioBars({ on }: { on: boolean }) {
-  return (
-    <span className="hq-radio-bars" data-on={on || undefined} aria-hidden="true">
-      <span />
-      <span />
-      <span />
-    </span>
-  );
-}
-
-function SkipIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 7 7" shapeRendering="crispEdges" aria-hidden="true">
-      <path fill="currentColor" d="M0 0h1v7H0zM1 1h1v5H1zM2 2h1v3H2zM3 3h1v1H3zM5 0h2v7H5z" />
-    </svg>
-  );
 }

@@ -1,9 +1,10 @@
 /*
- * The hacker's page: them at their desk across the full width under the
- * header, their name over the dark of the room, then their record. While
- * customizing, the game menu takes the room's dark left side on wide
- * screens; on phones the room stays pinned at the top and the menu runs
- * under it.
+ * The hacker's page: them at their desk filling the window under the
+ * header, their name and what they're on over the dark of the room, a Live
+ * mark in the corner, and the account's feed in a drawer that rises from
+ * the foot. While customizing, the game menu takes the room's dark left
+ * side on wide screens; on phones the room stays pinned at the top and the
+ * menu runs under it.
  */
 
 /* The stage runs edge to edge, past the shell; never let it widen the page. */
@@ -11,10 +12,11 @@ body:has(.hq-stage) {
   overflow-x: clip;
 }
 
+/* The whole window under the header: the page's own padding at the foot is taken back, so nothing scrolls. */
 .hq-stage {
   position: relative;
-  height: clamp(28rem, 74vh, 52rem);
-  margin: calc(-1 * var(--main-top)) calc(50% - 50vw) 0;
+  height: max(30rem, calc(100dvh - 3.75rem - 1px));
+  margin: calc(-1 * var(--main-top)) calc(50% - 50vw) -6rem;
   background: #000;
   color: var(--color-sand);
   overflow: hidden;
@@ -37,8 +39,9 @@ body:has(.hq-stage) {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(0deg, rgb(0 0 0 / 0.88) 0%, rgb(0 0 0 / 0.35) 34%, transparent 58%),
-    linear-gradient(90deg, rgb(0 0 0 / 0.55) 0%, transparent 46%);
+    linear-gradient(180deg, rgb(0 0 0 / 0.72) 0%, rgb(0 0 0 / 0.25) 22%, transparent 40%),
+    linear-gradient(0deg, rgb(0 0 0 / 0.6) 0%, transparent 22%),
+    linear-gradient(90deg, rgb(0 0 0 / 0.45) 0%, transparent 40%);
   transition: background 0.4s ease;
 }
 
@@ -47,21 +50,10 @@ body:has(.hq-stage) {
 }
 
 /* Lined up with the page's shell, inside a stage as wide as the window. */
-.hq-card,
+.hq-top,
+.hq-drawer,
 .hq-panel {
   --edge: max(var(--gutter), env(safe-area-inset-left), calc((100% - var(--shell)) / 2));
-}
-
-.hq-card {
-  position: absolute;
-  inset: auto 0 0;
-  z-index: 2;
-  padding: 0 var(--edge) clamp(1.75rem, 5vh, 3rem);
-  pointer-events: none;
-}
-
-.hq-card > * {
-  pointer-events: auto;
 }
 
 .hq-of {
@@ -70,80 +62,20 @@ body:has(.hq-stage) {
 }
 
 .hq-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.12em;
   margin: 0.35rem 0 0;
   max-width: 100%;
   overflow-wrap: anywhere;
   font-family: var(--font-display);
-  font-size: clamp(4.25rem, 13vw, 9.5rem);
+  font-size: clamp(3.25rem, 9vw, 7rem);
   font-weight: 400;
   line-height: 0.78;
   color: var(--color-bright);
   text-shadow:
     0 0 0.06em color-mix(in srgb, var(--phosphor) 55%, transparent),
     0 0 0.5em color-mix(in srgb, var(--phosphor) 28%, transparent);
-}
-
-.hq-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem 1rem;
-  margin-top: 1.5rem;
-}
-
-/* On a job: a dark pixel on the gold key, blinking like a recording light. */
-.hq-live {
-  width: 0.5rem;
-  height: 0.5rem;
-  flex: none;
-  background: var(--color-void);
-}
-
-.hq-idle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-right: 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--color-dust);
-}
-
-.hq-idle-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  background: var(--phosphor);
-  box-shadow: 0 0 10px var(--phosphor);
-}
-
-/* The radio: its key and, while it plays, a skip beside it. */
-.hq-radio {
-  display: inline-flex;
-  gap: 0.5rem;
-}
-
-/* A level meter of three pixel bars, resting low until the music's on. */
-.hq-radio-bars {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  width: 10px;
-  height: 10px;
-  flex: none;
-}
-
-.hq-radio-bars > span {
-  width: 2px;
-  height: 2px;
-  background: currentColor;
-}
-
-.hq-radio-bars[data-on] > span {
-  height: 6px;
-  box-shadow: 0 0 6px var(--phosphor);
-}
-
-.hq-radio-bars[data-on] > span:nth-child(2) {
-  height: 10px;
 }
 
 .hq-note {
@@ -155,7 +87,7 @@ body:has(.hq-stage) {
 .hq-hint {
   position: absolute;
   right: max(var(--gutter), env(safe-area-inset-right), calc((100% - var(--shell)) / 2));
-  bottom: clamp(1.75rem, 5vh, 3rem);
+  bottom: clamp(5rem, 11vh, 6.5rem);
   z-index: 2;
   display: flex;
   align-items: center;
@@ -170,37 +102,9 @@ body:has(.hq-stage) {
   opacity: 0;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .hq-live {
-    animation: blink 1s steps(1) infinite;
-  }
-  .hq-radio-bars[data-on] > span {
-    animation: hq-level 0.9s steps(4) infinite alternate;
-  }
-  .hq-radio-bars[data-on] > span:nth-child(2) {
-    animation-duration: 0.7s;
-    animation-delay: -0.3s;
-  }
-  .hq-radio-bars[data-on] > span:nth-child(3) {
-    animation-duration: 1.1s;
-    animation-delay: -0.6s;
-  }
-}
 
-@keyframes hq-level {
-  from {
-    height: 2px;
-  }
-  to {
-    height: 10px;
-  }
-}
 
 /* ---- Customizing --------------------------------------------------------------- */
-
-.hq-stage[data-editing] {
-  height: clamp(40rem, 82vh, 54rem);
-}
 
 .hq-panel {
   position: absolute;
@@ -297,7 +201,8 @@ body:has(.hq-stage) {
 
 @media (max-width: 44rem) {
   .hq-stage {
-    height: clamp(26rem, 74svh, 40rem);
+    height: max(26rem, calc(100dvh - 3.5rem - 1px - 4rem - env(safe-area-inset-bottom)));
+    margin-bottom: calc(-7rem - env(safe-area-inset-bottom));
   }
   .hq-stage[data-editing] .hq-scene {
     height: 40svh;
@@ -311,111 +216,537 @@ body:has(.hq-stage) {
   }
 }
 
-/* ---- Record --------------------------------------------------------------------- */
-
-.hq-record {
-  margin-top: clamp(2.5rem, 6vh, 3.5rem);
+/* In the demo, its bar sits above the header: the stage leaves room for it too. */
+body:has(.demo-bar) .hq-stage {
+  height: max(30rem, calc(100dvh - 3.75rem - 2.25rem - 2px));
 }
 
-.hq-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-top: 1px solid var(--color-seam);
-  border-bottom: 1px solid var(--color-seam);
+@media (max-width: 44rem) {
+  body:has(.demo-bar) .hq-stage {
+    height: max(26rem, calc(100dvh - 3.5rem - 2.25rem - 2px - 4rem - env(safe-area-inset-bottom)));
+  }
 }
 
-.hq-stat {
+/* ---- Over the room: who, what they're on, and Live ------------------------------- */
+
+.hq-top {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: clamp(1.25rem, 3.5vh, 2.25rem) var(--edge) 0;
+  pointer-events: none;
+}
+
+.hq-top > * {
+  pointer-events: auto;
+}
+
+.hq-id {
+  min-width: 0;
+  max-width: min(42rem, 62%);
+}
+
+/* On the name: lit in the screen's colour and breathing while they work, dim while they're off. */
+.hq-presence {
+  width: 0.16em;
+  height: 0.16em;
+  margin-top: 0.08em;
+  flex: none;
+  background: var(--color-edge);
+}
+
+.hq-presence[data-working] {
+  background: var(--phosphor);
+  box-shadow: 0 0 0.12em var(--phosphor), 0 0 0.4em color-mix(in srgb, var(--phosphor) 60%, transparent);
+}
+
+.hq-now {
+  margin-top: 0.85rem;
+  font-size: 0.875rem;
+  color: var(--color-sand);
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.8);
+}
+
+.hq-corner {
   display: grid;
+  flex: none;
+  justify-items: end;
+  gap: 0.9rem;
+}
+
+.hq-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.6rem;
-  padding: 1.5rem;
-  border-left: 1px solid var(--color-seam);
 }
 
-.hq-stat:first-child {
-  padding-left: 0;
-  border-left: 0;
-}
-
-.hq-stat dt {
+/* Live: a red light, like a camera's, while the feed is connected. */
+.hq-onair {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.75rem;
+  background: rgb(0 0 0 / 0.55);
+  box-shadow: inset 0 0 0 1px rgb(255 59 47 / 0.45);
   font-size: 0.8125rem;
+  font-weight: 500;
+  color: #ffd9d4;
+}
+
+.hq-onair-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  background: #ff3b2f;
+  box-shadow: 0 0 10px #ff3b2f;
+}
+
+.hq-onair[data-state="connecting"] {
+  box-shadow: inset 0 0 0 1px rgb(254 194 66 / 0.4);
+  color: var(--color-sand);
+}
+
+.hq-onair[data-state="connecting"] .hq-onair-dot {
+  background: var(--color-gold);
+  box-shadow: none;
+}
+
+.hq-onair[data-state="offline"] {
+  box-shadow: inset 0 0 0 1px var(--color-seam);
   color: var(--color-dust);
 }
 
-.hq-stat-value {
-  font-family: var(--font-display);
-  font-size: clamp(2.75rem, 5vw, 3.5rem);
-  line-height: 0.85;
-  color: var(--color-bright);
+.hq-onair[data-state="offline"] .hq-onair-dot {
+  background: var(--color-edge);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq-onair[data-state="live"] .hq-onair-dot {
+    animation: hq-pulse 1.6s ease-in-out infinite;
+  }
+  .hq-onair[data-state="connecting"] .hq-onair-dot {
+    animation: blink 1s steps(1) infinite;
+  }
+  .hq-presence[data-working] {
+    animation: hq-pulse 2.2s ease-in-out infinite;
+  }
+}
+
+@keyframes hq-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- The feed: a handle at the foot, and the drawer it raises --------------------- */
+
+.hq-drawer {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.hq-handle {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 0.75rem;
+  max-width: min(54rem, calc(100% - 2 * var(--gutter)));
+  margin-bottom: clamp(1rem, 3vh, 1.75rem);
+  padding: 0.55rem 0.6rem 0.55rem 0.85rem;
+  border: 0;
+  background: rgb(10 8 6 / 0.8);
+  box-shadow: inset 0 0 0 1px var(--color-seam);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--color-sand);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.hq-handle:hover {
+  box-shadow: inset 0 0 0 1px var(--color-edge);
+}
+
+.hq-handle:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.hq-handle-chevron {
+  display: inline-flex;
+  color: var(--color-dust);
+}
+
+.hq-handle-title {
+  flex: none;
+  font-weight: 500;
+}
+
+.hq-handle-count {
+  flex: none;
+  color: var(--phosphor);
+}
+
+.hq-handle-latest {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hq-handle-where {
+  color: var(--color-dust);
+}
+
+.hq-drawer[data-open] .hq-handle {
+  margin-bottom: 0.6rem;
+}
+
+.hq-sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(16rem, 1fr);
+  gap: 2.5rem;
+  height: min(54vh, 36rem);
+  padding: 1.25rem var(--edge) 0;
+  background: rgb(10 8 6 / 0.9);
+  border-top: 1px solid var(--color-seam);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+.hq-sheet[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq-sheet {
+    animation: hq-rise 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .hq-item,
+  .hq-handle-latest {
+    animation: hq-in 0.45s ease-out;
+  }
+}
+
+@keyframes hq-rise {
+  from {
+    transform: translateY(1.5rem);
+    opacity: 0;
+  }
+}
+
+@keyframes hq-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+}
+
+.hq-feed,
+.hq-side {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-seam) transparent;
+  padding-bottom: 1.5rem;
+}
+
+.hq-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Rows off screen cost nothing to lay out or paint. */
+.hq-item {
+  display: grid;
+  grid-template-columns: 2.75rem 5.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgb(255 243 220 / 0.05);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.75rem;
+}
+
+.hq-when {
+  font-size: 0.75rem;
+  color: var(--color-dust);
   font-variant-numeric: tabular-nums;
 }
 
-.hq-stat-foot {
+.hq-kind {
+  flex: none;
   font-size: 0.75rem;
   color: var(--color-dust);
 }
 
-.hq-since {
-  margin-top: 1rem;
+.hq-kind[data-kind="finding"] {
+  color: var(--color-gold);
+}
+
+.hq-kind[data-kind="finding"][data-severity="critical"],
+.hq-kind[data-kind="cve"][data-severity="critical"] {
+  color: var(--color-ember);
+}
+
+.hq-kind[data-kind="fixed"],
+.hq-kind[data-kind="done"] {
+  color: var(--phosphor);
+}
+
+.hq-kind[data-kind="cve"] {
+  color: var(--color-amber);
+}
+
+.hq-kind[data-kind="started"],
+.hq-kind[data-kind="queued"],
+.hq-kind[data-kind="stage"] {
+  color: var(--color-muted);
+}
+
+.hq-what {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--color-sand);
+  overflow-wrap: anywhere;
+}
+
+.hq-item[data-kind="line"] .hq-what {
+  color: var(--color-muted);
+}
+
+.hq-item[data-kind="finding"] .hq-what {
+  color: var(--color-bright);
+}
+
+.hq-item-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.hq-item-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.hq-where {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.hq-empty {
   font-size: 0.8125rem;
   color: var(--color-dust);
 }
 
-.hq-record + * {
-  margin-top: 3rem;
+.hq-side {
+  display: grid;
+  align-content: start;
+  gap: 1.75rem;
 }
 
-.hq-grid {
+.hq-side-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-dust);
+}
+
+.hq-jobs,
+.hq-crew {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 3rem 4rem;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hq-job-body {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 0.85rem;
+  background: rgb(255 243 220 / 0.035);
+  box-shadow: inset 0 0 0 1px rgb(255 243 220 / 0.05);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.hq-job-body:hover {
+  background: rgb(255 243 220 / 0.06);
+}
+
+.hq-job-name {
+  font-size: 0.875rem;
+  color: var(--color-bright);
+}
+
+.hq-job-step,
+.hq-job-line {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.hq-job-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-muted);
+}
+
+/* How far along: done in the screen's colour. */
+.hq-job-track {
+  position: relative;
+  height: 4px;
+  background: var(--color-seam);
+}
+
+.hq-job-track::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--done) * 100%);
+  background: var(--phosphor);
+  box-shadow: 0 0 8px var(--phosphor);
+  transition: width 0.6s ease;
+}
+
+.hq-job[data-queued] .hq-job-track::after {
+  background: var(--color-edge);
+  box-shadow: none;
+}
+
+.hq-record {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 0;
+}
+
+.hq-record-stat dt {
+  font-size: 0.75rem;
+  color: var(--color-dust);
+}
+
+.hq-record-stat dd {
+  margin: 0.3rem 0 0;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 0.9;
+  color: var(--color-bright);
+  font-variant-numeric: tabular-nums;
 }
 
 .hq-crew-row {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
-  padding: 0.75rem 0.75rem;
-  margin: 0 -0.75rem;
+  gap: 0.7rem;
+  padding: 0.5rem 0.6rem;
+  margin: 0 -0.6rem;
   color: inherit;
   text-decoration: none;
-  transition: background-color 120ms;
 }
 
 .hq-crew-row:hover {
-  background: var(--color-soot);
+  background: rgb(255 243 220 / 0.05);
 }
 
 .hq-crew-name {
   font-family: var(--font-display);
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   line-height: 1;
   color: var(--color-bright);
 }
 
 .hq-crew-org {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   color: var(--color-dust);
 }
 
-.hq-crew-row .blink {
+.hq-crew-on {
+  width: 0.45rem;
+  height: 0.45rem;
   margin-left: auto;
+  background: var(--phosphor);
+  box-shadow: 0 0 8px var(--phosphor);
 }
 
+.hq-stage[data-feed] .hq-hint {
+  opacity: 0;
+}
+
+/* Narrow: the feed and its side stack, and the drawer takes more of the screen. */
 @media (max-width: 52rem) {
-  .hq-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .hq-id {
+    max-width: 100%;
   }
-  .hq-stat {
-    padding: 1.25rem 1rem;
+  .hq-top {
+    flex-direction: column;
   }
-  .hq-stat:nth-child(odd) {
-    padding-left: 0;
-    border-left: 0;
+  .hq-corner {
+    justify-items: start;
   }
-  .hq-stat:nth-child(n + 3) {
-    border-top: 1px solid var(--color-seam);
+  .hq-tools {
+    justify-content: flex-start;
   }
-  .hq-grid {
-    grid-template-columns: minmax(0, 1fr);
+  /* One column that scrolls as a whole: the feed, then the jobs and the record under it. */
+  .hq-sheet {
+    display: block;
+    height: min(66vh, 40rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .hq-feed,
+  .hq-side {
+    overflow: visible;
+  }
+  .hq-side {
+    margin-top: 1.75rem;
+    padding-bottom: 2rem;
+  }
+  .hq-item {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 0.2rem 0.75rem;
+  }
+  .hq-item .hq-kind {
+    grid-column: 2;
+  }
+  .hq-item .hq-kind:empty {
+    display: none;
+  }
+  .hq-item .hq-what {
+    grid-column: 2;
+  }
+  .hq-handle {
+    align-self: stretch;
+    margin-inline: var(--gutter);
+    max-width: none;
+  }
+  .hq-handle-latest {
+    display: none;
   }
 }

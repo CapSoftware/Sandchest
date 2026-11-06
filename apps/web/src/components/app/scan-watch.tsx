@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { HackerMark } from "@/components/hacker/hacker-mark";
 import { Keycap } from "@/components/hacker/keycap";
+import { useKeySounds } from "@/components/hacker/key-sounds";
+import { useRadio } from "@/components/hacker/radio";
+import { SoundMenu } from "@/components/hacker/sound-menu";
 import { livePainter, type LiveModel } from "@/components/rig/paint-live";
 import { RigView } from "@/components/rig/rig-view";
 import type { Painter } from "@/components/rig/screen";
@@ -37,6 +40,8 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
   const [dragged, setDragged] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const signals = useRef(newSignals());
+  const sounds = useKeySounds(signals);
+  const radio = useRadio();
   const types = live.events.map((e) => e.type);
   const states = trackStates(live.kind, live.status, types);
   const steps = trackOf(live.kind, types);
@@ -83,8 +88,8 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
   const closer = () => setShot((s) => (s === "screen" ? "watch" : "screen"));
 
   // The keys on the caps, from anywhere on the page that isn't a field.
-  const keys = useRef({ closer, fullscreen, hide, hidden });
-  keys.current = { closer, fullscreen, hide, hidden };
+  const keys = useRef({ closer, fullscreen, hide, hidden, sounds, radio });
+  keys.current = { closer, fullscreen, hide, hidden, sounds, radio };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
@@ -99,6 +104,8 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
       if (key === "c") k.closer();
       else if (key === "f") k.fullscreen();
       else if (key === "h") k.hide(true);
+      else if (key === "k" && k.sounds.supported) k.sounds.toggle();
+      else if (key === "r" && k.radio.supported) k.radio.toggle();
       else return;
       event.preventDefault();
     };
@@ -145,6 +152,7 @@ function Watch({ profile, repo, findings, hackerHref }: { profile: HackerProfile
           </span>
         </p>
         <span className="watch-tools">
+          <SoundMenu radio={radio} keys={sounds} small />
           <button type="button" className="cap-key cap-key-small" aria-pressed={shot === "screen"} onClick={closer} data-track="scan-view-closer" aria-label={shot === "screen" ? "Step back" : "Look closer"}>
             <span className="cap-key-face">
               <LensIcon />
