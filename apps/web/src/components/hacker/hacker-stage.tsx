@@ -5,6 +5,7 @@ import type { HackerRecord } from "@sandchest/db";
 import { useDemo } from "@/components/app/demo";
 import { accountPainter, type AccountModel } from "@/components/rig/paint-account";
 import { recruitPainter, type RecruitModel } from "@/components/rig/paint-recruit";
+import type { CameraControl } from "@/components/rig/rig-scene";
 import { RigView } from "@/components/rig/rig-view";
 import type { Painter } from "@/components/rig/screen";
 import type { ShotName } from "@/components/rig/shots";
@@ -14,6 +15,7 @@ import { demoFeed } from "@/lib/demo-feed";
 import { PHOSPHORS, swatch, validHandle, type HackerProfile } from "@/lib/hacker";
 import { saveHacker, type SaveHackerOutcome } from "@/server/hacker-actions";
 import { serverFeed, useAccountLive } from "./account-live";
+import { CameraKeys, useCameraViews } from "./camera-keys";
 import { FeedDrawer, nowDoing, type Crew } from "./feed-drawer";
 import { HandleField } from "./handle-field";
 import { Keycap } from "./keycap";
@@ -80,6 +82,9 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   const source = useMemo(() => (demo ? demoFeed() : serverFeed(orgId)), [demo, orgId]);
   const live = useAccountLive(initial, source);
   const [drawer, setDrawer] = useDrawer();
+  // The camera: preset angles, saved views, and where it was left, remembered on this browser.
+  const camera = useRef<CameraControl | null>(null);
+  const views = useCameraViews(camera, wide);
 
   // The screen: the account's feed, or the customize menu while customizing.
   const model = useRef<RecruitModel>(null!);
@@ -128,8 +133,8 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   useEffect(() => {
     if (editing) name.current?.focus({ preventScroll: true });
   }, [editing]);
-  const keys = useRef({ save, close, open, editing, admin, radio, sounds, setDrawer });
-  keys.current = { save, close, open, editing, admin, radio, sounds, setDrawer };
+  const keys = useRef({ save, close, open, editing, admin, radio, sounds, setDrawer, views });
+  keys.current = { save, close, open, editing, admin, radio, sounds, setDrawer, views };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -151,6 +156,9 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
       } else if (!k.editing && k.sounds.supported && (event.key === "k" || event.key === "K") && !typing && !(at instanceof HTMLTextAreaElement)) {
         event.preventDefault();
         k.sounds.toggle();
+      } else if (!k.editing && (event.key === "v" || event.key === "V") && !typing && !(at instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        k.views.next();
       } else if (!k.editing && (event.key === "l" || event.key === "L") && !typing && !(at instanceof HTMLTextAreaElement)) {
         event.preventDefault();
         k.setDrawer((o) => !o);
@@ -163,14 +171,16 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   const working = live.jobs.some((j) => j.status !== "queued");
   const doing = nowDoing(live.jobs);
 
-  // At rest: side on against the screen's glow where there's width for it; face to face on a tall phone screen.
-  const shot: ShotName = editing && look >= 0 ? LOOKS[look]!.shot : wide ? "preview" : "hood";
+  // Customizing: the camera turns to whatever's being changed. Otherwise the view chosen in the camera menu.
+  const shot: ShotName = editing ? (look >= 0 ? LOOKS[look]!.shot : wide ? "preview" : "hood") : views.shot;
+  // The room's side-on view moves right to clear the name; close views stay centred.
+  const shift = !wide ? 0 : editing ? SHIFT.editing : shot === "preview" ? SHIFT.resting : 0;
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
 
   return (
     <section className="hq-stage" data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
       <div className="hq-scene" onPointerDown={() => setDragged(true)}>
-        <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={wide ? SHIFT[editing ? "editing" : "resting"] : 0} drag="look" poster />
+        <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={shift} camera={camera} drag="look" poster />
         <div className="hq-shade" aria-hidden="true" />
         {!editing && (
           <p className="hq-hint" data-gone={dragged || undefined} aria-hidden="true">
@@ -229,6 +239,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
                 {live.state === "live" ? "Live" : live.state === "connecting" ? "Reconnecting" : "Offline"}
               </p>
               <div className="hq-tools">
+                <CameraKeys views={views} />
                 <SoundMenu radio={radio} keys={sounds} />
                 {admin && (
                   <button ref={edit} type="button" className="cap-key" onClick={open} data-track="hacker-customize-open">

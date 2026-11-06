@@ -98,51 +98,25 @@
 }
 
 
-/* A level meter of three pixel bars, resting low until something plays. */
-.sound-bars {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  width: 10px;
-  height: 10px;
+/* The speaker on the key: in the screen's colour while something plays, its waves pulsing gently. */
+.sound-speaker {
   flex: none;
 }
 
-.sound-bars > span {
-  width: 2px;
-  height: 2px;
-  background: currentColor;
-}
-
-.sound-bars[data-on] > span {
-  height: 6px;
-  box-shadow: 0 0 6px var(--phosphor, var(--color-gold));
-}
-
-.sound-bars[data-on] > span:nth-child(2) {
-  height: 10px;
+.sound-speaker[data-on] {
+  color: var(--phosphor, var(--color-gold));
+  filter: drop-shadow(0 0 4px var(--phosphor, var(--color-gold)));
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .sound-bars[data-on] > span {
-    animation: sound-level 0.9s steps(4) infinite alternate;
-  }
-  .sound-bars[data-on] > span:nth-child(2) {
-    animation-duration: 0.7s;
-    animation-delay: -0.3s;
-  }
-  .sound-bars[data-on] > span:nth-child(3) {
-    animation-duration: 1.1s;
-    animation-delay: -0.6s;
+  .sound-waves {
+    animation: sound-pulse 1.2s steps(2) infinite;
   }
 }
 
-@keyframes sound-level {
-  from {
-    height: 2px;
-  }
-  to {
-    height: 10px;
+@keyframes sound-pulse {
+  50% {
+    opacity: 0.35;
   }
 }
 
@@ -193,4 +167,11 @@
 .sound-level input:focus-visible {
   outline: 2px solid var(--color-gold);
   outline-offset: 2px;
+}
+
+/* ---- The camera: its key, and the small keys that come and go beside it ---- */
+
+.camera-keys {
+  display: inline-flex;
+  gap: 0.5rem;
 }

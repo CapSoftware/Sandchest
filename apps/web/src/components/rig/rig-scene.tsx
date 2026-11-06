@@ -27,6 +27,19 @@ import { loadSurfaces } from "./textures";
  */
 export type Tier = "high" | "low";
 
+/** Where free look has the camera, from the shot: turned around and up (radians) and moved in or out (a share of its distance). */
+export interface CameraPose {
+  around: number;
+  up: number;
+  zoom: number;
+}
+
+/** What a page can do with the camera: read where it is, and put it somewhere (a shot and a pose from it). */
+export interface CameraControl {
+  pose(): CameraPose;
+  set(shot: ShotName, pose: CameraPose): void;
+}
+
 export interface RigSceneProps {
   profile: HackerProfile;
   org: string;
@@ -52,6 +65,8 @@ export interface RigSceneProps {
   typing?: boolean;
   /** Moves the picture right by this share of the width (left, if negative), to clear something on the other side. */
   frameShift?: number;
+  /** Filled in with a way for the page to read and place the camera. */
+  camera?: RefObject<CameraControl | null>;
   /** How lit the room is, 0 to 1: lower thins it to sparse dither, for when a form sits over it. */
   light?: number;
   /** Draw at all: false while scrolled away. */
@@ -406,7 +421,7 @@ function Post({ bloom, light, still, master, warming }: { bloom: boolean; light:
   return null;
 }
 
-function World({ profile, org, shot, paint, signals, parallax, drag, still, typing, frameShift, tier, pace, started }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean> }) {
+function World({ profile, org, shot, paint, signals, parallax, drag, still, typing, frameShift, camera, tier, pace, started }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean> }) {
   const room = swatch(ROOMS, profile.room);
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
   const budget = BUDGET[tier];
@@ -444,7 +459,7 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, typi
 
   return (
     <>
-      <CameraRig shot={shot} parallax={!!parallax && !still} drag={drag ?? false} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} />
+      <CameraRig shot={shot} parallax={!!parallax && !still} drag={drag ?? false} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} control={camera} />
       <ambientLight intensity={0.01} color={room.rim} />
       <hemisphereLight args={[room.rim, "#000000", 0.015]} />
       {/* Key: the room's one real light, over the left shoulder. */}
@@ -630,11 +645,29 @@ function useDrag(mode: boolean | "look", shot: ShotName, pace: RefObject<Pace>):
 }
 
 /** Glides between shots, drifts a little, follows the pointer, turns when dragged and flinches at a find. Says when it is moving, so the scene draws at the full rate. */
-function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace }: { shot: ShotName; parallax: boolean; drag: boolean | "look"; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace> }) {
+function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace, control }: { shot: ShotName; parallax: boolean; drag: boolean | "look"; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace>; control?: RefObject<CameraControl | null> }) {
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
   const pointer = useThree((state) => state.pointer);
   const size = useThree((state) => state.size);
   const drag = useDrag(draggable, shot, pace);
+  // A pose the page asked for, applied once its shot is the one showing (a new shot clears free look first).
+  const pending = useRef<{ shot: ShotName; pose: CameraPose } | null>(null);
+  useEffect(() => {
+    if (!control) return;
+    const range = DRAG_RANGE.look;
+    control.current = {
+      pose: () => ({ around: drag.current.goal[0], up: drag.current.goal[1], zoom: drag.current.zoom }),
+      set: (to, pose) => {
+        pending.current = {
+          shot: to,
+          pose: { around: MathUtils.clamp(pose.around, -range.around, range.around), up: MathUtils.clamp(pose.up, range.up[0], range.up[1]), zoom: MathUtils.clamp(pose.zoom, ZOOM[0], ZOOM[1]) },
+        };
+      },
+    };
+    return () => {
+      control.current = null;
+    };
+  }, [control, drag]);
   const now = useRef<number[]>(orbit(SHOTS[shot]));
   const velocity = useRef<number[]>(now.current.map(() => 0));
   const look = useRef({ x: 0, y: 0, vx: [0, 0] });
@@ -645,6 +678,13 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
   const scratch = useMemo(() => [new Vector3(), new Vector3()] as const, []);
 
   useFrame((state, delta) => {
+    const asked = pending.current;
+    if (asked && asked.shot === shot && drag.current.pointer === null) {
+      drag.current.goal = [asked.pose.around, asked.pose.up];
+      drag.current.zoom = asked.pose.zoom;
+      pending.current = null;
+      pace.current.busyUntil = performance.now() + 400;
+    }
     const goal = orbit(SHOTS[shot]);
     const t = state.clock.elapsedTime;
     // Long gaps between frames (a tab coming back) shouldn't fling the camera.

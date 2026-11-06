@@ -51,7 +51,7 @@ export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeyS
         data-track="hacker-sound-open"
       >
         <span className="cap-key-face">
-          <Bars on={playing} />
+          <SpeakerIcon on={playing} />
           <span className="cap-key-label">Sound</span>
         </span>
       </button>
@@ -127,14 +127,13 @@ function LoudIcon() {
   );
 }
 
-/** Three pixel bars: still when nothing plays, bouncing like a level meter when something does. */
-function Bars({ on }: { on: boolean }) {
+/** A pixel speaker: quiet when nothing plays, sound coming off it when something does. */
+function SpeakerIcon({ on }: { on: boolean }) {
   return (
-    <span className="sound-bars" data-on={on || undefined} aria-hidden="true">
-      <span />
-      <span />
-      <span />
-    </span>
+    <svg className="sound-speaker" data-on={on || undefined} width="14" height="14" viewBox="0 0 7 7" shapeRendering="crispEdges" aria-hidden="true">
+      <path fill="currentColor" d="M0 2h2v3H0zM2 1h1v5H2zM3 0h1v7H3z" />
+      {on && <path className="sound-waves" fill="currentColor" d="M5 2h1v3H5zM6 0h1v1H6zM6 6h1v1H6z" />}
+    </svg>
   );
 }
 
