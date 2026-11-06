@@ -53,7 +53,7 @@ export function HackerAtWork({ children }: { children?: ReactNode }) {
         <img className="hacker-placeholder" src={wide.src} width={wide.width} height={wide.height} alt="" loading="lazy" decoding="async" />
       </picture>
       {near ? (
-        <RigView profile={DEFAULT_HACKER} org="acme" shot={shot} paint={paint} signals={signals} opening="landing" poster drag />
+        <RigView profile={DEFAULT_HACKER} org="acme" shot={shot} paint={paint} signals={signals} opening="landing" poster drag typing={false} />
       ) : (
         <div className="rig" />
       )}

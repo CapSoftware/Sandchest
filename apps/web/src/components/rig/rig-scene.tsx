@@ -45,6 +45,11 @@ export interface RigSceneProps {
   drag?: boolean | "look";
   /** Animation off: the camera cuts, nothing sways. */
   still?: boolean;
+  /**
+   * The hacker's fingers type while `signals` says so (true unless set). Off
+   * where the picture must stay exactly as it was: the landing.
+   */
+  typing?: boolean;
   /** Moves the picture right by this share of the width (left, if negative), to clear something on the other side. */
   frameShift?: number;
   /** How lit the room is, 0 to 1: lower thins it to sparse dither, for when a form sits over it. */
@@ -401,7 +406,7 @@ function Post({ bloom, light, still, master, warming }: { bloom: boolean; light:
   return null;
 }
 
-function World({ profile, org, shot, paint, signals, parallax, drag, still, frameShift, tier, pace, started }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean> }) {
+function World({ profile, org, shot, paint, signals, parallax, drag, still, typing, frameShift, tier, pace, started }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean> }) {
   const room = swatch(ROOMS, profile.room);
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
   const budget = BUDGET[tier];
@@ -464,8 +469,8 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, fram
       <pointLight position={[0, 0.2, -0.16]} intensity={0.35} distance={1.2} decay={2} color={phosphor} />
 
       <Room room={room} profile={profile} org={org} />
-      <Laptop profile={profile} org={org} kit={kit} signals={signals} hands={hands} />
-      <Figure profile={profile} signals={signals} hands={hands} still={still} />
+      <Laptop profile={profile} org={org} kit={kit} signals={signals} hands={typing === false ? undefined : hands} />
+      <Figure profile={profile} signals={signals} hands={typing === false ? undefined : hands} still={still} />
     </>
   );
 }
