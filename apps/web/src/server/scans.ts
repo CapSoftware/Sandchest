@@ -337,13 +337,19 @@ export async function publishScan(scanId: string): Promise<void> {
     let inline = stats.inline ?? 0;
     // Private repos get findings inline on the diff, unless an earlier review of this PR already reported them:
     // those stay in the summary, so a PR isn't notified about the same bug on every push. Public repos never get details.
-    const earlier = scan.repo.private ? await earlierPrFindings(db(), { id: scan.id, repoId: scan.repo.id, prNumber: scan.prNumber, createdAt: scan.createdAt }) : new Set<string>();
+    const earlier = await earlierPrFindings(db(), { id: scan.id, repoId: scan.repo.id, prNumber: scan.prNumber, createdAt: scan.createdAt });
     const inlineable = scan.repo.private ? visible.filter((f) => !earlier.has(f.id)) : [];
+    // What earlier reviews of this PR found and this one didn't report again stays on the summary while it's open:
+    // a rescan of the same code can miss a bug, and the code may be outside the PR, where a later push can't fix it.
+    const reported = new Set(findings.map((f) => f.id));
+    const carried = (await findingsById([...earlier.keys()].filter((id) => !reported.has(id))))
+      .filter((row) => (row.status === "open" || row.status === "verified") && !row.staleAt)
+      .map((row) => ({ ...toEngineFinding(row), url: findingUrl(row.id), foundIn: { headSha: earlier.get(row.id)!.headSha, detailsUrl: detailsUrl(earlier.get(row.id)!.scanId, "github", "comment") } }));
     if (inlineable.length > 0 && stats.inline === undefined) {
       inline = await postInlineReview(scan, installation, inlineable);
       await updateScan(db(), scan.id, { stats: { ...stats, inline } });
     }
-    await postSummary(scan, installation, prSummary({ findings: findings.map((f) => ({ ...f, url: findingUrl(f.id) })), isPublic: !scan.repo.private, headSha: scan.headSha, detailsUrl: detailsUrl(scan.id, "github", "comment"), credits: scan.credits, inline, animationUrl: `${appUrl()}/github/review-chest.png?v=${PR_ANIMATION_VERSION}` }), { create: true });
+    await postSummary(scan, installation, prSummary({ findings: findings.map((f) => ({ ...f, url: findingUrl(f.id) })), isPublic: !scan.repo.private, headSha: scan.headSha, detailsUrl: detailsUrl(scan.id, "github", "comment"), credits: scan.credits, inline, earlier: carried, animationUrl: `${appUrl()}/github/review-chest.png?v=${PR_ANIMATION_VERSION}` }), { create: true });
     const threshold = scan.repo.org.settings.checkThreshold;
     const { conclusion, output } = checkResult({ findings, threshold, isPublic: !scan.repo.private, detailsUrl: detailsUrl(scan.id, "github", "check"), credits: scan.credits, inline });
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, conclusion, output);

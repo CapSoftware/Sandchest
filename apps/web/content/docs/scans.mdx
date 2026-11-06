@@ -70,6 +70,7 @@ Sandchest keeps one comment on each pull request it reviews, and edits it after 
 
 - **Nothing found:** "Sandchest reviewed `a1b2c3d`: nothing exploitable found in this change."
 - **Findings:** how many, by severity, with a link to them in the dashboard. On private repositories it also lists each finding with its full write-up folded away; on public ones it says only how many (see below).
+- **Still open from an earlier commit:** a finding an earlier review of the pull request reported stays on the comment, with the commit that found it, until it's fixed or dismissed. A later review that doesn't report it again says "nothing new found" instead of "nothing exploitable found". The Check describes the latest commit's review only.
 - **A review that couldn't finish, or wasn't run** (out of credits): the comment says so, so an earlier result never stands in for the latest commit. A pull request that never had a summary just gets the neutral Check.
 
 ### Private repositories

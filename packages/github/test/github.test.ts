@@ -235,6 +235,31 @@ describe("PR summary comment", () => {
     expect(prSummary({ ...base, findings: [], isPublic: false })).not.toContain("<img");
   });
 
+  test("findings still open from an earlier commit stay on the summary, with the commit that found them", () => {
+    const older = (severity: Finding["severity"], headSha = "1a2b3c4d5e6f7a8b") => ({ ...linked(severity), title: `Old ${severity}`, foundIn: { headSha, detailsUrl: "https://app/scans/0" } });
+    const quiet = prSummary({ ...base, findings: [], earlier: [older("medium")], isPublic: true });
+    expect(quiet).toContain("reviewed `0123456`: nothing new found in this change.");
+    expect(quiet).toContain("1 issue found in [`1a2b3c4`](https://app/scans/0) is still open (1 medium).");
+    expect(quiet).not.toContain("nothing exploitable found");
+    for (const secret of ["Old medium", "a.ts", "https://app/f/1"]) expect(quiet).not.toContain(secret);
+
+    const both = prSummary({ ...base, findings: [linked("high")], earlier: [older("medium"), older("low", "abcdef0123")], isPublic: true });
+    expect(both).toContain("found 1 issue in `0123456` (1 high).");
+    expect(both).toContain("2 issues found in earlier commits are still open: 1 medium in [`1a2b3c4`](https://app/scans/0); 1 low in [`abcdef0`](https://app/scans/0).");
+
+    const listed = prSummary({ ...base, findings: [], earlier: [older("low"), older("critical")], isPublic: false });
+    expect(listed).toContain("reviewed `0123456`: nothing new found in this change.");
+    expect(listed).toContain("| Severity | Issue | Where | Found in |");
+    expect(listed.indexOf("| Critical | [Old critical]")).toBeLessThan(listed.indexOf("| Low | [Old low]"));
+    expect(listed).toContain("| Critical | [Old critical](https://app/f/1) | `a.ts:3` | [`1a2b3c4`](https://app/scans/0) |");
+    expect(listed).toContain("<details><summary><b>Critical</b> Old critical</summary>");
+  });
+
+  test("low-confidence earlier findings stay hidden, as they do on the review that found them", () => {
+    const hidden = { ...linked("high", "low"), foundIn: { headSha: "1a2b3c4d", detailsUrl: "https://app/scans/0" } };
+    expect(prSummary({ ...base, findings: [], earlier: [hidden], isPublic: false })).toContain("nothing exploitable found in this change.");
+  });
+
   test("an unfinished review says so instead of leaving an older result standing", () => {
     expect(prSummaryUnfinished({ headSha: "abcdef0123", detailsUrl: "https://app/scans/2", reason: "failed" })).toContain("couldn't finish reviewing `abcdef0`. Comment `/sandchest review` to try again");
   });

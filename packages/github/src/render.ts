@@ -149,24 +149,36 @@ export interface SummaryInput {
   inline?: number;
   /** Absolute URL of the animated chest shown at the top. */
   animationUrl?: string;
+  /**
+   * Findings an earlier review of this pull request reported that are still
+   * open and that this review didn't report again. They stay on the summary
+   * until fixed or dismissed, so a rescan that misses one can't hide it.
+   */
+  earlier?: Array<Finding & { url: string; foundIn: { headSha: string; detailsUrl: string } }>;
 }
 
 /**
  * Sandchest's one comment on a pull request, edited in place after every
- * review so it always describes the latest commit. Public repositories get
+ * review so it always describes the latest commit, plus what earlier commits'
+ * reviews found that is still open. Public repositories get
  * counts and a private link, never what or where; private ones get each
  * finding with its full write-up folded away.
  */
 export function prSummary(input: SummaryInput): string {
   const visible = shown(input.findings) as SummaryInput["findings"];
+  const earlier = (shown(input.earlier ?? []) as NonNullable<SummaryInput["earlier"]>).sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity));
   const commit = `\`${input.headSha.slice(0, 7)}\``;
   const cost = input.credits ? ` · ${input.credits} ${input.credits === 1 ? "credit" : "credits"}` : "";
   // Linked to the review, or GitHub links it to the raw image.
   const head = input.animationUrl ? [SUMMARY_MARKER, `<a href="${input.detailsUrl}"><img src="${input.animationUrl}" alt="Sandchest" width="152" height="120"></a>`] : [SUMMARY_MARKER];
   const foot = `<sub>Sandchest reviews every change for vulnerabilities an attacker could use${cost} · [Review details](${input.detailsUrl})</sub>`;
+  const carried = earlier.length > 0 ? [stillOpen(earlier)] : [];
 
-  if (visible.length === 0) {
+  if (visible.length === 0 && earlier.length === 0) {
     return [...head, `**Sandchest** reviewed ${commit}: nothing exploitable found in this change.`, foot].join("\n\n");
+  }
+  if (visible.length === 0 && input.isPublic) {
+    return [...head, `**Sandchest** reviewed ${commit}: nothing new found in this change.`, ...carried, `<sub>This repository is public, so the details stay private: only people who can push to it can see them.${cost ? ` Reviewed${cost}.` : ""}</sub>`].join("\n\n");
   }
   const counts = countBySeverity(visible);
   const issues = `${visible.length} ${visible.length === 1 ? "issue" : "issues"}`;
@@ -174,21 +186,46 @@ export function prSummary(input: SummaryInput): string {
     return [
       ...head,
       `**Sandchest** found ${issues} in ${commit} (${counts}).`,
+      ...carried,
       `This repository is public, so the details stay private: [view them in the Sandchest dashboard →](${input.detailsUrl})`,
       `<sub>Only people who can push to this repository can see them.${cost ? ` Reviewed${cost}.` : ""}</sub>`,
     ].join("\n\n");
   }
 
-  const rows = visible.map((f) => {
+  const row = (f: SummaryInput["findings"][number], extra = "") => {
     const sink = f.attackPath.at(-1)!;
-    return `| ${LABEL[f.severity]} | [${tableCell(f.title)}](${f.url}) | \`${tableCell(`${sink.file}:${sink.line}`)}\` |`;
-  });
+    return `| ${LABEL[f.severity]} | [${tableCell(f.title)}](${f.url}) | \`${tableCell(`${sink.file}:${sink.line}`)}\` |${extra}`;
+  };
   const inline = input.inline ? ` ${input.inline} ${input.inline === 1 ? "is" : "are"} also commented on the diff.` : "";
-  const list = [...head, `**Sandchest** found ${issues} in ${commit}: ${counts}.${inline}`, ["| Severity | Issue | Where |", "| --- | --- | --- |", ...rows].join("\n")];
-  const details = visible.map((f) => `<details><summary><b>${LABEL[f.severity]}</b> ${escapeHtml(f.title)}</summary>\n\n${reviewComment(f)}\n\n</details>`);
+  const current = visible.length > 0 ? [`**Sandchest** found ${issues} in ${commit}: ${counts}.${inline}`, ["| Severity | Issue | Where |", "| --- | --- | --- |", ...visible.map((f) => row(f))].join("\n")] : [`**Sandchest** reviewed ${commit}: nothing new found in this change.`];
+  const older =
+    earlier.length > 0
+      ? [...carried, ["| Severity | Issue | Where | Found in |", "| --- | --- | --- | --- |", ...earlier.map((f) => row(f, ` [\`${f.foundIn.headSha.slice(0, 7)}\`](${f.foundIn.detailsUrl}) |`))].join("\n")]
+      : [];
+  const list = [...head, ...current, ...older];
+  const details = [...visible, ...earlier].map((f) => `<details><summary><b>${LABEL[f.severity]}</b> ${escapeHtml(f.title)}</summary>\n\n${reviewComment(f)}\n\n</details>`);
   const full = [...list, ...details, foot].join("\n\n");
   if (full.length <= COMMENT_LIMIT) return full;
   return [...list, `Full write-ups, proof and fix prompts are in the dashboard: [open the review →](${input.detailsUrl})`, foot].join("\n\n");
+}
+
+/** The line for findings an earlier commit's review reported that are still open, each commit linked to its review. */
+function stillOpen(earlier: NonNullable<SummaryInput["earlier"]>): string {
+  const groups = new Map<string, { detailsUrl: string; findings: Finding[] }>();
+  for (const f of earlier) {
+    const group = groups.get(f.foundIn.headSha) ?? { detailsUrl: f.foundIn.detailsUrl, findings: [] };
+    group.findings.push(f);
+    groups.set(f.foundIn.headSha, group);
+  }
+  const link = (sha: string, url: string) => `[\`${sha.slice(0, 7)}\`](${url})`;
+  const issues = (n: number) => `${n} ${n === 1 ? "issue" : "issues"}`;
+  const [only] = groups;
+  if (groups.size === 1 && only) {
+    const [sha, group] = only;
+    return `${issues(earlier.length)} found in ${link(sha, group.detailsUrl)} ${earlier.length === 1 ? "is" : "are"} still open (${countBySeverity(group.findings)}).`;
+  }
+  const parts = [...groups].map(([sha, group]) => `${countBySeverity(group.findings)} in ${link(sha, group.detailsUrl)}`);
+  return `${issues(earlier.length)} found in earlier commits are still open: ${parts.join("; ")}.`;
 }
 
 /**

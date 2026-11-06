@@ -21,6 +21,7 @@ import {
   noteScanEvent,
   createDb,
   createScan,
+  earlierPrFindings,
   disableRepos,
   eventsSince,
   EventWriter,
@@ -182,6 +183,25 @@ describe("webhooks", () => {
 });
 
 describe("scans", () => {
+  it("names the first finished review of the PR that reported each earlier finding", async () => {
+    const { org, repos } = await upsertInstallation(database, 9011, { ...account, githubAccountId: 111 }, [repo(110)]);
+    const at = (minutes: number) => new Date(Date.UTC(2026, 0, 1, 0, minutes));
+    const review = async (headSha: string, prNumber: number, minutes: number, status: "completed" | "failed", findingIds: string[]) => {
+      const { scan } = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "pr_review", trigger: "webhook", headSha, prNumber });
+      await database.update(schema.scans).set({ createdAt: at(minutes) }).where(eq(schema.scans.id, scan.id));
+      await updateScan(database, scan.id, { status, stats: { findingIds } });
+      return { ...scan, createdAt: at(minutes) };
+    };
+    const first = await review("aaa", 5, 1, "completed", ["A"]);
+    const second = await review("bbb", 5, 2, "completed", ["A", "B"]);
+    await review("ccc", 5, 3, "failed", ["C"]);
+    await review("ddd", 6, 4, "completed", ["D"]);
+    const current = await review("eee", 5, 5, "completed", ["E"]);
+    await review("fff", 5, 6, "completed", ["F"]);
+    const earlier = await earlierPrFindings(database, { id: current.id, repoId: repos[0]!.id, prNumber: 5, createdAt: current.createdAt });
+    expect(Object.fromEntries(earlier)).toEqual({ A: { scanId: first.id, headSha: "aaa" }, B: { scanId: second.id, headSha: "bbb" } });
+  });
+
   it("never creates two reviews for one PR head", async () => {
     const { org, repos } = await upsertInstallation(database, 9002, { ...account, githubAccountId: 102 }, [repo(10)]);
     const input = { repoId: repos[0]!.id, orgId: org.id, kind: "pr_review" as const, trigger: "webhook" as const, headSha: "abc", prNumber: 7 };

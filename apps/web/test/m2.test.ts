@@ -168,6 +168,8 @@ const call = (name: string, args: unknown): ToolCall => ({ id: `c-${name}`, type
 
 /** Set to make the model provider refuse every request for quota. */
 let quotaExhausted = false;
+/** Set to make the hunter miss the bug, as a rescan of the same code sometimes does. */
+let huntMisses = false;
 
 const fakeLlm: LlmClient = {
   config: { baseUrl: "http://fake", apiKey: "k", model: "m" },
@@ -176,7 +178,7 @@ const fakeLlm: LlmClient = {
     const answered = request.messages.some((m) => m.role === "tool");
     if (request.responseFormat) return reply(JSON.stringify(request.role === "recon" ? threatModelJson : writeUp));
     if (request.role === "recon") return reply("Notes.");
-    if (request.role === "hunt") return answered ? reply("Done.") : reply("", [call("report_finding", candidate)]);
+    if (request.role === "hunt") return answered || huntMisses ? reply("Done.") : reply("", [call("report_finding", candidate)]);
     // The skeptic disproves once the query binds its parameter.
     const text = request.messages.map((m) => m.content ?? "").join("\n");
     const fixed = text.includes("email = $1");
@@ -309,6 +311,24 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     const summary = recorded.comments.get("acme/private-app#5")!;
     expect(summary.edits).toBe(1);
     expect(summary.body).toContain(`\`${next.slice(0, 7)}\``);
+  }, 60_000);
+
+  test("a rescan that misses a bug still open from an earlier commit keeps it on the summary", async () => {
+    const first = await database.query.scans.findFirst({ where: (scans, { and, eq }) => and(eq(scans.headSha, head), eq(scans.prNumber, 5)) });
+    const event = { ...prEvent(repos[0]!, head), action: "synchronize" };
+    event.pull_request.head.sha = pushCommit("private-app", work, `${VULNERABLE}\n// touched again\n`);
+    huntMisses = true;
+    try {
+      await runWorkflow((await handleWebhook(deps(), "pull_request", "d-pr-missed", event)).scans![0]!);
+    } finally {
+      huntMisses = false;
+    }
+    const summary = recorded.comments.get("acme/private-app#5")!.body;
+    expect(summary).toContain(`reviewed \`${event.pull_request.head.sha.slice(0, 7)}\`: nothing new found in this change.`);
+    expect(summary).toContain(`1 issue found in [\`${head.slice(0, 7)}\`](https://sandchest.test/dashboard/scans/${first!.id}`);
+    expect(summary).toContain("is still open (1 high).");
+    expect(summary).toMatch(/\| High \| \[SQL injection in login[^\]]*\]\([^)]+\) \| `app\.js:4` \| \[`[0-9a-f]{7}`\]\([^)]+\) \|/);
+    expect(summary).not.toContain("nothing exploitable found");
   }, 60_000);
 
   test("an older commit's review finishing late never replaces the newer summary", async () => {

@@ -130,17 +130,20 @@ export async function prComment(database: Db, repoId: string, prNumber: number):
 }
 
 /**
- * Findings an earlier finished review of this pull request already reported:
- * those were posted inline then, so a later push doesn't post them again.
+ * Findings an earlier finished review of this pull request already reported,
+ * each with the first review that did. Those were posted inline then, so a
+ * later push doesn't post them again, and the summary keeps them while open.
  */
-export async function earlierPrFindings(database: Db, scan: { id: string; repoId: string; prNumber: number; createdAt: Date }): Promise<Set<string>> {
-  const rows = await database.execute<{ id: string }>(sql`
-    select distinct jsonb_array_elements_text(${scans.stats} -> 'findingIds') as id from ${scans}
+export async function earlierPrFindings(database: Db, scan: { id: string; repoId: string; prNumber: number; createdAt: Date }): Promise<Map<string, { scanId: string; headSha: string }>> {
+  const rows = await database.execute<{ id: string; scan_id: string; head_sha: string }>(sql`
+    select distinct on (found.id) found.id, ${scans.id} as scan_id, ${scans.headSha} as head_sha
+    from ${scans} cross join lateral jsonb_array_elements_text(${scans.stats} -> 'findingIds') as found(id)
     where ${scans.repoId} = ${scan.repoId} and ${scans.kind} = 'pr_review' and ${scans.prNumber} = ${scan.prNumber}
       and ${scans.status} = 'completed' and ${scans.id} <> ${scan.id} and ${scans.createdAt} < ${scan.createdAt.toISOString()}
       and jsonb_typeof(${scans.stats} -> 'findingIds') = 'array'
+    order by found.id, ${scans.createdAt}
   `);
-  return new Set(rows.map((row) => row.id));
+  return new Map(rows.map((row) => [row.id, { scanId: row.scan_id, headSha: row.head_sha }]));
 }
 
 /** Whether a later review of the same pull request is for a different head: this one is then out of date. */
