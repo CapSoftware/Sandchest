@@ -277,18 +277,74 @@ for name in ("Bip01 Head", "Bip01 L Hand", "Bip01 R Hand", "Bip01 L Finger2", "B
 
 # ---- Export ----------------------------------------------------------------------------------
 
+# The fingers, for the scene to type with (figure.tsx): each finger's joints, knuckle first, and for each
+# vertex how much of it moves with that finger, from the avatar's own skin weights. The fingers are
+# numbered 0-4 thumb to little finger on the left hand, 5-9 on the right.
+FINGERS = [(side, f) for side in ("L", "R") for f in range(5)]
+
+
+def chain(side, f):
+    return [f"Bip01 {side} Finger{f}{suffix}" for suffix in ("", "1", "2")]
+
+
+print("JOINTS", [[out(head_of(name)) for name in chain(side, f)] for side, f in FINGERS])
+print("WRISTS", [out(head_of(f"Bip01 {side} Hand")) for side in ("L", "R")])
+
 if EXPORT:
     depsgraph = bpy.context.evaluated_depsgraph_get()
     mesh = bpy.data.meshes.new_from_object(body.evaluated_get(depsgraph), depsgraph=depsgraph)
     mesh.transform(body.matrix_world)
     mesh.name = "hacker"
+    # Per vertex: the share that turns at the knuckle, at the middle joint and at the last one (each
+    # includes the joints after it), and which finger (its number + 1, sixteenths; 0 for none).
+    groups = {g.index: g.name for g in body.vertex_groups}
+    slots = {name: (i, k) for i, (side, f) in enumerate(FINGERS) for k, name in enumerate(chain(side, f))}
+    # And how much of each vertex goes with each hand when the hand slides over the keys: the hand
+    # and fingers all of it, the forearm from half at the elbow to all of it at the wrist, the upper
+    # arm from none at the shoulder to half at the elbow (left, right, unused).
+    def along(v, a, b):
+        ab = b - a
+        return max(0.0, min(1.0, (v - a).dot(ab) / ab.length_squared))
+
+    arm = mesh.attributes.new("_ARM", "FLOAT_VECTOR", "POINT")
+    joints = {side: [head_of(f"Bip01 {side} {bone}") for bone in ("UpperArm", "Forearm", "Hand")] for side in ("L", "R")}
+    for vertex in body.data.vertices:
+        co = mesh.vertices[vertex.index].co
+        share = {"L": 0.0, "R": 0.0}
+        for g in vertex.groups:
+            name = groups.get(g.group, "")
+            for side in ("L", "R"):
+                shoulder, elbow, wrist = joints[side]
+                if name.startswith(f"Bip01 {side} Hand") or name.startswith(f"Bip01 {side} Finger"):
+                    share[side] += g.weight
+                elif name == f"Bip01 {side} Forearm":
+                    share[side] += g.weight * (0.5 + 0.5 * along(co, elbow, wrist))
+                elif name == f"Bip01 {side} UpperArm":
+                    share[side] += g.weight * 0.5 * along(co, shoulder, elbow)
+        arm.data[vertex.index].vector = (share["L"], share["R"], 0)
+    bend = mesh.attributes.new("_FINGER", "FLOAT_VECTOR", "POINT")
+    digit = mesh.attributes.new("_DIGIT", "FLOAT", "POINT")
+    for vertex in body.data.vertices:
+        weights = [[0.0, 0.0, 0.0] for _ in FINGERS]
+        for g in vertex.groups:
+            slot = slots.get(groups.get(g.group))
+            if slot:
+                weights[slot[0]][slot[1]] += g.weight
+        best = max(range(len(FINGERS)), key=lambda i: sum(weights[i]))
+        w = weights[best]
+        if sum(w) < 1e-4:
+            bend.data[vertex.index].vector = (0, 0, 0)
+            digit.data[vertex.index].value = 0
+        else:
+            bend.data[vertex.index].vector = (w[0] + w[1] + w[2], w[1] + w[2], w[2])
+            digit.data[vertex.index].value = (best + 1) / 16
     baked = bpy.data.objects.new("hacker", mesh)
     bpy.context.scene.collection.objects.link(baked)
     for obj in bpy.context.scene.objects:
         obj.select_set(obj == baked)
     bpy.ops.export_scene.gltf(filepath=EXPORT, export_format="GLB", use_selection=True, export_apply=True, export_materials="EXPORT",
                               export_texcoords=True, export_normals=True, export_yup=True, export_animations=False, export_skins=False,
-                              export_morph=False)
+                              export_morph=False, export_attributes=True)
     print("EXPORTED", EXPORT, len(mesh.polygons), "faces")
     raise SystemExit(0)
 

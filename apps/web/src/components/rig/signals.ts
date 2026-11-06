@@ -8,6 +8,8 @@ export interface Signals {
   dim?: boolean;
   /** The scene's clock, so pages can schedule against it. */
   now: number;
+  /** Told as each of the laptop's keys goes down or comes back up (an index into KEYS), on the frame it's drawn: for the keyboard's sound. */
+  onKey?: (key: number, down: boolean) => void;
 }
 
 /** How long a find jolts the camera and the screen, in seconds. */

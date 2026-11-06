@@ -9,6 +9,7 @@ import { PHOSPHORS, ROOMS, swatch } from "@/lib/hacker";
 import { loadFonts, pageFonts } from "./art";
 import { DitherEffect } from "./dither";
 import { Figure, loadHacker } from "./figure";
+import type { Typist } from "./hands";
 import { Laptop } from "./laptop";
 import { keepOut, orbit, orbitPosition } from "./camera-bounds";
 import { Room } from "./room";
@@ -407,6 +408,8 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, fram
   const kit = useMemo(() => new Kit(pageFonts(), budget.screenScale), [budget.screenScale]);
   const [fontsReady, setFontsReady] = useState(false);
   const scene = useThree((state) => state.scene);
+  // Between the hacker's fingers and the laptop's keys.
+  const hands = useMemo<{ typist: Typist | null }>(() => ({ typist: null }), []);
 
   useEffect(() => {
     loadFonts(kit.fonts).then(() => setFontsReady(true));
@@ -461,8 +464,8 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, fram
       <pointLight position={[0, 0.2, -0.16]} intensity={0.35} distance={1.2} decay={2} color={phosphor} />
 
       <Room room={room} profile={profile} org={org} />
-      <Laptop profile={profile} org={org} kit={kit} signals={signals} />
-      <Figure profile={profile} signals={signals} />
+      <Laptop profile={profile} org={org} kit={kit} signals={signals} hands={hands} />
+      <Figure profile={profile} signals={signals} hands={hands} still={still} />
     </>
   );
 }

@@ -1,12 +1,13 @@
 "use client";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Color, Group, Mesh, type MeshStandardMaterial, type Texture, TextureLoader, Vector3 } from "three";
+import { type BufferAttribute, Color, Group, Matrix3, Matrix4, Mesh, type MeshStandardMaterial, type Object3D, type Texture, TextureLoader, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { HackerProfile } from "@/lib/hacker";
 import { HOODIES, PHOSPHORS, swatch } from "@/lib/hacker";
 import { RIG_HOODIE_MASK_URL, RIG_MODEL_URL } from "./assets";
+import { buildHands, placeHand, Typist, type V3 } from "./hands";
 import type { Signals } from "./signals";
 import { Visor } from "./visor";
 
@@ -103,8 +104,14 @@ totalEmissiveRadiance += edgeColour * rim * 0.12 * smoothstep(0.1, 0.3, vHeight)
   return dressed;
 }
 
-/** The hacker at work: hood up, hunched over the laptop, hands on the keys, a visor for a face. */
-export function Figure({ profile, signals }: { profile: HackerProfile; signals: RefObject<Signals> }) {
+/** The breathing: the body's scale about PIVOT at `t`. */
+function breathAt(t: number, out: Vector3): Vector3 {
+  const s = Math.sin(t * 1.4);
+  return out.set(1 + s * 0.003, 1 + s * 0.004, 1 + s * 0.003);
+}
+
+/** The hacker at work: hood up, hunched over the laptop, hands on the keys, a visor for a face. Their fingers type while `signals` says so. */
+export function Figure({ profile, signals, hands, still }: { profile: HackerProfile; signals: RefObject<Signals>; hands?: { typist: Typist | null }; still?: boolean }) {
   const body = useRef<Group>(null);
   const model = useHacker();
   const hoodie = swatch(HOODIES, profile.hoodie).color;
@@ -139,11 +146,34 @@ export function Figure({ profile, signals }: { profile: HackerProfile; signals: 
     };
   }, [model, hoodie, phosphor]);
 
+  // The hands, set up the first time they type (never, on a page that doesn't type).
+  // False once it's known the model has no hand data.
+  const fingers = useRef<Hands | false | null>(null);
+  useEffect(() => {
+    return () => {
+      if (fingers.current) fingers.current.release();
+      fingers.current = null;
+      if (hands) hands.typist = null;
+    };
+  }, [model, hands]);
+
   const breath = useMemo(() => new Vector3(), []);
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    if (body.current) body.current.scale.copy(breath.set(1 + Math.sin(t * 1.4) * 0.003, 1 + Math.sin(t * 1.4) * 0.004, 1 + Math.sin(t * 1.4) * 0.003));
+    if (body.current) body.current.scale.copy(breathAt(t, breath));
   });
+  // Before anything else draws from them: the laptop presses its keys from where the fingers are this frame.
+  useFrame((state) => {
+    if (!model || !hands) return;
+    const t = state.clock.elapsedTime;
+    const typing = !still && (signals.current?.typingUntil ?? 0) > t;
+    if (fingers.current === false || (!typing && !fingers.current?.typist.busy)) return;
+    fingers.current ??= Hands.of(model.scene, PIVOT) ?? false;
+    if (!fingers.current) return;
+    hands.typist = fingers.current.typist;
+    fingers.current.typist.update(t, typing, breathAt(t, breath).toArray() as V3);
+    fingers.current.draw();
+  }, -1);
 
   return (
     <group position={PIVOT.toArray()}>
@@ -155,4 +185,111 @@ export function Figure({ profile, signals }: { profile: HackerProfile; signals: 
       </group>
     </group>
   );
+}
+
+/**
+ * The hacker's hands moving on their mesh. The model is shared by every rig
+ * on the page, so the mesh gets a geometry of its own first; a hand back at
+ * rest gets its exact original vertices back.
+ */
+class Hands {
+  /** Hands drawn away from rest last time. */
+  private readonly moved: boolean[];
+  private readonly position: BufferAttribute;
+  private readonly normal: BufferAttribute;
+  private readonly restPosition: ArrayLike<number>;
+  private readonly restNormal: ArrayLike<number>;
+  /** Each hand's vertices in the scene's space, posed, before going back into the mesh's own. */
+  private readonly placed: { positions: Float32Array; normals: Float32Array }[];
+  private readonly scratch = new Vector3();
+
+  private constructor(
+    private readonly mesh: Mesh,
+    private readonly original: Mesh["geometry"],
+    private readonly toLocal: Matrix4,
+    private readonly normalToLocal: Matrix3,
+    readonly typist: Typist,
+  ) {
+    mesh.geometry = original.clone();
+    this.position = mesh.geometry.getAttribute("position") as BufferAttribute;
+    this.normal = mesh.geometry.getAttribute("normal") as BufferAttribute;
+    this.restPosition = (original.getAttribute("position") as BufferAttribute).array;
+    this.restNormal = (original.getAttribute("normal") as BufferAttribute).array;
+    this.moved = typist.hands.map(() => false);
+    this.placed = typist.hands.map((hand) => ({ positions: new Float32Array(hand.ids.length * 3), normals: new Float32Array(hand.ids.length * 3) }));
+  }
+
+  /** The hands of the mesh in `root` that carries the bake's hand data, or null if none does. */
+  static of(root: Object3D, pivot: Vector3): Hands | null {
+    let found: Hands | null = null;
+    root.traverse((child) => {
+      if (found || !(child instanceof Mesh) || !child.geometry.getAttribute("_arm")) return;
+      // From the mesh's own (quantized) space to the scene's metres, and back.
+      const toScene = new Matrix4();
+      for (let node: Object3D | null = child; node && node !== root; node = node.parent) toScene.premultiply(node.matrix);
+      const geometry = child.geometry;
+      const read = (name: string, size: number) => {
+        const attribute = geometry.getAttribute(name) as BufferAttribute;
+        const out = new Float32Array(attribute.count * size);
+        for (let i = 0; i < attribute.count; i++) for (let c = 0; c < size; c++) out[i * size + c] = attribute.getComponent(i, c);
+        return out;
+      };
+      const positions = read("position", 3);
+      const normals = read("normal", 3);
+      const sceneNormal = new Matrix3().getNormalMatrix(toScene);
+      const v = new Vector3();
+      for (let i = 0; i < positions.length / 3; i++) {
+        v.fromArray(positions, i * 3).applyMatrix4(toScene).toArray(positions, i * 3);
+        v.fromArray(normals, i * 3).applyMatrix3(sceneNormal).normalize().toArray(normals, i * 3);
+      }
+      const hands = buildHands({ positions, normals, finger: read("_finger", 3), digit: read("_digit", 1), arm: read("_arm", 3) });
+      if (hands.length === 0) return;
+      const toLocal = toScene.clone().invert();
+      found = new Hands(child, geometry, toLocal, new Matrix3().getNormalMatrix(toLocal), new Typist(hands, pivot.toArray() as V3));
+    });
+    return found;
+  }
+
+  /** Puts every hand where the typist has it. */
+  draw() {
+    const { typist, position, normal, scratch } = this;
+    let changed = false;
+    typist.hands.forEach((hand, h) => {
+      const resting = typist.resting(h);
+      if (resting && !this.moved[h]) return;
+      this.moved[h] = !resting;
+      changed = true;
+      if (resting) {
+        // Exactly as the model has it.
+        const positions = position.array as Float32Array;
+        const normals = normal.array as Float32Array;
+        for (const v of hand.ids)
+          for (let c = 0; c < 3; c++) {
+            positions[v * 3 + c] = this.restPosition[v * 3 + c]!;
+            normals[v * 3 + c] = this.restNormal[v * 3 + c]!;
+          }
+        return;
+      }
+      const placed = this.placed[h]!;
+      placeHand(hand, typist.poses[h]!, placed.positions, placed.normals);
+      for (let m = 0; m < hand.ids.length; m++) {
+        const v = hand.ids[m]!;
+        scratch.fromArray(placed.positions, m * 3).applyMatrix4(this.toLocal);
+        position.setXYZ(v, scratch.x, scratch.y, scratch.z);
+        scratch.fromArray(placed.normals, m * 3).applyMatrix3(this.normalToLocal).normalize();
+        normal.setXYZ(v, scratch.x, scratch.y, scratch.z);
+      }
+    });
+    if (changed) {
+      position.needsUpdate = true;
+      normal.needsUpdate = true;
+    }
+  }
+
+  /** Back to the shared geometry. */
+  release() {
+    const own = this.mesh.geometry;
+    this.mesh.geometry = this.original;
+    own.dispose();
+  }
 }
