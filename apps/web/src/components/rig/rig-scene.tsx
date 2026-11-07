@@ -1,8 +1,8 @@
 "use client";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { BloomEffect, EffectComposer, EffectPass, RenderPass, VignetteEffect, type Effect } from "postprocessing";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ACESFilmicToneMapping, Color, DirectionalLight, Fog, Group, HalfFloatType, HemisphereLight, MathUtils, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PMREMGenerator, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
+import { BloomEffect, ChromaticAberrationEffect, DepthOfFieldEffect, EffectComposer, EffectPass, RenderPass, VignetteEffect, type Effect } from "postprocessing";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { ACESFilmicToneMapping, Color, DirectionalLight, Fog, Group, HalfFloatType, HemisphereLight, MathUtils, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PMREMGenerator, type SpotLight, Vector2, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { HackerProfile } from "@/lib/hacker";
 import { PHOSPHORS, ROOMS, swatch } from "@/lib/hacker";
@@ -63,6 +63,14 @@ export interface RigSceneProps {
    * where the picture must stay exactly as it was: the landing.
    */
   typing?: boolean;
+  /**
+   * `high`: the hacker's own page, where the room is the whole page. On the
+   * high tier the screen's light casts soft shadows (fingers on the keys),
+   * and the picture is seen through a lens: a slight depth of field focused
+   * on the screen, and faint colour fringes at the edges. Elsewhere (the
+   * landing, onboarding, whose stills must match the first frame) as before.
+   */
+  detail?: "high";
   /** Moves the picture right by this share of the width (left, if negative), to clear something on the other side. */
   frameShift?: number;
   /** Filled in with a way for the page to read and place the camera. */
@@ -200,6 +208,8 @@ export default function RigScene(props: RigSceneProps) {
   const started = useRef(false);
   // Set while the shaders compile, before the clock starts: nothing is drawn meanwhile.
   const warming = useRef(false);
+  // Where the camera looks, for the lens to focus on.
+  const focus = useMemo(() => new Vector3(0, 0.1, -0.1), []);
   return (
     <Canvas
       key={tier}
@@ -215,8 +225,8 @@ export default function RigScene(props: RigSceneProps) {
       <Watchdog pace={pace} started={started} onReady={props.onReady} onSlow={props.onSlow} />
       {budget.shadowFps > 0 && <ShadowPace fps={budget.shadowFps} />}
       <Reflections />
-      <World {...props} pace={pace} started={started} />
-      <Post bloom={tier === "high"} light={props.light ?? 1} still={!!props.still} master={!!props.master} warming={warming} />
+      <World {...props} pace={pace} started={started} focus={focus} />
+      <Post bloom={tier === "high"} light={props.light ?? 1} still={!!props.still} master={!!props.master} warming={warming} lens={props.detail === "high" && tier === "high" && !props.still} focus={focus} />
       {process.env.NODE_ENV === "development" && <DevCapture shot={props.shot} started={started} />}
     </Canvas>
   );
@@ -386,15 +396,31 @@ function Reflections() {
  * The finish: bloom on the screen's glow (high tier only), a vignette, then
  * the landing page's ordered dither over everything, in 3-pixel cells.
  */
-function Post({ bloom, light, still, master, warming }: { bloom: boolean; light: number; still: boolean; master: boolean; warming: RefObject<boolean> }) {
+/**
+ * The lens on the hacker's page: a slight depth of field, focused where the
+ * camera looks (the screen and hands, mostly) with a range that grows with
+ * the distance, so the screen is always sharp and only what's well in front
+ * or behind softens; and faint colour fringes towards the frame's edges,
+ * none in the middle. Its own pass ahead of the others, at half resolution.
+ */
+const BOKEH = 1.4;
+
+function Post({ bloom, light, still, master, warming, lens, focus }: { bloom: boolean; light: number; still: boolean; master: boolean; warming: RefObject<boolean>; lens: boolean; focus: Vector3 }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
   const dpr = useThree((state) => state.viewport.dpr);
-  const { composer, dither } = useMemo(() => {
+  const { composer, dither, dof } = useMemo(() => {
     const c = new EffectComposer(gl, { multisampling: bloom ? Math.min(4, gl.capabilities.maxSamples) : 0, frameBufferType: HalfFloatType });
     c.addPass(new RenderPass(scene, camera));
+    let depth: DepthOfFieldEffect | null = null;
+    if (lens) {
+      depth = new DepthOfFieldEffect(camera, { focusDistance: 1.5, focusRange: 0.4, bokehScale: BOKEH, resolutionScale: 0.5 });
+      depth.target = focus;
+      const fringe = new ChromaticAberrationEffect({ offset: new Vector2(0.0006, 0.0004), radialModulation: true, modulationOffset: 0.4 });
+      c.addPass(new EffectPass(camera, depth, fringe));
+    }
     // The still's master leaves the vignette to the page, which draws it for the size it's shown at.
     const effects: Effect[] = master ? [] : [new VignetteEffect({ offset: VIGNETTE.offset, darkness: VIGNETTE.darkness })];
     if (bloom) effects.unshift(new BloomEffect({ mipmapBlur: true, intensity: 1.2, luminanceThreshold: 0.5, luminanceSmoothing: 0.3, radius: 0.7 }));
@@ -402,10 +428,10 @@ function Post({ bloom, light, still, master, warming }: { bloom: boolean; light:
     d.light = light;
     d.master = master;
     c.addPass(new EffectPass(camera, ...effects, d));
-    return { composer: c, dither: d };
+    return { composer: c, dither: d, dof: depth };
     // The light eases in below; a new composer only for a new tier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gl, scene, camera, bloom, master]);
+  }, [gl, scene, camera, bloom, master, lens]);
   useEffect(() => composer.setSize(size.width, size.height), [composer, size]);
   useEffect(() => {
     dither.cell = Math.round(2 * dpr);
@@ -414,6 +440,8 @@ function Post({ bloom, light, still, master, warming }: { bloom: boolean; light:
   // Priority 1: this renders the frame in place of the default render.
   useFrame((_, delta) => {
     dither.light = still ? light : MathUtils.damp(dither.light, light, 3, Math.min(delta, 0.1));
+    // In focus: a range about a quarter of the distance to where the camera looks, and never less than 15 cm.
+    if (dof) dof.cocMaterial.focusRange = Math.max(0.15, camera.position.distanceTo(focus) * 0.25);
     // Drawing now would wait on the shaders compiling in the background.
     if (warming.current) return;
     composer.render(delta);
@@ -421,7 +449,7 @@ function Post({ bloom, light, still, master, warming }: { bloom: boolean; light:
   return null;
 }
 
-function World({ profile, org, shot, paint, signals, parallax, drag, still, typing, frameShift, camera, tier, pace, started }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean> }) {
+function World({ profile, org, shot, paint, signals, parallax, drag, still, typing, detail, frameShift, camera, tier, pace, started, focus }: RigSceneProps & { pace: RefObject<Pace>; started: RefObject<boolean>; focus: Vector3 }) {
   const room = swatch(ROOMS, profile.room);
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
   const budget = BUDGET[tier];
@@ -459,7 +487,7 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, typi
 
   return (
     <>
-      <CameraRig shot={shot} parallax={!!parallax && !still} drag={drag ?? false} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} control={camera} />
+      <CameraRig shot={shot} parallax={!!parallax && !still} drag={drag ?? false} still={!!still} signals={signals} shift={frameShift ?? 0} pace={pace} control={camera} focus={focus} />
       <ambientLight intensity={0.01} color={room.rim} />
       <hemisphereLight args={[room.rim, "#000000", 0.015]} />
       {/* Key: the room's one real light, over the left shoulder. */}
@@ -480,13 +508,50 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, typi
       {/* Rim: behind and to the right, to cut the hood out of the dark. */}
       <spotLight position={[-0.7, 1.0, -0.6]} angle={0.45} penumbra={0.9} intensity={room.rimIntensity * 1.1} color={room.rim} distance={4} decay={1.5} target-position={[0, 0.35, 0.55]} />
       <spotLight position={[0.8, 0.8, -0.5]} angle={0.45} penumbra={0.9} intensity={room.rimIntensity * 0.6} color={room.rim} distance={4} decay={1.5} target-position={[0, 0.3, 0.6]} />
-      {/* The screen's spill: on the hands, the keys and into the hood. */}
-      <pointLight position={[0, 0.2, -0.16]} intensity={0.35} distance={1.2} decay={2} color={phosphor} />
+      {/* The screen's spill: on the hands, the keys and into the hood. On the hacker's page, from the screen itself, casting the fingers' shadows. */}
+      {detail === "high" && tier === "high" ? <ScreenSpill colour={phosphor} /> : <pointLight position={[0, 0.2, -0.16]} intensity={0.35} distance={1.2} decay={2} color={phosphor} />}
 
       <Room room={room} profile={profile} org={org} />
       <Laptop profile={profile} org={org} kit={kit} signals={signals} hands={typing === false ? undefined : hands} />
       <Figure profile={profile} signals={signals} hands={typing === false ? undefined : hands} still={still} />
     </>
+  );
+}
+
+/**
+ * The screen's light as it really falls: from the screen, out towards the
+ * hacker, so the hands shadow the keys under them and each fingertip's
+ * shadow meets it as it lands. A small, tight shadow map (only the desk
+ * between the screen and the hacker), redrawn with the others at
+ * ShadowPace's rate. Lights about as much as the point light it replaces.
+ */
+function ScreenSpill({ colour }: { colour: string }) {
+  const light = useRef<SpotLight>(null);
+  useLayoutEffect(() => {
+    const spot = light.current;
+    if (!spot) return;
+    spot.target.position.set(0, 0.06, 0.3);
+    spot.target.updateMatrixWorld();
+    spot.shadow.camera.near = 0.02;
+    spot.shadow.camera.far = 1.1;
+    spot.shadow.camera.updateProjectionMatrix();
+  }, []);
+  return (
+    <spotLight
+      ref={light}
+      position={[0, 0.125, -0.115]}
+      angle={1.2}
+      penumbra={0.9}
+      intensity={0.42}
+      distance={1.2}
+      decay={2}
+      color={colour}
+      castShadow
+      shadow-mapSize={[1024, 1024]}
+      shadow-bias={-0.0006}
+      shadow-normalBias={0.004}
+      shadow-radius={4}
+    />
   );
 }
 
@@ -645,7 +710,7 @@ function useDrag(mode: boolean | "look", shot: ShotName, pace: RefObject<Pace>):
 }
 
 /** Glides between shots, drifts a little, follows the pointer, turns when dragged and flinches at a find. Says when it is moving, so the scene draws at the full rate. */
-function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace, control }: { shot: ShotName; parallax: boolean; drag: boolean | "look"; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace>; control?: RefObject<CameraControl | null> }) {
+function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pace, control, focus }: { shot: ShotName; parallax: boolean; drag: boolean | "look"; still: boolean; signals: RefObject<Signals>; shift: number; pace: RefObject<Pace>; control?: RefObject<CameraControl | null>; focus?: Vector3 }) {
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
   const pointer = useThree((state) => state.pointer);
   const size = useThree((state) => state.size);
@@ -750,6 +815,7 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
     orbitPosition(distance, around, up, camera.position).add(offset);
     keepOut(camera.position, scratch[0], scratch[1]);
     camera.lookAt(aim.set(tx, ty, tz));
+    focus?.copy(aim);
     camera.updateProjectionMatrix();
   });
   return null;

@@ -22,8 +22,8 @@ export const SHOTS = {
   preview: { position: [1.55, 0.55, 1.15], target: [-0.08, 0.2, 0.12], fov: 30 },
   /** Leaning in from the resting shot, past the hacker's arm, onto the screen: for the moment something is found. */
   lean: { position: [0.7, 0.32, 0.46], target: [0, 0.13, -0.11], fov: 26 },
-  /** From above, just past the hood: the laptop's whole screen, and the hands typing under it. */
-  work: { position: [0, 0.72, 0.17], target: [0, 0.08, -0.08], fov: 42 },
+  /** Where the hacker's eyes are, just in front of the hood: the laptop's screen close and nearly square on, the hands typing under it. */
+  work: { position: [0, 0.42, 0.12], target: [0, 0.085, -0.09], fov: 42 },
   /** Close on the hands and the keys, from the right. */
   hands: { position: [0.3, 0.24, 0.12], target: [-0.01, 0.025, -0.03], fov: 36 },
   /** The same, for watching a scan. */

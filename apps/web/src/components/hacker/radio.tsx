@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * mix at its own quiet points. Browsers keep them for a year (next.config.ts),
  * so bump the version when a track changes.
  */
-const RADIO_VERSION = "2";
+const RADIO_VERSION = "3";
 const TRACKS = Array.from({ length: 10 }, (_, i) => `/radio/${String(i + 1).padStart(2, "0")}.webm?v=${RADIO_VERSION}`);
 /** How loud the radio plays at full on its slider. */
 const VOLUME = 0.55;
@@ -21,6 +21,8 @@ export interface Radio {
   track: number | null;
   toggle: () => void;
   next: () => void;
+  /** Starts fetching the first track, so it plays the moment it's asked for (the Sound menu opening is a good sign it will be). */
+  prime: () => void;
   /** Its slider, 0 to 1, remembered on this browser. */
   level: number;
   setLevel: (level: number) => void;
@@ -99,6 +101,13 @@ export function useRadio(): Radio {
     return el;
   }, []);
 
+  const prime = useCallback(() => {
+    const el = element();
+    if (el.src || track !== null) return;
+    el.preload = "auto";
+    el.src = TRACKS[0]!;
+  }, [element, track]);
+
   const toggle = useCallback(() => {
     const el = element();
     if (on) {
@@ -108,10 +117,15 @@ export function useRadio(): Radio {
     }
     setOn(true);
     el.volume = 0;
-    if (el.src && !el.ended) el.play().catch(() => setOn(false));
+    // Primed with the first track but never played: play that, from what's already in.
+    if (el.src && track === null && queue.current.length === 0) {
+      queue.current = shuffled(TRACKS.length - 1, null).map((i) => i + 1);
+      setTrack(1);
+      el.play().catch(() => setOn(false));
+    } else if (el.src && !el.ended) el.play().catch(() => setOn(false));
     else play(el);
     ramp(el, VOLUME * levelRef.current);
-  }, [element, on, play, ramp]);
+  }, [element, on, play, ramp, track]);
 
   const next = useCallback(() => {
     const el = element();
@@ -132,7 +146,7 @@ export function useRadio(): Radio {
     [],
   );
 
-  return { supported, on, track, toggle, next, level, setLevel };
+  return { supported, on, track, toggle, next, prime, level, setLevel };
 }
 
 function safeGet(key: string): string | null {

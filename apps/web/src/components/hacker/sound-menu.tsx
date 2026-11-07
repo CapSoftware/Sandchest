@@ -47,7 +47,11 @@ export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeyS
         className={`cap-key${small ? " cap-key-small" : ""}`}
         aria-expanded={open}
         aria-controls={panel}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open && radio.supported && !radio.on) radio.prime();
+          setOpen((o) => !o);
+        }}
+        onPointerEnter={() => radio.supported && !radio.on && radio.prime()}
         data-track="hacker-sound-open"
       >
         <span className="cap-key-face">

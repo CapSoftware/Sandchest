@@ -180,7 +180,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   return (
     <section className="hq-stage" data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
       <div className="hq-scene" onPointerDown={() => setDragged(true)}>
-        <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={shift} camera={camera} drag="look" poster />
+        <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={shift} camera={camera} detail="high" drag="look" poster />
         <div className="hq-shade" aria-hidden="true" />
         {!editing && (
           <p className="hq-hint" data-gone={dragged || undefined} aria-hidden="true">
