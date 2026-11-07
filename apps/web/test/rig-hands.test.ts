@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildHands, contactPoint, FIDGET, glideOverlap, handOf, overlap, PLAIN, solveStations, STATIONS, STATIONS_HQ, strokeAt, strokeOverlap, thumbManner, Typist, WANDER, type Angles, type Finger, type Hand, type Manner, type Station } from "@/components/rig/hands";
+import { buildHands, contactPoint, FIDGET, fingerAngles, glideOverlap, handOf, overlap, placeFinger, placeHand, placeVertex, PLAIN, solveStations, STATIONS, STATIONS_HQ, strokeAt, strokeOverlap, thumbManner, Typist, WANDER, type Angles, type Finger, type Hand, type Manner, type Station } from "@/components/rig/hands";
 import { KEY_TOP, KEYS, keyAt, TRAVEL } from "@/components/rig/keyboard";
 import { hackerMesh } from "./hacker-mesh";
 
@@ -20,6 +20,40 @@ const strokes = (list: Hand[] = hands) =>
   list.flatMap((hand) => hand.stations.flatMap((station) => Object.entries(station.strokes).flatMap(([index, targets]) => targets.map((target) => ({ hand, station, finger: hand.fingers.find((f) => f.index === Number(index))!, target })))));
 
 describe(`the hacker's hands on the keys (${model})`, () => {
+  test("the page's fast way to place a finger puts every vertex and normal where placeVertex does", () => {
+    let seed = 3;
+    const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+    for (const hand of hands) {
+      const fast = { positions: new Float32Array(hand.ids.length * 3), normals: new Float32Array(hand.ids.length * 3) };
+      const exact = { positions: new Float32Array(hand.ids.length * 3), normals: new Float32Array(hand.ids.length * 3) };
+      for (let round = 0; round < 12; round++) {
+        const offset: [number, number] = [r() * 0.03, r() * 0.02];
+        const working = round % 3 === 0 ? 0 : Math.abs(r());
+        hand.fingers.forEach((finger) => {
+          const a: Angles | null = round % 4 === 3 ? null : [r() * 1.2, r() * 1.2, r() * 0.5];
+          placeFinger(hand, finger, a, offset, fast.positions, fast.normals, working);
+          for (const m of finger.members) placeVertex(hand, m, finger, a, offset, exact.positions, m * 3, exact.normals, working);
+          for (const m of finger.members)
+            for (let c = 0; c < 3; c++) {
+              expect(Math.abs(fast.positions[m * 3 + c]! - exact.positions[m * 3 + c]!)).toBeLessThan(1e-6);
+              expect(Math.abs(fast.normals[m * 3 + c]! - exact.normals[m * 3 + c]!)).toBeLessThan(1e-6);
+            }
+        });
+      }
+      // And the whole hand, finger and palm alike.
+      const pose = { offset: [0.01, -0.005] as [number, number], thumb: 0.6, angles: hand.fingers.map((): Angles => [0.3, 0.5, 0.1]) };
+      placeHand(hand, pose, fast.positions, fast.normals);
+      for (let m = 0; m < hand.ids.length; m++) {
+        const f = hand.memberOf[m]!;
+        placeVertex(hand, m, f >= 0 ? hand.fingers[f]! : null, f >= 0 ? fingerAngles(hand, pose, f) : null, pose.offset, exact.positions, m * 3, exact.normals, pose.thumb);
+      }
+      for (let i = 0; i < fast.positions.length; i++) {
+        expect(Math.abs(fast.positions[i]! - exact.positions[i]!)).toBeLessThan(1e-6);
+        expect(Math.abs(fast.normals[i]! - exact.normals[i]!)).toBeLessThan(1e-6);
+      }
+    }
+  });
+
   test("the places and strokes the page plays are the ones the model solves to", () => {
     for (const side of [0, 1] as const) {
       const solved = solveStations(handOf(mesh, side)!);

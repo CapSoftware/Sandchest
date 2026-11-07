@@ -7,7 +7,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import type { HackerProfile } from "@/lib/hacker";
 import { HOODIES, PHOSPHORS, swatch } from "@/lib/hacker";
 import { RIG_HOODIE_MASK_URL, RIG_MODEL_HQ_URL, RIG_MODEL_URL } from "./assets";
-import { buildHands, fingerAngles, placeHand, placeVertex, STATIONS, STATIONS_HQ, Typist, type Angles, type Hand, type V3 } from "./hands";
+import { buildHands, fingerAngles, placeFinger, placeHand, STATIONS, STATIONS_HQ, Typist, type Angles, type Hand, type V3 } from "./hands";
 import type { Signals } from "./signals";
 import { Visor } from "./visor";
 
@@ -215,7 +215,7 @@ class Hands {
   private readonly placed: { positions: Float32Array; normals: Float32Array }[];
   private readonly scratch = new Vector3();
   /** The direct way back into the mesh's own space, when there is one: local = (scene - offset) / scale, then the integers' range. */
-  private readonly fast: { s: number; x: number; y: number; z: number; p: number; n: number } | null;
+  private readonly fast: { s: number; x: number; y: number; z: number; p: number; n: number; k: number } | null;
 
   private constructor(
     private readonly mesh: Mesh,
@@ -240,7 +240,8 @@ class Hands {
     const scale = (array: ArrayLike<number>, normalized: boolean) => (normalized && array instanceof Int16Array ? 32767 : normalized && array instanceof Int8Array ? 127 : 0);
     const p = scale(this.at.position.array, this.position.normalized);
     const n = scale(this.at.normal.array, this.normal.normalized);
-    this.fast = uniform && p && n ? { s: 1 / e[0]!, x: -e[12]! / e[0]!, y: -e[13]! / e[0]!, z: -e[14]! / e[0]!, p, n } : null;
+    // k: scene metres to the integers in one multiply (p / s).
+    this.fast = uniform && p && n ? { s: 1 / e[0]!, x: -e[12]! / e[0]!, y: -e[13]! / e[0]!, z: -e[14]! / e[0]!, p, n, k: p * e[0]! } : null;
     this.placed = typist.hands.map((hand) => ({ positions: new Float32Array(hand.ids.length * 3), normals: new Float32Array(hand.ids.length * 3) }));
   }
 
@@ -317,10 +318,8 @@ class Hands {
         const before = drawn.angles[f] ?? null;
         // Moves under a tenth of a millimetre at the tip (slow fidgets) wait until they add up; strikes are always past it.
         if (now === before || (now && before && Math.abs(now[0] - before[0]) < FINGER_STEP && Math.abs(now[1] - before[1]) < FINGER_STEP && Math.abs(now[2] - before[2]) < FINGER_STEP)) return;
-        for (const m of finger.members) {
-          placeVertex(hand, m, finger, now, drawn.offset, placed.positions, m * 3, placed.normals, drawn.thumb);
-          this.write(hand, m, placed);
-        }
+        placeFinger(hand, finger, now, drawn.offset, placed.positions, placed.normals, drawn.thumb);
+        for (const m of finger.members) this.write(hand, m, placed);
         drawn.angles[f] = now ? ([...now] as Angles) : null;
         dirty.push(...this.runs[h]!.fingers[f]!);
       });
@@ -344,9 +343,9 @@ class Hands {
     if (fast) {
       // The model's own transform is a uniform scale and an offset (its quantization): straight into its integers.
       const i = v * P.stride + P.offset;
-      P.array[i] = Math.round(((placed.positions[o]! - fast.x) / fast.s) * fast.p);
-      P.array[i + 1] = Math.round(((placed.positions[o + 1]! - fast.y) / fast.s) * fast.p);
-      P.array[i + 2] = Math.round(((placed.positions[o + 2]! - fast.z) / fast.s) * fast.p);
+      P.array[i] = Math.round((placed.positions[o]! - fast.x) * fast.k);
+      P.array[i + 1] = Math.round((placed.positions[o + 1]! - fast.y) * fast.k);
+      P.array[i + 2] = Math.round((placed.positions[o + 2]! - fast.z) * fast.k);
     } else {
       scratch.fromArray(placed.positions, o).applyMatrix4(this.toLocal);
       position.setXYZ(v, scratch.x, scratch.y, scratch.z);
@@ -357,7 +356,7 @@ class Hands {
       const nx = placed.normals[o]!;
       const ny = placed.normals[o + 1]!;
       const nz = placed.normals[o + 2]!;
-      const length = Math.hypot(nx, ny, nz) || 1;
+      const length = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
       const i = v * N.stride + N.offset;
       N.array[i] = Math.round((nx / length) * fast.n);
       N.array[i + 1] = Math.round((ny / length) * fast.n);

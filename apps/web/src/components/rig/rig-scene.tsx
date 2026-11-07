@@ -1,7 +1,7 @@
 "use client";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { BloomEffect, ChromaticAberrationEffect, DepthOfFieldEffect, EffectComposer, EffectPass, RenderPass, VignetteEffect, type Effect } from "postprocessing";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ACESFilmicToneMapping, Color, DirectionalLight, Fog, Group, HalfFloatType, HemisphereLight, MathUtils, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PMREMGenerator, type SpotLight, Vector2, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { HackerProfile } from "@/lib/hacker";
@@ -97,9 +97,13 @@ export interface RigSceneProps {
  * change, and they look the same at half the frames for half the work.
  */
 const BUDGET = {
-  high: { fps: 60, rest: 30, screenFps: 15, shadowFps: 15, screenScale: 1 },
+  // 30 while the camera moves is what the landing has always drawn (the ticker used to draw every other frame of 60).
+  high: { fps: 30, rest: 30, screenFps: 15, shadowFps: 15, screenScale: 1 },
   low: { fps: 30, rest: 20, screenFps: 10, shadowFps: 0, screenScale: 0.75 },
 } as const;
+
+/** The frame rate while anything moves, where the hacker types: smooth hands on any machine that can. */
+const LIVELY_FPS = 60;
 
 /** Between the camera, which knows when it is moving, and the ticker, which sets the pace. */
 interface Pace {
@@ -210,19 +214,34 @@ export default function RigScene(props: RigSceneProps) {
   const warming = useRef(false);
   // Where the camera looks, for the lens to focus on.
   const focus = useMemo(() => new Vector3(0, 0.1, -0.1), []);
+  const fast = props.typing === false ? budget.fps : LIVELY_FPS;
+  // Up to 1.5 pixels per pixel on the high tier, until the frame rate says the machine is short of GPU (see onSlow).
+  const [sharp, setSharp] = useState(true);
+  const { onSlow } = props;
+  const slow = useCallback(() => {
+    // First draw fewer pixels: the dither's cells are the same size on screen either way, so it looks the same.
+    if (tier === "high" && sharp && window.devicePixelRatio > 1) {
+      setSharp(false);
+      return true;
+    }
+    onSlow?.();
+    return false;
+  }, [tier, sharp, onSlow]);
   return (
     <Canvas
       key={tier}
       shadows={tier === "high" ? { type: PCFShadowMap } : false}
-      dpr={tier === "high" ? [1, 1.5] : 1}
+      dpr={tier === "high" && sharp ? [1, 1.5] : 1}
       frameloop="demand"
       gl={{ antialias: false, stencil: false, powerPreference: tier === "high" ? "high-performance" : "default", toneMapping: ACESFilmicToneMapping, toneMappingExposure: 0.82 }}
       camera={{ position: SHOTS[props.shot].position, fov: SHOTS[props.shot].fov, near: 0.02, far: 20 }}
       aria-hidden="true"
     >
       <Start loaded={loaded} started={started} warming={warming} master={!!props.master} />
-      <Ticker fast={budget.fps} rest={props.still ? budget.screenFps : budget.rest} pace={pace} active={props.active !== false} />
-      <Watchdog pace={pace} started={started} onReady={props.onReady} onSlow={props.onSlow} />
+      {/* Where the hacker types, anything moving (the hands most of all) is drawn at 60 on either tier; the landing keeps its pace. */}
+      <Ticker fast={fast} rest={props.still ? budget.screenFps : budget.rest} pace={pace} active={props.active !== false} />
+      {/* The high tier is held to the rate it asks for; the low tier, made for small machines, only to its own. */}
+      <Watchdog pace={pace} started={started} ceiling={tier === "high" ? fast : budget.fps} onReady={props.onReady} onSlow={slow} />
       {budget.shadowFps > 0 && <ShadowPace fps={budget.shadowFps} />}
       <Reflections />
       <World {...props} pace={pace} started={started} focus={focus} />
@@ -285,26 +304,38 @@ function DevCapture({ shot, started }: { shot: ShotName; started: RefObject<bool
   return null;
 }
 
-/** Asks for a frame `fast` times a second while the camera is busy, `rest` times otherwise, while active. */
+/**
+ * Draws a frame `fast` times a second while something moves, `rest` times
+ * otherwise, while active. It draws in the animation frame that decides to
+ * (`advance`), not the one after: asking R3F's own loop (`invalidate`) lands
+ * a frame late, and its loop stops in between, so asking every frame drew
+ * every other one and 60 came out as 30.
+ */
 function Ticker({ fast, rest, pace, active }: { fast: number; rest: number; pace: RefObject<Pace>; active: boolean }) {
-  const invalidate = useThree((state) => state.invalidate);
+  const advance = useThree((state) => state.advance);
   useEffect(() => {
     if (!active) return;
     let raf = 0;
     let last = 0;
+    let previous = 0;
+    // The display's own frame interval, learnt as it goes: 16.7 ms at 60 Hz, 8.3 at 120.
+    let interval = 1000 / 60;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
+      const gap = now - previous;
+      previous = now;
+      if (gap > 2 && gap < 50) interval += (gap - interval) * 0.05;
       const fps = now < pace.current.busyUntil ? fast : rest;
       pace.current.fps = fps;
-      // Two milliseconds early, so a 60 Hz display's frames aren't missed by a hair.
-      if (now - last >= 1000 / fps - 2) {
+      // Half a display frame early: frame times jitter (Safari's come in whole milliseconds, 12 to 21 apart at 60 Hz), and a frame that's due shouldn't be missed by a hair.
+      if (now - last >= 1000 / fps - interval / 2) {
         last = now;
-        invalidate();
+        advance(now);
       }
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [fast, rest, pace, active, invalidate]);
+  }, [fast, rest, pace, active, advance]);
   return null;
 }
 
@@ -332,9 +363,12 @@ function ShadowPace({ fps }: { fps: number }) {
  * Says when the first frame is up, then watches the frame rate: if frames
  * keep arriving at well under the rate asked for, the machine is
  * struggling and the page steps down. Ignores the first moments, while
- * shaders compile.
+ * shaders compile. Judged against no more than the tier's own rate
+ * (`ceiling`): asking for more where the hacker types is a bonus for
+ * machines that can, never a reason to step down. `onSlow` says whether it
+ * found a lighter way to draw the same picture, worth watching again.
  */
-function Watchdog({ pace, started, onReady, onSlow }: { pace: RefObject<Pace>; started: RefObject<boolean>; onReady?: () => void; onSlow?: () => void }) {
+function Watchdog({ pace, started, ceiling, onReady, onSlow }: { pace: RefObject<Pace>; started: RefObject<boolean>; ceiling: number; onReady?: () => void; onSlow?: () => boolean }) {
   const frames = useRef(0);
   // Frames drawn since the clock started: the files are in, and the first of these compiles their shaders.
   const framesLoaded = useRef(0);
@@ -343,6 +377,8 @@ function Watchdog({ pace, started, onReady, onSlow }: { pace: RefObject<Pace>; s
   const last = useRef(0);
   // The lowest rate asked for in this stretch: the pace drops to the resting rate when the camera settles.
   const asked = useRef(Infinity);
+  // Long frames in a row: one is a stall, a run of them is a machine that can't draw this.
+  const stalls = useRef(0);
   useFrame(() => {
     const now = performance.now() / 1000;
     const gap = now - last.current;
@@ -350,8 +386,23 @@ function Watchdog({ pace, started, onReady, onSlow }: { pace: RefObject<Pace>; s
     frames.current++;
     asked.current = Math.min(asked.current, pace.current.fps);
     if (started.current && ++framesLoaded.current === 3) onReady?.();
+    // Hidden tabs and scrolled-away canvases don't draw at all; only judge time spent drawing.
+    const slow = () => {
+      if (document.visibilityState !== "visible" || told.current) return;
+      told.current = true;
+      // Lighter now: judge it afresh, after the moments it takes to settle.
+      if (onSlow?.()) {
+        told.current = false;
+        frames.current = 0;
+        stalls.current = 0;
+      }
+    };
     // One long frame is a stall (a shader compiling, a texture uploading, the tab
-    // coming back), not a slow machine: start counting again after it.
+    // coming back), not a slow machine: start counting again after it. Past the
+    // first few frames, which compile everything, a run of them is too slow by far.
+    const stalled = gap > 0.25 && framesLoaded.current > 5;
+    stalls.current = stalled ? stalls.current + 1 : 0;
+    if (stalls.current >= 6) return slow();
     if (frames.current < 20 || (frames.current > 20 && gap > 0.25)) {
       since.current = now;
       asked.current = pace.current.fps;
@@ -361,15 +412,11 @@ function Watchdog({ pace, started, onReady, onSlow }: { pace: RefObject<Pace>; s
     const elapsed = now - since.current;
     if (elapsed < 3) return;
     const rate = (frames.current - 20) / elapsed;
-    const floor = asked.current * 0.55;
+    const floor = Math.min(asked.current, ceiling) * 0.55;
     asked.current = pace.current.fps;
-    // Hidden tabs and scrolled-away canvases don't draw at all; only judge time spent drawing.
-    if (document.visibilityState === "visible" && rate > 0 && rate < floor && !told.current) {
-      told.current = true;
-      onSlow?.();
-    }
     since.current = now;
     frames.current = 20;
+    if (rate > 0 && rate < floor) slow();
   });
   return null;
 }
@@ -435,7 +482,8 @@ function Post({ bloom, light, still, master, warming, lens, focus }: { bloom: bo
     // The light eases in below; a new composer only for a new tier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl, scene, camera, bloom, master, lens]);
-  useEffect(() => composer.setSize(size.width, size.height), [composer, size]);
+  // Again when the pixel ratio changes (see RigScene's onSlow): the buffers are sized in device pixels.
+  useEffect(() => composer.setSize(size.width, size.height), [composer, size, dpr]);
   useEffect(() => {
     dither.cell = Math.round(2 * dpr);
   }, [dither, dpr]);
@@ -480,6 +528,8 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, typi
   useFrame((state) => {
     const t = state.clock.elapsedTime;
     if (signals.current) advance(signals.current, t);
+    // Typing, or the hands still settling: draw at the full rate (the ticker drops back to resting a moment after).
+    if (typing !== false && ((signals.current?.typingUntil ?? 0) > t || hands.typist?.busy)) pace.current.busyUntil = performance.now() + 250;
     // Nothing is shown before the clock starts, and the screen's first paint should be at its start.
     if (!started.current || !fontsReady || !due(t, lastPaint.current, budget.screenFps)) return;
     lastPaint.current = t;

@@ -134,6 +134,14 @@ export interface Finger {
   weights: Float32Array;
   /** Which of `members` are the fingertip: the lowest is where it meets a key. */
   tips: Uint32Array;
+  /**
+   * For placeFinger: each joint's distinct weights, and for each member which
+   * of them it has (3 per member, as `weights`). A finger has a few dozen
+   * distinct weights to its hundreds of vertices, so each joint's turns are
+   * worked out once per weight rather than once per vertex.
+   */
+  levels: [Float64Array, Float64Array, Float64Array];
+  level: Uint16Array;
 }
 
 export interface Hand {
@@ -241,6 +249,110 @@ export function placeVertex(hand: Hand, m: number, finger: Finger | null, a: Ang
   }
 }
 
+/** Rodrigues' rotation about the unit `axis` by `angle`, as a 3x3 matrix (row-major) into `out` at `o`: the same turn as turn(). */
+function rotation(axis: V3, angle: number, out: Float64Array, o: number) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const t = 1 - c;
+  const kx = axis[0];
+  const ky = axis[1];
+  const kz = axis[2];
+  out[o] = c + kx * kx * t;
+  out[o + 1] = kx * ky * t - kz * s;
+  out[o + 2] = kx * kz * t + ky * s;
+  out[o + 3] = ky * kx * t + kz * s;
+  out[o + 4] = c + ky * ky * t;
+  out[o + 5] = ky * kz * t - kx * s;
+  out[o + 6] = kz * kx * t - ky * s;
+  out[o + 7] = kz * ky * t + kx * s;
+  out[o + 8] = c + kz * kz * t;
+}
+
+/** Each joint's turns for a finger at one pose, by weight level (9 per level), grown as needed. */
+let turns: [Float64Array, Float64Array, Float64Array] = [new Float64Array(9 * 64), new Float64Array(9 * 64), new Float64Array(9 * 64)];
+const sideways = new Float64Array(9);
+const bend = new Float64Array(9);
+
+/**
+ * Every vertex of `finger` as placeVertex places it, into `out` and
+ * `outNormal` (3 per hand vertex, at m * 3), but with each joint's turn
+ * worked out once per distinct weight: the hands' work, every frame.
+ */
+export function placeFinger(hand: Hand, finger: Finger, a: Angles | null, offset: [number, number], out: Float32Array, outNormal: Float32Array, working = 1): void {
+  const members = finger.members;
+  const { rest, normals, slide, tilt } = hand;
+  const sink = hand.sink * working;
+  const ox = offset[0];
+  const oz = offset[1];
+  if (!a) {
+    for (let j = 0; j < members.length; j++) {
+      const m = members[j]!;
+      const o = m * 3;
+      const share = slide[m]!;
+      out[o] = rest[o]! + ox * share;
+      out[o + 1] = rest[o + 1]! + sink * tilt[m]!;
+      out[o + 2] = rest[o + 2]! + oz * share;
+      outNormal[o] = normals[o]!;
+      outNormal[o + 1] = normals[o + 1]!;
+      outNormal[o + 2] = normals[o + 2]!;
+    }
+    return;
+  }
+  const { levels, level, axis } = finger;
+  const most = Math.max(levels[0].length, levels[1].length, levels[2].length) * 9;
+  if (turns[0].length < most) turns = [new Float64Array(most), new Float64Array(most), new Float64Array(most)];
+  const [t0, t1, t2] = turns;
+  // The knuckle: bent about the axis, then turned sideways about UP (as placeVertex does it), as one matrix.
+  for (let k = 0; k < levels[0].length; k++) {
+    const w = levels[0][k]!;
+    rotation(axis, a[0] * w, bend, 0);
+    rotation(UP, a[2] * w, sideways, 0);
+    const o = k * 9;
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < 3; c++) t0[o + r * 3 + c] = sideways[r * 3]! * bend[c]! + sideways[r * 3 + 1]! * bend[3 + c]! + sideways[r * 3 + 2]! * bend[6 + c]!;
+  }
+  for (let k = 0; k < levels[1].length; k++) rotation(axis, a[1] * levels[1][k]!, t1, k * 9);
+  for (let k = 0; k < levels[2].length; k++) rotation(axis, a[1] * LAST_JOINT * levels[2][k]!, t2, k * 9);
+  const [K, M, L] = finger.joints;
+  const kx = K[0], ky = K[1], kz = K[2];
+  const mx = M[0], my = M[1], mz = M[2];
+  const lx = L[0], ly = L[1], lz = L[2];
+  for (let j = 0; j < members.length; j++) {
+    const m = members[j]!;
+    const o = m * 3;
+    const q0 = level[j * 3]! * 9;
+    const q1 = level[j * 3 + 1]! * 9;
+    const q2 = level[j * 3 + 2]! * 9;
+    // Outermost first, each about where its joint is at rest: the last joint, the middle, then the knuckle.
+    let x = rest[o]! - lx;
+    let y = rest[o + 1]! - ly;
+    let z = rest[o + 2]! - lz;
+    let X = t2[q2]! * x + t2[q2 + 1]! * y + t2[q2 + 2]! * z + lx - mx;
+    let Y = t2[q2 + 3]! * x + t2[q2 + 4]! * y + t2[q2 + 5]! * z + ly - my;
+    let Z = t2[q2 + 6]! * x + t2[q2 + 7]! * y + t2[q2 + 8]! * z + lz - mz;
+    x = t1[q1]! * X + t1[q1 + 1]! * Y + t1[q1 + 2]! * Z + mx - kx;
+    y = t1[q1 + 3]! * X + t1[q1 + 4]! * Y + t1[q1 + 5]! * Z + my - ky;
+    z = t1[q1 + 6]! * X + t1[q1 + 7]! * Y + t1[q1 + 8]! * Z + mz - kz;
+    const share = slide[m]!;
+    out[o] = t0[q0]! * x + t0[q0 + 1]! * y + t0[q0 + 2]! * z + kx + ox * share;
+    out[o + 1] = t0[q0 + 3]! * x + t0[q0 + 4]! * y + t0[q0 + 5]! * z + ky + sink * tilt[m]!;
+    out[o + 2] = t0[q0 + 6]! * x + t0[q0 + 7]! * y + t0[q0 + 8]! * z + kz + oz * share;
+    // The normal turns the same, about no point.
+    x = normals[o]!;
+    y = normals[o + 1]!;
+    z = normals[o + 2]!;
+    X = t2[q2]! * x + t2[q2 + 1]! * y + t2[q2 + 2]! * z;
+    Y = t2[q2 + 3]! * x + t2[q2 + 4]! * y + t2[q2 + 5]! * z;
+    Z = t2[q2 + 6]! * x + t2[q2 + 7]! * y + t2[q2 + 8]! * z;
+    x = t1[q1]! * X + t1[q1 + 1]! * Y + t1[q1 + 2]! * Z;
+    y = t1[q1 + 3]! * X + t1[q1 + 4]! * Y + t1[q1 + 5]! * Z;
+    z = t1[q1 + 6]! * X + t1[q1 + 7]! * Y + t1[q1 + 8]! * Z;
+    outNormal[o] = t0[q0]! * x + t0[q0 + 1]! * y + t0[q0 + 2]! * z;
+    outNormal[o + 1] = t0[q0 + 3]! * x + t0[q0 + 4]! * y + t0[q0 + 5]! * z;
+    outNormal[o + 2] = t0[q0 + 6]! * x + t0[q0 + 7]! * y + t0[q0 + 8]! * z;
+  }
+}
+
 /** Finger `f`'s angles in `pose`: its own, or for the thumb and little finger their lift as the hand works (null at rest). */
 export function fingerAngles(hand: Hand, pose: HandPose, f: number): Angles | null {
   const finger = hand.fingers[f];
@@ -254,11 +366,8 @@ export function fingerAngles(hand: Hand, pose: HandPose, f: number): Angles | nu
 
 /** Every vertex of the hand in `pose`, into `out` and `outNormal` (3 per vertex, in the order of hand.ids). */
 export function placeHand(hand: Hand, pose: HandPose, out: Float32Array, outNormal: Float32Array): void {
-  const angles = hand.fingers.map((_, f) => fingerAngles(hand, pose, f));
-  for (let m = 0; m < hand.ids.length; m++) {
-    const f = hand.memberOf[m]!;
-    placeVertex(hand, m, f >= 0 ? hand.fingers[f]! : null, f >= 0 ? angles[f]! : null, pose.offset, out, m * 3, outNormal, pose.thumb);
-  }
+  for (let m = 0; m < hand.ids.length; m++) if (hand.memberOf[m]! < 0) placeVertex(hand, m, null, null, pose.offset, out, m * 3, outNormal, pose.thumb);
+  hand.fingers.forEach((finger, f) => placeFinger(hand, finger, fingerAngles(hand, pose, f), pose.offset, out, outNormal, pose.thumb));
 }
 
 const point = new Float64Array(3);
@@ -435,7 +544,14 @@ function fingerOf(mesh: HandMesh, ids: number[], index: number): Finger {
     for (let c = 0; c < 3; c++) weights[j * 3 + c] = mesh.finger[ids[m]! * 3 + c]!;
   });
   const tips = members.map((_, j) => j).filter((j) => weights[j * 3 + 2]! > 0.5);
-  return { index, joints, axis: [-along[2] / size, 0, along[0] / size], members: Uint32Array.from(members), weights, tips: Uint32Array.from(tips) };
+  const level = new Uint16Array(members.length * 3);
+  const levels = [0, 1, 2].map((c) => {
+    const distinct = [...new Set(members.map((_, j) => weights[j * 3 + c]!))];
+    const at = new Map(distinct.map((w, k) => [w, k]));
+    members.forEach((_, j) => (level[j * 3 + c] = at.get(weights[j * 3 + c]!)!));
+    return Float64Array.from(distinct);
+  }) as Finger["levels"];
+  return { index, joints, axis: [-along[2] / size, 0, along[0] / size], members: Uint32Array.from(members), weights, tips: Uint32Array.from(tips), levels, level };
 }
 
 /**
