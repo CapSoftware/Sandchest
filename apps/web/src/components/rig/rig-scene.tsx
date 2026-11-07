@@ -117,16 +117,16 @@ const due = (now: number, last: number, rate: number) => now < last || now - las
 const ASSETS_WAIT_MS = 3000;
 
 /** True once the hacker and the surfaces have loaded (or failed), or ASSETS_WAIT_MS has passed. */
-function useAssetsLoaded(): boolean {
+function useAssetsLoaded(detail?: "high"): boolean {
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let alive = true;
     const cap = new Promise<void>((resolve) => setTimeout(resolve, ASSETS_WAIT_MS));
-    void Promise.race([Promise.allSettled([loadHacker(), loadSurfaces()]), cap]).then(() => alive && setLoaded(true));
+    void Promise.race([Promise.allSettled([loadHacker(detail), loadSurfaces()]), cap]).then(() => alive && setLoaded(true));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [detail]);
   return loaded;
 }
 
@@ -203,7 +203,7 @@ export default function RigScene(props: RigSceneProps) {
   const { tier } = props;
   const budget = BUDGET[tier];
   const pace = useRef<Pace>({ busyUntil: 0, fps: budget.fps });
-  const loaded = useAssetsLoaded();
+  const loaded = useAssetsLoaded(props.detail);
   // Set on the frame the clock starts: from then on everything moves and the screen is painted.
   const started = useRef(false);
   // Set while the shaders compile, before the clock starts: nothing is drawn meanwhile.
@@ -513,7 +513,7 @@ function World({ profile, org, shot, paint, signals, parallax, drag, still, typi
 
       <Room room={room} profile={profile} org={org} />
       <Laptop profile={profile} org={org} kit={kit} signals={signals} hands={typing === false ? undefined : hands} />
-      <Figure profile={profile} signals={signals} hands={typing === false ? undefined : hands} still={still} />
+      <Figure profile={profile} signals={signals} hands={typing === false ? undefined : hands} still={still} detail={detail} />
     </>
   );
 }

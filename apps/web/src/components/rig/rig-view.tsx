@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { preload } from "react-dom";
-import { RIG_BITMAP_URLS, RIG_IMAGE_URLS, RIG_MODEL_URL, RIG_STILL_MASTERS, type StillKind } from "./assets";
+import { RIG_BITMAP_URLS, RIG_IMAGE_URLS, RIG_MODEL_HQ_URL, RIG_MODEL_URL, RIG_STILL_MASTERS, type StillKind } from "./assets";
 import { drawStill, STILL_SCRIPT, VIGNETTE, type StillSpec } from "./still";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RigSceneProps, Tier } from "./rig-scene";
@@ -73,7 +73,7 @@ const CUT_MS = 170;
 export function RigView({ className, poster, opening, profile, ...props }: Props) {
   // Fetch the model and textures alongside the page's scripts (as <link rel=preload> in the server's HTML),
   // not after three.js has loaded and the scene has mounted. The options match how three.js requests them.
-  preload(RIG_MODEL_URL, { as: "fetch", crossOrigin: "anonymous" });
+  preload(props.detail === "high" ? RIG_MODEL_HQ_URL : RIG_MODEL_URL, { as: "fetch", crossOrigin: "anonymous" });
   for (const url of RIG_IMAGE_URLS) preload(url, { as: "image", crossOrigin: "anonymous" });
   for (const url of RIG_BITMAP_URLS) preload(url, { as: "fetch", crossOrigin: "anonymous" });
   // The still's master first of all, from the HTML's head, so it's in before the inline script asks for it.

@@ -4,8 +4,8 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import type { HandMesh } from "@/components/rig/hands";
 
 /** The hacker's mesh as the scene has it: hacker.glb's body, in scene metres. */
-export async function hackerMesh(): Promise<HandMesh> {
-  const file = readFileSync(join(import.meta.dir, "../public/rig/hacker.glb"));
+export async function hackerMesh(model = "hacker.glb"): Promise<HandMesh> {
+  const file = readFileSync(join(import.meta.dir, "../public/rig", model));
   const jsonLength = file.readUInt32LE(12);
   const gltf = JSON.parse(file.subarray(20, 20 + jsonLength).toString("utf8"));
   const bin = file.subarray(20 + jsonLength + 8);

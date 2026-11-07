@@ -4,6 +4,8 @@
  * mounted. Kept free of three.js so the page can import it cheaply.
  */
 export const RIG_MODEL_URL = "/rig/hacker.glb";
+/** The same hacker in more detail, for their own page only: smoother (rounder fingertips) and sharper skin. */
+export const RIG_MODEL_HQ_URL = "/rig/hacker-hq.glb";
 /** Which texels of the body texture are the hoodie. */
 export const RIG_HOODIE_MASK_URL = "/rig/hacker-hoodie.webp";
 /** The photographed surfaces, as `/rig/<surface>-<map>.webp`. */

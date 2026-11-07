@@ -15,6 +15,16 @@ hacker facing -z).
     bunx @gltf-transform/cli optimize /tmp/hacker.glb apps/web/public/rig/hacker.glb \
         --compress meshopt --simplify false --texture-compress webp --texture-size 1024
 
+`--hq` after the output path bakes the high-detail model for the hacker's
+own page (public/rig/hacker-hq.glb): the posed mesh subdivided once
+(Catmull-Clark, so fingertips and every silhouette round off; the skin
+weights carry through), the skin's colour kept at 2048 (normal and specular
+maps at 1024), and no head (the visor is the face):
+
+    blender -b --python apps/web/scripts/rig/hacker.py -- /tmp/hacker-hq.glb --hq
+    bunx @gltf-transform/cli optimize /tmp/hacker-hq.glb apps/web/public/rig/hacker-hq.glb \
+        --compress meshopt --simplify false --texture-compress webp --texture-size 2048
+
 `--preview /tmp/hacker` instead of an output path renders close-ups of the
 pose (textured, and plain grey for checking the geometry) next to stand-ins
 for the desk, laptop and chair.
@@ -33,6 +43,7 @@ from mathutils import Matrix, Vector
 ARGS = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
 PREVIEW = ARGS[1] if ARGS[:1] == ["--preview"] else None
 EXPORT = None if PREVIEW else (ARGS[0] if ARGS else "/tmp/hacker.glb")
+HQ = "--hq" in ARGS
 
 REPO = "https://raw.githubusercontent.com/microsoft/Microsoft-Rocketbox/master/Assets"
 AVATAR = "Male_Adult_18"
@@ -291,10 +302,34 @@ print("JOINTS", [[out(head_of(name)) for name in chain(side, f)] for side, f in 
 print("WRISTS", [out(head_of(f"Bip01 {side} Hand")) for side in ("L", "R")])
 
 if EXPORT:
+    if HQ:
+        # After the pose: smooth the posed shape, not the rest pose.
+        smooth = body.modifiers.new("smooth", "SUBSURF")
+        smooth.levels = 1
+        smooth.render_levels = 1
+        smooth.quality = 3
+        smooth.uv_smooth = "PRESERVE_BOUNDARIES"
     depsgraph = bpy.context.evaluated_depsgraph_get()
     mesh = bpy.data.meshes.new_from_object(body.evaluated_get(depsgraph), depsgraph=depsgraph)
     mesh.transform(body.matrix_world)
     mesh.name = "hacker"
+    if HQ:
+        # The face never shows (the visor is the face): the high-detail model leaves the head and its textures out.
+        import bmesh
+
+        heads = {i for i, material in enumerate(mesh.materials) if material and "head" in material.name}
+        edit = bmesh.new()
+        edit.from_mesh(mesh)
+        bmesh.ops.delete(edit, geom=[f for f in edit.faces if f.material_index in heads], context="FACES")
+        edit.to_mesh(mesh)
+        edit.free()
+        for i in sorted(heads, reverse=True):
+            mesh.materials.pop(index=i)
+        # The skin's colour is what reads up close: keep it at full size, the normal and specular maps at half.
+        for image in bpy.data.images:
+            source = os.path.basename(image.filepath or image.name).lower()
+            if ("body_normal" in source or "body_specular" in source) and image.size[0] > 1024:
+                image.scale(1024, 1024)
     # Per vertex: the share that turns at the knuckle, at the middle joint and at the last one (each
     # includes the joints after it), and which finger (its number + 1, sixteenths; 0 for none).
     groups = {g.index: g.name for g in body.vertex_groups}
@@ -308,8 +343,9 @@ if EXPORT:
 
     arm = mesh.attributes.new("_ARM", "FLOAT_VECTOR", "POINT")
     joints = {side: [head_of(f"Bip01 {side} {bone}") for bone in ("UpperArm", "Forearm", "Hand")] for side in ("L", "R")}
-    for vertex in body.data.vertices:
-        co = mesh.vertices[vertex.index].co
+    # The weights as the exported mesh has them (subdividing carries them through), by its own vertices.
+    for vertex in mesh.vertices:
+        co = vertex.co
         share = {"L": 0.0, "R": 0.0}
         for g in vertex.groups:
             name = groups.get(g.group, "")
@@ -324,7 +360,7 @@ if EXPORT:
         arm.data[vertex.index].vector = (share["L"], share["R"], 0)
     bend = mesh.attributes.new("_FINGER", "FLOAT_VECTOR", "POINT")
     digit = mesh.attributes.new("_DIGIT", "FLOAT", "POINT")
-    for vertex in body.data.vertices:
+    for vertex in mesh.vertices:
         weights = [[0.0, 0.0, 0.0] for _ in FINGERS]
         for g in vertex.groups:
             slot = slots.get(groups.get(g.group))

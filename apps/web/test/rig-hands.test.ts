@@ -1,21 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { buildHands, contactPoint, FIDGET, glideOverlap, handOf, overlap, solveStations, STATIONS, strokeAt, strokeOverlap, Typist, WANDER, type Angles, type Hand, type Manner } from "@/components/rig/hands";
+import { buildHands, contactPoint, FIDGET, glideOverlap, handOf, overlap, solveStations, STATIONS, STATIONS_HQ, strokeAt, strokeOverlap, Typist, WANDER, type Angles, type Hand, type Manner, type Station } from "@/components/rig/hands";
 import { KEY_TOP, KEYS, keyAt, TRAVEL } from "@/components/rig/keyboard";
 import { hackerMesh } from "./hacker-mesh";
 
-const mesh = await hackerMesh();
-const hands = buildHands(mesh);
 const PIVOT: [number, number, number] = [0, -0.15, 0.6];
+/** The high-detail model has four times the vertices to check. */
+const SLOW = 60_000;
+
+// Both models: the one every page draws, and the high-detail one on the hacker's own page.
+for (const [model, table] of [["hacker.glb", STATIONS], ["hacker-hq.glb", STATIONS_HQ]] as [string, Station[][]][]) {
+const mesh = await hackerMesh(model);
+const hands = buildHands(mesh, table);
 
 /** Every stroke in the table: hand, place, finger and target. */
 const strokes = (list: Hand[] = hands) =>
   list.flatMap((hand) => hand.stations.flatMap((station) => Object.entries(station.strokes).flatMap(([index, targets]) => targets.map((target) => ({ hand, station, finger: hand.fingers.find((f) => f.index === Number(index))!, target })))));
 
-describe("the hacker's hands on the keys", () => {
+describe(`the hacker's hands on the keys (${model})`, () => {
   test("the places and strokes the page plays are the ones the model solves to", () => {
     for (const side of [0, 1] as const) {
       const solved = solveStations(handOf(mesh, side)!);
-      const shipped = STATIONS[side]!;
+      const shipped = table[side]!;
       expect(shipped.map((s) => s.offset)).toEqual(solved.map((s) => s.offset));
       shipped.forEach((station, i) => {
         const want = solved[i]!;
@@ -31,7 +36,7 @@ describe("the hacker's hands on the keys", () => {
         }
       });
     }
-  });
+  }, SLOW);
 
   test("both hands type, each over a good part of the keyboard", () => {
     expect(hands.map((h) => h.side)).toEqual([0, 1]);
@@ -43,7 +48,7 @@ describe("the hacker's hands on the keys", () => {
       // Index, middle and ring all type.
       expect(new Set(strokes([hand]).map((s) => s.finger.index)).size).toBe(3);
     }
-  });
+  }, SLOW);
 
   test("each stroke's fingertip comes down on its key and pushes it exactly as far as it goes", () => {
     for (const { hand, station, finger, target } of strokes()) {
@@ -56,7 +61,7 @@ describe("the hacker's hands on the keys", () => {
       expect(Math.abs(pressed[1] - (KEY_TOP - TRAVEL))).toBeLessThan(5e-5);
       expect(keyAt(pressed[0], pressed[2])).toBe(target.key);
     }
-  });
+  }, SLOW);
 
   test("the key moves only while the fingertip is on it, and the tip stays on it all the way down and up", () => {
     for (const { hand, station, finger, target } of strokes())
@@ -68,12 +73,12 @@ describe("the hacker's hands on the keys", () => {
           expect(keyAt(tip[0], tip[2])).toBe(target.key);
         } else expect(tip[1]).toBeGreaterThan(KEY_TOP - 1e-4);
       }
-  });
+  }, SLOW);
 
   test("nothing else of the hand touches a key or the laptop, striking or sliding between places", () => {
     for (const { hand, station, finger, target } of strokes()) expect(strokeOverlap(hand, station, finger, target, 160)).toBeLessThan(1e-4);
     for (const hand of hands) for (const a of hand.stations) for (const b of hand.stations) expect(glideOverlap(hand, a.offset, b.offset, 48)).toBeLessThan(1e-4);
-  });
+  }, SLOW);
 
   test("however a stroke is played, the tip meets the key exactly while it's down, and nothing else touches", () => {
     // A steady random source, so a failure can be replayed.
@@ -101,7 +106,7 @@ describe("the hacker's hands on the keys", () => {
         expect(strokeOverlap(hand, station, finger, target, 60, manner, wander, [0, FIDGET.curl, 0])).toBeLessThan(1e-4);
       }
     }
-  });
+  }, SLOW);
 
   test("idle fingers fidget and the hands wander without touching anything", () => {
     for (const hand of hands)
@@ -110,15 +115,15 @@ describe("the hacker's hands on the keys", () => {
           for (const dz of [-WANDER * 0.8, 0, WANDER * 0.8])
             for (const a of [[0, FIDGET.curl, 0], [0, -FIDGET.curl, 0], [-(FIDGET.bend + FIDGET.twitch), FIDGET.curl, 0], [-0.3, 0, 0]] as Angles[])
               expect(overlap(hand, { offset: [station.offset[0] + dx, station.offset[1] + dz], thumb: 1, angles: hand.fingers.map((f) => (f === hand.thumb ? null : a)) })).toBeLessThan(1e-4);
-  });
+  }, SLOW);
 
   test("the thumbs lift clear of the keys while the hands type", () => {
     for (const hand of hands) expect(contactPoint(hand, hand.thumb, hand.thumbLift)[1]).toBeGreaterThan(KEY_TOP + 0.0029);
-  });
+  }, SLOW);
 
   test("the lift is clearly visible: about a centimetre above the key", () => {
     for (const { hand, station, finger, target } of strokes()) expect(contactPoint(hand, finger, target.lift, station.offset)[1] - KEY_TOP).toBeGreaterThan(0.008);
-  });
+  }, SLOW);
 
   test("while the body breathes, the corrected stroke still lands on the key", () => {
     const typist = new Typist(hands, PIVOT);
@@ -137,7 +142,7 @@ describe("the hacker's hands on the keys", () => {
         expect(Math.abs(into(contactPoint(hand, finger, fixed.bottom, station.offset))[1]! - (KEY_TOP - TRAVEL))).toBeLessThan(5e-5);
       }
     }
-  });
+  }, SLOW);
 
   test("the typist types like a person, every press lands, nothing else touches, and it comes back to rest", () => {
     const typist = new Typist(hands, PIVOT);
@@ -192,9 +197,10 @@ describe("the hacker's hands on the keys", () => {
     // at an uneven pace: quick runs, and pauses well over half a second.
     expect(q(0.9) / q(0.1)).toBeGreaterThan(3);
     expect(sorted.at(-1)!).toBeGreaterThan(0.6);
-  });
+  }, SLOW);
 
   test("at rest, with the thumbs up, every hand hovers touching nothing", () => {
     for (const hand of hands) expect(overlap(hand, { offset: [0, 0], thumb: 1, angles: [] })).toBe(0);
-  });
+  }, SLOW);
 });
+}
