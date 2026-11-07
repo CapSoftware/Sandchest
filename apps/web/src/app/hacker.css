@@ -285,53 +285,7 @@ body:has(.demo-bar) .hq-stage {
   gap: 0.6rem;
 }
 
-/* Live: a red light, like a camera's, while the feed is connected. */
-.hq-onair {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.4rem 0.75rem;
-  background: rgb(0 0 0 / 0.55);
-  box-shadow: inset 0 0 0 1px rgb(255 59 47 / 0.45);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: #ffd9d4;
-}
-
-.hq-onair-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  background: #ff3b2f;
-  box-shadow: 0 0 10px #ff3b2f;
-}
-
-.hq-onair[data-state="connecting"] {
-  box-shadow: inset 0 0 0 1px rgb(254 194 66 / 0.4);
-  color: var(--color-sand);
-}
-
-.hq-onair[data-state="connecting"] .hq-onair-dot {
-  background: var(--color-gold);
-  box-shadow: none;
-}
-
-.hq-onair[data-state="offline"] {
-  box-shadow: inset 0 0 0 1px var(--color-seam);
-  color: var(--color-dust);
-}
-
-.hq-onair[data-state="offline"] .hq-onair-dot {
-  background: var(--color-edge);
-  box-shadow: none;
-}
-
 @media (prefers-reduced-motion: no-preference) {
-  .hq-onair[data-state="live"] .hq-onair-dot {
-    animation: hq-pulse 1.6s ease-in-out infinite;
-  }
-  .hq-onair[data-state="connecting"] .hq-onair-dot {
-    animation: blink 1s steps(1) infinite;
-  }
   .hq-presence[data-working] {
     animation: hq-pulse 2.2s ease-in-out infinite;
   }
@@ -396,6 +350,11 @@ body:has(.demo-bar) .hq-stage {
 .hq-handle-title {
   flex: none;
   font-weight: 500;
+}
+
+.hq-handle-state {
+  flex: none;
+  color: var(--color-dust);
 }
 
 .hq-handle-count {

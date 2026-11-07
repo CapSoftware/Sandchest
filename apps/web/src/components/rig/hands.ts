@@ -42,10 +42,23 @@ const TYPING = [
   [6, 7, 8],
 ];
 const THUMBS = [0, 5];
+/** The little fingers: they don't type, and curl up a touch while the hands work, clear of the keys. */
+const PINKIES = [4, 9];
+/**
+ * How far the fingertips come down towards the keys while the hands work, so
+ * they hover just over them as a typist's do. The hand tips down from the
+ * wrist, resting on the palm rest: nothing at the wrist (WRIST_Z, from the
+ * bake), all of it from the fingers' first row on (TIPS_Z).
+ */
+const HAND_SINK = 0.004;
+const WRIST_Z = 0.1;
+const TIPS_Z = -0.04;
+/** How far over the keys the little fingers curl while the hands work. */
+const PINKY_CLEAR = 0.002;
 /** How much the last joint curls with the middle one, as real fingers do. */
 const LAST_JOINT = 0.7;
 /** How high a finger lifts before it strikes, above where it hovers. */
-const LIFT = 0.009;
+const LIFT = 0.007;
 /** The keys a finger reaches for: those this close to where it hovers. */
 const REACH = 0.024;
 /** What a finger can do, in radians. */
@@ -54,6 +67,14 @@ const LIMITS: [number, number][] = [
   [-0.4, 0.9],
   [-0.25, 0.25],
 ];
+/** What a thumb can do: it swings much further across, from the base of the hand. */
+const THUMB_LIMITS: [number, number][] = [
+  [-0.6, 0.9],
+  [-0.4, 0.9],
+  [-0.75, 0.75],
+];
+/** How far a thumb reaches for the space bar from where it hovers. */
+const THUMB_REACH = 0.05;
 /** How close a solved stroke must land: a twentieth of a millimetre. */
 const LANDS = 5e-5;
 /** What the contact check forgives: a tenth of a millimetre. */
@@ -65,6 +86,8 @@ const SLIDE = { x: [-0.024, -0.012, 0, 0.012, 0.024], z: [-0.012, 0, 0.012, 0.02
 /** At most this many places per hand, each adding at least MIN_NEW keys. */
 const MAX_STATIONS = 6;
 const MIN_NEW = 3;
+/** What a place counts for, in keys, when its thumb can reach the space bar. */
+const THUMB_BONUS = 4;
 
 /** The hacker's mesh at rest, in the scene's metres, with the bake's finger and arm data. */
 export interface HandMesh {
@@ -124,19 +147,31 @@ export interface Hand {
   /** The typing fingers and the thumb, and for each of the hand's vertices which of them it bends with (-1 for none) and where in its list. */
   fingers: Finger[];
   thumb: Finger;
+  /** The little finger: it doesn't type. */
+  pinky: Finger;
   memberOf: Int8Array;
   slot: Uint32Array;
-  /** The thumb's pose while the hands type. */
+  /** The thumb's and the little finger's poses while the hands type. */
   thumbLift: Angles;
+  pinkyLift: Angles;
+  /** How far the fingertips come down while the hand works (metres, negative), and each vertex's share of it (0 at the wrist). */
+  sink: number;
+  tilt: Float32Array;
   /** Where the hand types from; the first is where it rests. */
   stations: Station[];
 }
 
-/** How a hand is posed: slid by `offset`, the thumb raised by `thumb` (0-1), each finger's angles (null at rest). */
+/**
+ * How a hand is posed: slid by `offset`; how much it's at work (`thumb`,
+ * 0-1: brings in the sink, and the thumb and little finger lifting clear);
+ * each finger's angles (null at rest; a thumb's only while it strikes).
+ */
 export interface HandPose {
   offset: [number, number];
   thumb: number;
   angles: (Angles | null)[];
+  /** How far the thumb and little finger are lifted clear (0-1), when that isn't simply how much the hand works. */
+  lift?: number;
 }
 
 const UP: V3 = [0, 1, 0];
@@ -169,7 +204,7 @@ const n = new Float64Array(3);
  * The joints turn outermost first, about where they are at rest, so each
  * carries the ones after it; then the hand slides, taking them all along.
  */
-export function placeVertex(hand: Hand, m: number, finger: Finger | null, a: Angles | null, offset: [number, number], out: Float32Array | Float64Array, o: number, outNormal?: Float32Array | Float64Array): void {
+export function placeVertex(hand: Hand, m: number, finger: Finger | null, a: Angles | null, offset: [number, number], out: Float32Array | Float64Array, o: number, outNormal?: Float32Array | Float64Array, working = 1): void {
   p[0] = hand.rest[m * 3]!;
   p[1] = hand.rest[m * 3 + 1]!;
   p[2] = hand.rest[m * 3 + 2]!;
@@ -197,7 +232,7 @@ export function placeVertex(hand: Hand, m: number, finger: Finger | null, a: Ang
   }
   const share = hand.slide[m]!;
   out[o] = p[0]! + offset[0] * share;
-  out[o + 1] = p[1]!;
+  out[o + 1] = p[1]! + hand.sink * hand.tilt[m]! * working;
   out[o + 2] = p[2]! + offset[1] * share;
   if (outNormal) {
     outNormal[o] = n[0]!;
@@ -206,13 +241,23 @@ export function placeVertex(hand: Hand, m: number, finger: Finger | null, a: Ang
   }
 }
 
+/** Finger `f`'s angles in `pose`: its own, or for the thumb and little finger their lift as the hand works (null at rest). */
+export function fingerAngles(hand: Hand, pose: HandPose, f: number): Angles | null {
+  const finger = hand.fingers[f];
+  const own = pose.angles[f] ?? null;
+  const amount = pose.lift ?? pose.thumb;
+  const lifted = (lift: Angles): Angles | null => (amount > 0 ? [lift[0] * amount, lift[1] * amount, lift[2] * amount] : null);
+  if (finger === hand.thumb) return own ?? lifted(hand.thumbLift);
+  if (finger === hand.pinky) return lifted(hand.pinkyLift);
+  return own;
+}
+
 /** Every vertex of the hand in `pose`, into `out` and `outNormal` (3 per vertex, in the order of hand.ids). */
 export function placeHand(hand: Hand, pose: HandPose, out: Float32Array, outNormal: Float32Array): void {
-  const thumb = pose.thumb > 0 ? (hand.thumbLift.map((v) => v * pose.thumb) as Angles) : null;
-  const angles = hand.fingers.map((finger, f) => (finger === hand.thumb ? thumb : (pose.angles[f] ?? null)));
+  const angles = hand.fingers.map((_, f) => fingerAngles(hand, pose, f));
   for (let m = 0; m < hand.ids.length; m++) {
     const f = hand.memberOf[m]!;
-    placeVertex(hand, m, f >= 0 ? hand.fingers[f]! : null, f >= 0 ? angles[f]! : null, pose.offset, out, m * 3, outNormal);
+    placeVertex(hand, m, f >= 0 ? hand.fingers[f]! : null, f >= 0 ? angles[f]! : null, pose.offset, out, m * 3, outNormal, pose.thumb);
   }
 }
 
@@ -238,7 +283,7 @@ function solve3(m: number[], b: V3): V3 | null {
 }
 
 /** The pose that puts the fingertip at `goal` with the hand slid by `offset`; null if no pose within the finger's limits does. */
-export function reach(hand: Hand, finger: Finger, goal: V3, offset: [number, number], from: Angles = [0.1, 0, 0]): { angles: Angles; drop: number } | null {
+export function reach(hand: Hand, finger: Finger, goal: V3, offset: [number, number], from: Angles = [0.1, 0, 0], limits: [number, number][] = LIMITS): { angles: Angles; drop: number } | null {
   let a: Angles = [...from];
   const h = 1e-4;
   for (let step = 0; step < 60; step++) {
@@ -252,14 +297,14 @@ export function reach(hand: Hand, finger: Finger, goal: V3, offset: [number, num
       const q = contactPoint(hand, finger, moved, offset);
       for (let r = 0; r < 3; r++) m[r * 3 + j] = (q[r]! - at[r]!) / h;
     }
-    if (Math.hypot(...miss) < LANDS / 4) return a.every((v, j) => v >= LIMITS[j]![0] && v <= LIMITS[j]![1]) ? { angles: a, drop: m[3]! } : null;
+    if (Math.hypot(...miss) < LANDS / 4) return a.every((v, j) => v >= limits[j]![0] && v <= limits[j]![1]) ? { angles: a, drop: m[3]! } : null;
     const by = solve3(m, miss);
     if (!by) return null;
     // Small steps: the lowest point of the tip changes as the finger turns.
     const size = Math.hypot(...by);
     const scale = size > 0.08 ? 0.08 / size : 1;
     a = a.map((v, j) => v + by[j]! * scale) as Angles;
-    if (a.some((v, j) => v < LIMITS[j]![0] - 0.3 || v > LIMITS[j]![1] + 0.3)) return null;
+    if (a.some((v, j) => v < limits[j]![0] - 0.3 || v > limits[j]![1] + 0.3)) return null;
   }
   return null;
 }
@@ -329,14 +374,14 @@ export function strokeAt(target: Pick<Target, "lift" | "contact" | "bottom">, p:
  * down (`depth`, by key), and the laptop's base.
  */
 export function overlap(hand: Hand, pose: HandPose, depth?: ArrayLike<number>): number {
-  const thumb = pose.thumb > 0 ? (hand.thumbLift.map((v) => v * pose.thumb) as Angles) : null;
+  const angles = hand.fingers.map((_, f) => fingerAngles(hand, pose, f));
   let worst = 0;
   for (let m = 0; m < hand.ids.length; m++) {
     // Nothing on the laptop stands above a key's top: anything higher can't touch it, so most of the hand is skipped here.
     if (hand.rest[m * 3 + 1]! > KEY_TOP + 0.04) continue;
     const f = hand.memberOf[m]!;
     const finger = f >= 0 ? hand.fingers[f]! : null;
-    placeVertex(hand, m, finger, finger === hand.thumb ? thumb : f >= 0 ? (pose.angles[f] ?? null) : null, pose.offset, point, 0);
+    placeVertex(hand, m, finger, f >= 0 ? angles[f]! : null, pose.offset, point, 0, undefined, pose.thumb);
     const [x, y, z] = point as unknown as V3;
     if (y >= KEY_TOP || Math.abs(x) > BASE.w / 2 || Math.abs(z) > BASE.d / 2) continue;
     const k = keyAt(x, z);
@@ -358,7 +403,7 @@ export function strokeOverlap(hand: Hand, station: Station, finger: Finger, targ
   for (let s = 0; s <= samples; s++) {
     const { angles, depth: down } = strokeAt(target, s / samples, manner);
     depth[target.key] = down;
-    const pose: HandPose = { offset: [station.offset[0] + wander[0], station.offset[1] + wander[1]], thumb: 1, angles: hand.fingers.map((other, i) => (i === f ? angles : other === hand.thumb ? null : others)) };
+    const pose: HandPose = { offset: [station.offset[0] + wander[0], station.offset[1] + wander[1]], thumb: 1, angles: hand.fingers.map((other, i) => (i === f ? angles : other === hand.thumb || other === hand.pinky ? null : others)) };
     worst = Math.max(worst, overlap(hand, pose, depth));
   }
   return worst;
@@ -404,14 +449,16 @@ export function handOf(mesh: HandMesh, side: 0 | 1): Hand | null {
   const rest = new Float32Array(ids.length * 3);
   const normals = new Float32Array(ids.length * 3);
   const slide = new Float32Array(ids.length);
+  const tilt = new Float32Array(ids.length);
   ids.forEach((v, m) => {
     for (let c = 0; c < 3; c++) {
       rest[m * 3 + c] = mesh.positions[v * 3 + c]!;
       normals[m * 3 + c] = mesh.normals[v * 3 + c]!;
     }
     slide[m] = Math.min(1, mesh.arm[v * 3 + side]!);
+    tilt[m] = Math.max(0, Math.min(1, (WRIST_Z - rest[m * 3 + 2]!) / (WRIST_Z - TIPS_Z)));
   });
-  const fingers = [...TYPING[side]!, THUMBS[side]!].map((index) => fingerOf(mesh, ids, index));
+  const fingers = [...TYPING[side]!, PINKIES[side]!, THUMBS[side]!].map((index) => fingerOf(mesh, ids, index));
   if (fingers.some((finger) => finger.members.length === 0 || finger.tips.length === 0)) return null;
   const memberOf = new Int8Array(ids.length).fill(-1);
   const slot = new Uint32Array(ids.length);
@@ -421,13 +468,17 @@ export function handOf(mesh: HandMesh, side: 0 | 1): Hand | null {
       slot[m] = j;
     }),
   );
-  const hand: Hand = { side, ids: Uint32Array.from(ids), rest, normals, slide, fingers, thumb: fingers.at(-1)!, memberOf, slot, thumbLift: REST, stations: [] };
+  const hand: Hand = { side, ids: Uint32Array.from(ids), rest, normals, slide, fingers, thumb: fingers.at(-1)!, pinky: fingers.at(-2)!, memberOf, slot, thumbLift: REST, pinkyLift: REST, sink: -HAND_SINK, tilt, stations: [] };
   // Which way is down for each finger: a positive bend must lower the tip.
   for (const finger of fingers) if (contactPoint(hand, finger, [0.05, 0, 0])[1] > contactPoint(hand, finger, REST)[1]) finger.axis = [-finger.axis[0], 0, -finger.axis[2]];
-  // The thumb: raised at the knuckle until it clears the keys.
-  let bend = 0;
-  while (bend > -0.8 && contactPoint(hand, hand.thumb, [bend, 0, 0])[1] < KEY_TOP + THUMB_CLEAR) bend -= 0.01;
-  hand.thumbLift = [Math.round(bend * 100) / 100, 0, 0];
+  // The thumb and the little finger: raised at the knuckle until they clear the keys, with the hand down at work.
+  const clear = (finger: Finger, by: number): Angles => {
+    let bend = 0;
+    while (bend > -0.8 && contactPoint(hand, finger, [bend, 0, 0])[1] < KEY_TOP + by) bend -= 0.01;
+    return [Math.round(bend * 100) / 100, 0, 0];
+  };
+  hand.thumbLift = clear(hand.thumb, THUMB_CLEAR);
+  hand.pinkyLift = clear(hand.pinky, PINKY_CLEAR);
   return hand;
 }
 
@@ -452,6 +503,34 @@ function targetsFrom(hand: Hand, finger: Finger, offset: [number, number], sampl
   return targets;
 }
 
+/** The space bar: the widest key. */
+const SPACE = KEYS.reduce((widest, key, k) => (key.w > KEYS[widest]!.w ? k : widest), 0);
+
+/**
+ * The thumb's stroke onto the space bar from `offset`, if it can make one
+ * cleanly: at the point of the bar nearest where it hovers (kept off the
+ * bar's ends), from and back to its lifted pose.
+ */
+function thumbTargets(hand: Hand, offset: [number, number], samples: number): Target[] {
+  const thumb = hand.thumb;
+  const hover = contactPoint(hand, thumb, hand.thumbLift, offset);
+  const bar = KEYS[SPACE]!;
+  const x = Math.max(bar.x - bar.w / 2 + 0.009, Math.min(bar.x + bar.w / 2 - 0.009, hover[0]));
+  if (Math.hypot(x - hover[0], bar.z - hover[2]) > THUMB_REACH) return [];
+  const contact = reach(hand, thumb, [x, KEY_TOP, bar.z], offset, hand.thumbLift, THUMB_LIMITS);
+  const bottom = contact && reach(hand, thumb, [x, KEY_TOP - TRAVEL, bar.z], offset, contact.angles, THUMB_LIMITS);
+  if (!contact || !bottom) return [];
+  const target: Target = { key: SPACE, lift: [hand.thumbLift[0] - 0.06, hand.thumbLift[1], contact.angles[2] * 0.6], contact: contact.angles, bottom: bottom.angles, drop: contact.drop };
+  const lifted: Manner = { ...PLAIN, from: hand.thumbLift, to: hand.thumbLift };
+  return strokeOverlap(hand, { offset, strokes: {} }, thumb, target, samples, lifted) <= TOUCH ? [target] : [];
+}
+
+/** How a thumb strikes: from its lifted pose and back to it. */
+export function thumbManner(hand: Hand, manner: Omit<Manner, "from" | "to">, working = 1): Manner {
+  const lift: Angles = [hand.thumbLift[0] * working, hand.thumbLift[1] * working, hand.thumbLift[2] * working];
+  return { ...manner, from: lift, to: lift };
+}
+
 /**
  * Where each hand types from and what each finger strikes there, solved
  * afresh: of a grid of places the hand can slide to without touching
@@ -466,7 +545,9 @@ export function solveStations(hand: Hand, samples = 40): Station[] {
     for (const dz of SLIDE.z) {
       const offset: [number, number] = [dx, dz];
       if (overlap(hand, { offset, thumb: 1, angles: [] }) > TOUCH) continue;
-      const strokes = Object.fromEntries(hand.fingers.filter((f) => f !== hand.thumb).map((finger) => [finger.index, targetsFrom(hand, finger, offset, samples)]));
+      const strokes: Record<number, Target[]> = Object.fromEntries(hand.fingers.filter((f) => f !== hand.thumb && f !== hand.pinky).map((finger) => [finger.index, targetsFrom(hand, finger, offset, samples)]));
+      const space = thumbTargets(hand, offset, samples);
+      if (space.length > 0) strokes[hand.thumb.index] = space;
       candidates.push({ offset, strokes });
     }
   const keysOf = (station: Station) => new Set(Object.values(station.strokes).flatMap((targets) => targets.map((t) => t.key)));
@@ -478,7 +559,8 @@ export function solveStations(hand: Hand, samples = 40): Station[] {
     let best: { station: Station; gain: number } | null = null;
     for (const station of candidates) {
       if (chosen.includes(station)) continue;
-      const gain = [...keysOf(station)].filter((k) => !covered.has(k)).length;
+      // A place the thumb reaches the space bar from counts for more: the thumb only strikes from such places.
+      const gain = [...keysOf(station)].filter((k) => !covered.has(k)).length + ((station.strokes[hand.thumb.index]?.length ?? 0) > 0 ? THUMB_BONUS : 0);
       if (gain < MIN_NEW || (best && gain <= best.gain)) continue;
       if (chosen.some((other) => glideOverlap(hand, other.offset, station.offset) > TOUCH)) continue;
       best = { station, gain };
@@ -500,95 +582,108 @@ export const STATIONS: Station[][] = [
     {
       offset: [0, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.09, 0, -0.260097], contact: [-0.359617, 0.474494, -0.433495], bottom: [-0.331378, 0.4592, -0.433495], drop: -0.071723 },
+        ],
         1: [
-          { key: 32, lift: [-0.13156, -0.12, -0.111835], contact: [-0.043733, 0.229282, -0.186392], bottom: [-0.005409, 0.19898, -0.186392], drop: -0.061167 },
-          { key: 31, lift: [-0.13156, -0.12, 0.083734], contact: [-0.262981, 0.60069, 0.139556], bottom: [-0.229801, 0.579485, 0.139557], drop: -0.055675 },
+          { key: 32, lift: [-0.099997, -0.12, -0.111835], contact: [-0.161698, 0.315178, -0.186392], bottom: [-0.127639, 0.291522, -0.186392], drop: -0.061167 },
         ],
         2: [
-          { key: 17, lift: [-0.107429, -0.12, -0.071483], contact: [0.032026, 0.124577, -0.119138], bottom: [0.065011, 0.096667, -0.119138], drop: -0.07201 },
-          { key: 16, lift: [-0.107429, -0.12, 0.085906], contact: [-0.034761, 0.243902, 0.143176], bottom: [-0.004623, 0.220225, 0.143173], drop: -0.068881 },
+          { key: 17, lift: [-0.08208, -0.12, -0.071483], contact: [-0.069746, 0.204662, -0.119138], bottom: [-0.04033, 0.182446, -0.119138], drop: -0.07201 },
+          { key: 16, lift: [-0.08208, -0.12, 0.085883], contact: [-0.130238, 0.314113, 0.143138], bottom: [-0.102226, 0.294196, 0.143173], drop: -0.068875 },
         ],
         3: [
-          { key: 28, lift: [-0.121171, -0.12, 0.107519], contact: [-0.196367, 0.587077, 0.179198], bottom: [-0.163158, 0.562527, 0.179198], drop: -0.052972 },
+          { key: 28, lift: [-0.092035, -0.12, 0.10752], contact: [-0.303748, 0.661562, 0.179199], bottom: [-0.272004, 0.640322, 0.179198], drop: -0.052972 },
         ],
       },
     },
     {
-      offset: [0, 0.036],
+      offset: [0.024, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.09, 0, -0.013177], contact: [-0.595006, 0.785677, -0.021962], bottom: [-0.568661, 0.774255, -0.021962], drop: -0.067273 },
+        ],
         1: [
-          { key: 58, lift: [-0.13156, -0.12, -0.049089], contact: [-0.167549, 0.437408, -0.081816], bottom: [-0.133121, 0.413414, -0.081816], drop: -0.058089 },
-          { key: 57, lift: [-0.13156, -0.12, 0.133778], contact: [-0.288781, 0.648773, 0.222963], bottom: [-0.255791, 0.628132, 0.222961], drop: -0.054013 },
+          { key: 33, lift: [-0.099997, -0.12, -0.038056], contact: [-0.260766, 0.480072, -0.063427], bottom: [-0.228198, 0.459454, -0.063328], drop: -0.058926 },
         ],
         2: [
-          { key: 44, lift: [-0.107429, -0.12, -0.035555], contact: [-0.020868, 0.218126, -0.059259], bottom: [0.009946, 0.193454, -0.059312], drop: -0.069612 },
-          { key: 43, lift: [-0.107429, -0.12, 0.129532], contact: [-0.151373, 0.449626, 0.215887], bottom: [-0.122883, 0.429651, 0.215899], drop: -0.06765 },
+          { key: 18, lift: [-0.08208, -0.12, -0.027245], contact: [-0.098481, 0.255622, -0.045409], bottom: [-0.069872, 0.234695, -0.045412], drop: -0.070613 },
+          { key: 17, lift: [-0.08208, -0.12, 0.132922], contact: [-0.129917, 0.313527, 0.221536], bottom: [-0.10202, 0.293808, 0.221536], drop: -0.068893 },
         ],
         3: [
-          { key: 55, lift: [-0.121171, -0.12, 0.027947], contact: [-0.214837, 0.631923, 0.046578], bottom: [-0.181969, 0.60798, 0.046578], drop: -0.051254 },
+          { key: 30, lift: [-0.092035, -0.12, -0.094363], contact: [-0.297966, 0.64822, -0.157272], bottom: [-0.266179, 0.626854, -0.157271], drop: -0.053484 },
+          { key: 29, lift: [-0.092035, -0.12, 0.115941], contact: [-0.302523, 0.658711, 0.193235], bottom: [-0.27077, 0.637444, 0.193234], drop: -0.053082 },
         ],
       },
     },
     {
-      offset: [-0.012, 0.012],
+      offset: [-0.012, -0.012],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.09, 0, -0.355266], contact: [-0.593172, 0.783226, -0.592109], bottom: [-0.566831, 0.771789, -0.592109], drop: -0.06735 },
+        ],
         1: [
-          { key: 45, lift: [-0.13156, -0.12, -0.111159], contact: [-0.283795, 0.639296, -0.185265], bottom: [-0.250779, 0.618557, -0.185264], drop: -0.054348 },
+          { key: 17, lift: [-0.099997, -0.12, 0.054571], contact: [-0.122163, 0.251458, 0.090951], bottom: [-0.086426, 0.225232, 0.090986], drop: -0.062638 },
         ],
         2: [
-          { key: 29, lift: [-0.107429, -0.12, 0.062264], contact: [-0.218828, 0.585674, 0.103774], bottom: [-0.191375, 0.567646, 0.103774], drop: -0.062441 },
-          { key: 30, lift: [-0.107429, -0.12, -0.108207], contact: [-0.166105, 0.477884, -0.180346], bottom: [-0.138125, 0.458648, -0.180346], drop: -0.066635 },
+          { key: 1, lift: [-0.08208, -0.12, 0.063326], contact: [-0.081785, 0.225806, 0.105543], bottom: [-0.052732, 0.204164, 0.105543], drop: -0.071444 },
+          { key: 2, lift: [-0.08208, -0.12, -0.087176], contact: [0.009285, 0.071886, -0.145293], bottom: [0.042202, 0.044463, -0.145293], drop: -0.075136 },
         ],
         3: [
-          { key: 42, lift: [-0.121171, -0.12, -0.068491], contact: [-0.254249, 0.747317, -0.114151], bottom: [-0.221877, 0.724395, -0.114151], drop: -0.04637 },
+          { key: 14, lift: [-0.092035, -0.12, 0.028428], contact: [-0.114902, 0.301234, 0.04738], bottom: [-0.080099, 0.273353, 0.04738], drop: -0.05906 },
         ],
       },
     },
     {
-      offset: [0, -0.012],
+      offset: [-0.012, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.09, 0, -0.340979], contact: [-0.112986, 0.158267, -0.568298], bottom: [-0.073124, 0.128136, -0.568298], drop: -0.076984 },
+        ],
         1: [
-          { key: 18, lift: [-0.13156, -0.12, -0.006687], contact: [0.056634, 0.072754, -0.011145], bottom: [0.103136, 0.031252, -0.011149], drop: -0.064091 },
+          { key: 31, lift: [-0.099997, -0.12, -0.026312], contact: [-0.269064, 0.494222, -0.043853], bottom: [-0.236632, 0.47387, -0.043762], drop: -0.058509 },
         ],
         2: [
-          { key: 2, lift: [-0.107429, -0.12, 0.008401], contact: [0.037491, 0.115221, 0.014002], bottom: [0.070783, 0.086866, 0.014002], drop: -0.072229 },
-          { key: 17, lift: [-0.107429, -0.12, -0.100146], contact: [-0.237998, 0.628724, -0.16691], bottom: [-0.210476, 0.610857, -0.166996], drop: -0.06062 },
-          { key: 16, lift: [-0.107429, -0.12, 0.047493], contact: [-0.272395, 0.715432, 0.079156], bottom: [-0.244995, 0.698154, 0.079156], drop: -0.056908 },
+          { key: 16, lift: [-0.08208, -0.12, -0.017203], contact: [-0.103505, 0.264693, -0.028672], bottom: [-0.074966, 0.243892, -0.02868], drop: -0.070353 },
+          { key: 15, lift: [-0.08208, -0.12, 0.143333], contact: [-0.128885, 0.311584, 0.238889], bottom: [-0.100965, 0.291825, 0.238889], drop: -0.068953 },
         ],
         3: [
-          { key: 15, lift: [-0.121171, -0.12, -0.03828], contact: [0.01425, 0.184851, -0.063801], bottom: [0.054341, 0.148519, -0.0638], drop: -0.059422 },
-          { key: 14, lift: [-0.121171, -0.12, 0.148861], contact: [0.035578, 0.146181, 0.248102], bottom: [0.07748, 0.107296, 0.2481], drop: -0.060276 },
+          { key: 28, lift: [-0.092035, -0.12, -0.0291], contact: [-0.307237, 0.669757, -0.048501], bottom: [-0.275515, 0.648593, -0.048501], drop: -0.052654 },
         ],
       },
     },
     {
-      offset: [0.024, -0.012],
+      offset: [0.012, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.09, 0, -0.11723], contact: [-0.5577, 0.736099, -0.195383], bottom: [-0.531553, 0.724624, -0.195354], drop: -0.068787 },
+        ],
         1: [
-          { key: 19, lift: [-0.13156, -0.12, 0.043261], contact: [0.009387, 0.144935, 0.072101], bottom: [0.051195, 0.109785, 0.072101], drop: -0.062862 },
+          { key: 32, lift: [-0.099997, -0.12, 0.014263], contact: [-0.348158, 0.625844, 0.023771], bottom: [-0.316513, 0.60751, 0.023771], drop: -0.056982 },
         ],
         2: [
-          { key: 3, lift: [-0.107429, -0.12, 0.053268], contact: [0.02074, 0.144073, 0.088781], bottom: [0.053134, 0.117023, 0.08878], drop: -0.071542 },
-          { key: 4, lift: [-0.107429, -0.12, -0.096302], contact: [0.141964, -0.054912, -0.160503], bottom: [0.184872, -0.096805, -0.160503], drop: -0.075525 },
-          { key: 18, lift: [-0.107429, -0.12, -0.047991], contact: [-0.253495, 0.666227, -0.079985], bottom: [-0.226145, 0.648747, -0.079985], drop: -0.058958 },
+          { key: 17, lift: [-0.08208, -0.12, 0.028707], contact: [-0.120336, 0.295616, 0.047845], bottom: [-0.09225, 0.275564, 0.047845], drop: -0.06944 },
+          { key: 18, lift: [-0.08208, -0.12, -0.123062], contact: [-0.016629, 0.114393, -0.205104], bottom: [0.014893, 0.089002, -0.205104], drop: -0.074217 },
         ],
         3: [
-          { key: 16, lift: [-0.121171, -0.12, 0.016243], contact: [0.006089, 0.199969, 0.027071], bottom: [0.045583, 0.164486, 0.027071], drop: -0.059071 },
+          { key: 29, lift: [-0.092035, -0.12, -0.020596], contact: [-0.307888, 0.6713, -0.034327], bottom: [-0.276171, 0.650149, -0.034327], drop: -0.052594 },
         ],
       },
     },
     {
-      offset: [0.024, 0.036],
+      offset: [0.024, 0.024],
       strokes: {
         1: [
-          { key: 59, lift: [-0.13156, -0.12, -0.00877], contact: [-0.251592, 0.580154, -0.014617], bottom: [-0.218293, 0.558666, -0.014617], drop: -0.056357 },
+          { key: 47, lift: [-0.099997, -0.12, -0.085283], contact: [-0.012368, 0.083819, -0.142139], bottom: [0.029797, 0.048613, -0.142139], drop: -0.065782 },
+          { key: 46, lift: [-0.099997, -0.12, 0.086427], contact: [-0.166638, 0.323292, 0.144046], bottom: [-0.132719, 0.299861, 0.144046], drop: -0.060969 },
         ],
         2: [
-          { key: 45, lift: [-0.107429, -0.12, 0.010654], contact: [-0.041033, 0.255673, 0.017756], bottom: [-0.011109, 0.232327, 0.017756], drop: -0.068538 },
-          { key: 46, lift: [-0.107429, -0.12, -0.141308], contact: [0.083172, 0.038954, -0.235514], bottom: [0.119604, 0.006121, -0.235514], drop: -0.073867 },
+          { key: 31, lift: [-0.08208, -0.12, 0.054725], contact: [-0.008715, 0.10131, 0.091209], bottom: [0.023441, 0.074953, 0.091184], drop: -0.074508 },
+          { key: 32, lift: [-0.08208, -0.12, -0.089344], contact: [0.134976, -0.123599, -0.148907], bottom: [0.182455, -0.171409, -0.148907], drop: -0.078349 },
         ],
         3: [
-          { key: 56, lift: [-0.121171, -0.12, -0.044522], contact: [-0.211537, 0.623621, -0.074204], bottom: [-0.178614, 0.599577, -0.074204], drop: -0.051579 },
+          { key: 43, lift: [-0.092035, -0.12, 0.060932], contact: [-0.23728, 0.521401, 0.101553], bottom: [-0.204658, 0.498284, 0.101553], drop: -0.05796 },
+          { key: 44, lift: [-0.092035, -0.12, -0.125106], contact: [-0.100126, 0.273039, -0.208511], bottom: [-0.064671, 0.244157, -0.208502], drop: -0.059796 },
         ],
       },
     },
@@ -598,16 +693,53 @@ export const STATIONS: Station[][] = [
       offset: [0, 0],
       strokes: {
         6: [
-          { key: 36, lift: [-0.131362, -0.12, 0.088993], contact: [0.101162, 0.026818, 0.148322], bottom: [0.152408, -0.020962, 0.148315], drop: -0.065042 },
-          { key: 37, lift: [-0.131362, -0.12, -0.080991], contact: [-0.085924, 0.320864, -0.134985], bottom: [-0.050073, 0.29421, -0.134984], drop: -0.059349 },
+          { key: 36, lift: [-0.099979, -0.12, 0.089011], contact: [-0.039493, 0.144655, 0.148352], bottom: [-0.000246, 0.113441, 0.148315], drop: -0.065037 },
+          { key: 37, lift: [-0.099979, -0.12, -0.080991], contact: [-0.198471, 0.398133, -0.134984], bottom: [-0.165678, 0.376616, -0.134984], drop: -0.05935 },
         ],
         7: [
-          { key: 24, lift: [-0.107268, -0.12, 0.02446], contact: [0.059451, 0.072333, 0.040766], bottom: [0.094055, 0.042152, 0.040799], drop: -0.073938 },
-          { key: 25, lift: [-0.107268, -0.12, -0.128718], contact: [-0.024633, 0.217112, -0.21453], bottom: [0.005612, 0.193336, -0.21453], drop: -0.070452 },
+          { key: 24, lift: [-0.082007, -0.12, 0.024479], contact: [-0.044878, 0.156076, 0.040799], bottom: [-0.014893, 0.133013, 0.040799], drop: -0.073943 },
+          { key: 25, lift: [-0.082007, -0.12, -0.128718], contact: [-0.119953, 0.286988, -0.21453], bottom: [-0.09214, 0.267395, -0.21453], drop: -0.070452 },
         ],
         8: [
-          { key: 39, lift: [-0.121301, -0.12, 0.115857], contact: [-0.194394, 0.571426, 0.193096], bottom: [-0.161541, 0.547861, 0.193096], drop: -0.054872 },
-          { key: 40, lift: [-0.121301, -0.12, -0.090857], contact: [-0.228556, 0.649269, -0.151428], bottom: [-0.196201, 0.626704, -0.151428], drop: -0.051965 },
+          { key: 39, lift: [-0.092273, -0.12, 0.115858], contact: [-0.300472, 0.642619, 0.193096], bottom: [-0.269141, 0.622373, 0.193096], drop: -0.054872 },
+          { key: 40, lift: [-0.092273, -0.12, -0.090857], contact: [-0.333908, 0.718067, -0.151428], bottom: [-0.302661, 0.698411, -0.151428], drop: -0.051965 },
+        ],
+      },
+    },
+    {
+      offset: [-0.024, 0],
+      strokes: {
+        5: [
+          { key: 71, lift: [-0.18, 0, 0.176383], contact: [-0.354972, 0.345885, 0.293972], bottom: [-0.326663, 0.330394, 0.293971], drop: -0.072735 },
+        ],
+        6: [
+          { key: 35, lift: [-0.099979, -0.12, 0.043119], contact: [-0.110492, 0.253954, 0.071864], bottom: [-0.075132, 0.228315, 0.071883], drop: -0.062877 },
+          { key: 36, lift: [-0.099979, -0.12, -0.120354], contact: [-0.265319, 0.509076, -0.20059], bottom: [-0.233044, 0.489097, -0.200509], drop: -0.058636 },
+        ],
+        7: [
+          { key: 23, lift: [-0.082007, -0.12, -0.018478], contact: [-0.07947, 0.215118, -0.030796], bottom: [-0.050651, 0.193862, -0.030796], drop: -0.072456 },
+        ],
+        8: [
+          { key: 38, lift: [-0.092273, -0.12, 0.058646], contact: [-0.318491, 0.682131, 0.097744], bottom: [-0.287197, 0.662193, 0.097761], drop: -0.05338 },
+        ],
+      },
+    },
+    {
+      offset: [-0.012, -0.012],
+      strokes: {
+        5: [
+          { key: 71, lift: [-0.18, 0, 0.315986], contact: [-0.541225, 0.59866, 0.526643], bottom: [-0.514272, 0.586254, 0.526643], drop: -0.065904 },
+        ],
+        6: [
+          { key: 23, lift: [-0.099979, -0.12, -0.116948], contact: [-0.020434, 0.11614, -0.194914], bottom: [0.01981, 0.083588, -0.194914], drop: -0.065526 },
+        ],
+        7: [
+          { key: 9, lift: [-0.082007, -0.12, -0.001443], contact: [-0.003492, 0.087771, -0.002405], bottom: [0.028377, 0.061912, -0.002405], drop: -0.075479 },
+          { key: 23, lift: [-0.082007, -0.12, 0.148294], contact: [-0.289131, 0.589925, 0.247157], bottom: [-0.262876, 0.574328, 0.247157], drop: -0.065365 },
+        ],
+        8: [
+          { key: 25, lift: [-0.092273, -0.12, 0.063803], contact: [-0.109344, 0.289899, 0.106338], bottom: [-0.075034, 0.263154, 0.106338], drop: -0.060442 },
+          { key: 26, lift: [-0.092273, -0.12, -0.118723], contact: [-0.245703, 0.533108, -0.197872], bottom: [-0.213797, 0.511464, -0.197872], drop: -0.058671 },
         ],
       },
     },
@@ -615,66 +747,49 @@ export const STATIONS: Station[][] = [
       offset: [-0.024, 0.036],
       strokes: {
         6: [
-          { key: 61, lift: [-0.131362, -0.12, 0.087906], contact: [0.040205, 0.11806, 0.146509], bottom: [0.083522, 0.080901, 0.146509], drop: -0.063639 },
-          { key: 62, lift: [-0.131362, -0.12, -0.0711], contact: [-0.16944, 0.461991, -0.1185], bottom: [-0.135071, 0.438311, -0.118417], drop: -0.057975 },
+          { key: 61, lift: [-0.099979, -0.12, 0.08791], contact: [-0.087488, 0.217978, 0.146516], bottom: [-0.051235, 0.191017, 0.146509], drop: -0.063637 },
+          { key: 62, lift: [-0.099979, -0.12, -0.088187], contact: [-0.324319, 0.606759, -0.146978], bottom: [-0.29267, 0.588298, -0.147017], drop: -0.058047 },
         ],
         7: [
-          { key: 50, lift: [-0.107268, -0.12, 0.021263], contact: [0.022864, 0.133791, 0.035438], bottom: [0.055134, 0.106992, 0.035438], drop: -0.072569 },
-          { key: 51, lift: [-0.107268, -0.12, -0.13496], contact: [-0.048669, 0.261166, -0.224933], bottom: [-0.019184, 0.238577, -0.224932], drop: -0.069211 },
+          { key: 50, lift: [-0.082007, -0.12, 0.021263], contact: [-0.076982, 0.210805, 0.035438], bottom: [-0.04809, 0.189433, 0.035438], drop: -0.07257 },
+          { key: 51, lift: [-0.082007, -0.12, -0.13496], contact: [-0.142228, 0.328081, -0.224933], bottom: [-0.114823, 0.309225, -0.224932], drop: -0.069211 },
         ],
         8: [
-          { key: 64, lift: [-0.121301, -0.12, 0.11254], contact: [-0.211517, 0.609222, 0.187567], bottom: [-0.178939, 0.586184, 0.187565], drop: -0.053495 },
-          { key: 65, lift: [-0.121301, -0.12, -0.099671], contact: [-0.240372, 0.678909, -0.166118], bottom: [-0.208133, 0.656627, -0.166117], drop: -0.050784 },
+          { key: 64, lift: [-0.092273, -0.12, 0.112469], contact: [-0.317338, 0.679346, 0.187449], bottom: [-0.285875, 0.659194, 0.187565], drop: -0.05349 },
         ],
       },
     },
     {
-      offset: [-0.024, -0.012],
+      offset: [0, -0.012],
       strokes: {
-        6: [
-          { key: 35, lift: [-0.131362, -0.12, 0.095024], contact: [-0.313354, 0.719847, 0.158374], bottom: [-0.280562, 0.700025, 0.158374], drop: -0.051894 },
+        5: [
+          { key: 71, lift: [-0.18, 0, 0.399118], contact: [-0.368502, 0.363647, 0.665196], bottom: [-0.340356, 0.348428, 0.665184], drop: -0.072325 },
         ],
+        6: [],
         7: [
-          { key: 8, lift: [-0.107268, -0.12, 0.048348], contact: [0.20273, -0.151878, 0.080581], bottom: [0.259361, -0.212713, 0.080581], drop: -0.077502 },
-          { key: 9, lift: [-0.107268, -0.12, -0.097206], contact: [0.03889, 0.106614, -0.16201], bottom: [0.072038, 0.078541, -0.16201], drop: -0.073195 },
-          { key: 23, lift: [-0.107268, -0.12, 0.04307], contact: [-0.251497, 0.644288, 0.071783], bottom: [-0.224399, 0.627205, 0.071783], drop: -0.060908 },
+          { key: 10, lift: [-0.082007, -0.12, -0.053456], contact: [-0.043673, 0.15405, -0.089093], bottom: [-0.013632, 0.130906, -0.089093], drop: -0.073991 },
+          { key: 24, lift: [-0.082007, -0.12, 0.092303], contact: [-0.321455, 0.655863, 0.153838], bottom: [-0.29517, 0.640666, 0.153838], drop: -0.062669 },
         ],
         8: [
-          { key: 25, lift: [-0.121301, -0.12, -0.055743], contact: [-0.030311, 0.267462, -0.092906], bottom: [0.006263, 0.236674, -0.092904], drop: -0.058638 },
-          { key: 24, lift: [-0.121301, -0.12, 0.125199], contact: [0.06372, 0.098746, 0.208664], bottom: [0.107428, 0.057744, 0.208632], drop: -0.062397 },
+          { key: 26, lift: [-0.092273, -0.12, -0.001032], contact: [-0.134931, 0.338293, -0.00172], bottom: [-0.101429, 0.312842, -0.00172], drop: -0.059155 },
         ],
       },
     },
     {
-      offset: [0.012, -0.012],
+      offset: [-0.012, 0],
       strokes: {
+        5: [
+          { key: 71, lift: [-0.18, 0, 0.264445], contact: [-0.189862, 0.13475, 0.440742], bottom: [-0.156143, 0.112165, 0.440737], drop: -0.076747 },
+        ],
         6: [
-          { key: 37, lift: [-0.131362, -0.12, 0.082637], contact: [-0.319923, 0.733381, 0.137728], bottom: [-0.28712, 0.71365, 0.137728], drop: -0.051374 },
+          { key: 36, lift: [-0.099979, -0.12, -0.01704], contact: [-0.16577, 0.343179, -0.0284], bottom: [-0.13228, 0.320446, -0.0284], drop: -0.060783 },
         ],
         7: [
-          { key: 10, lift: [-0.107268, -0.12, 0.039485], contact: [0.179486, -0.116946, 0.065808], bottom: [0.229405, -0.168506, 0.065809], drop: -0.077096 },
-          { key: 11, lift: [-0.107268, -0.12, -0.107028], contact: [0.035595, 0.112154, -0.17838], bottom: [0.068589, 0.084308, -0.178379], drop: -0.07307 },
-          { key: 25, lift: [-0.107268, -0.12, 0.031752], contact: [-0.254801, 0.651942, 0.052919], bottom: [-0.227704, 0.634904, 0.052919], drop: -0.060575 },
+          { key: 23, lift: [-0.082007, -0.12, 0.074531], contact: [0.019768, 0.050308, 0.124218], bottom: [0.053134, 0.022291, 0.124202], drop: -0.076238 },
+          { key: 24, lift: [-0.082007, -0.12, -0.072912], contact: [-0.10643, 0.262607, -0.121519], bottom: [-0.078318, 0.242504, -0.121519], drop: -0.071156 },
         ],
         8: [
-          { key: 26, lift: [-0.121301, -0.12, 0.114333], contact: [0.051469, 0.119598, 0.190555], bottom: [0.093818, 0.080534, 0.190539], drop: -0.061996 },
-          { key: 27, lift: [-0.121301, -0.12, -0.115621], contact: [-0.030347, 0.267539, -0.192701], bottom: [0.00621, 0.236774, -0.192701], drop: -0.058636 },
-        ],
-      },
-    },
-    {
-      offset: [0.012, 0.036],
-      strokes: {
-        6: [
-          { key: 63, lift: [-0.131362, -0.12, 0.077763], contact: [0.021453, 0.146871, 0.129605], bottom: [0.063157, 0.111911, 0.129604], drop: -0.063127 },
-          { key: 64, lift: [-0.131362, -0.12, -0.083279], contact: [-0.172771, 0.467855, -0.138798], bottom: [-0.138537, 0.444374, -0.138729], drop: -0.057803 },
-        ],
-        7: [
-          { key: 52, lift: [-0.107268, -0.12, 0.011661], contact: [0.014075, 0.148827, 0.019434], bottom: [0.046031, 0.122512, 0.019448], drop: -0.072211 },
-          { key: 53, lift: [-0.107268, -0.12, -0.145371], contact: [-0.049608, 0.262916, -0.242285], bottom: [-0.020136, 0.240345, -0.242276], drop: -0.06916 },
-        ],
-        8: [
-          { key: 66, lift: [-0.121301, -0.12, -0.031567], contact: [-0.239077, 0.675572, -0.052612], bottom: [-0.206828, 0.653264, -0.052612], drop: -0.050919 },
+          { key: 39, lift: [-0.092273, -0.12, -0.01499], contact: [-0.330786, 0.710619, -0.024983], bottom: [-0.299541, 0.690918, -0.024983], drop: -0.052262 },
         ],
       },
     },
@@ -687,67 +802,71 @@ export const STATIONS_HQ: Station[][] = [
     {
       offset: [0, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.07, 0, -0.240952], contact: [-0.45383, 0.609337, -0.401587], bottom: [-0.426693, 0.595792, -0.401565], drop: -0.072003 },
+        ],
         1: [
-          { key: 31, lift: [-0.127401, -0.12, 0.075692], contact: [-0.242108, 0.573049, 0.126154], bottom: [-0.208699, 0.551263, 0.126154], drop: -0.055701 },
-          { key: 32, lift: [-0.127401, -0.12, -0.107963], contact: [-0.053906, 0.254393, -0.179939], bottom: [-0.015778, 0.224495, -0.179939], drop: -0.061157 },
+          { key: 31, lift: [-0.097006, -0.12, 0.075692], contact: [-0.349753, 0.638207, 0.126154], bottom: [-0.318009, 0.619797, 0.126154], drop: -0.055702 },
+          { key: 32, lift: [-0.097006, -0.12, -0.107964], contact: [-0.171483, 0.339324, -0.179939], bottom: [-0.137506, 0.315907, -0.179939], drop: -0.061157 },
         ],
         2: [
-          { key: 17, lift: [-0.108667, -0.12, -0.077692], contact: [0.021929, 0.148641, -0.129486], bottom: [0.054698, 0.121164, -0.129485], drop: -0.072028 },
-          { key: 16, lift: [-0.108667, -0.12, 0.083013], contact: [-0.111466, 0.38305, 0.138356], bottom: [-0.082576, 0.362079, 0.138355], drop: -0.068891 },
+          { key: 17, lift: [-0.083009, -0.12, -0.077693], contact: [-0.079336, 0.227617, -0.129488], bottom: [-0.050031, 0.205671, -0.129485], drop: -0.072028 },
+          { key: 16, lift: [-0.083009, -0.12, 0.083013], contact: [-0.20383, 0.445846, 0.138355], bottom: [-0.176692, 0.428068, 0.138355], drop: -0.068891 },
         ],
         3: [
-          { key: 28, lift: [-0.123583, -0.12, 0.11676], contact: [-0.176949, 0.56051, 0.1946], bottom: [-0.143261, 0.535013, 0.194729], drop: -0.05298 },
-          { key: 29, lift: [-0.123583, -0.12, -0.143079], contact: [-0.153554, 0.508214, -0.238464], bottom: [-0.119495, 0.482018, -0.238463], drop: -0.054808 },
+          { key: 28, lift: [-0.093799, -0.12, 0.116838], contact: [-0.28468, 0.636594, 0.194729], bottom: [-0.252796, 0.614849, 0.194729], drop: -0.052986 },
+          { key: 29, lift: [-0.093799, -0.12, -0.143036], contact: [-0.262797, 0.587032, -0.238394], bottom: [-0.23057, 0.564559, -0.238463], drop: -0.054804 },
         ],
       },
     },
     {
-      offset: [0, 0.036],
+      offset: [-0.012, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.07, 0, -0.323125], contact: [-0.253153, 0.356579, -0.538541], bottom: [-0.221644, 0.336898, -0.538542], drop: -0.077249 },
+        ],
         1: [
-          { key: 58, lift: [-0.127401, -0.12, -0.070586], contact: [-0.197208, 0.493458, -0.117644], bottom: [-0.162964, 0.470154, -0.117612], drop: -0.05818 },
-          { key: 57, lift: [-0.127401, -0.12, 0.125488], contact: [-0.268364, 0.622357, 0.209147], bottom: [-0.235205, 0.601207, 0.209147], drop: -0.05404 },
+          { key: 31, lift: [-0.097006, -0.12, -0.047592], contact: [-0.297845, 0.548119, -0.079319], bottom: [-0.265752, 0.528594, -0.079298], drop: -0.058608 },
         ],
         2: [
-          { key: 44, lift: [-0.108667, -0.12, -0.042009], contact: [-0.030206, 0.240645, -0.070016], bottom: [0.000288, 0.216538, -0.070016], drop: -0.069636 },
-          { key: 43, lift: [-0.108667, -0.12, 0.124119], contact: [-0.131127, 0.419581, 0.206864], bottom: [-0.102646, 0.399302, 0.206864], drop: -0.067676 },
+          { key: 16, lift: [-0.083009, -0.12, -0.023563], contact: [-0.112777, 0.286846, -0.039271], bottom: [-0.084385, 0.266375, -0.039271], drop: -0.070374 },
+          { key: 15, lift: [-0.083009, -0.12, 0.140446], contact: [-0.202677, 0.443741, 0.234076], bottom: [-0.175526, 0.425936, 0.234076], drop: -0.068963 },
         ],
         3: [
-          { key: 55, lift: [-0.123583, -0.12, 0.050671], contact: [-0.202509, 0.622621, 0.084452], bottom: [-0.169438, 0.598204, 0.084452], drop: -0.051265 },
+          { key: 28, lift: [-0.093799, -0.12, -0.006979], contact: [-0.29519, 0.661171, -0.011632], bottom: [-0.263314, 0.639616, -0.011632], drop: -0.052665 },
         ],
       },
     },
     {
-      offset: [-0.012, -0.012],
+      offset: [0.012, 0],
       strokes: {
+        0: [
+          { key: 71, lift: [-0.07, 0, -0.14666], contact: [-0.552002, 0.737823, -0.244434], bottom: [-0.525516, 0.725868, -0.244433], drop: -0.06849 },
+        ],
         1: [
-          { key: 17, lift: [-0.127401, -0.12, 0.05597], contact: [0.10234, 0.013682, 0.093283], bottom: [0.152681, -0.034185, 0.093283], drop: -0.062646 },
+          { key: 32, lift: [-0.097006, -0.12, 0.006381], contact: [-0.327664, 0.599033, 0.010635], bottom: [-0.295691, 0.580052, 0.010676], drop: -0.057003 },
         ],
         2: [
-          { key: 1, lift: [-0.108667, -0.12, 0.057068], contact: [0.008514, 0.171782, 0.095114], bottom: [0.040608, 0.145289, 0.095113], drop: -0.071462 },
-          { key: 2, lift: [-0.108667, -0.12, -0.09313], contact: [0.114436, -0.003165, -0.155217], bottom: [0.193781, -0.102753, -0.171179], drop: -0.07515 },
-          { key: 16, lift: [-0.108667, -0.12, -0.04576], contact: [-0.245002, 0.665076, -0.076267], bottom: [-0.217557, 0.647349, -0.076267], drop: -0.058681 },
+          { key: 17, lift: [-0.083009, -0.12, 0.02584], contact: [-0.194744, 0.429347, 0.043066], bottom: [-0.16749, 0.411333, 0.043066], drop: -0.069449 },
+          { key: 18, lift: [-0.083009, -0.12, -0.129086], contact: [-0.026796, 0.138623, -0.215144], bottom: [0.004525, 0.11363, -0.215144], drop: -0.074235 },
         ],
         3: [
-          { key: 14, lift: [-0.123583, -0.12, 0.033797], contact: [-0.08361, 0.369269, 0.056328], bottom: [-0.046927, 0.339142, 0.056329], drop: -0.059066 },
-          { key: 15, lift: [-0.123583, -0.12, -0.136309], contact: [0.103025, 0.039326, -0.227182], bottom: [0.153, -0.011146, -0.227149], drop: -0.0619 },
+          { key: 29, lift: [-0.093799, -0.12, 0.00155], contact: [-0.295852, 0.662742, 0.002584], bottom: [-0.263982, 0.641202, 0.002584], drop: -0.052605 },
         ],
       },
     },
     {
-      offset: [0.024, -0.012],
+      offset: [-0.012, 0.036],
       strokes: {
         1: [
-          { key: 19, lift: [-0.127401, -0.12, 0.044635], contact: [0.11226, -0.001645, 0.074392], bottom: [0.16446, -0.05205, 0.07439], drop: -0.062856 },
+          { key: 57, lift: [-0.097006, -0.12, -0.004326], contact: [-0.344053, 0.628005, -0.007209], bottom: [-0.312297, 0.609498, -0.007209], drop: -0.056046 },
         ],
         2: [
-          { key: 3, lift: [-0.108667, -0.12, 0.047019], contact: [0.010792, 0.167831, 0.078365], bottom: [0.042988, 0.141187, 0.078365], drop: -0.07156 },
-          { key: 4, lift: [-0.108667, -0.12, -0.111753], contact: [0.167104, -0.086108, -0.186256], bottom: [0.249512, -0.188161, -0.169737], drop: -0.075556 },
-          { key: 18, lift: [-0.108667, -0.12, -0.057661], contact: [-0.242239, 0.658138, -0.096102], bottom: [-0.214791, 0.640373, -0.096102], drop: -0.05899 },
+          { key: 43, lift: [-0.083009, -0.12, 0.018181], contact: [-0.212136, 0.461117, 0.030302], bottom: [-0.185095, 0.443545, 0.030302], drop: -0.068364 },
+          { key: 44, lift: [-0.083009, -0.12, -0.138307], contact: [-0.047668, 0.173457, -0.230512], bottom: [-0.017265, 0.149826, -0.230512], drop: -0.073411 },
         ],
         3: [
-          { key: 16, lift: [-0.123583, -0.12, 0.02161], contact: [-0.08339, 0.368862, 0.036017], bottom: [-0.046697, 0.33872, 0.036018], drop: -0.059077 },
-          { key: 17, lift: [-0.123583, -0.12, -0.14737], contact: [0.117288, 0.015732, -0.245616], bottom: [0.169356, -0.037642, -0.245616], drop: -0.062276 },
+          { key: 55, lift: [-0.093799, -0.12, -0.087722], contact: [-0.296408, 0.664062, -0.146203], bottom: [-0.264541, 0.642535, -0.146203], drop: -0.052554 },
         ],
       },
     },
@@ -755,14 +874,30 @@ export const STATIONS_HQ: Station[][] = [
       offset: [0.024, 0.036],
       strokes: {
         1: [
-          { key: 59, lift: [-0.127401, -0.12, -0.016714], contact: [-0.230505, 0.551967, -0.027856], bottom: [-0.196931, 0.529846, -0.027858], drop: -0.056382 },
+          { key: 59, lift: [-0.097006, -0.12, -0.016715], contact: [-0.338355, 0.617892, -0.027858], bottom: [-0.306583, 0.599285, -0.027858], drop: -0.056383 },
         ],
         2: [
-          { key: 45, lift: [-0.108667, -0.12, 0.007749], contact: [-0.117177, 0.393546, 0.012914], bottom: [-0.088414, 0.372787, 0.012914], drop: -0.068548 },
-          { key: 46, lift: [-0.108667, -0.12, -0.147361], contact: [0.072267, 0.064543, -0.245602], bottom: [0.108274, 0.032435, -0.245602], drop: -0.073885 },
+          { key: 45, lift: [-0.083009, -0.12, 0.007749], contact: [-0.209266, 0.455819, 0.012914], bottom: [-0.182191, 0.438175, 0.012914], drop: -0.068548 },
+          { key: 46, lift: [-0.083009, -0.12, -0.147361], contact: [-0.035855, 0.153667, -0.245602], bottom: [-0.004963, 0.129305, -0.245602], drop: -0.073885 },
         ],
         3: [
-          { key: 56, lift: [-0.123583, -0.12, -0.021941], contact: [-0.199138, 0.614157, -0.036568], bottom: [-0.166004, 0.589628, -0.036568], drop: -0.051591 },
+          { key: 56, lift: [-0.093799, -0.12, -0.021941], contact: [-0.30657, 0.688795, -0.036568], bottom: [-0.274768, 0.667483, -0.036568], drop: -0.051591 },
+        ],
+      },
+    },
+    {
+      offset: [-0.012, -0.012],
+      strokes: {
+        1: [
+          { key: 17, lift: [-0.097006, -0.12, 0.058372], contact: [-0.131877, 0.275782, 0.097287], bottom: [-0.09663, 0.250394, 0.097287], drop: -0.062639 },
+        ],
+        2: [
+          { key: 1, lift: [-0.083009, -0.12, 0.057064], contact: [-0.091303, 0.24855, 0.095107], bottom: [-0.062322, 0.227114, 0.095113], drop: -0.071461 },
+          { key: 2, lift: [-0.083009, -0.12, -0.093126], contact: [-0.00126, 0.096844, -0.15521], bottom: [0.031377, 0.06993, -0.15521], drop: -0.075153 },
+        ],
+        3: [
+          { key: 14, lift: [-0.093799, -0.12, 0.033797], contact: [-0.198352, 0.457197, 0.056328], bottom: [-0.164956, 0.432586, 0.056329], drop: -0.059066 },
+          { key: 15, lift: [-0.093799, -0.12, -0.136306], contact: [-0.036324, 0.167554, -0.227177], bottom: [0.002693, 0.133291, -0.227149], drop: -0.061903 },
         ],
       },
     },
@@ -772,16 +907,49 @@ export const STATIONS_HQ: Station[][] = [
       offset: [0, 0],
       strokes: {
         6: [
-          { key: 36, lift: [-0.126276, -0.12, 0.078364], contact: [0.128995, -0.008424, 0.130607], bottom: [0.184988, -0.062788, 0.130607], drop: -0.065065 },
-          { key: 37, lift: [-0.126276, -0.12, -0.095631], contact: [-0.108662, 0.362866, -0.159385], bottom: [-0.073258, 0.337125, -0.159385], drop: -0.059374 },
+          { key: 36, lift: [-0.096277, -0.12, 0.078364], contact: [-0.018622, 0.119338, 0.130607], bottom: [0.021693, 0.086564, 0.130607], drop: -0.065066 },
+          { key: 37, lift: [-0.096277, -0.12, -0.095624], contact: [-0.220259, 0.437904, -0.159373], bottom: [-0.187673, 0.416937, -0.159385], drop: -0.059373 },
         ],
         7: [
-          { key: 24, lift: [-0.108578, -0.12, 0.040772], contact: [0.079267, 0.047363, 0.067954], bottom: [0.11518, 0.015132, 0.067953], drop: -0.073978 },
-          { key: 25, lift: [-0.108578, -0.12, -0.117134], contact: [-0.043645, 0.256642, -0.195224], bottom: [-0.013721, 0.23356, -0.195224], drop: -0.070487 },
+          { key: 24, lift: [-0.082988, -0.12, 0.030868], contact: [-0.053304, 0.177374, 0.051446], bottom: [-0.023439, 0.154576, 0.051446], drop: -0.073965 },
+          { key: 25, lift: [-0.082988, -0.12, -0.124709], contact: [-0.193284, 0.420422, -0.207848], bottom: [-0.166302, 0.402821, -0.207848], drop: -0.070467 },
         ],
         8: [
-          { key: 39, lift: [-0.123787, -0.12, 0.106893], contact: [-0.176044, 0.546456, 0.178156], bottom: [-0.142944, 0.522256, 0.17816], drop: -0.054882 },
-          { key: 40, lift: [-0.123787, -0.12, -0.100312], contact: [-0.210842, 0.626165, -0.167187], bottom: [-0.178322, 0.603067, -0.167199], drop: -0.051975 },
+          { key: 39, lift: [-0.0941, -0.12, 0.106896], contact: [-0.282683, 0.619342, 0.17816], bottom: [-0.251214, 0.598634, 0.17816], drop: -0.054883 },
+          { key: 40, lift: [-0.0941, -0.12, -0.100319], contact: [-0.316519, 0.696385, -0.167199], bottom: [-0.285193, 0.676333, -0.167199], drop: -0.051976 },
+        ],
+      },
+    },
+    {
+      offset: [-0.024, 0],
+      strokes: {
+        5: [
+          { key: 71, lift: [-0.17, 0, 0.17385], contact: [-0.3089, 0.316624, 0.289749], bottom: [-0.278949, 0.2989, 0.289749], drop: -0.072754 },
+        ],
+        6: [
+          { key: 35, lift: [-0.096277, -0.12, 0.036708], contact: [-0.120887, 0.277029, 0.061181], bottom: [-0.08586, 0.251979, 0.061181], drop: -0.062896 },
+        ],
+        7: [
+          { key: 23, lift: [-0.082988, -0.12, -0.011958], contact: [-0.087668, 0.235809, -0.01993], bottom: [-0.058925, 0.214759, -0.01993], drop: -0.072479 },
+        ],
+        8: [
+          { key: 38, lift: [-0.0941, -0.12, 0.049445], contact: [-0.300903, 0.65968, 0.082409], bottom: [-0.269538, 0.639351, 0.082408], drop: -0.053392 },
+        ],
+      },
+    },
+    {
+      offset: [0, -0.012],
+      strokes: {
+        5: [
+          { key: 71, lift: [-0.17, 0, 0.406332], contact: [-0.411513, 0.448409, 0.677221], bottom: [-0.383757, 0.433869, 0.677223], drop: -0.072249 },
+        ],
+        6: [],
+        7: [
+          { key: 10, lift: [-0.082988, -0.12, -0.04707], contact: [-0.052122, 0.175396, -0.07845], bottom: [-0.02219, 0.152494, -0.078453], drop: -0.074013 },
+          { key: 24, lift: [-0.082988, -0.12, 0.060813], contact: [-0.302962, 0.631645, 0.101356], bottom: [-0.276609, 0.61612, 0.101356], drop: -0.062648 },
+        ],
+        8: [
+          { key: 26, lift: [-0.0941, -0.12, -0.004821], contact: [-0.218797, 0.491776, -0.008035], bottom: [-0.186478, 0.469237, -0.008035], drop: -0.05916 },
         ],
       },
     },
@@ -789,34 +957,15 @@ export const STATIONS_HQ: Station[][] = [
       offset: [-0.024, 0.036],
       strokes: {
         6: [
-          { key: 61, lift: [-0.126276, -0.12, 0.07705], contact: [0.061562, 0.092028, 0.128417], bottom: [0.107229, 0.051449, 0.12841], drop: -0.063651 },
-          { key: 62, lift: [-0.126276, -0.12, -0.101177], contact: [-0.136799, 0.411412, -0.168628], bottom: [-0.102195, 0.386945, -0.168628], drop: -0.058069 },
+          { key: 61, lift: [-0.096277, -0.12, 0.077046], contact: [-0.069531, 0.197053, 0.12841], bottom: [-0.032491, 0.168879, 0.12841], drop: -0.06366 },
+          { key: 62, lift: [-0.096277, -0.12, -0.101177], contact: [-0.246716, 0.483367, -0.168628], bottom: [-0.214522, 0.463206, -0.168628], drop: -0.05807 },
         ],
         7: [
-          { key: 50, lift: [-0.108578, -0.12, 0.027772], contact: [0.014312, 0.155341, 0.046287], bottom: [0.046422, 0.128878, 0.046287], drop: -0.072592 },
-          { key: 51, lift: [-0.108578, -0.12, -0.130878], contact: [-0.123106, 0.397228, -0.218131], bottom: [-0.094713, 0.377086, -0.21813], drop: -0.069227 },
+          { key: 50, lift: [-0.082988, -0.12, 0.027772], contact: [-0.085194, 0.231538, 0.046287], bottom: [-0.05638, 0.210375, 0.046287], drop: -0.072593 },
+          { key: 51, lift: [-0.082988, -0.12, -0.130878], contact: [-0.214036, 0.457567, -0.218131], bottom: [-0.187302, 0.440489, -0.21813], drop: -0.069227 },
         ],
         8: [
-          { key: 64, lift: [-0.123787, -0.12, 0.103347], contact: [-0.193493, 0.585167, 0.172246], bottom: [-0.160726, 0.561573, 0.172245], drop: -0.053506 },
-          { key: 65, lift: [-0.123787, -0.12, -0.109353], contact: [-0.222817, 0.656422, -0.182255], bottom: [-0.190456, 0.633663, -0.182254], drop: -0.050796 },
-        ],
-      },
-    },
-    {
-      offset: [-0.012, -0.012],
-      strokes: {
-        6: [
-          { key: 36, lift: [-0.126276, -0.12, -0.008864], contact: [-0.328842, 0.774126, -0.014774], bottom: [-0.295668, 0.754154, -0.014681], drop: -0.049338 },
-        ],
-        7: [
-          { key: 9, lift: [-0.108578, -0.12, 0.014519], contact: [0.133292, -0.039598, 0.024198], bottom: [0.174554, -0.079362, 0.024198], drop: -0.075519 },
-          { key: 10, lift: [-0.108578, -0.12, -0.144967], contact: [0.018922, 0.147493, -0.241612], bottom: [0.05129, 0.120656, -0.241612], drop: -0.072779 },
-          { key: 24, lift: [-0.108578, -0.12, -0.050026], contact: [-0.255008, 0.670601, -0.083376], bottom: [-0.227819, 0.653438, -0.083376], drop: -0.059345 },
-          { key: 23, lift: [-0.108578, -0.12, 0.118104], contact: [-0.181147, 0.508153, 0.19684], bottom: [-0.153631, 0.489683, 0.196839], drop: -0.065345 },
-        ],
-        8: [
-          { key: 25, lift: [-0.123787, -0.12, 0.052146], contact: [-0.023973, 0.263426, 0.08691], bottom: [0.013872, 0.231274, 0.08691], drop: -0.060444 },
-          { key: 26, lift: [-0.123787, -0.12, -0.127104], contact: [-0.117015, 0.427979, -0.21184], bottom: [-0.082327, 0.40121, -0.21184], drop: -0.058681 },
+          { key: 64, lift: [-0.0941, -0.12, 0.103348], contact: [-0.29957, 0.656644, 0.172247], bottom: [-0.268197, 0.636287, 0.172245], drop: -0.053506 },
         ],
       },
     },
@@ -824,31 +973,15 @@ export const STATIONS_HQ: Station[][] = [
       offset: [0.012, 0.024],
       strokes: {
         6: [
-          { key: 63, lift: [-0.126276, -0.12, 0.108448], contact: [-0.276981, 0.664581, 0.180747], bottom: [-0.244051, 0.644027, 0.180746], drop: -0.052482 },
+          { key: 51, lift: [-0.096277, -0.12, -0.03548], contact: [0.032246, 0.04396, -0.059134], bottom: [0.077567, 0.004359, -0.059134], drop: -0.066212 },
         ],
         7: [
-          { key: 39, lift: [-0.108578, -0.12, -0.092618], contact: [0.157479, -0.077425, -0.154363], bottom: [0.235888, -0.173678, -0.170579], drop: -0.076085 },
-          { key: 52, lift: [-0.108578, -0.12, 0.050368], contact: [-0.240625, 0.636177, 0.083946], bottom: [-0.213315, 0.618693, 0.084009], drop: -0.060843 },
+          { key: 39, lift: [-0.082988, -0.12, -0.092618], contact: [0.033991, 0.034362, -0.154363], bottom: [0.068119, 0.005109, -0.154363], drop: -0.076085 },
+          { key: 52, lift: [-0.082988, -0.12, 0.050358], contact: [-0.329637, 0.689444, 0.08393], bottom: [-0.303048, 0.674042, 0.084009], drop: -0.060842 },
         ],
         8: [
-          { key: 54, lift: [-0.123787, -0.12, -0.095702], contact: [-0.139397, 0.471088, -0.159504], bottom: [-0.105409, 0.445411, -0.159504], drop: -0.05737 },
-          { key: 53, lift: [-0.123787, -0.12, 0.141909], contact: [0.089892, 0.066132, 0.236515], bottom: [0.136143, 0.021335, 0.236515], drop: -0.062567 },
-        ],
-      },
-    },
-    {
-      offset: [0.024, -0.012],
-      strokes: {
-        6: [
-          { key: 38, lift: [-0.126276, -0.12, -0.022847], contact: [-0.333142, 0.783768, -0.038078], bottom: [-0.299824, 0.763754, -0.037987], drop: -0.048953 },
-        ],
-        7: [
-          { key: 11, lift: [-0.108578, -0.12, 0.005278], contact: [0.120651, -0.019625, 0.008797], bottom: [0.160939, -0.05806, 0.008793], drop: -0.075196 },
-          { key: 25, lift: [-0.108578, -0.12, 0.108037], contact: [-0.188079, 0.522241, 0.180062], bottom: [-0.160632, 0.503929, 0.180062], drop: -0.064813 },
-          { key: 26, lift: [-0.108578, -0.12, -0.06205], contact: [-0.256908, 0.675284, -0.103417], bottom: [-0.229717, 0.658144, -0.103417], drop: -0.059137 },
-        ],
-        8: [
-          { key: 27, lift: [-0.123787, -0.12, 0.00269], contact: [-0.106148, 0.407681, 0.004483], bottom: [-0.071073, 0.380324, 0.004483], drop: -0.05927 },
+          { key: 54, lift: [-0.0941, -0.12, -0.095702], contact: [-0.247826, 0.547585, -0.159504], bottom: [-0.215987, 0.525978, -0.159504], drop: -0.05737 },
+          { key: 53, lift: [-0.0941, -0.12, 0.141909], contact: [-0.043255, 0.18415, 0.236515], bottom: [-0.005811, 0.152566, 0.236515], drop: -0.062567 },
         ],
       },
     },
@@ -893,6 +1026,8 @@ interface HandState {
   last: number[];
   /** Where it goes once its strokes are done. */
   pending: number | null;
+  /** When it last had something to do (scene seconds). */
+  lastWorked: number;
   /** How much the hand is at work, 0-1: brings in the thumb's lift, the fidgets and the wander, and takes them out again. */
   work: number;
   /** Each finger's restlessness: two slow waves for the bend, one for the curl, and now and then a twitch. */
@@ -913,6 +1048,8 @@ const SYMPATHY = [
 ];
 
 const wave = (t: number, rate: number, phase: number) => Math.sin(t * rate + phase);
+/** How long the hands stay at the keys after the last thing to do, before they settle back. */
+const HOLD_S = 2.5;
 /** How long a twitch takes. */
 const TWITCH_S = 0.22;
 
@@ -944,16 +1081,19 @@ export class Typist {
     readonly hands: Hand[],
     private readonly pivot: V3,
     seed = 7,
+    /** Keep the thumbs and little fingers lifted clear at rest too (the hacker's page): the model's own resting thumb sits in a key. */
+    private readonly keepLifted = false,
   ) {
     this.random = random(seed);
     const r = this.random;
-    this.poses = hands.map((hand) => ({ offset: [0, 0], thumb: 0, angles: hand.fingers.map(() => null) }));
+    this.poses = hands.map((hand) => ({ offset: [0, 0], thumb: 0, angles: hand.fingers.map(() => null), lift: keepLifted ? 1 : undefined }));
     this.state = hands.map((hand) => ({
       station: 0,
       glide: null,
       strokes: hand.fingers.map(() => null),
       last: hand.fingers.map(() => -1),
       pending: null,
+      lastWorked: -Infinity,
       work: 0,
       fidget: hand.fingers.map(() => ({ bend: [0.6 + r() * 1.4, r() * 7, 1.7 + r() * 2.2, r() * 7], curl: [0.5 + r() * 1.2, r() * 7], twitch: 0, twitchAt: -1 })),
       wander: [0.3 + r() * 0.5, r() * 7, 0.25 + r() * 0.45, r() * 7],
@@ -968,7 +1108,7 @@ export class Typist {
   /** Whether hand `h` is exactly at rest. */
   resting(h: number): boolean {
     const pose = this.poses[h]!;
-    return pose.thumb === 0 && pose.offset[0] === 0 && pose.offset[1] === 0 && pose.angles.every((a) => a === null);
+    return pose.thumb === 0 && !pose.lift && pose.offset[0] === 0 && pose.offset[1] === 0 && pose.angles.every((a) => a === null);
   }
 
   /** Moves on to `t` (scene seconds). `breath` is the body's scale about the pivot right now. */
@@ -979,6 +1119,7 @@ export class Typist {
         state.strokes.fill(null);
         state.glide = null;
         state.pending = null;
+        state.lastWorked = -Infinity;
         for (const f of state.fidget) f.twitchAt = -1;
       }
       this.next = t;
@@ -999,7 +1140,9 @@ export class Typist {
       const hand = this.hands[h]!;
       const pose = this.poses[h]!;
       // At work while typing, away from its place or mid-stroke; it eases in and out.
-      const working = typing || state.station !== 0 || !!state.glide || state.strokes.some((s) => s);
+      // At work while typing, away from its place or mid-stroke, and for a moment after: a short break keeps the hands at the keys.
+      if (typing || state.station !== 0 || !!state.glide || state.strokes.some((s) => s)) state.lastWorked = t;
+      const working = t - state.lastWorked < HOLD_S;
       state.work = working ? Math.min(1, state.work + dt / 0.2) : Math.max(0, state.work - dt / 0.35);
       const work = smooth(state.work);
       pose.thumb = state.work;
@@ -1032,7 +1175,17 @@ export class Typist {
         lifted[f] = (p < raised ? smooth(p / raised) : p < stroke.contact ? 1 - (p - raised) / (stroke.contact - raised) : 0) * stroke.lift;
       });
       hand.fingers.forEach((finger, f) => {
-        if (finger === hand.thumb) return;
+        // The little finger only ever lifts clear (fingerAngles does that); the thumb strikes the space bar now and then.
+        if (finger === hand.pinky) return void (pose.angles[f] = null);
+        if (finger === hand.thumb) {
+          const stroke = state.strokes[f];
+          if (!stroke) return void (pose.angles[f] = null);
+          const manner = thumbManner(hand, { lift: stroke.lift, contact: stroke.contact, bounce: stroke.bounce }, state.work);
+          const { angles, depth } = strokeAt(this.steady(hand, finger, stroke.target, breath), (t - stroke.from) / stroke.length, manner);
+          pose.angles[f] = angles;
+          if (depth > 0) this.depth[stroke.target.key] = depth;
+          return;
+        }
         const stroke = state.strokes[f];
         if (!stroke) {
           if (work === 0) return void (pose.angles[f] = null);
@@ -1067,6 +1220,23 @@ export class Typist {
     return [bend * work, FIDGET.curl * wave(t, r3, p3) * work, 0];
   }
 
+  /** A thumb on the space bar, if either can reach it from where its hand is (right first) and nothing else holds the bar. */
+  private space(t: number) {
+    const r = this.random;
+    const down = this.state.some((s) => s.strokes.some((x) => x?.target.key === SPACE));
+    if (down) return;
+    for (const h of [1, 0]) {
+      const state = this.state[h];
+      const hand = this.hands[h];
+      if (!state || !hand || state.glide || state.pending !== null || state.work < 1) continue;
+      const f = hand.fingers.indexOf(hand.thumb);
+      const target = hand.stations[state.station]!.strokes[hand.thumb.index]?.[0];
+      if (!target || state.strokes[f]) continue;
+      state.strokes[f] = { target, from: t, length: (0.14 + r() * 0.08) * Math.sqrt(this.tempo), lift: 0.5 + r() * 0.6, contact: 0.42 + r() * 0.12, bounce: 0.01 + r() * 0.03 };
+      return;
+    }
+  }
+
   private slide(h: number, to: number, t: number) {
     const state = this.state[h]!;
     const at = this.hands[h]!.stations[to]!.offset;
@@ -1094,6 +1264,8 @@ export class Typist {
         if (count < 2 || state.glide || state.pending !== null || r() > 0.45) return;
         state.pending = (state.station + 1 + Math.floor(r() * (count - 1))) % count;
       });
+      // The word ends with the space bar: the right thumb, as most people's, or the left where only it reaches.
+      this.space(t);
       const roll = r();
       this.next = t + (roll < 0.08 ? 0.7 + r() * 1.1 : (0.1 + r() * 0.25) * this.tempo);
       return;
@@ -1103,9 +1275,10 @@ export class Typist {
     for (const h of order) {
       const state = states[h];
       const hand = this.hands[h];
-      if (!state || !hand || state.glide || state.pending !== null) continue;
+      // Not until the hand has come down to the keys: strokes are solved for it there.
+      if (!state || !hand || state.glide || state.pending !== null || state.work < 1) continue;
       const station = hand.stations[state.station]!;
-      const free = hand.fingers.flatMap((finger, f) => (finger !== hand.thumb && !state.strokes[f] && (station.strokes[finger.index]?.length ?? 0) > 0 ? [f] : []));
+      const free = hand.fingers.flatMap((finger, f) => (finger !== hand.thumb && finger !== hand.pinky && !state.strokes[f] && (station.strokes[finger.index]?.length ?? 0) > 0 ? [f] : []));
       if (free.length === 0) continue;
       const f = free[Math.floor(r() * free.length)]!;
       const down = new Set(states.flatMap((s) => s.strokes.flatMap((x) => (x ? [x.target.key] : []))));

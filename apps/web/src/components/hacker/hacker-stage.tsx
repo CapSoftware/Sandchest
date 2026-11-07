@@ -234,10 +234,6 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
               </p>
             </div>
             <div className="hq-corner">
-              <p className="hq-onair" data-state={live.state}>
-                <span className="hq-onair-dot" aria-hidden="true" />
-                {live.state === "live" ? "Live" : live.state === "connecting" ? "Reconnecting" : "Offline"}
-              </p>
               <div className="hq-tools">
                 <CameraKeys views={views} />
                 <SoundMenu radio={radio} keys={sounds} />
@@ -251,7 +247,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
               </div>
             </div>
           </div>
-          <FeedDrawer open={drawer} onToggle={() => setDrawer((o) => !o)} items={live.items} jobs={live.jobs} record={record} login={login} handle={profile.handle} crew={crew} demo={demo} admin={admin} />
+          <FeedDrawer open={drawer} onToggle={() => setDrawer((o) => !o)} state={live.state} items={live.items} jobs={live.jobs} record={record} login={login} handle={profile.handle} crew={crew} demo={demo} admin={admin} />
         </>
       )}
     </section>

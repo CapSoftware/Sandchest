@@ -400,10 +400,12 @@ function Reflections() {
  * The lens on the hacker's page: a slight depth of field, focused where the
  * camera looks (the screen and hands, mostly) with a range that grows with
  * the distance, so the screen is always sharp and only what's well in front
- * or behind softens; and faint colour fringes towards the frame's edges,
- * none in the middle. Its own pass ahead of the others, at half resolution.
+ * or behind softens a little; and faint colour fringes towards the frame's
+ * edges, none in the middle. Its own pass ahead of the others.
  */
-const BOKEH = 1.4;
+const BOKEH = 0.8;
+/** How deep the sharp zone is, as a share of the distance to where the camera looks. */
+const FOCUS_SHARE = 0.35;
 
 function Post({ bloom, light, still, master, warming, lens, focus }: { bloom: boolean; light: number; still: boolean; master: boolean; warming: RefObject<boolean>; lens: boolean; focus: Vector3 }) {
   const gl = useThree((state) => state.gl);
@@ -416,7 +418,8 @@ function Post({ bloom, light, still, master, warming, lens, focus }: { bloom: bo
     c.addPass(new RenderPass(scene, camera));
     let depth: DepthOfFieldEffect | null = null;
     if (lens) {
-      depth = new DepthOfFieldEffect(camera, { focusDistance: 1.5, focusRange: 0.4, bokehScale: BOKEH, resolutionScale: 0.5 });
+      // Full resolution: at half, its edges came out blocky under the dither.
+      depth = new DepthOfFieldEffect(camera, { focusDistance: 1.5, focusRange: 0.4, bokehScale: BOKEH, resolutionScale: 1 });
       depth.target = focus;
       const fringe = new ChromaticAberrationEffect({ offset: new Vector2(0.0006, 0.0004), radialModulation: true, modulationOffset: 0.4 });
       c.addPass(new EffectPass(camera, depth, fringe));
@@ -440,8 +443,8 @@ function Post({ bloom, light, still, master, warming, lens, focus }: { bloom: bo
   // Priority 1: this renders the frame in place of the default render.
   useFrame((_, delta) => {
     dither.light = still ? light : MathUtils.damp(dither.light, light, 3, Math.min(delta, 0.1));
-    // In focus: a range about a quarter of the distance to where the camera looks, and never less than 15 cm.
-    if (dof) dof.cocMaterial.focusRange = Math.max(0.15, camera.position.distanceTo(focus) * 0.25);
+    // In focus: a range about a third of the distance to where the camera looks, and never less than 15 cm.
+    if (dof) dof.cocMaterial.focusRange = Math.max(0.15, camera.position.distanceTo(focus) * FOCUS_SHARE);
     // Drawing now would wait on the shaders compiling in the background.
     if (warming.current) return;
     composer.render(delta);
@@ -676,9 +679,12 @@ function useDrag(mode: boolean | "look", shot: ShotName, pace: RefObject<Pace>):
       busy();
     };
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) return;
+      // A pinch (ctrl + scroll) always; a plain scroll too where the page doesn't scroll (the hacker's own page).
+      const page = document.scrollingElement;
+      if (!event.ctrlKey && (!page || page.scrollHeight > window.innerHeight + 1)) return;
       event.preventDefault();
-      state.zoom = MathUtils.clamp(state.zoom * Math.exp(event.deltaY * 0.01), ZOOM[0], ZOOM[1]);
+      // Trackpads send many small steps, mouse wheels a few big ones: the same zoom per distance scrolled.
+      state.zoom = MathUtils.clamp(state.zoom * Math.exp(MathUtils.clamp(event.deltaY, -60, 60) * (event.ctrlKey ? 0.01 : 0.0025)), ZOOM[0], ZOOM[1]);
       busy();
     };
     element.addEventListener("pointerdown", down);
@@ -772,15 +778,18 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
     for (let i = 0; i < 2; i++) {
       const settling = turn.pointer === null && turn.goal[i] === 0;
       if (still) turn.now[i] = turn.goal[i]!;
-      else turn.now[i] = follow(turn.now[i]!, turn.goal[i]!, turn.velocity, i, settling ? MOVE_TIME * 1.6 : 0.18, step);
+      // Free look follows the hand closely (a camera on a turntable); the nudge eases more, as before.
+      else turn.now[i] = follow(turn.now[i]!, turn.goal[i]!, turn.velocity, i, settling ? MOVE_TIME * 1.6 : draggable === "look" ? 0.09 : 0.18, step);
       if (!near(turn.now[i]! - turn.goal[i]!, turn.velocity[i]!, 3e-4)) pace.current.busyUntil = performance.now() + 400;
     }
     turn.zoomNow = still ? turn.zoom : follow(turn.zoomNow, turn.zoom, turn.zoomVelocity, 0, 0.25, step);
     if (!near(turn.zoomNow - turn.zoom, turn.zoomVelocity[0]!, 3e-4)) pace.current.busyUntil = performance.now() + 400;
-    const around = shotAround + turn.now[0];
+    // The nudge swings the camera around the room's middle, as it always has; free look turns it around what it looks at.
+    const free = draggable === "look";
+    const around = shotAround + (free ? 0 : turn.now[0]);
     // Never so far down that the camera looks up from under the desk's edge.
-    const up = Math.max(-0.05, shotUp + turn.now[1]);
-    const distance = radius * turn.zoomNow;
+    const up = Math.max(-0.05, shotUp + (free ? 0 : turn.now[1]));
+    const distance = radius * (free ? 1 : turn.zoomNow);
 
     offset.set(0, 0, 0);
     if (!still) {
@@ -812,9 +821,19 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
       camera.clearViewOffset();
       camera.aspect = size.width / size.height;
     }
-    orbitPosition(distance, around, up, camera.position).add(offset);
+    orbitPosition(distance, around, up, camera.position);
+    aim.set(tx, ty, tz);
+    if (free) {
+      // Turn around the point looked at: across, then up (kept off the desk and short of straight down), then in or out.
+      const v = scratch[0].subVectors(camera.position, aim);
+      const length = v.length() * turn.zoomNow;
+      const yaw = Math.atan2(v.x, v.z) + turn.now[0];
+      const pitch = MathUtils.clamp(Math.asin(MathUtils.clamp(v.y / Math.max(v.length(), 1e-6), -1, 1)) + turn.now[1], -0.12, 1.35);
+      camera.position.set(aim.x + length * Math.cos(pitch) * Math.sin(yaw), aim.y + length * Math.sin(pitch), aim.z + length * Math.cos(pitch) * Math.cos(yaw));
+    }
+    camera.position.add(offset);
     keepOut(camera.position, scratch[0], scratch[1]);
-    camera.lookAt(aim.set(tx, ty, tz));
+    camera.lookAt(aim);
     focus?.copy(aim);
     camera.updateProjectionMatrix();
   });

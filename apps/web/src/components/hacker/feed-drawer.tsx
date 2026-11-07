@@ -5,6 +5,7 @@ import { HoverLink } from "@/components/app/hover-link";
 import { itemLabel, itemWhere, scanName, type FeedItem, type FeedJob } from "@/lib/account-feed";
 import { compactNumber } from "@/lib/format";
 import { readHacker, type HackerProfile } from "@/lib/hacker";
+import type { LiveState } from "./account-live";
 import { HackerMark } from "./hacker-mark";
 import { Keycap } from "./keycap";
 
@@ -34,7 +35,7 @@ export function nowDoing(jobs: FeedJob[]): string {
  * L) the whole feed rising over the room, with the jobs running and the
  * hacker's record beside it.
  */
-export function FeedDrawer({ open, onToggle, items, jobs, record, login, handle, crew, demo, admin }: { open: boolean; onToggle: () => void; items: FeedItem[]; jobs: FeedJob[]; record: HackerRecord; login: string; handle: string; crew: Crew[]; demo: boolean; admin: boolean }) {
+export function FeedDrawer({ open, onToggle, state, items, jobs, record, login, handle, crew, demo, admin }: { open: boolean; onToggle: () => void; state: LiveState; items: FeedItem[]; jobs: FeedJob[]; record: HackerRecord; login: string; handle: string; crew: Crew[]; demo: boolean; admin: boolean }) {
   const now = useNow(open ? 15_000 : 60_000);
   const latest = items.find((item) => item.kind !== "line") ?? items[0];
   const jobsDone = record.jobs.deep + record.jobs.reviews + record.jobs.other;
@@ -45,6 +46,7 @@ export function FeedDrawer({ open, onToggle, items, jobs, record, login, handle,
           <Chevron up={!open} />
         </span>
         <span className="hq-handle-title">Live feed</span>
+        {state !== "live" && <span className="hq-handle-state">{state === "connecting" ? "Reconnecting…" : "Offline"}</span>}
         {jobs.length > 0 && <span className="hq-handle-count">{jobs.length} running</span>}
         {latest && !open && (
           <span className="hq-handle-latest" key={latest.id}>

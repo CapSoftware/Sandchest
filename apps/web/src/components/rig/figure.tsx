@@ -7,7 +7,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import type { HackerProfile } from "@/lib/hacker";
 import { HOODIES, PHOSPHORS, swatch } from "@/lib/hacker";
 import { RIG_HOODIE_MASK_URL, RIG_MODEL_HQ_URL, RIG_MODEL_URL } from "./assets";
-import { buildHands, placeHand, placeVertex, STATIONS, STATIONS_HQ, Typist, type Angles, type Hand, type V3 } from "./hands";
+import { buildHands, fingerAngles, placeHand, placeVertex, STATIONS, STATIONS_HQ, Typist, type Angles, type Hand, type V3 } from "./hands";
 import type { Signals } from "./signals";
 import { Visor } from "./visor";
 
@@ -171,8 +171,10 @@ export function Figure({ profile, signals, hands, still, detail }: { profile: Ha
     if (!model || !hands) return;
     const t = state.clock.elapsedTime;
     const typing = !still && (signals.current?.typingUntil ?? 0) > t;
-    if (fingers.current === false || (!typing && !fingers.current?.typist.busy)) return;
-    fingers.current ??= Hands.of(model.scene, PIVOT, detail === "high" ? STATIONS_HQ : STATIONS) ?? false;
+    // On the hacker's page the hands are set up at once, so the thumbs are lifted clear from the first frame.
+    const first = detail === "high" && fingers.current === null;
+    if (fingers.current === false || (!typing && !fingers.current?.typist.busy && !first)) return;
+    fingers.current ??= Hands.of(model.scene, PIVOT, detail === "high" ? STATIONS_HQ : STATIONS, detail === "high") ?? false;
     if (!fingers.current) return;
     hands.typist = fingers.current.typist;
     fingers.current.typist.update(t, typing, breathAt(t, breath).toArray() as V3);
@@ -202,7 +204,7 @@ class Hands {
   /** Each hand's vertices, and each finger's, as runs of the mesh's vertex list: only those changed are sent to the GPU. */
   private readonly runs: { hand: [number, number][]; fingers: [number, number][][] }[];
   /** What each hand was last drawn at: its slide, thumb and fingers (null at rest). */
-  private readonly drawn: ({ offset: [number, number]; thumb: number; angles: (Angles | null)[] } | null)[];
+  private readonly drawn: ({ offset: [number, number]; thumb: number; lift: number | undefined; angles: (Angles | null)[] } | null)[];
   private readonly position: BufferAttribute | InterleavedBufferAttribute;
   private readonly normal: BufferAttribute | InterleavedBufferAttribute;
   /** Where each attribute's values sit in its array (the loader may interleave them): vertex v, component c at v * stride + offset + c. */
@@ -243,7 +245,7 @@ class Hands {
   }
 
   /** The hands of the mesh in `root` that carries the bake's hand data, or null if none does. */
-  static of(root: Object3D, pivot: Vector3, stations: typeof STATIONS): Hands | null {
+  static of(root: Object3D, pivot: Vector3, stations: typeof STATIONS, keepLifted = false): Hands | null {
     let found: Hands | null = null;
     root.traverse((child) => {
       if (found || !(child instanceof Mesh) || !child.geometry.getAttribute("_arm")) return;
@@ -268,7 +270,7 @@ class Hands {
       const hands = buildHands({ positions, normals, finger: read("_finger", 3), digit: read("_digit", 1), arm: read("_arm", 3) }, stations);
       if (hands.length === 0) return;
       const toLocal = toScene.clone().invert();
-      found = new Hands(child, geometry, toLocal, new Matrix3().getNormalMatrix(toLocal), new Typist(hands, pivot.toArray() as V3));
+      found = new Hands(child, geometry, toLocal, new Matrix3().getNormalMatrix(toLocal), new Typist(hands, pivot.toArray() as V3, 7, keepLifted));
     });
     return found;
   }
@@ -301,23 +303,22 @@ class Hands {
       }
       const pose = typist.poses[h]!;
       const placed = this.placed[h]!;
-      const slid = !drawn || Math.abs(pose.offset[0] - drawn.offset[0]) > 5e-5 || Math.abs(pose.offset[1] - drawn.offset[1]) > 5e-5 || pose.thumb !== drawn.thumb;
+      const slid = !drawn || Math.abs(pose.offset[0] - drawn.offset[0]) > 5e-5 || Math.abs(pose.offset[1] - drawn.offset[1]) > 5e-5 || pose.thumb !== drawn.thumb || pose.lift !== drawn.lift;
       if (slid) {
         placeHand(hand, pose, placed.positions, placed.normals);
         for (let m = 0; m < hand.ids.length; m++) this.write(hand, m, placed);
-        this.drawn[h] = { offset: [pose.offset[0], pose.offset[1]], thumb: pose.thumb, angles: pose.angles.map((a) => (a ? ([...a] as Angles) : null)) };
+        this.drawn[h] = { offset: [pose.offset[0], pose.offset[1]], thumb: pose.thumb, lift: pose.lift, angles: hand.fingers.map((_, f) => fingerAngles(hand, pose, f)) };
         dirty.push(...this.runs[h]!.hand);
         return;
       }
       // Only the fingers that moved, at the slide already drawn.
       hand.fingers.forEach((finger, f) => {
-        if (finger === hand.thumb) return;
-        const now = pose.angles[f] ?? null;
+        const now = fingerAngles(hand, pose, f);
         const before = drawn.angles[f] ?? null;
         // Moves under a tenth of a millimetre at the tip (slow fidgets) wait until they add up; strikes are always past it.
         if (now === before || (now && before && Math.abs(now[0] - before[0]) < FINGER_STEP && Math.abs(now[1] - before[1]) < FINGER_STEP && Math.abs(now[2] - before[2]) < FINGER_STEP)) return;
         for (const m of finger.members) {
-          placeVertex(hand, m, finger, now, drawn.offset, placed.positions, m * 3, placed.normals);
+          placeVertex(hand, m, finger, now, drawn.offset, placed.positions, m * 3, placed.normals, drawn.thumb);
           this.write(hand, m, placed);
         }
         drawn.angles[f] = now ? ([...now] as Angles) : null;
