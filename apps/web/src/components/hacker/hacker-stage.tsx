@@ -71,7 +71,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   // The room alone: full screen, and the controls and words stepping aside while nobody moves.
   const stage = useRef<HTMLElement>(null);
   const fullscreen = useFullscreen(stage);
-  const idle = useIdle(stage, !editing);
+  const { idle, still } = useIdle(stage, !editing);
 
   // The look as last saved: the server's, or ours the moment a save succeeds (before the page refreshes with it,
   // so the room never flicks back to the old look in between). A new one from the server is taken unless editing.
@@ -186,7 +186,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
 
   return (
-    <section ref={stage} className="hq-stage" data-idle={idle || undefined} data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
+    <section ref={stage} className="hq-stage" data-idle={idle || undefined} data-still={still || undefined} data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
       <div className="hq-scene" onPointerDown={() => setDragged(true)}>
         <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={shift} camera={camera} detail="high" drag="look" poster />
         <div className="hq-shade" aria-hidden="true" />

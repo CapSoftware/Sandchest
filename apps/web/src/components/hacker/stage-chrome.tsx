@@ -2,53 +2,80 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { Keycap } from "./keycap";
 
-/** How long the controls stay up after the last sign of someone there. */
-const IDLE_MS = 3000;
+/** How long the controls, and the pointer, stay after the last sign of someone there. */
+const IDLE_MS = 2500;
 /** Leaving the room (the pointer off the window): gone sooner. */
 const LEFT_MS = 400;
 
+export interface Idle {
+  /** The words and controls step aside. */
+  idle: boolean;
+  /** The pointer hides. */
+  still: boolean;
+}
+
 /**
- * Whether the room's controls and words should step aside: true a few
- * seconds after the last move, press, scroll or key, so what's left is the
- * room. Not while `active` is false (customizing), and never while someone is
- * on a control: the pointer over one, keyboard focus on one, or a menu open.
+ * The room left to itself: a few seconds after the last move, tap or scroll
+ * the pointer hides (`still`), and a few seconds after the last move or key
+ * the words and controls fade (`idle`). Moving brings both back; a key brings
+ * back the controls only, as a video player does. Not while `active` is false
+ * (customizing). The controls stay only while a menu is open, or while someone
+ * is tabbing through them: a pointer resting on one, or a button left focused
+ * by a click, doesn't hold them.
  */
-export function useIdle(stage: RefObject<HTMLElement | null>, active: boolean): boolean {
+export function useIdle(stage: RefObject<HTMLElement | null>, active: boolean): Idle {
   const [idle, setIdle] = useState(false);
+  const [still, setStill] = useState(false);
   useEffect(() => {
     const el = stage.current;
     if (!active || !el) {
       setIdle(false);
+      setStill(false);
       return;
     }
-    let timer = 0;
-    const busy = () => !!el.querySelector(".hq-top :hover, .hq-handle:hover, .hq-sheet:hover, .hq-top :focus-visible, .hq-drawer :focus-visible, .sound-panel");
-    const settle = (ms: number) => {
-      clearTimeout(timer);
-      timer = window.setTimeout(function check() {
-        if (busy()) timer = window.setTimeout(check, IDLE_MS);
+    let controls = 0;
+    let pointer = 0;
+    // Whether the last thing done was Tab (moving through the controls by keyboard), not a click.
+    let tabbing = false;
+    const busy = () => !!el.querySelector(".sound-panel") || (tabbing && !!el.querySelector(".hq-top :focus-visible, .hq-drawer :focus-visible"));
+    const fade = (ms: number) => {
+      clearTimeout(controls);
+      controls = window.setTimeout(function check() {
+        if (busy()) controls = window.setTimeout(check, IDLE_MS);
         else setIdle(true);
       }, ms);
     };
-    const wake = () => {
+    const moved = (event: Event) => {
+      if (event.type === "pointerdown") tabbing = false;
       setIdle(false);
-      settle(IDLE_MS);
+      setStill(false);
+      fade(IDLE_MS);
+      clearTimeout(pointer);
+      pointer = window.setTimeout(() => setStill(true), IDLE_MS);
     };
-    const left = () => settle(LEFT_MS);
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Tab") tabbing = true;
+      setIdle(false);
+      fade(IDLE_MS);
+    };
+    const left = () => fade(LEFT_MS);
     const moves = ["pointermove", "pointerdown", "wheel", "touchstart"] as const;
-    for (const name of moves) el.addEventListener(name, wake, { passive: true });
+    for (const name of moves) el.addEventListener(name, moved, { passive: true });
     el.addEventListener("pointerleave", left);
-    window.addEventListener("keydown", wake);
+    window.addEventListener("keydown", key);
     // Up to begin with, so they can be found, then away.
-    wake();
+    setIdle(false);
+    fade(IDLE_MS);
+    pointer = window.setTimeout(() => setStill(true), IDLE_MS);
     return () => {
-      clearTimeout(timer);
-      for (const name of moves) el.removeEventListener(name, wake);
+      clearTimeout(controls);
+      clearTimeout(pointer);
+      for (const name of moves) el.removeEventListener(name, moved);
       el.removeEventListener("pointerleave", left);
-      window.removeEventListener("keydown", wake);
+      window.removeEventListener("keydown", key);
     };
   }, [stage, active]);
-  return idle;
+  return { idle, still };
 }
 
 type Prefixed = Document & { webkitFullscreenEnabled?: boolean; webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };

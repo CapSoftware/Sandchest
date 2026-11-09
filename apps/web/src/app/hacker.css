@@ -712,7 +712,7 @@ a.hq-job-body:hover {
 
 /* ---- Nobody moving: only the room ---------------------------------------------------
    A few seconds after the last move, press or key (stage-chrome.tsx), the words and
-   controls fade away, and the pointer with them; any move brings them back. An open
+   controls fade away, and the pointer goes too; any move brings them back. An open
    feed stays: it was asked for. Faded, not hidden: Tab still reaches every control,
    and focusing one brings them all back. */
 
@@ -736,8 +736,11 @@ a.hq-job-body:hover {
   pointer-events: none;
 }
 
-.hq-stage[data-idle] .hq-scene {
-  cursor: none;
+/* The pointer, on its own clock: gone a few seconds after it stops, wherever it rests.
+   Important over the room's own grab hand, which the drag sets on the canvas inline. */
+.hq-stage[data-still],
+.hq-stage[data-still] * {
+  cursor: none !important;
 }
 
 /* Full screen: the room fills it, the page around it gone. */
