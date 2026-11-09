@@ -232,10 +232,10 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
         <>
           <div className="hq-top">
             <div className="hq-id">
-              <p className="hq-of">{login}’s hacker</p>
               <h1 id="hq-name" className="hq-name">
-                {profile.handle}
                 <span className="hq-presence" data-working={working || undefined} title={working ? "Working" : "Off duty"} aria-hidden="true" />
+                {profile.handle}
+                <span className="sr-only">, {login}’s hacker</span>
               </h1>
               <p className="hq-now" aria-live="polite">
                 {doing}
