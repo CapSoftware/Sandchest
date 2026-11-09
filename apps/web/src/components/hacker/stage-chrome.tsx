@@ -16,9 +16,10 @@ export interface Idle {
 
 /**
  * The room left to itself: a few seconds after the last move, tap or scroll
- * the pointer hides (`still`), and a few seconds after the last move or key
- * the words and controls fade (`idle`). Moving brings both back; a key brings
- * back the controls only, as a video player does. Not while `active` is false
+ * the pointer hides (`still`), and a few seconds after the last move the
+ * words and controls fade (`idle`). Moving brings both back; Tab brings back
+ * the controls only. Shortcut keys (V for the camera and the rest) leave
+ * things as they are, so the view can change with nothing in front of it. Not while `active` is false
  * (customizing). The controls stay only while a menu is open, or while someone
  * is tabbing through them: a pointer resting on one, or a button left focused
  * by a click, doesn't hold them.
@@ -53,8 +54,10 @@ export function useIdle(stage: RefObject<HTMLElement | null>, active: boolean): 
       clearTimeout(pointer);
       pointer = window.setTimeout(() => setStill(true), IDLE_MS);
     };
+    // Only Tab, moving through the controls, brings them back: a shortcut (V, L, F...) just does its thing.
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Tab") tabbing = true;
+      if (event.key !== "Tab") return;
+      tabbing = true;
       setIdle(false);
       fade(IDLE_MS);
     };
