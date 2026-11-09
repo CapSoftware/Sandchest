@@ -142,7 +142,7 @@ function feed(kit: Kit, t: number, shown: Shown[], m: LiveModel, live: boolean) 
   const y = 56;
   const w = 860;
   const h = 690;
-  kit.window(x, y, w, h, `scan — ${m.repo} — ${m.kind}`, { focused: true });
+  kit.window(x, y, w, h, `scan · ${m.repo} · ${m.kind}`, { focused: true });
   const rows = Math.floor((h - 60) / LINE_H);
   const visible = shown.filter((line) => line.from <= t);
   const lines = visible.slice(-rows);

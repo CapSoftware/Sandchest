@@ -141,7 +141,7 @@ function feed(kit: Kit, t: number, shown: Shown[], m: AccountModel) {
   const y = 56;
   const w = 860;
   const h = 690;
-  kit.window(x, y, w, h, `feed — ${m.login}`, { focused: true });
+  kit.window(x, y, w, h, `feed · ${m.login}`, { focused: true });
   const rows = Math.floor((h - 60) / LINE_H);
   const lines = shown.filter((line) => line.from <= t).slice(-rows);
   let row = 0;
