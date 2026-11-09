@@ -5,15 +5,18 @@ import type { ShotName } from "@/components/rig/shots";
 import { Keycap } from "./keycap";
 import "./sound-menu.css";
 
-/** The angles there always are. Room is where the page opens the first time. */
+/** The angles there always are, in the order the camera key goes through them. */
 export const PRESETS = [
-  { id: "room", label: "Room" },
   { id: "work", label: "Screen and keys" },
+  { id: "room", label: "Room" },
   { id: "hands", label: "Hands" },
   { id: "face", label: "Face" },
 ] as const;
 
 type PresetId = (typeof PRESETS)[number]["id"];
+
+/** Where the page opens the first time, and where the default key goes back to: the screen and the hands typing under it. */
+const DEFAULT: PresetId = "work";
 
 /** A view someone saved: a shot, and where they'd turned and zoomed from it. */
 export interface SavedView {
@@ -68,7 +71,7 @@ export interface CameraViews {
  * pose is what's saved and remembered.
  */
 export function useCameraViews(camera: RefObject<CameraControl | null>, wide: boolean): CameraViews {
-  const [current, setCurrent] = useState<Current>({ chosen: "room", shot: presetShot("room", wide), pose: STILL });
+  const [current, setCurrent] = useState<Current>({ chosen: DEFAULT, shot: presetShot(DEFAULT, wide), pose: STILL });
   const [saved, setSaved] = useState<SavedView[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [away, setAway] = useState(false);
@@ -110,7 +113,7 @@ export function useCameraViews(camera: RefObject<CameraControl | null>, wide: bo
         place(shot, stored.current.pose);
       }
     } catch {
-      // Nothing usable stored: the room it is.
+      // Nothing usable stored: the default it is.
     }
     setLoaded(true);
     // Once, on arrival; the width's own changes are handled below.
@@ -130,7 +133,7 @@ export function useCameraViews(camera: RefObject<CameraControl | null>, wide: bo
       if (!pose) return;
       const c = latest.current.current;
       const changed = Math.abs(pose.around - c.pose.around) > 1e-3 || Math.abs(pose.up - c.pose.up) > 1e-3 || Math.abs(pose.zoom - c.pose.zoom) > 1e-3;
-      const isAway = c.chosen !== "room" || moved(pose);
+      const isAway = c.chosen !== DEFAULT || moved(pose);
       setAway(isAway);
       // Moved from the chosen view's own pose (a preset's is still; a saved one's is its own).
       const base = latest.current.saved.find((v) => v.id === c.chosen)?.pose ?? STILL;
@@ -157,7 +160,7 @@ export function useCameraViews(camera: RefObject<CameraControl | null>, wide: bo
       })();
       if (!view) return;
       setCurrent(view);
-      setAway(view.chosen !== "room" || moved(view.pose));
+      setAway(view.chosen !== DEFAULT || moved(view.pose));
       setDragged(false);
       place(view.shot, view.pose);
       persist({ current: view, saved: latest.current.saved });
@@ -189,7 +192,7 @@ export function useCameraViews(camera: RefObject<CameraControl | null>, wide: bo
     [persist],
   );
 
-  const reset = useCallback(() => choose("room"), [choose]);
+  const reset = useCallback(() => choose(DEFAULT), [choose]);
 
   const next = useCallback(() => {
     const order = [...PRESETS.map((p) => p.id as string), ...latest.current.saved.map((v) => v.id)];

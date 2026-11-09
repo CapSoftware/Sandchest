@@ -3,6 +3,23 @@ export interface Shot {
   position: [number, number, number];
   target: [number, number, number];
   fov: number;
+  /**
+   * The narrowest picture (width over height) it's framed for. On a narrower
+   * one, a phone held upright, the lens widens to keep the same width in
+   * view, so what the shot is of still fits across. Without it the sides
+   * are simply cut off.
+   */
+  fit?: number;
+}
+
+/** The widest a fitted lens goes: past this the picture bends too much to read. */
+const WIDEST = 76;
+
+/** The lens (vertical field of view, in degrees) for `shot` on a picture `aspect` wide for its height. */
+export function lens(shot: Shot, aspect: number): number {
+  if (!shot.fit || !(aspect > 0) || aspect >= shot.fit) return shot.fov;
+  const half = Math.tan((shot.fov * Math.PI) / 360) * (shot.fit / aspect);
+  return Math.min(WIDEST, (Math.atan(half) * 360) / Math.PI);
 }
 
 export const SHOTS = {
@@ -23,7 +40,7 @@ export const SHOTS = {
   /** Leaning in from the resting shot, past the hacker's arm, onto the screen: for the moment something is found. */
   lean: { position: [0.7, 0.32, 0.46], target: [0, 0.13, -0.11], fov: 26 },
   /** Where the hacker's eyes are, just in front of the hood: the laptop's screen close and nearly square on, the hands typing under it. */
-  work: { position: [0, 0.42, 0.12], target: [0, 0.085, -0.09], fov: 42 },
+  work: { position: [0, 0.42, 0.12], target: [0, 0.085, -0.09], fov: 42, fit: 1.08 },
   /** Close on the hands and the keys, from the right. */
   hands: { position: [0.3, 0.24, 0.12], target: [-0.01, 0.025, -0.03], fov: 36 },
   /** The same, for watching a scan. */

@@ -14,7 +14,7 @@ import { Laptop } from "./laptop";
 import { keepOut, orbit, orbitPosition } from "./camera-bounds";
 import { Room } from "./room";
 import { Kit, type Painter } from "./screen";
-import { SHOTS, type Shot, type ShotName } from "./shots";
+import { lens, SHOTS, type Shot, type ShotName } from "./shots";
 import { advance, joltAt, type Signals } from "./signals";
 import { STILL_TIME, VIGNETTE } from "./still";
 import { loadSurfaces } from "./textures";
@@ -283,9 +283,13 @@ function DevCapture({ shot, started }: { shot: ShotName; started: RefObject<bool
         lights.add(key);
         state.scene.add(lights);
       }
-      // Let the camera glide all the way to a new view; otherwise one frame.
+      // Let the camera glide all the way to a new view; otherwise one frame. The glide goes by the clock,
+      // and these frames come all at once, so the clock is told a tenth of a second passed before each.
       let time = performance.now();
-      for (let i = options.view ? 40 : 1; i > 0; i--) state.advance((time += 100));
+      for (let i = options.view ? 40 : 1; i > 0; i--) {
+        if (options.view) state.clock.oldTime -= 100;
+        state.advance((time += 100));
+      }
       const url = state.gl.domElement.toDataURL("image/png");
       (SHOTS as Record<string, Shot>)[shot] = saved;
       if (options.studio) {
@@ -789,7 +793,13 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
       control.current = null;
     };
   }, [control, drag]);
-  const now = useRef<number[]>(orbit(SHOTS[shot]));
+  // The shot, with its lens fitted to the picture's shape (a shot framed for a wide window, on a phone held upright).
+  const framed = (name: ShotName, width: number, height: number) => {
+    const values = orbit(SHOTS[name]);
+    values[6] = lens(SHOTS[name], width / Math.max(height, 1));
+    return values;
+  };
+  const now = useRef<number[]>(framed(shot, size.width, size.height));
   const velocity = useRef<number[]>(now.current.map(() => 0));
   const look = useRef({ x: 0, y: 0, vx: [0, 0] });
   const eased = useRef(shift);
@@ -806,7 +816,7 @@ function CameraRig({ shot, parallax, drag: draggable, still, signals, shift, pac
       pending.current = null;
       pace.current.busyUntil = performance.now() + 400;
     }
-    const goal = orbit(SHOTS[shot]);
+    const goal = framed(shot, size.width, size.height);
     const t = state.clock.elapsedTime;
     // Long gaps between frames (a tab coming back) shouldn't fling the camera.
     const step = Math.max(Math.min(delta, 0.1), 1e-4);

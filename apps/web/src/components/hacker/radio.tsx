@@ -22,6 +22,8 @@ export interface Radio {
   on: boolean;
   /** On, but the browser wants a press on the page before it will play (it was left on last time). */
   waiting: boolean;
+  /** Never switched on or off on this browser: nothing chosen yet. */
+  untouched: boolean;
   /** Which track is on, counting from 1. */
   track: number | null;
   toggle: () => void;
@@ -44,6 +46,7 @@ export function useRadio(): Radio {
   const [supported, setSupported] = useState(false);
   const [on, setOn] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [untouched, setUntouched] = useState(false);
   const waking = useWaking();
   const [track, setTrack] = useState<number | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -54,6 +57,7 @@ export function useRadio(): Radio {
 
   useEffect(() => {
     setSupported(document.createElement("audio").canPlayType('audio/webm; codecs="opus"') !== "");
+    setUntouched(safeGet(ON_KEY) === null);
     const saved = Number(safeGet(LEVEL_KEY));
     if (saved >= 0 && saved <= 1 && safeGet(LEVEL_KEY) !== null) {
       levelRef.current = saved;
@@ -140,6 +144,7 @@ export function useRadio(): Radio {
   const turnOn = useCallback(() => {
     const el = element();
     setOn(true);
+    setUntouched(false);
     remember(ON_KEY, "1");
     el.volume = 0;
     // Primed with the first track but never played: play that, from what's already in.
@@ -158,6 +163,7 @@ export function useRadio(): Radio {
     const el = element();
     setOn(false);
     setWaiting(false);
+    setUntouched(false);
     remember(ON_KEY, "0");
     ramp(el, 0, () => el.pause());
   }, [element, on, ramp, turnOn, waking]);
@@ -203,7 +209,7 @@ export function useRadio(): Radio {
     [],
   );
 
-  return { supported, on, waiting, track, toggle, next, prime, level, setLevel };
+  return { supported, on, waiting, untouched, track, toggle, next, prime, level, setLevel };
 }
 
 function remember(key: string, value: string) {

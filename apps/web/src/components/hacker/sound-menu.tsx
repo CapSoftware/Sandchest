@@ -8,7 +8,9 @@ import "./sound-menu.css";
 
 /**
  * Everything the room can play, behind one key: the radio, and the sound of
- * the keyboard as the hacker types, with a choice of keyboards. The panel
+ * the keyboard as the hacker types, with a choice of keyboards. The first
+ * time it's pressed on a browser it turns both on; what's chosen from then
+ * on is remembered. The panel
  * opens above the key (`up`, for keys at the foot of a picture) or below it.
  */
 export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeySounds; up?: boolean; small?: boolean }) {
@@ -50,7 +52,12 @@ export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeyS
         aria-expanded={open}
         aria-controls={panel}
         onClick={() => {
-          if (!open && radio.supported && !radio.on) radio.prime();
+          // Nothing chosen yet on this browser: asking for sound means all of it, the radio and the keys. After that the menu only opens.
+          const first = !open && (radio.supported || keys.supported) && (!radio.supported || radio.untouched) && (!keys.supported || keys.untouched);
+          if (first) {
+            if (radio.supported && !radio.on) radio.toggle();
+            if (keys.supported && !keys.on) keys.toggle();
+          } else if (!open && radio.supported && !radio.on) radio.prime();
           setOpen((o) => !o);
         }}
         onPointerEnter={() => radio.supported && !radio.on && radio.prime()}

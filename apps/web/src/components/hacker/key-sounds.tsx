@@ -15,6 +15,8 @@ export interface KeySounds {
   on: boolean;
   /** On, but the browser wants a press on the page before it will play (it was left on last time). */
   waiting: boolean;
+  /** Never switched on or off on this browser: nothing chosen yet. */
+  untouched: boolean;
   style: SwitchId;
   toggle: () => void;
   /** Turns it on with `style`, playing a key so it can be heard at once. */
@@ -36,6 +38,7 @@ export function useKeySounds(signals: RefObject<Signals>): KeySounds {
   const [supported, setSupported] = useState(false);
   const [on, setOn] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [untouched, setUntouched] = useState(false);
   const waking = useWaking();
   const [style, setStyle] = useState<SwitchId>("thock");
   const sound = useRef<KeyboardSound | null>(null);
@@ -47,6 +50,7 @@ export function useKeySounds(signals: RefObject<Signals>): KeySounds {
     setSupported(can);
     let chosen: SwitchId = "thock";
     let again = false;
+    let fresh = true;
     try {
       const saved = localStorage.getItem(STYLE_KEY);
       if (SWITCHES.some((s) => s.id === saved)) chosen = saved as SwitchId;
@@ -56,10 +60,12 @@ export function useKeySounds(signals: RefObject<Signals>): KeySounds {
         setLevelState(Number(loud));
       }
       again = localStorage.getItem(ON_KEY) === "1";
+      fresh = localStorage.getItem(ON_KEY) === null;
     } catch {
       // Storage blocked: the default keyboard it is, off.
     }
     setStyle(chosen);
+    setUntouched(fresh);
     if (!can || !again) return;
     // Left on last time: on again, sounding as soon as the browser lets it.
     sound.current ??= keyboardSound(chosen);
@@ -97,6 +103,7 @@ export function useKeySounds(signals: RefObject<Signals>): KeySounds {
     sound.current.level = levelRef.current;
     void sound.current.resume().then(() => setWaiting(false));
     setOn(true);
+    setUntouched(false);
     remember(ON_KEY, "1");
     return true;
   }, []);
@@ -108,6 +115,7 @@ export function useKeySounds(signals: RefObject<Signals>): KeySounds {
     sound.current?.suspend();
     setOn(false);
     setWaiting(false);
+    setUntouched(false);
     remember(ON_KEY, "0");
   }, [on, start, style, waking]);
 
@@ -147,7 +155,7 @@ export function useKeySounds(signals: RefObject<Signals>): KeySounds {
     [],
   );
 
-  return { supported, on, waiting, style, toggle, choose, level, setLevel };
+  return { supported, on, waiting, untouched, style, toggle, choose, level, setLevel };
 }
 
 function remember(key: string, value: string) {
