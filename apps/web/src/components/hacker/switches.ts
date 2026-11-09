@@ -125,9 +125,14 @@ export class KeyboardSound {
     source.start(context.currentTime, take * step, takes.length);
   }
 
-  /** Wakes the sound after the browser has put it to sleep (a press is needed in some). */
-  resume(): void {
-    void this.context.resume();
+  /** Wakes the sound after the browser has put it to sleep (a press is needed in some). Settles once it's awake: never, if the browser still wants a press. */
+  resume(): Promise<void> {
+    return this.context.resume();
+  }
+
+  /** Whether it's making sound now, rather than asleep or waiting for a press. */
+  get running(): boolean {
+    return this.context.state === "running";
   }
 
   /** Puts it to sleep while it's off: no work for the audio thread. */

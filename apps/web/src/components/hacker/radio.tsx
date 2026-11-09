@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFirstPress, useWaking } from "./first-press";
 
 /**
  * The station's tracks, in /public/radio: a few minutes each, cut from one long
@@ -11,12 +12,16 @@ const TRACKS = Array.from({ length: 10 }, (_, i) => `/radio/${String(i + 1).padS
 /** How loud the radio plays at full on its slider. */
 const VOLUME = 0.55;
 const LEVEL_KEY = "sandchest:radio-level";
+/** "1" while it's on, so it comes back on next time. */
+const ON_KEY = "sandchest:radio-on";
 const FADE_MS = 400;
 
 export interface Radio {
   /** Whether this browser plays the tracks; the keys stay hidden if not. */
   supported: boolean;
   on: boolean;
+  /** On, but the browser wants a press on the page before it will play (it was left on last time). */
+  waiting: boolean;
   /** Which track is on, counting from 1. */
   track: number | null;
   toggle: () => void;
@@ -29,14 +34,17 @@ export interface Radio {
 }
 
 /**
- * Background music for the hacker's room, off until asked for. Track 1 always
- * opens the station; the rest follow in a shuffled order, every one once before
+ * Background music for the hacker's room, off until asked for. Left on, it
+ * comes back on next visit: at once where the browser allows, or on the
+ * first press anywhere on the page. Track 1 always opens the station; the rest follow in a shuffled order, every one once before
  * any repeats, and never the same one twice running. Only the track playing is
  * fetched, and it streams.
  */
 export function useRadio(): Radio {
   const [supported, setSupported] = useState(false);
   const [on, setOn] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const waking = useWaking();
   const [track, setTrack] = useState<number | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const queue = useRef<number[]>([]);
@@ -84,7 +92,7 @@ export function useRadio(): Radio {
     const index = queue.current.shift()!;
     el.src = TRACKS[index]!;
     setTrack(index + 1);
-    el.play().catch(() => setOn(false));
+    return el.play();
   }, [track]);
 
   // Kept current for the `ended` listener, which outlives any one render.
@@ -95,7 +103,7 @@ export function useRadio(): Radio {
     if (audio.current) return audio.current;
     const el = new Audio();
     el.preload = "none";
-    el.addEventListener("ended", () => playRef.current(el));
+    el.addEventListener("ended", () => void playRef.current(el).catch(() => setOn(false)));
     el.addEventListener("error", () => setOn(false));
     audio.current = el;
     return el;
@@ -108,29 +116,78 @@ export function useRadio(): Radio {
     el.src = TRACKS[0]!;
   }, [element, track]);
 
-  const toggle = useCallback(() => {
+  /**
+   * Plays, fading in. A browser that wants a press first (sound left on from
+   * last time) leaves it on and waiting; any other failure turns it off.
+   */
+  const start = useCallback(
+    (el: HTMLAudioElement, playing: Promise<void>) => {
+      el.volume = 0;
+      playing.then(
+        () => {
+          setWaiting(false);
+          ramp(el, VOLUME * levelRef.current);
+        },
+        (error: unknown) => {
+          if (error instanceof DOMException && error.name === "NotAllowedError") setWaiting(true);
+          else if (!(error instanceof DOMException && error.name === "AbortError")) setOn(false);
+        },
+      );
+    },
+    [ramp],
+  );
+
+  const turnOn = useCallback(() => {
     const el = element();
-    if (on) {
-      setOn(false);
-      ramp(el, 0, () => el.pause());
-      return;
-    }
     setOn(true);
+    remember(ON_KEY, "1");
     el.volume = 0;
     // Primed with the first track but never played: play that, from what's already in.
     if (el.src && track === null && queue.current.length === 0) {
       queue.current = shuffled(TRACKS.length - 1, null).map((i) => i + 1);
       setTrack(1);
-      el.play().catch(() => setOn(false));
-    } else if (el.src && !el.ended) el.play().catch(() => setOn(false));
-    else play(el);
-    ramp(el, VOLUME * levelRef.current);
-  }, [element, on, play, ramp, track]);
+      start(el, el.play());
+    } else if (el.src && !el.ended) start(el, el.play());
+    else start(el, play(el));
+  }, [element, play, start, track]);
+
+  const toggle = useCallback(() => {
+    // The key press that just woke it was asking for music, not to switch it off.
+    if (waking.now()) return;
+    if (!on) return turnOn();
+    const el = element();
+    setOn(false);
+    setWaiting(false);
+    remember(ON_KEY, "0");
+    ramp(el, 0, () => el.pause());
+  }, [element, on, ramp, turnOn, waking]);
+
+  // Left on last time: on again, playing as soon as the browser lets it.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumed.current || !supported || safeGet(ON_KEY) !== "1") return;
+    resumed.current = true;
+    turnOn();
+  }, [supported, turnOn]);
+  // Unmounted (and, in development, mounted again at once): free to start it again.
+  useEffect(
+    () => () => {
+      resumed.current = false;
+    },
+    [],
+  );
+
+  // Waiting on the browser: the first press anywhere starts it.
+  useFirstPress(on && waiting, (event) => {
+    if (event.type === "keydown") waking.mark();
+    const el = audio.current;
+    if (el?.src && el.paused) start(el, el.play());
+  });
 
   const next = useCallback(() => {
     const el = element();
     el.volume = VOLUME * levelRef.current;
-    play(el);
+    play(el).catch(() => setOn(false));
   }, [element, play]);
 
   // Leaving the page stops the music and lets the browser drop the stream.
@@ -146,7 +203,15 @@ export function useRadio(): Radio {
     [],
   );
 
-  return { supported, on, track, toggle, next, prime, level, setLevel };
+  return { supported, on, waiting, track, toggle, next, prime, level, setLevel };
+}
+
+function remember(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not remembered, then.
+  }
 }
 
 function safeGet(key: string): string | null {

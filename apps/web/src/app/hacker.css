@@ -709,3 +709,39 @@ a.hq-job-body:hover {
     display: none;
   }
 }
+
+/* ---- Nobody moving: only the room ---------------------------------------------------
+   A few seconds after the last move, press or key (stage-chrome.tsx), the words and
+   controls fade away, and the pointer with them; any move brings them back. An open
+   feed stays: it was asked for. Faded, not hidden: Tab still reaches every control,
+   and focusing one brings them all back. */
+
+.hq-top,
+.hq-handle,
+.hq-hint:not([data-gone]),
+.hq-shade {
+  transition: opacity 0.25s ease;
+}
+
+.hq-stage[data-idle] .hq-top,
+.hq-stage[data-idle] .hq-hint,
+.hq-stage[data-idle] .hq-shade,
+.hq-stage[data-idle]:not([data-feed]) .hq-handle {
+  opacity: 0;
+  transition-duration: 0.9s;
+}
+
+.hq-stage[data-idle] .hq-top > *,
+.hq-stage[data-idle]:not([data-feed]) .hq-handle {
+  pointer-events: none;
+}
+
+.hq-stage[data-idle] .hq-scene {
+  cursor: none;
+}
+
+/* Full screen: the room fills it, the page around it gone. */
+.hq-stage:fullscreen {
+  height: 100%;
+  margin: 0;
+}

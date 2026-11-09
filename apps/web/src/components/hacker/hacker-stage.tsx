@@ -23,6 +23,7 @@ import { LookMenu, LOOKS } from "./look-menu";
 import { useKeySounds } from "./key-sounds";
 import { useRadio } from "./radio";
 import { SoundMenu } from "./sound-menu";
+import { FullscreenKey, useFullscreen, useIdle } from "./stage-chrome";
 
 /** How far right the picture sits on wide screens: a little to clear the name, more while the customize panel covers the left. */
 const SHIFT = { resting: 0.12, editing: 0.17 };
@@ -67,6 +68,10 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   // Up here, not in the card, so the music carries on while they customize.
   const radio = useRadio();
   const sounds = useKeySounds(signals);
+  // The room alone: full screen, and the controls and words stepping aside while nobody moves.
+  const stage = useRef<HTMLElement>(null);
+  const fullscreen = useFullscreen(stage);
+  const idle = useIdle(stage, !editing);
 
   // The look as last saved: the server's, or ours the moment a save succeeds (before the page refreshes with it,
   // so the room never flicks back to the old look in between). A new one from the server is taken unless editing.
@@ -133,8 +138,8 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   useEffect(() => {
     if (editing) name.current?.focus({ preventScroll: true });
   }, [editing]);
-  const keys = useRef({ save, close, open, editing, admin, radio, sounds, setDrawer, views });
-  keys.current = { save, close, open, editing, admin, radio, sounds, setDrawer, views };
+  const keys = useRef({ save, close, open, editing, admin, radio, sounds, setDrawer, views, fullscreen });
+  keys.current = { save, close, open, editing, admin, radio, sounds, setDrawer, views, fullscreen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -162,6 +167,9 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
       } else if (!k.editing && (event.key === "l" || event.key === "L") && !typing && !(at instanceof HTMLTextAreaElement)) {
         event.preventDefault();
         k.setDrawer((o) => !o);
+      } else if (!k.editing && k.fullscreen.supported && (event.key === "f" || event.key === "F") && !typing && !(at instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        k.fullscreen.toggle();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -178,7 +186,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
   const phosphor = swatch(PHOSPHORS, profile.phosphor).color;
 
   return (
-    <section className="hq-stage" data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
+    <section ref={stage} className="hq-stage" data-idle={idle || undefined} data-editing={editing || undefined} data-feed={(!editing && drawer) || undefined} style={{ "--phosphor": phosphor } as CSSProperties} aria-labelledby="hq-name">
       <div className="hq-scene" onPointerDown={() => setDragged(true)}>
         <RigView profile={profile} org={login} shot={shot} paint={paint} signals={signals} frameShift={shift} camera={camera} detail="high" drag="look" poster />
         <div className="hq-shade" aria-hidden="true" />
@@ -244,6 +252,7 @@ export function HackerStage({ orgId, login, profile: saved, admin, feed: initial
                     </span>
                   </button>
                 )}
+                <FullscreenKey fullscreen={fullscreen} />
               </div>
             </div>
           </div>

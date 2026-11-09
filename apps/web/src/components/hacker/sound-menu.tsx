@@ -39,6 +39,8 @@ export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeyS
 
   if (!radio.supported && !keys.supported) return null;
   const playing = (radio.on && radio.supported) || keys.on;
+  // Left on last time, and the browser wants a press before it plays: say so, where the sound is.
+  const waiting = (radio.supported && radio.on && radio.waiting) || (keys.on && keys.waiting);
   return (
     <div ref={box} className="sound" data-up={up || undefined}>
       <button
@@ -55,8 +57,8 @@ export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeyS
         data-track="hacker-sound-open"
       >
         <span className="cap-key-face">
-          <SpeakerIcon on={playing} />
-          <span className="cap-key-label">Sound</span>
+          <SpeakerIcon on={playing && !waiting} />
+          <span className="cap-key-label">{waiting ? <WaitingLabel /> : "Sound"}</span>
         </span>
       </button>
       {open && (
@@ -102,6 +104,12 @@ export function SoundMenu({ radio, keys, up, small }: { radio: Radio; keys: KeyS
       )}
     </div>
   );
+}
+
+/** "Click for sound", or "Tap for sound" on a touch screen. */
+function WaitingLabel() {
+  const [touch] = useState(() => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches);
+  return <>{touch ? "Tap" : "Click"} for sound</>;
 }
 
 /** A volume slider, in the room's colours: quiet on the left, loud on the right. */
