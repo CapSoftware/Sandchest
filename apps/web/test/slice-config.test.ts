@@ -46,8 +46,8 @@ describe("slice engine settings", () => {
     expect(scanEngine("deep", "acme", config({ ...slice, SANDCHEST_ENGINE_ORGS: "," }))).toBe("classic");
   });
 
-  test("slice needs boat, the gateway secret and both ceilings, all named in one error", () => {
-    const { SANDCHEST_GATEWAY_SECRET: _secret, SANDCHEST_SLICE_CEILING_USD: _ceiling, SANDCHEST_SLICE_CEILING_PR_USD: _pr, ...missing } = slice;
+  test("slice needs a Boat key, the Linux indexer, the gateway secret and both ceilings, all named in one error", () => {
+    const { SANDCHEST_GATEWAY_SECRET: _secret, SANDCHEST_SLICE_CEILING_USD: _ceiling, SANDCHEST_SLICE_CEILING_PR_USD: _pr, SANDCHEST_BOAT_API_KEY: _key, SANDCHEST_INDEXER_LINUX_BIN: _bin, ...missing } = slice;
     let message = "";
     try {
       config({ ...missing, SANDCHEST_WORKSPACE: "local" });
@@ -55,12 +55,14 @@ describe("slice engine settings", () => {
       message = (error as Error).message;
     }
     expect(message).toStartWith("Invalid server configuration:");
-    for (const name of ["SANDCHEST_WORKSPACE", "SANDCHEST_GATEWAY_SECRET", "SANDCHEST_SLICE_CEILING_USD", "SANDCHEST_SLICE_CEILING_PR_USD"]) expect(message).toContain(name);
+    for (const name of ["SANDCHEST_BOAT_API_KEY", "SANDCHEST_INDEXER_LINUX_BIN", "SANDCHEST_GATEWAY_SECRET", "SANDCHEST_SLICE_CEILING_USD", "SANDCHEST_SLICE_CEILING_PR_USD"]) expect(message).toContain(name);
     // The PR ceiling alone missing is named alone.
     const { SANDCHEST_SLICE_CEILING_PR_USD: _alone, ...noPr } = slice;
     expect(() => config(noPr)).toThrow("SANDCHEST_SLICE_CEILING_PR_USD: is required by the slice engine");
     expect(() => config({ ...noPr, SANDCHEST_SLICE_CEILING_PR_USD: " " })).toThrow("SANDCHEST_SLICE_CEILING_PR_USD");
-    expect(() => config({ ...slice, SANDCHEST_WORKSPACE: "sandbox" })).toThrow("SANDCHEST_WORKSPACE: the slice engine needs boat");
+    // Classic scans keep their own workspace: the slice engine opens Boat sandboxes itself.
+    for (const workspace of ["sandbox", "local", "boat"]) expect(config({ ...slice, SANDCHEST_WORKSPACE: workspace })).toMatchObject({ SANDCHEST_ENGINE: "slice", workspace });
+    expect(config({ ...slice, SANDCHEST_WORKSPACE: undefined, VERCEL: "1" }).workspace).toBe("sandbox");
   });
 
   test("each ceiling is a positive decimal", () => {

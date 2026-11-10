@@ -301,7 +301,7 @@ async function openSandbox(input: { scan: LoadedScan; installation: Installation
         return opened;
       },
       clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
-      binary: indexerBinary(settings.workspace),
+      binary: indexerBinary("boat"),
       started: input.started,
       onRetry: (message) => events.write("progress", message),
     });
@@ -492,7 +492,7 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
         ? { verdicts: parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.variants)) ?? [], confirmed: parseJson<slice.ConfirmedEntry[]>(await sandbox.readPrivateFile(FILES.confirmed)) ?? [] }
         : undefined;
       events.write("stage:verify", "Writing up what was confirmed…");
-      const indexer = runtime.indexer(await restartIndexer(sandbox, indexerBinary(config().workspace)));
+      const indexer = runtime.indexer(await restartIndexer(sandbox, indexerBinary("boat")));
       const out = await slice.writeUpVerdicts({
         client: sliceClient(fast),
         indexer,

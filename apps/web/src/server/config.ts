@@ -91,7 +91,7 @@ const Schema = z.object({
   /** ...or as a release download, verified by checksum inside the sandbox. */
   SANDCHEST_INDEXER_LINUX_URL: z.url().optional(),
   SANDCHEST_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-  /** Which engine runs deep scans. Default `classic`. `slice` needs the boat workspace, the gateway and a ceiling. */
+  /** Which engine runs deep scans and PR reviews. Default `classic`. `slice` needs a Boat API key, the Linux indexer, the gateway and its ceilings. */
   SANDCHEST_ENGINE: z.enum(["classic", "slice"]).optional(),
   /** GitHub account logins, comma-separated, any case. When set, only these accounts' deep scans and PR reviews use the slice engine. */
   SANDCHEST_ENGINE_ORGS: z.string().max(2_000).optional(),
@@ -134,7 +134,11 @@ export function config(env: Record<string, string | undefined> = process.env): C
   if (workspace === "boat" && !parsed.data.SANDCHEST_BOAT_API_KEY) throw new Error("Boat scans need SANDCHEST_BOAT_API_KEY.");
   if (parsed.data.SANDCHEST_ENGINE === "slice") {
     const problems: string[] = [];
-    if (workspace !== "boat") problems.push("SANDCHEST_WORKSPACE: the slice engine needs boat");
+    // The slice engine opens its own Boat sandboxes whatever SANDCHEST_WORKSPACE says, so classic scans stay where they run today.
+    if (!parsed.data.SANDCHEST_BOAT_API_KEY) problems.push("SANDCHEST_BOAT_API_KEY: is required by the slice engine");
+    if (!parsed.data.SANDCHEST_INDEXER_LINUX_BIN && !(parsed.data.SANDCHEST_INDEXER_LINUX_URL && parsed.data.SANDCHEST_INDEXER_LINUX_SHA256)) {
+      problems.push("SANDCHEST_INDEXER_LINUX_BIN, or SANDCHEST_INDEXER_LINUX_URL with SANDCHEST_INDEXER_LINUX_SHA256: is required by the slice engine");
+    }
     if (!parsed.data.SANDCHEST_GATEWAY_SECRET) problems.push("SANDCHEST_GATEWAY_SECRET: is required by the slice engine");
     if (!parsed.data.SANDCHEST_SLICE_CEILING_USD) problems.push("SANDCHEST_SLICE_CEILING_USD: is required by the slice engine");
     if (!parsed.data.SANDCHEST_SLICE_CEILING_PR_USD) problems.push("SANDCHEST_SLICE_CEILING_PR_USD: is required by the slice engine");
