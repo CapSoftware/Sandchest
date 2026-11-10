@@ -169,6 +169,13 @@
       "when": 1794300663541,
       "tag": "0023_credit_unit_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794311905534,
+      "tag": "0024_usage_spend_idx",
+      "breakpoints": true
     }
   ]
 }

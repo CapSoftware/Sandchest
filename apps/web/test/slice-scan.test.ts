@@ -10,6 +10,7 @@ import {
   createScan,
   eventsSince,
   finishUsageCall,
+  insertUsage,
   orgCarry,
   scanBill,
   scanById,
@@ -39,6 +40,7 @@ import { quotePrReview, startPrReview } from "@/server/pr-review";
 import { beginScan, failScan, publishScan, ScanFinished, type BeginResult } from "@/server/scans";
 import { resetSentry } from "@/server/sentry";
 import { setServices } from "@/server/services";
+import { resetSliceLimit } from "@/server/slice-limit";
 import { setScanStarter } from "@/server/start";
 import { billSlice } from "@/server/usage-billing";
 import { SandboxGone, type SliceRuntime, type SliceSandbox } from "@/server/slice-runtime";
@@ -1952,5 +1954,98 @@ describe.skipIf(!available)("usage billing settlement", () => {
       expect(await orgCarry(database, orgId)).toBe(7_000);
       await resetCarry();
     });
+  });
+});
+
+describe.skipIf(!available)("the slice engine's daily limit", () => {
+  const CLASSIC = { engine: "classic", mode: "tiered", unit: "cent" } as const;
+
+  /** Runs `fn` with usage billing on and the limit set, every read forgotten before and after. */
+  async function withLimit(limit: string, fn: () => Promise<void>): Promise<void> {
+    resetSliceLimit();
+    try {
+      await withSettings({ ...USAGE_ENV, SANDCHEST_SLICE_DAILY_LIMIT_USD: limit }, fn);
+    } finally {
+      resetSliceLimit();
+    }
+  }
+
+  /** Something spent in the last 24 hours, so a made-up tiny limit is reached. */
+  async function spend(): Promise<void> {
+    await insertUsage(database, await newScan("recon"), [{ kind: "model", stage: "recon", costUsd: "0.01", costSource: "provider" }]);
+  }
+
+  it("reached: scans priced now get the classic engine at every reservation and in begin; scans already priced keep slice", async () => {
+    setScanStarter(async () => {});
+    try {
+      autumn.get(orgId).credits = 10_000;
+      // Priced on slice under the limit, before it is reached.
+      let priced = "";
+      await withLimit("999999", async () => {
+        priced = (await requestDeepScan({ ...(await newRepo()), loc: 50_000 }) as { scanId: string }).scanId;
+        expect((await scanById(database, priced))!.pricing).toMatchObject({ engine: "slice", mode: "usage" });
+      });
+      await spend();
+      await withLimit("0.000001", async () => {
+        // Dig.
+        const dug = await requestDeepScan({ ...(await newRepo()), loc: 50_000 });
+        expect(dug).toMatchObject({ ok: true });
+        expect("heldUpTo" in dug).toBe(false);
+        const dugId = (dug as { scanId: string }).scanId;
+        expect((await scanById(database, dugId))!.pricing).toEqual(CLASSIC);
+
+        // A dashboard review: quoted and held as classic.
+        gh.files = [CHANGED, DOCS];
+        const repo = await newRepo();
+        const quoted = await quotePrReview(repo, 7);
+        expect(quoted).toMatchObject({ ok: true });
+        expect("upTo" in quoted).toBe(false);
+        const started = await startPrReview(repo, 7, (quoted as { credits: number }).credits);
+        expect(started).toMatchObject({ ok: true });
+        const reviewId = (started as { scanId: string }).scanId;
+        expect((await scanById(database, reviewId))!.pricing).toEqual(CLASSIC);
+
+        // Begin, for scans with no stored pricing: a deep scan and a review from a push.
+        const deep = await newScan();
+        expect(await beginScan(deep)).toEqual({ state: "running" });
+        expect((await scanById(database, deep))!.pricing).toEqual(CLASSIC);
+        const pushed = await newScan("pr_review");
+        expect(await beginScan(pushed)).toEqual({ state: "running" });
+        expect((await scanById(database, pushed))!.pricing).toEqual(CLASSIC);
+        for (const id of [dugId, reviewId, deep, pushed]) await failScan(id, "test over");
+
+        // Priced before the limit was reached: it stays on slice, billed as it was priced.
+        expect(await beginScan(priced)).toEqual({ state: "running", engine: "slice", pricing: "usage" });
+        await failScan(priced, "test over");
+      });
+    } finally {
+      setScanStarter(undefined);
+    }
+  });
+
+  it("reached with billing off: begin runs a scan with no pricing on the classic engine", async () => {
+    await spend();
+    setAutumn(undefined);
+    try {
+      await withLimit("0.000001", async () => {
+        const deep = await newScan();
+        expect(await beginScan(deep)).toEqual({ state: "running" });
+        expect((await scanById(database, deep))!.pricing).toBeNull();
+        await failScan(deep, "test over");
+      });
+    } finally {
+      setAutumn(autumn);
+    }
+  });
+
+  it("under the limit, and unset: scans run on slice as before", async () => {
+    autumn.get(orgId).credits = 10_000;
+    for (const limit of ["999999", ""]) {
+      await withLimit(limit, async () => {
+        const deep = await newScan();
+        expect(await beginScan(deep)).toEqual({ state: "running", engine: "slice", pricing: "usage" });
+        await failScan(deep, "test over");
+      });
+    }
   });
 });

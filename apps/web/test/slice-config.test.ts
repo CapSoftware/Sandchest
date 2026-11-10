@@ -67,19 +67,36 @@ describe("slice engine settings", () => {
     expect(config({ ...slice, SANDCHEST_WORKSPACE: undefined, VERCEL: "1" }).workspace).toBe("sandbox");
   });
 
-  test("an account on the slice engine runs all its work on Boat; every other account stays on the configured workspace", () => {
-    // Unset or classic: the configured workspace for everyone, as today.
+  test("an account SANDCHEST_ENGINE_ORGS names runs all its work on Boat; every other account stays on the configured workspace", () => {
     for (const workspace of ["sandbox", "local", "boat"] as const) {
-      expect(scanWorkspace("acme", config({ ...base, ...boat, SANDCHEST_WORKSPACE: workspace }))).toBe(workspace);
-      expect(scanWorkspace("acme", config({ ...base, ...boat, SANDCHEST_WORKSPACE: workspace, SANDCHEST_ENGINE: "classic" }))).toBe(workspace);
+      // Unset or classic: the configured workspace for everyone, as today, with or without a list.
+      for (const engine of [{}, { SANDCHEST_ENGINE: "classic" }]) {
+        expect(scanWorkspace("acme", config({ ...base, ...boat, ...engine, SANDCHEST_WORKSPACE: workspace }))).toBe(workspace);
+        expect(scanWorkspace("acme", config({ ...base, ...boat, ...engine, SANDCHEST_WORKSPACE: workspace, SANDCHEST_ENGINE_ORGS: "acme" }))).toBe(workspace);
+      }
+      // Slice for a list of accounts: Boat for them only, whatever the kind of work.
+      const listed = config({ ...slice, SANDCHEST_WORKSPACE: workspace, SANDCHEST_ENGINE_ORGS: "Acme, other" });
+      expect(scanWorkspace("acme", listed)).toBe("boat");
+      expect(scanWorkspace("OTHER", listed)).toBe("boat");
+      expect(scanWorkspace("someone-else", listed)).toBe(workspace);
+      // A list naming nobody: nobody moves.
+      expect(scanWorkspace("acme", config({ ...slice, SANDCHEST_WORKSPACE: workspace, SANDCHEST_ENGINE_ORGS: "," }))).toBe(workspace);
+      // Slice for everyone (no list): classic work stays on the configured workspace for everyone.
+      for (const login of ["acme", "someone-else"]) expect(scanWorkspace(login, config({ ...slice, SANDCHEST_WORKSPACE: workspace }))).toBe(workspace);
     }
-    // Slice for a list of accounts: Boat for them only, whatever the kind of work.
-    const listed = config({ ...slice, SANDCHEST_WORKSPACE: "sandbox", SANDCHEST_ENGINE_ORGS: "Acme, other" });
-    expect(scanWorkspace("acme", listed)).toBe("boat");
-    expect(scanWorkspace("OTHER", listed)).toBe("boat");
-    expect(scanWorkspace("someone-else", listed)).toBe("sandbox");
-    // Slice for everyone: Boat for everyone.
-    expect(scanWorkspace("someone-else", config({ ...slice, SANDCHEST_WORKSPACE: "sandbox" }))).toBe("boat");
+  });
+
+  test("SANDCHEST_SLICE_DAILY_LIMIT_USD is optional, and a positive decimal when set", () => {
+    expect(config(slice).SANDCHEST_SLICE_DAILY_LIMIT_USD).toBeUndefined();
+    expect(config({ ...slice, SANDCHEST_SLICE_DAILY_LIMIT_USD: " " }).SANDCHEST_SLICE_DAILY_LIMIT_USD).toBeUndefined();
+    expect(config({ ...slice, SANDCHEST_SLICE_DAILY_LIMIT_USD: "12.5" }).SANDCHEST_SLICE_DAILY_LIMIT_USD).toBe("12.5");
+    for (const bad of ["0", "0.0", "-1", "1e3", "abc", "1.1234567", "1234567"]) expect(() => config({ ...slice, SANDCHEST_SLICE_DAILY_LIMIT_USD: bad })).toThrow("SANDCHEST_SLICE_DAILY_LIMIT_USD");
+  });
+
+  test("past the daily limit every scan is classic, and priced classic", () => {
+    const settings = config(slice);
+    for (const kind of ["deep", "pr_review", "recon", "fix_check"]) expect(scanEngine(kind, "acme", settings, false)).toBe("classic");
+    expect(scanEngine("deep", "acme", settings, true)).toBe("slice");
   });
 
   test("the slice engine's own indexer build is a URL with its checksum, both or neither", () => {

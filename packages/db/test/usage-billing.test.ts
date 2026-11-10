@@ -16,6 +16,7 @@ import {
   scanBill,
   schema,
   settleBilledScan,
+  spendSince,
   upsertInstallation,
   usageHistory,
   voidScanBill,
@@ -573,5 +574,31 @@ describe("usageHistory", () => {
     expect(await usageHistory(database, await person([]), org.orgId)).toEqual([]);
     // An account with no bills has no history.
     expect(await usageHistory(database, userId, (await newOrg()).orgId)).toEqual([]);
+  });
+});
+
+describe("spendSince", () => {
+  it("sums every account's rows of every status from the bound on, and nothing before it", async () => {
+    // A window far from every other test's rows.
+    const bound = new Date(Date.UTC(2099, 0, 1));
+    const after = (ms: number) => new Date(bound.getTime() + ms);
+    expect(await spendSince(database, bound)).toBe("0");
+    const first = await newScan(await newOrg());
+    const second = await newScan(await newOrg());
+    await insertUsage(database, first, [
+      { kind: "model", stage: "hunt", costUsd: "0.0000000001", costSource: "provider", status: "ok", createdAt: bound },
+      { kind: "model", stage: "hunt", costUsd: "0.25", costSource: "provider", status: "aborted", createdAt: after(1) },
+      { kind: "sandbox", stage: "sandbox", costUsd: "1.5", costSource: "sandbox", createdAt: after(60_000) },
+      // Before the bound: not counted.
+      { kind: "model", stage: "hunt", costUsd: "100", costSource: "provider", createdAt: after(-1) },
+    ]);
+    await insertUsage(database, second, [
+      { kind: "model", stage: "verify", costUsd: "0.125", costSource: "provider", status: "failed", createdAt: after(5) },
+      { kind: "model", stage: "verify", costUsd: "0", costSource: "provider", status: "unpriced", createdAt: after(6) },
+    ]);
+    await database.$client`update scan_usage set status = 'started' where scan_id = ${second} and status = 'failed'`;
+    expect(await spendSince(database, bound)).toBe("1.8750000001");
+    expect(await spendSince(database, after(2))).toBe("1.6250000000");
+    expect(await spendSince(database, after(60_001))).toBe("0");
   });
 });

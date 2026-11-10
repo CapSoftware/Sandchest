@@ -4,9 +4,10 @@ import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { activeDeepScan, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
 import { digState } from "@/lib/dig-state";
 import { autumn, billingFrozen, heldCredits, reserveScan } from "./billing";
-import { fastOffered, scanPricing } from "./config";
+import { config, fastOffered, scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
+import { sliceAllowedNow } from "./slice-limit";
 import { startScan } from "./start";
 
 export type DigResult =
@@ -46,7 +47,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     // measures (never more than it held). Inside the try: a failure here cleans up like any other, and never
     // leaves a scan to be charged later.
     // How the scan is priced is decided here, with its hold, and stored with it.
-    const pricing = scanPricing(scan, repo.org.githubLogin);
+    const pricing = scanPricing(scan, repo.org.githubLogin, config(), await sliceAllowedNow(scan.kind, repo.org.githubLogin));
     credits = heldCredits(pricing, state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
     usage = pricing.mode === "usage";
     gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits, true, { pricing });

@@ -9,9 +9,10 @@ import { createScan, deleteUnstartedScan, prReviewStates, type Org, type Repo } 
 import { changedLines, relevantChanges } from "@sandchest/engine/scan";
 import { parsePatch, type PullFile } from "@sandchest/github";
 import { autumn, billingEnabled, billingFrozen, heldCredits, reserveScan } from "./billing";
-import { scanPricing } from "./config";
+import { config, scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
+import { sliceAllowedNow } from "./slice-limit";
 import { startScan } from "./start";
 
 /** `upTo`: the review is billed from its usage, so `credits` is the most it can be charged. Absent otherwise. */
@@ -85,7 +86,7 @@ async function reviewable(repo: InstalledRepo, prNumber: number) {
   }
   const files = await installation.pullFiles(repo.fullName, prNumber);
   // What is quoted is what is held: a review billed from its usage holds enough for its ceiling.
-  const pricing = scanPricing({ kind: "pr_review", fast: false }, repo.org.githubLogin);
+  const pricing = scanPricing({ kind: "pr_review", fast: false }, repo.org.githubLogin, config(), await sliceAllowedNow("pr_review", repo.org.githubLogin));
   return { ok: true as const, pull, credits: heldCredits(pricing, reviewCredits(files)), pricing };
 }
 

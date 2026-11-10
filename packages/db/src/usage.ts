@@ -2,7 +2,7 @@
  * The usage ledger: one row per model call and one per sandbox, each with
  * its exact cost. Records only; nothing here changes what anyone is charged.
  */
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import type { ScanStatus } from "./queries";
 import { scanMetrics, scans, scanUsage, type UsageCostSource, type UsageKind, type UsageStatus } from "./schema";
@@ -100,6 +100,15 @@ export async function scanUsageTotals(database: Db, scanId: string): Promise<Usa
     .where(eq(scanUsage.scanId, scanId))
     .groupBy(scanUsage.kind, scanUsage.stage)
     .orderBy(asc(scanUsage.kind), asc(scanUsage.stage));
+}
+
+/** What every scan of every account has recorded since `since`, whatever each row's status. Exact decimal string. One query. */
+export async function spendSince(database: Db, since: Date): Promise<string> {
+  const [row] = await database
+    .select({ costUsd: sql<string>`coalesce(sum(${scanUsage.costUsd}), 0)::text` })
+    .from(scanUsage)
+    .where(gte(scanUsage.createdAt, since));
+  return row?.costUsd ?? "0";
 }
 
 /** Whether the scan's ledger has the row written under `key`. */

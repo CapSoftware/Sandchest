@@ -279,7 +279,8 @@ export const scanUsage = pgTable(
     key: uuid("key"),
     createdAt: createdAt(),
   },
-  (table) => [index("scan_usage_scan_idx").on(table.scanId), uniqueIndex("scan_usage_key_unique").on(table.key)],
+  // created_at: the 24-hour spend the slice engine's daily limit reads.
+  (table) => [index("scan_usage_scan_idx").on(table.scanId), uniqueIndex("scan_usage_key_unique").on(table.key), index("scan_usage_created_idx").on(table.createdAt)],
 );
 
 export const STAGE_OUTCOMES = ["ok", "failed", "skipped"] as const;

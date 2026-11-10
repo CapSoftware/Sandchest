@@ -2,10 +2,12 @@
  * What a scan billed from its usage is quoted before it starts: the most it can be charged, which is what it
  * holds. Decided here, on the server, from the account's pricing: the browser only ever sees whole credits.
  * Undefined for an account whose scans are priced by tier (or in shadow, which charges the tier price), so
- * every quote for it stays exactly as it was.
+ * every quote for it stays exactly as it was. Past the slice engine's daily limit, as this instance last read it
+ * (`sliceAllowedCached`), scans are priced classic and nothing is quoted.
  */
 import { usageHold } from "./billing";
 import { config, fastOffered, scanPricing, type Config } from "./config";
+import { sliceAllowedCached } from "./slice-limit";
 
 export interface UsageQuote {
   /** Credits a deep scan holds: the most it can be charged. */
@@ -16,7 +18,7 @@ export interface UsageQuote {
 
 /** The usage quote for an account's deep scans, or undefined when they are not billed from usage. */
 export function deepScanQuote(githubLogin: string, settings: Config = config()): UsageQuote | undefined {
-  const pricing = scanPricing({ kind: "deep", fast: false }, githubLogin, settings);
+  const pricing = scanPricing({ kind: "deep", fast: false }, githubLogin, settings, sliceAllowedCached(settings));
   if (pricing.mode !== "usage") return undefined;
   const hold = usageHold(pricing);
   if (!fastOffered(githubLogin, settings)) return { hold };
@@ -25,7 +27,7 @@ export function deepScanQuote(githubLogin: string, settings: Config = config()):
 
 /** The most a pull request review of the account can be charged, or undefined when reviews are not billed from usage. */
 export function prReviewQuote(githubLogin: string, settings: Config = config()): number | undefined {
-  const pricing = scanPricing({ kind: "pr_review", fast: false }, githubLogin, settings);
+  const pricing = scanPricing({ kind: "pr_review", fast: false }, githubLogin, settings, sliceAllowedCached(settings));
   return pricing.mode === "usage" ? usageHold(pricing) : undefined;
 }
 

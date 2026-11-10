@@ -65,6 +65,7 @@ import { billingEnabled, heldCredits, reserveScan, settleScan, syncBilling, type
 import { config, scanEngine, scanPricing, scanWorkspace, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
+import { sliceAllowedNow } from "./slice-limit";
 import { noticeScanPaused } from "./notices";
 import { classifier, classifierPrice, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
@@ -107,8 +108,10 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
   }
   // How the scan was priced when its credits were reserved, if they were: by an earlier run of this step, by Dig or the dashboard, or just below.
   let pricing = scan.pricing;
+  // A queued scan with no stored pricing is priced now, so the slice engine's daily limit applies to it.
+  const sliceAllowed = scan.status === "queued" && !pricing ? await sliceAllowedNow(scan.kind, scan.repo.org.githubLogin) : true;
   if (scan.status === "queued" && scan.billing === null && billingEnabled()) {
-    const priced = scanPricing(scan, scan.repo.org.githubLogin);
+    const priced = scanPricing(scan, scan.repo.org.githubLogin, config(), sliceAllowed);
     const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, heldCredits(priced, await scanCredits(scan)), true, { evenWhenEmpty: scan.kind === "fix_check", pricing: priced });
     if (!gate.ok) {
       // Billing is being upgraded: nothing is held now. The workflow asks again every 10 s, and this goes ahead once it's done.
@@ -151,7 +154,7 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
     await updateScan(db(), scan.id, { checkRunId });
   }
   // A scan holding credits keeps the engine it was priced for, whatever the settings say now.
-  if ((pricing?.engine ?? scanEngine(scan.kind, scan.repo.org.githubLogin)) === "slice") {
+  if ((pricing?.engine ?? scanEngine(scan.kind, scan.repo.org.githubLogin, config(), sliceAllowed)) === "slice") {
     return { state: "running", engine: "slice", ...((pricing?.mode === "usage" || pricing?.mode === "shadow") && { pricing: pricing.mode }) };
   }
   return { state: "running" };
@@ -216,7 +219,7 @@ export async function executeScan(scanId: string, run: { /** How many times the 
   const started = Date.now();
   const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`;
   // "HEAD" is the remote's default branch as it is now, so a renamed default branch still clones.
-  // The configured workspace, or Boat for an account the slice engine is on.
+  // The configured workspace, or Boat for an account SANDCHEST_ENGINE_ORGS puts on the slice engine.
   const where = scanWorkspace(scan.repo.org.githubLogin, settings);
   const preparing = prepareWorkspace({
     open: () =>

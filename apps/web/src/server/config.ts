@@ -108,6 +108,11 @@ const Schema = z.object({
   SANDCHEST_SLICE_CEILING_USD: usd().optional(),
   /** The same for one slice pull request review. Required for the slice engine. */
   SANDCHEST_SLICE_CEILING_PR_USD: usd().optional(),
+  /**
+   * The most all scans together may spend in any 24 hours, in USD, before new scans are priced classic instead
+   * of slice (see `sliceAllowedNow`). Unset: no limit.
+   */
+  SANDCHEST_SLICE_DAILY_LIMIT_USD: usd().optional(),
   /** A JSON object of fields set on every model request of the slice engine's own calls (endpoint options). */
   LLM_SLICE_BODY: z.string().optional(),
   /** Fast deep scans (see `fastModeAvailable`): the most one may cost, in USD. */
@@ -182,9 +187,10 @@ export function config(env: Record<string, string | undefined> = process.env): C
 /**
  * Which engine runs a scan. The slice engine runs deep scans and PR reviews only, when SANDCHEST_ENGINE
  * is `slice` and, if SANDCHEST_ENGINE_ORGS is set, only for the accounts it names. Everything else is classic.
+ * `sliceAllowed` false (the daily limit is reached, see `sliceAllowedNow`) makes every scan classic.
  */
-export function scanEngine(kind: string, githubLogin: string, settings: Config = config()): "classic" | "slice" {
-  if ((kind !== "deep" && kind !== "pr_review") || !onSliceEngine(githubLogin, settings)) return "classic";
+export function scanEngine(kind: string, githubLogin: string, settings: Config = config(), sliceAllowed = true): "classic" | "slice" {
+  if (!sliceAllowed || (kind !== "deep" && kind !== "pr_review") || !onSliceEngine(githubLogin, settings)) return "classic";
   return "slice";
 }
 
@@ -197,11 +203,12 @@ function onSliceEngine(githubLogin: string, settings: Config): boolean {
 
 /**
  * Where an account's classic work runs (recon, fix checks, CVE reads, and scans the slice engine does not
- * take): Boat for an account the slice engine is on, so everything of that account is on one sandbox host;
- * the configured workspace for every other account.
+ * take): Boat for an account SANDCHEST_ENGINE_ORGS names while the slice engine is on, so everything of that
+ * account is on one sandbox host; the configured workspace for every other account, and for everyone when the
+ * slice engine is on with no list. The slice engine opens its own Boat sandboxes either way.
  */
 export function scanWorkspace(githubLogin: string, settings: Config = config()): Config["workspace"] {
-  return onSliceEngine(githubLogin, settings) ? "boat" : settings.workspace;
+  return settings.SANDCHEST_ENGINE_ORGS !== undefined && onSliceEngine(githubLogin, settings) ? "boat" : settings.workspace;
 }
 
 /**
@@ -278,10 +285,10 @@ export function sliceCeilingMicroUsd(kind: string, fast: boolean, settings: Conf
  * How a scan is priced if its credits are reserved now: its engine, its pricing mode and the credit's size; for
  * `usage` and `shadow`, also the multiplier, whether it may run fast, and the most it may spend (a pull request's
  * ceiling, a deep scan's, or for a scan that may run fast the larger of the fast and deep ones, since a fast scan
- * can fall back to standard).
+ * can fall back to standard). `sliceAllowed` false prices it classic (see `scanEngine`).
  */
-export function scanPricing(scan: { kind: string; fast: boolean }, githubLogin: string, settings: Config = config()): ScanPricing {
-  const engine = scanEngine(scan.kind, githubLogin, settings);
+export function scanPricing(scan: { kind: string; fast: boolean }, githubLogin: string, settings: Config = config(), sliceAllowed = true): ScanPricing {
+  const engine = scanEngine(scan.kind, githubLogin, settings, sliceAllowed);
   const mode = scanPricingMode(engine, settings);
   const unit = creditUnit(settings);
   if (mode === "tiered") return { engine, mode, unit };

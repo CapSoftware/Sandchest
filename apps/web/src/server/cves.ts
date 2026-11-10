@@ -152,7 +152,7 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
     const settings = config();
     const startedAt = new Date();
     const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${repo.fullName}.git`;
-    // The configured workspace, or Boat for an account the slice engine is on.
+    // The configured workspace, or Boat for an account SANDCHEST_ENGINE_ORGS puts on the slice engine.
     const where = scanWorkspace(repo.org.githubLogin, settings);
     const { workspace, headSha, handle } = await prepareWorkspace({
       open: () =>
