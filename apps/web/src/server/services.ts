@@ -5,9 +5,12 @@ import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig,
 import { createMavenRepository, createOsvCatalog, type MavenRepository, type OsvCatalog } from "@sandchest/engine/advisories";
 import { createOsvClient, loadClassifierPrice, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import type { GitHubApp } from "@sandchest/github";
+import { config, sliceBody } from "./config";
 import { db, setDb } from "./db";
+import { loadGatewayUpstream } from "./gateway";
 import { githubApp, setGithubApp } from "./github-app";
 import { mailer, setMailer } from "./mailer";
+import { boatSliceRuntime, type SliceRuntime } from "./slice-runtime";
 
 export { db, githubApp, mailer };
 
@@ -15,6 +18,9 @@ interface Services {
   db: Db;
   github: GitHubApp;
   llm: LlmClient;
+  /** The slice engine's own model calls (hunt and write-up). */
+  slice: LlmClient;
+  sliceRuntime: SliceRuntime;
   classifier: Classifier | undefined;
   osv: OsvClient | undefined;
   catalog: OsvCatalog;
@@ -36,6 +42,22 @@ export function setServices(overrides: Partial<Services>): void {
 
 export function llmClient(): LlmClient {
   return (instances.llm ??= createLlmClient(loadLlmConfig()));
+}
+
+/** The slice engine's hunt and write-up client: the gateway's endpoint, key and model, with LLM_SLICE_BODY on every request. */
+export function sliceClient(): LlmClient {
+  if (!instances.slice) {
+    const { baseUrl, apiKey, model } = loadGatewayUpstream();
+    const body = sliceBody(config().LLM_SLICE_BODY);
+    if ("problem" in body) throw new Error(`Invalid server configuration:\n  LLM_SLICE_BODY: ${body.problem}`);
+    instances.slice = createLlmClient({ baseUrl, apiKey, model, body: body.body });
+  }
+  return instances.slice;
+}
+
+/** Sandboxes and agent sessions for the slice engine. */
+export function sliceRuntime(): SliceRuntime {
+  return (instances.sliceRuntime ??= boatSliceRuntime());
 }
 
 export function classifier(): Classifier | undefined {

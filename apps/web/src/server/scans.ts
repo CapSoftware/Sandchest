@@ -62,7 +62,7 @@ import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { BoatWorkspace } from "@sandchest/workspace/boat";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
-import { config, type Config } from "./config";
+import { config, scanEngine, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
@@ -86,7 +86,8 @@ const CHECK_NAME = "Sandchest";
 /** A scan's job is done; retries and duplicate starts must not redo it. */
 export class ScanFinished extends Error {}
 
-export type BeginResult = { state: "running" | "queued" | "done" };
+/** `engine` is set only for a scan the slice engine runs; anything else (old results included) runs classic. */
+export type BeginResult = { state: "running" | "queued" | "done"; engine?: "slice" };
 
 /**
  * Lets the scan run (its credits held, or the org's plan checked), claims a
@@ -137,6 +138,7 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
       });
     await updateScan(db(), scan.id, { checkRunId });
   }
+  if (scanEngine(scan.kind, scan.repo.org.githubLogin) === "slice") return { state: "running", engine: "slice" };
   return { state: "running" };
 }
 
@@ -313,7 +315,7 @@ export async function executeScan(scanId: string, run: { /** How many times the 
 }
 
 /** What a fetch of a branch with no commits says. Retrying never helps. */
-function isEmptyRepoError(error: unknown): boolean {
+export function isEmptyRepoError(error: unknown): boolean {
   return error instanceof Error && /couldn't find remote ref HEAD\b/.test(error.message);
 }
 
@@ -460,9 +462,9 @@ export async function failScan(scanId: string, message: string): Promise<void> {
   }
 }
 
-type LoadedScan = NonNullable<Awaited<ReturnType<typeof scanById>>>;
+export type LoadedScan = NonNullable<Awaited<ReturnType<typeof scanById>>>;
 
-async function requireScan(scanId: string): Promise<LoadedScan> {
+export async function requireScan(scanId: string): Promise<LoadedScan> {
   const scan = await scanById(db(), scanId);
   if (!scan) throw new ScanFinished(`Scan ${scanId} not found`);
   return scan;
@@ -577,7 +579,7 @@ function usageOf(usage: { inputTokens: number; cachedTokens: number; outputToken
   return { inputTokens: usage.inputTokens, cachedTokens: usage.cachedTokens, outputTokens: usage.outputTokens, requests: usage.requests };
 }
 
-function toFindingInput(finding: Finding): FindingInput {
+export function toFindingInput(finding: Finding): FindingInput {
   return {
     fingerprint: finding.fingerprint,
     severity: finding.severity,

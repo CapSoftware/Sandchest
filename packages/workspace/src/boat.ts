@@ -679,6 +679,29 @@ export class BoatWorkspace implements Workspace {
     }
   }
 
+  /**
+   * Writes files into a directory only the sandbox user can enter (mode 700), outside the checkout and
+   * `agentDir`: state a later invocation reads back, out of an agent's reach. Names are plain file names.
+   */
+  async writePrivateFiles(files: Array<{ name: string; content: string }>): Promise<void> {
+    this.assertUsable();
+    for (const file of files) if (!AGENT_FILE.test(file.name) || file.name.startsWith("env-")) throw new WorkspaceError(`Bad private file name: ${file.name}`);
+    await this.ensurePrivateDir();
+    await this.writeFiles(files.map((file) => ({ path: `${PRIVATE_DIR}/${file.name}`, content: file.content, mode: 0o600 })));
+  }
+
+  /** Reads a file `writePrivateFiles` wrote; undefined when there is none. */
+  async readPrivateFile(name: string): Promise<string | undefined> {
+    this.assertUsable();
+    if (!AGENT_FILE.test(name) || name.startsWith("env-")) throw new WorkspaceError(`Bad private file name: ${name}`);
+    try {
+      return (await this.client.readFile(this.id, `${PRIVATE_DIR}/${name}`, "utf8")).content;
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw fileError(error, name);
+    }
+  }
+
   /** Moves the auto-stop deadline to now + `ttlSeconds`. */
   async extendTtl(ttlSeconds: number): Promise<void> {
     this.assertUsable();
@@ -767,14 +790,19 @@ export class BoatWorkspace implements Workspace {
   private async writeEnvFile(env: Record<string, string> | undefined): Promise<string | undefined> {
     if (!env || Object.keys(env).length === 0) return undefined;
     const content = envFileContent(env);
+    await this.ensurePrivateDir();
+    const path = `${PRIVATE_DIR}/env-${crypto.randomUUID()}`;
+    await this.client.writeFile(this.id, path, content, "utf8");
+    return path;
+  }
+
+  /** Creates the private directory once per workspace object (again after a failure). */
+  private ensurePrivateDir(): Promise<void> {
     this.privateDir ??= this.client.createFolder(this.id, PRIVATE_DIR, 0o700).catch((error: unknown) => {
       this.privateDir = undefined;
       throw error;
     });
-    await this.privateDir;
-    const path = `${PRIVATE_DIR}/env-${crypto.randomUUID()}`;
-    await this.client.writeFile(this.id, path, content, "utf8");
-    return path;
+    return this.privateDir;
   }
 
   private assertUsable(): void {

@@ -40,7 +40,11 @@ export interface SliceRunOptions {
   onProgress?: (message: string) => void;
   /** Default `SLICE_RUN.passDelayMs`. */
   passDelayMs?: number;
+  /** Once per phase when it ends (epoch ms), the phase that failed included. A phase never reached is not reported. */
+  onPhase?: (phase: SlicePhase, startedAt: number, endedAt: number, ok: boolean) => void;
 }
+
+export type SlicePhase = "select" | "hunt" | "score";
 
 export interface SliceHuntOptions extends SliceRunOptions, PlanDeps {}
 
@@ -75,7 +79,13 @@ export interface SliceHuntResult {
 }
 
 /** Whole repository: the bundle plan, hunt x3, score x3, dedupe, top 30 by score interleaved with score plus deviance. */
-export async function runSliceHunt(options: SliceHuntOptions): Promise<SliceHuntResult> {
+export function runSliceHunt(options: SliceHuntOptions): Promise<SliceHuntResult> {
+  const phases = phaseClock(options.onPhase);
+  return phases.around(() => sliceHunt(options, phases));
+}
+
+async function sliceHunt(options: SliceHuntOptions, phases: PhaseClock): Promise<SliceHuntResult> {
+  phases.start("select");
   const listFiles = once(options.listFiles);
   const plan = await planBundle({ indexer: options.indexer, readFile: options.readFile, listFiles });
   options.signal?.throwIfAborted();
@@ -83,7 +93,7 @@ export async function runSliceHunt(options: SliceHuntOptions): Promise<SliceHunt
   const size = { files: bundleFiles(bundle), lines: bundle.stats.totalLines, mode: plan.mode };
   options.onProgress?.(`Selected ${size.files} files, ${size.lines} lines (${plan.mode})`);
 
-  const found = await huntAndScore(options, bundle, "generic");
+  const found = await huntAndScore(options, bundle, "generic", phases);
   const kept = dedupe(found.clusters, found.scores);
   const deviance = await candidateDeviance(kept, devianceDeps(options, listFiles));
   options.signal?.throwIfAborted();
@@ -92,7 +102,13 @@ export async function runSliceHunt(options: SliceHuntOptions): Promise<SliceHunt
 }
 
 /** A code change: changed server files, the change-review hunt x3, score x3, candidates on changed lines, top 12. */
-export async function runChangeHunt(options: ChangeHuntOptions): Promise<SliceHuntResult> {
+export function runChangeHunt(options: ChangeHuntOptions): Promise<SliceHuntResult> {
+  const phases = phaseClock(options.onPhase);
+  return phases.around(() => changeHunt(options, phases));
+}
+
+async function changeHunt(options: ChangeHuntOptions, phases: PhaseClock): Promise<SliceHuntResult> {
+  phases.start("select");
   const hunks = parseDiffHunks(options.diff);
   const files: Array<{ file: string; text: string; hunks: Range[] }> = [];
   for (const file of changedServerPaths(parseNumstat(options.numstat))) {
@@ -106,9 +122,47 @@ export async function runChangeHunt(options: ChangeHuntOptions): Promise<SliceHu
   const size = { files: bundleFiles(change.bundle), lines: change.bundle.stats.totalLines, mode: "change" as const };
   options.onProgress?.(`Selected ${size.files} changed files, ${size.lines} lines`);
 
-  const found = await huntAndScore(options, change.bundle, "change");
+  const found = await huntAndScore(options, change.bundle, "change", phases);
   const { kept, selected } = changeCandidates(found.clusters, found.scores, change.hunks);
   return result(found, kept, selected, size, { titleMax: SLICE_RUN.changeTitleMax });
+}
+
+interface PhaseClock {
+  /** Ends the phase under way, as ok, and starts this one. */
+  start(phase: SlicePhase): void;
+  /** Runs the whole hunt: the last phase ends ok with it, or failed with its error. */
+  around<T>(run: () => Promise<T>): Promise<T>;
+}
+
+/** Times the phases for `onPhase`. A callback that throws is ignored: timing never stops a run. */
+function phaseClock(onPhase: SliceRunOptions["onPhase"]): PhaseClock {
+  let current: { phase: SlicePhase; startedAt: number } | undefined;
+  const end = (ok: boolean) => {
+    if (!current) return;
+    const { phase, startedAt } = current;
+    current = undefined;
+    try {
+      onPhase?.(phase, startedAt, Date.now(), ok);
+    } catch {
+      // Timing only.
+    }
+  };
+  return {
+    start(phase) {
+      end(true);
+      current = { phase, startedAt: Date.now() };
+    },
+    async around(run) {
+      try {
+        const out = await run();
+        end(true);
+        return out;
+      } catch (error) {
+        end(false);
+        throw error;
+      }
+    },
+  };
 }
 
 interface Found {
@@ -127,7 +181,8 @@ function result(found: Found, kept: Candidate[], selected: number[], bundle: Sli
 }
 
 /** Hunts every packet, clusters the rows and scores the clusters. */
-async function huntAndScore(options: SliceRunOptions & { readFile: (file: string) => Promise<string | undefined> }, bundle: Bundle, mode: HuntMode): Promise<Found> {
+async function huntAndScore(options: SliceRunOptions & { readFile: (file: string) => Promise<string | undefined> }, bundle: Bundle, mode: HuntMode, phases: PhaseClock): Promise<Found> {
+  phases.start("hunt");
   const calls = modelCalls(options);
   const lines = await loadLines(bundle, options.readFile);
   options.signal?.throwIfAborted();
@@ -138,6 +193,7 @@ async function huntAndScore(options: SliceRunOptions & { readFile: (file: string
   if (hunt.calls > 0 && hunt.failed === hunt.calls) throw new Error(`Every hunt call failed (${hunt.calls} calls)`);
 
   const clusters = cluster(hunt.rows);
+  phases.start("score");
   let score = { calls: 0, failed: 0, votes: {} as Record<number, string[]> };
   if (clusters.length) {
     options.onProgress?.(`Scoring ${clusters.length} candidates`);

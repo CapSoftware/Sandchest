@@ -264,6 +264,31 @@ export const scanUsage = pgTable(
   (table) => [index("scan_usage_scan_idx").on(table.scanId), uniqueIndex("scan_usage_key_unique").on(table.key)],
 );
 
+export const STAGE_OUTCOMES = ["ok", "failed", "skipped"] as const;
+export type StageOutcome = (typeof STAGE_OUTCOMES)[number];
+
+/**
+ * How long each stage of a scan took, one row per run of a stage. Counts and times only, never code
+ * or model text. A row with no end is a stage still running, or one whose end was never seen.
+ */
+export const scanStages = pgTable(
+  "scan_stages",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    scanId: uuid("scan_id")
+      .notNull()
+      .references(() => scans.id, { onDelete: "cascade" }),
+    /** Short machine name: `queue`, `sandbox`, `select`, `hunt`... */
+    stage: text("stage").notNull(),
+    /** Which run of the stage this is. */
+    attempt: integer("attempt").notNull().default(0),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    outcome: text("outcome", { enum: STAGE_OUTCOMES }),
+  },
+  (table) => [uniqueIndex("scan_stages_run_unique").on(table.scanId, table.stage, table.attempt), index("scan_stages_scan_idx").on(table.scanId)],
+);
+
 export const findingStatus = pgEnum("finding_status", ["open", "fixed", "dismissed", "verified"]);
 export const dismissReason = pgEnum("dismiss_reason", ["false_positive", "accepted_risk", "wont_fix"]);
 

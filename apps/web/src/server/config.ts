@@ -83,6 +83,18 @@ const Schema = z.object({
   /** ...or as a release download, verified by checksum inside the sandbox. */
   SANDCHEST_INDEXER_LINUX_URL: z.url().optional(),
   SANDCHEST_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** Which engine runs deep scans. Default `classic`. `slice` needs the boat workspace, the gateway and a ceiling. */
+  SANDCHEST_ENGINE: z.enum(["classic", "slice"]).optional(),
+  /** GitHub account logins, comma-separated, any case. When set, only these accounts' deep scans use the slice engine. */
+  SANDCHEST_ENGINE_ORGS: z.string().max(2_000).optional(),
+  /** The most one slice scan may cost in model and sandbox spend, in USD. Required for the slice engine. */
+  SANDCHEST_SLICE_CEILING_USD: z
+    .string()
+    .regex(/^\d{1,6}(\.\d{1,6})?$/, "a positive decimal amount in USD")
+    .refine((value) => Number(value) > 0, "a positive decimal amount in USD")
+    .optional(),
+  /** A JSON object of fields set on every model request of the slice engine's own calls (endpoint options). */
+  LLM_SLICE_BODY: z.string().optional(),
 });
 
 export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" | "boat" };
@@ -107,7 +119,41 @@ export function config(env: Record<string, string | undefined> = process.env): C
     throw new Error("Sandbox scans need SANDCHEST_INDEXER_LINUX_BIN, or SANDCHEST_INDEXER_LINUX_URL with SANDCHEST_INDEXER_LINUX_SHA256.");
   }
   if (workspace === "boat" && !parsed.data.SANDCHEST_BOAT_API_KEY) throw new Error("Boat scans need SANDCHEST_BOAT_API_KEY.");
+  if (parsed.data.SANDCHEST_ENGINE === "slice") {
+    const problems: string[] = [];
+    if (workspace !== "boat") problems.push("SANDCHEST_WORKSPACE: the slice engine needs boat");
+    if (!parsed.data.SANDCHEST_GATEWAY_SECRET) problems.push("SANDCHEST_GATEWAY_SECRET: is required by the slice engine");
+    if (!parsed.data.SANDCHEST_SLICE_CEILING_USD) problems.push("SANDCHEST_SLICE_CEILING_USD: is required by the slice engine");
+    const body = sliceBody(parsed.data.LLM_SLICE_BODY);
+    if ("problem" in body) problems.push(`LLM_SLICE_BODY: ${body.problem}`);
+    if (problems.length > 0) throw new Error(`Invalid server configuration:\n  ${problems.join("\n  ")}`);
+  }
   const result = { ...parsed.data, workspace };
   if (env === process.env) cached = result;
   return result;
+}
+
+/**
+ * Which engine runs a scan. The slice engine runs deep scans only, when SANDCHEST_ENGINE is `slice`
+ * and, if SANDCHEST_ENGINE_ORGS is set, only for the accounts it names. Everything else is classic.
+ */
+export function scanEngine(kind: string, githubLogin: string, settings: Config = config()): "classic" | "slice" {
+  if (settings.SANDCHEST_ENGINE !== "slice" || kind !== "deep") return "classic";
+  if (settings.SANDCHEST_ENGINE_ORGS !== undefined) {
+    const logins = settings.SANDCHEST_ENGINE_ORGS.split(",").map((login) => login.trim().toLowerCase());
+    if (!logins.includes(githubLogin.toLowerCase())) return "classic";
+  }
+  return "slice";
+}
+
+/** LLM_SLICE_BODY as an object (empty when unset), or what is wrong with it. */
+export function sliceBody(text: string | undefined): { body: Record<string, unknown> } | { problem: string } {
+  if (text === undefined || text.trim() === "") return { body: {} };
+  try {
+    const value: unknown = JSON.parse(text);
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) return { body: value as Record<string, unknown> };
+  } catch {
+    // Reported below.
+  }
+  return { problem: "must be a JSON object" };
 }
