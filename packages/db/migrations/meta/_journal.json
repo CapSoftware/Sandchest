@@ -127,6 +127,13 @@
       "when": 1794272742400,
       "tag": "0017_usage_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794274037297,
+      "tag": "0018_usage_calls",
+      "breakpoints": true
     }
   ]
 }

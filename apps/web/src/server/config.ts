@@ -67,6 +67,11 @@ const Schema = z.object({
   SANDCHEST_BOAT_TYPE: z.enum(["small", "default", "large", "xlarge"]).optional(),
   /** Seconds before a Boat sandbox stops itself if a scan never deletes it. Default: the scan's own budget. */
   SANDCHEST_BOAT_TTL_SECONDS: z.coerce.number().int().min(60).max(2_592_000).optional(),
+  /**
+   * Signs the tokens a scan's sandbox uses to reach a model through /api/gateway. Unset means the
+   * gateway answers 404 and no scan can use it. Where it forwards to is LLM_AGENT_* (see the gateway).
+   */
+  SANDCHEST_GATEWAY_SECRET: z.string().min(32).optional(),
   /** GitHub's REST API. Default https://api.github.com; tests point it at a fake. */
   GITHUB_API_URL: z.url({ protocol: /^https?$/ }).optional(),
   /** Where repositories are cloned from. Default https://github.com. */

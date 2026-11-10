@@ -219,6 +219,13 @@ export const USAGE_KINDS = ["model", "sandbox"] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 export const USAGE_COST_SOURCES = ["provider", "priced", "sandbox"] as const;
 export type UsageCostSource = (typeof USAGE_COST_SOURCES)[number];
+/**
+ * How a ledger row's call ended. `started`: under way, or lost if it stays so. `ok`: finished, cost
+ * known. `failed`: the endpoint refused it. `aborted`: its stream broke off before the end. `unpriced`:
+ * finished, but the endpoint reported no cost.
+ */
+export const USAGE_STATUSES = ["started", "ok", "failed", "aborted", "unpriced"] as const;
+export type UsageStatus = (typeof USAGE_STATUSES)[number];
 
 /**
  * What a scan spent, one row per model call and one per sandbox: the ledger usage-based bills are
@@ -245,6 +252,9 @@ export const scanUsage = pgTable(
     costUsd: numeric("cost_usd", { precision: 18, scale: 10 }).notNull(),
     /** `provider`: the model endpoint reported it. `priced`: computed from the price settings. `sandbox`: the sandbox host's meter. */
     costSource: text("cost_source", { enum: USAGE_COST_SOURCES }).notNull(),
+    /** Which run of its step wrote the row, so a step that is run again can be told from the run before it. */
+    attempt: integer("attempt").notNull().default(0),
+    status: text("status", { enum: USAGE_STATUSES }).notNull().default("ok"),
     createdAt: createdAt(),
   },
   (table) => [index("scan_usage_scan_idx").on(table.scanId)],

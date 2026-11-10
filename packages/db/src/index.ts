@@ -15,4 +15,4 @@ export * from "./team";
 export * from "./advisories";
 export * from "./live";
 export * from "./usage";
-export { USAGE_COST_SOURCES, USAGE_KINDS, type UsageCostSource, type UsageKind } from "./schema";
+export { USAGE_COST_SOURCES, USAGE_KINDS, USAGE_STATUSES, type UsageCostSource, type UsageKind, type UsageStatus } from "./schema";
