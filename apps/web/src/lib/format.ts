@@ -62,13 +62,14 @@ const UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
 ];
 
 const relative = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
+const relativeLong = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "long" });
 
-/** "3 hr. ago", "yesterday", "just now". */
-export function timeAgo(date: Date, now = Date.now()): string {
+/** "3 hr. ago", "yesterday", "just now". `long`: spelled out, where it is read as part of a sentence ("3 hours ago", "last week"). */
+export function timeAgo(date: Date, now = Date.now(), long = false): string {
   const diff = date.getTime() - now;
   if (Math.abs(diff) < 60_000) return "just now";
   for (const [unit, ms] of UNITS) {
-    if (Math.abs(diff) >= ms) return relative.format(Math.round(diff / ms), unit);
+    if (Math.abs(diff) >= ms) return (long ? relativeLong : relative).format(Math.round(diff / ms), unit);
   }
   return "just now";
 }

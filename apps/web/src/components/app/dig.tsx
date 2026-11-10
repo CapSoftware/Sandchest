@@ -1,7 +1,7 @@
 import type { DashboardRepo } from "@sandchest/db";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { digState } from "@/lib/dig-state";
-import { notEnoughBalance, sizePrice, usagePrice } from "@/lib/pricing";
+import { lastScanCost, notEnoughBalance, sizePrice, usagePrice } from "@/lib/pricing";
 import type { OrgPlan } from "@/server/org-plans";
 import { DigButton } from "./dig-button";
 import { HoverLink } from "./hover-link";
@@ -12,9 +12,10 @@ const MAX_DEEP_SCAN_CREDITS = DEEP_SCAN_TIERS.at(-1)!.credits;
 /**
  * A repo's deep scan control: the key with what it costs, or why there is none.
  * A repo can be scanned again as soon as the last scan ends; each one is paid
- * from the account's balance, and confirmed before it starts.
+ * from the account's balance, and confirmed before it starts. `lastCost`: credits
+ * its last deep scan was charged from its usage, said beside the price when known.
  */
-export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
+export function Dig({ repo, plan, lastCost }: { repo: DashboardRepo; plan: OrgPlan; lastCost?: number }) {
   const state = digState(repo);
   const label = repo.lastDeepScanAt ? "Scan again" : "Deep scan";
   switch (state.state) {
@@ -52,7 +53,7 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
           <DigButton
             repoId={repo.id}
             label={label}
-            note={usagePrice(hold)}
+            note={lastCost === undefined ? usagePrice(hold) : `${usagePrice(hold)} ${lastScanCost(lastCost)}`}
             confirm="Start scan"
             account={account}
             need={hold}

@@ -10,7 +10,7 @@ import { ScanBill } from "@/components/app/scan-bill";
 import { UsageHistory } from "@/components/app/usage-history";
 import { ranFast } from "@/app/dashboard/scans/[id]/scan-view";
 import { digAllCredits, digCredits } from "@/lib/briefing";
-import { firstScan } from "@/lib/first-scan";
+import { firstScan, scanChoices } from "@/lib/first-scan";
 import { money } from "@/lib/format";
 import { sampleBill, sampleRepos, sampleScan, sampleUsageHistory } from "@/lib/samples";
 import { deepScanPrice } from "@/server/agent/views";
@@ -91,6 +91,39 @@ describe("quoted before a scan", () => {
     const billed = firstScan(repos, new Map([[orgId, { planId: "standard", credits: 120, usage: { hold: 150 } }]]), [])!;
     for (const repo of billed.repos) expect(repo).toMatchObject({ credits: 150, usage: true });
     expect(billed.repos.map((repo) => [repo.id, repo.unsized])).toEqual(tiered.repos.map((repo) => [repo.id, repo.unsized]));
+    // Nothing has been scanned: no row says when, none is running, and none has a last cost.
+    for (const repo of billed.repos) expect(repo).toMatchObject({ scanned: null });
+    for (const repo of billed.repos) expect("running" in repo || "lastCost" in repo).toBe(false);
+  });
+
+  test("the launcher: every repository that can be scanned, when each last was, the running ones listed but never suggested", () => {
+    const now = Date.UTC(2026, 0, 31);
+    const [first, second, third, fourth] = sampleRepos().map((repo) => ({ ...repo, lastDeepScanAt: null, activeDeepScanId: null, loc: 50_000 }));
+    const repos = [
+      // The busiest, but being scanned now.
+      { ...first!, reviews30d: 90, activeDeepScanId: "00000000-0000-4000-8000-000000000001", lastDeepScanAt: new Date(now - 9 * 86_400_000) },
+      { ...second!, reviews30d: 40, lastDeepScanAt: new Date(now - 3 * 86_400_000) },
+      { ...third!, reviews30d: 10 },
+      // Too large to scan: never offered.
+      { ...fourth!, reviews30d: 99, loc: 5_000_000 },
+    ];
+    const orgId = repos[0]!.orgId;
+    const plans = new Map([[orgId, { planId: "standard", credits: 1_000, usage: { hold: 300 } }]]);
+    // Once anything has been scanned there is no first-scan panel, and the launcher takes over.
+    expect(firstScan(repos, plans, [])).toBeUndefined();
+    const choices = scanChoices(repos, plans, [], { charges: new Map([[second!.id, 48]]), now })!;
+    expect(choices.repos.map((repo) => repo.id)).toEqual([first!.id, second!.id, third!.id]);
+    expect(choices.suggested).toBe(second!.id);
+    expect(choices.repos[0]).toMatchObject({ running: true, scanned: "last week", credits: 300, usage: true });
+    expect(choices.repos[1]).toMatchObject({ scanned: "3 days ago", lastCost: 48 });
+    expect("running" in choices.repos[1]! || "lastCost" in choices.repos[2]!).toBe(false);
+    expect(choices.repos[2]).toMatchObject({ scanned: null });
+    expect(choices.orgs).toMatchObject([{ id: orgId, credits: 1_000 }]);
+    // Nothing left to choose: no launcher. An account that has not joined offers nothing either.
+    expect(scanChoices(repos.slice(0, 1), plans, [])).toBeUndefined();
+    expect(scanChoices(repos, new Map([[orgId, { planId: null, credits: 0 }]]), [])).toBeUndefined();
+    // Billing off: every repository that can be scanned, with nothing to price.
+    expect(scanChoices(repos, new Map(), [])!.orgs).toMatchObject([{ credits: null }]);
   });
 
   test("the agent API's price: unchanged for a tiered account; up to the hold, with fast, for a usage one", () => {
@@ -103,7 +136,7 @@ describe("quoted before a scan", () => {
 
   test("the deep scan key: Start scan beside what it costs; a usage account's cost is a maximum, with fast where it is offered", () => {
     const repo = { ...sampleRepos()[0]!, activeDeepScanId: null, loc: 50_000, lastDeepScanAt: null };
-    const props = (plan: Parameters<typeof Dig>[0]["plan"]) => (Dig({ repo, plan }) as ReactElement<Record<string, unknown>>).props;
+    const props = (plan: Parameters<typeof Dig>[0]["plan"], lastCost?: number) => (Dig({ repo, plan, lastCost }) as ReactElement<Record<string, unknown>>).props;
 
     const tiered = props({ planId: "standard", credits: 1_000 });
     expect(tiered).toMatchObject({ confirm: "Start scan", need: 500, note: `This scan costs ${money(500)}.` });
@@ -118,6 +151,8 @@ describe("quoted before a scan", () => {
     expect(billed).toMatchObject({ confirm: "Start scan", need: 150 });
     expect(billed.note).toBe(`You pay for what the scan uses, never more than ${money(150)}.`);
     expect("fast" in billed).toBe(false);
+    // What its last scan was charged, when that is known.
+    expect(props({ planId: "standard", credits: 1_000, usage: { hold: 150 } }, 48).note).toBe(`You pay for what the scan uses, never more than ${money(150)}. The last scan of this repository cost ${money(48)}.`);
     // The old wording is gone: no credits, no "up to".
     for (const said of [tiered, billed]) expect(`${String(said.confirm)} ${String(said.note)}`).not.toMatch(/credit|up to/i);
 

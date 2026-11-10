@@ -47,7 +47,7 @@ export function ScanView({
   bill,
 }: {
   row: ScanRow;
-  again?: { repo: DashboardRepo; plan: OrgPlan };
+  again?: { repo: DashboardRepo; plan: OrgPlan; lastCost?: number };
   next?: string;
   waitingOn?: string;
   loop?: LiveLoop;
@@ -94,7 +94,7 @@ export function ScanView({
               <span className="key-face">Open the pull request</span>
             </a>
           )}
-          {again && <Dig repo={again.repo} plan={again.plan} />}
+          {again && <Dig repo={again.repo} plan={again.plan} lastCost={again.lastCost} />}
         </div>
 
         {scan.error && <p className="scan-error">{scan.error}</p>}

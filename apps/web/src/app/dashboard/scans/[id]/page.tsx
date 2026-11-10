@@ -1,4 +1,4 @@
-import { dashboardRepos, pendingRecon, scanBill, scanForUser } from "@sandchest/db";
+import { dashboardRepos, lastDeepScanCharges, pendingRecon, scanBill, scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
@@ -30,7 +30,7 @@ export default async function ScanPage({ params }: Params) {
   // A finished deep scan can be run again from here: the repo's Dig key, priced for its org.
   const again =
     row.scan.kind === "deep" && !ACTIVE.has(row.scan.status)
-      ? await dashboardRepos(db(), user.id, { repoId: row.repo.id }).then(async ([repo]) => (repo ? { repo, plan: (await orgPlans([repo])).get(repo.orgId) } : undefined))
+      ? await dashboardRepos(db(), user.id, { repoId: row.repo.id }).then(async ([repo]) => (repo ? { repo, plan: (await orgPlans([repo])).get(repo.orgId), lastCost: (await lastDeepScanCharges(db(), [repo.id])).get(repo.id) } : undefined))
       : undefined;
   // A recon that a deep scan is waiting for points on to it: that's the scan they're here for.
   const next =

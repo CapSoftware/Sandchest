@@ -5,7 +5,7 @@ import { AddCredits, type CreditsAccount } from "./add-credits";
 import { Submit } from "./submit";
 
 /**
- * Starts a deep scan, then opens its live feed. When it is paid
+ * Starts a deep scan, then goes to the hacker at work on it. When it is paid
  * for, the first press only asks: the second, on a key beside what it costs,
  * starts it. Short of balance (`short`, or refused for it), the key opens the
  * dialog to add funds, which starts the scan once they're in. `fast`: the account is offered a fast scan, chosen with a

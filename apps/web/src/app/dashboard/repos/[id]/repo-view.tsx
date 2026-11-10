@@ -26,9 +26,12 @@ export function RepoView({
   findings,
   history,
   pulls,
+  lastCost,
 }: {
   repo: DashboardRepo;
   plan: OrgPlan;
+  /** Credits its last deep scan was charged from its usage, when it was. */
+  lastCost?: number;
   findings: FindingListItem[];
   history: ScanListItem[];
   pulls: ReactNode;
@@ -66,7 +69,7 @@ export function RepoView({
             </a>
           </p>
         </div>
-        <Dig repo={repo} plan={plan} />
+        <Dig repo={repo} plan={plan} lastCost={lastCost} />
       </div>
 
       <dl className="stats">

@@ -4,8 +4,10 @@ import { InstallKey } from "@/components/app/install-key";
 import { ListFilter } from "@/components/app/list-filter";
 import { Tally } from "@/components/app/tally";
 import { When } from "@/components/app/when";
+import type { FirstScan as ScanChoices } from "@/lib/first-scan";
 import { plural, SCAN_KIND_LABEL, SEVERITIES } from "@/lib/format";
 import { site } from "@/lib/site";
+import { ScanLauncher } from "../scan-launcher";
 
 /** A repository's PR review mode, in a word or two. */
 const MODE_LABEL: Record<DashboardRepo["prReviews"], string> = { auto: "every push", command: "when asked", off: "off" };
@@ -16,8 +18,11 @@ const FILTER_FROM = 8;
 /** "Deep scan failed 2 hr. ago". Completed scans need no verb. */
 const LAST_SCAN_VERB: Record<string, string> = { queued: "queued", running: "started", publishing: "started", failed: "failed", refused: "refused", cancelled: "cancelled" };
 
-/** The repos list, drawn from what the page read; its loading state draws it from sample repos. */
-export function ReposView({ repos }: { repos: DashboardRepo[] }) {
+/**
+ * The repos list, drawn from what the page read; its loading state draws it from sample repos. `launch`: the
+ * repositories a deep scan can be started on, behind the Deep scan key in the head.
+ */
+export function ReposView({ repos, launch }: { repos: DashboardRepo[]; launch?: ScanChoices }) {
   const orgs = [...new Map(repos.map((repo) => [repo.orgId, repo.orgLogin])).entries()];
   const open = repos.reduce((sum, repo) => sum + SEVERITIES.reduce((n, s) => n + repo.open[s], 0), 0);
 
@@ -30,7 +35,10 @@ export function ReposView({ repos }: { repos: DashboardRepo[] }) {
             {plural(repos.length, "repository", "repositories")}, {open === 0 ? "nothing open" : plural(open, "open finding")}. Most exposed first.
           </p>
         </div>
-        <InstallKey secondary />
+        <div className="page-head-keys">
+          <InstallKey secondary />
+          {launch && <ScanLauncher data={launch} />}
+        </div>
       </div>
 
       {repos.length === 0 ? (

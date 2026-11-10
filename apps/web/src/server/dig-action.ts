@@ -15,10 +15,15 @@ import { db } from "./db";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 
-export type DigOutcome = { error?: string; topUp?: boolean };
+/** `href`: where the scan can be watched, when the caller asked to go there itself (`launch`). */
+export type DigOutcome = { error?: string; topUp?: boolean; href?: string };
 
-/** `options.fast`: the person ticked Fast. The server decides whether the account may have it, never the browser. */
-export async function dig(repoId: string, options?: { fast?: boolean }): Promise<DigOutcome> {
+/**
+ * `options.fast`: the person ticked Fast. The server decides whether the account may have it, never the browser.
+ * `options.launch`: the caller plays its launch and then goes to the hacker itself, so the place to go is
+ * answered instead of redirected to.
+ */
+export async function dig(repoId: string, options?: { fast?: boolean; launch?: boolean }): Promise<DigOutcome> {
   const user = await viewer();
   const row = z.uuid().safeParse(repoId).success ? await repoForUser(db(), user.id, repoId) : undefined;
   if (!row) {
@@ -61,5 +66,8 @@ export async function dig(repoId: string, options?: { fast?: boolean }): Promise
     return { error: messages[result.reason], topUp: result.reason === "no_plan" || result.reason === "out_of_credits" };
   }
   await record("ok", { scanId: result.scanId });
-  redirect(`/dashboard/scans/${result.scanId}`);
+  // Straight to the hacker, at work on it: their page follows the account live, this scan included.
+  const href = `/dashboard/hacker?org=${row.org.id}`;
+  if (options?.launch) return { href };
+  redirect(href);
 }

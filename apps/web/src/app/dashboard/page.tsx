@@ -1,4 +1,4 @@
-import { adminOrgs, orgByInstallation, dashboardFindings, dashboardOverview, dashboardRepos, dashboardScans } from "@sandchest/db";
+import { adminOrgs, orgByInstallation, dashboardFindings, dashboardOverview, dashboardRepos, dashboardScans, lastDeepScanCharges } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Link } from "@/components/app/hover-link";
@@ -7,7 +7,7 @@ import { safeToken } from "@/lib/analytics";
 import { ensureAccess, readAgainOnInstall, viewer } from "@/server/access";
 import { track } from "@/server/analytics";
 import { db } from "@/server/db";
-import { firstScan } from "@/lib/first-scan";
+import { firstScan, scanChoices } from "@/lib/first-scan";
 import { installationSettingsUrl, MANY_REPOS } from "@/lib/installation";
 import { myHackers } from "@/server/hackers";
 import { orgPlans } from "@/server/org-plans";
@@ -76,7 +76,13 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     );
   }
 
-  const [[overview, attention, recent], hackers, admin] = await Promise.all([reads, myHackers(user.id).catch(() => []), adminOrgs(db(), user.id)]);
+  const [[overview, attention, recent], hackers, admin, charges] = await Promise.all([
+    reads,
+    myHackers(user.id).catch(() => []),
+    adminOrgs(db(), user.id),
+    // What each repository's last deep scan cost, for the launcher's price line. Without it the line still says the most.
+    lastDeepScanCharges(db(), repos.map((repo) => repo.id)).catch(() => new Map<string, number>()),
+  ]);
   // Accounts this person runs that connected more repositories than anyone needs scanned.
   const crowded = admin.flatMap((org) => {
     const count = repos.filter((repo) => repo.orgId === org.id).length;
@@ -87,6 +93,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     <PageShape id="overview">
       <OverviewView repos={repos} plans={plans} overview={overview} attention={attention} recent={recent} notice={params.recruited === "1" ? "recruited" : params.plan === "started" ? "plan_started" : undefined}
         first={firstScan(repos, plans, hackers)}
+        launch={scanChoices(repos, plans, hackers, { charges })}
         crowded={crowded}
       />
     </PageShape>

@@ -1,4 +1,4 @@
-import { dashboardFindings, dashboardRepos, dashboardScans } from "@sandchest/db";
+import { dashboardFindings, dashboardRepos, dashboardScans, lastDeepScanCharges } from "@sandchest/db";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache, Suspense } from "react";
@@ -29,13 +29,19 @@ export default async function RepoPage({ params }: Params) {
   const row = await load((await params).id);
   if (!row) notFound();
   const { user, repo } = row;
-  const [plans, findings, history] = await Promise.all([orgPlans([repo]), dashboardFindings(db(), user.id, { repoId: repo.id }, 8), dashboardScans(db(), user.id, { repoId: repo.id }, HISTORY)]);
+  const [plans, findings, history, charges] = await Promise.all([
+    orgPlans([repo]),
+    dashboardFindings(db(), user.id, { repoId: repo.id }, 8),
+    dashboardScans(db(), user.id, { repoId: repo.id }, HISTORY),
+    lastDeepScanCharges(db(), [repo.id]),
+  ]);
   const priced = billingEnabled();
   return (
     <PageShape id="repo">
       <RepoView
         repo={repo}
         plan={plans.get(repo.orgId)}
+        lastCost={charges.get(repo.id)}
         findings={findings}
         history={history}
         pulls={

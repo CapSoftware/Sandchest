@@ -12,6 +12,7 @@ import { PRICES } from "@/lib/pricing";
 import type { FirstScan as FirstScanData } from "@/lib/first-scan";
 import type { OrgPlan } from "@/server/org-plans";
 import { FirstScan } from "./first-scan";
+import { ScanLauncher } from "./scan-launcher";
 import "../rig.css";
 
 /** The overview's window, in days. */
@@ -26,6 +27,7 @@ export function OverviewView({
   recent,
   notice,
   first,
+  launch,
   crowded = [],
 }: {
   repos: DashboardRepo[];
@@ -37,6 +39,8 @@ export function OverviewView({
   notice?: "recruited" | "plan_started";
   /** Nothing deep scanned yet: the choice of what to scan first. */
   first?: FirstScanData;
+  /** The repositories a deep scan can be started on, behind the Deep scan key in the head. */
+  launch?: FirstScanData;
   /** Accounts the person runs with more repositories connected than recommended. */
   crowded?: Crowded[];
 }) {
@@ -58,6 +62,8 @@ export function OverviewView({
             {orgs.map((repo) => repo.orgLogin).join(", ")} · {plural(repos.length, "repository", "repositories")} · last {DAYS} days
           </p>
         </div>
+        {/* The first-scan panel below is the same choice, already open. */}
+        {launch && !first && <ScanLauncher data={launch} />}
       </div>
 
       {crowded.map((org) => (

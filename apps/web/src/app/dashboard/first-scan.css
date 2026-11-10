@@ -1,4 +1,7 @@
-/* The first deep scan: the hacker at their desk on the left, the choice in the dark on the right. */
+/*
+ * Choosing a repository to deep scan: the hacker at their desk on the left, the choice in the dark on the right.
+ * The overview's first-scan panel, and the launcher the Deep scan key opens.
+ */
 
 .first-scan {
   position: relative;
@@ -112,7 +115,7 @@
 .first-scan-repo {
   position: relative;
   display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr) auto 6.5rem;
+  grid-template-columns: 1.25rem minmax(0, 1fr) auto 10.5rem;
   grid-template-areas: "mark name meta cost";
   align-items: baseline;
   column-gap: 0.75rem;
@@ -189,6 +192,9 @@
 
 .first-scan-repo-cost {
   grid-area: cost;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   justify-self: end;
   color: var(--color-dust);
   font-size: 0.8125rem;
@@ -197,6 +203,36 @@
 
 .first-scan-repo[data-on] .first-scan-repo-cost {
   color: var(--color-gold-light);
+}
+
+.first-scan-repos[data-plain] .first-scan-repo {
+  grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+  grid-template-areas: "mark name meta";
+}
+
+.first-scan-repos[data-plain] .first-scan-repo-cost {
+  display: none;
+}
+
+/* Being scanned now: listed, so it's clear why it isn't offered, and not to be chosen. */
+.first-scan-repo[data-running] {
+  cursor: default;
+}
+
+.first-scan-repo[data-running]:hover {
+  background: color-mix(in oklab, var(--color-void) 55%, transparent);
+}
+
+.first-scan-repo[data-running]::before {
+  box-shadow: inset 0 0 0 1.5px var(--color-seam);
+}
+
+.first-scan-repo[data-running] :is(.first-scan-repo-name, .first-scan-owner, .first-scan-repo-meta) {
+  color: color-mix(in oklab, var(--color-dust) 70%, var(--color-void));
+}
+
+.first-scan-repo[data-running] .first-scan-repo-cost {
+  color: var(--color-gold);
 }
 
 .first-scan-none {
@@ -211,6 +247,10 @@
   align-items: center;
   gap: 1rem 1.5rem;
   margin-top: 1.75rem;
+}
+
+.first-scan-key {
+  display: inline-flex;
 }
 
 .first-scan-note {
@@ -262,16 +302,13 @@
     padding: 0 1.25rem 1.75rem;
   }
 
-  .first-scan-repo {
+  .first-scan-repo,
+  .first-scan-repos[data-plain] .first-scan-repo {
     grid-template-columns: 1.25rem minmax(0, 1fr) auto;
     grid-template-areas:
-      "mark name cost"
+      "mark name name"
       ". meta cost";
     row-gap: 0.15rem;
-  }
-
-  .first-scan-repo-cost {
-    align-self: center;
   }
 }
 
@@ -313,4 +350,314 @@
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
+}
+
+/* ---- The launch ---------------------------------------------------------- */
+/*
+ * Pressing Start: the key sinks, the choice gives way to the command typed on the hacker's terminal, and their
+ * screen lights the room. About 0.8 s, while the scan is already starting; then the page moves on to them.
+ * Opacity, transform and a letter's own colours only. `LAUNCH_MS` in first-scan.tsx is the whole of it.
+ */
+
+.first-scan-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  aspect-ratio: 2880 / 1200;
+  background: radial-gradient(24% 46% at 30% 58%, color-mix(in srgb, var(--phosphor, var(--color-gold)) 62%, transparent), transparent 74%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.first-scan[data-launching] .first-scan-glow {
+  animation: scan-launch-glow 700ms 180ms steps(7) forwards;
+}
+
+/* A screen coming on: a flicker, then steady. */
+@keyframes scan-launch-glow {
+  0% {
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.85;
+  }
+  43% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0.9;
+  }
+}
+
+.first-scan[data-launching] .first-scan-key .key-face {
+  animation: scan-launch-press 180ms steps(3) both;
+}
+
+@keyframes scan-launch-press {
+  35% {
+    transform: translateY(3px);
+    filter: brightness(1.2);
+  }
+  100% {
+    transform: translateY(1px);
+  }
+}
+
+.scan-launch {
+  --step: min(26ms, calc(420ms / var(--chars, 16)));
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  gap: 1rem;
+  padding: 3rem;
+  animation: scan-launch-in 120ms 150ms steps(3) both;
+}
+
+@keyframes scan-launch-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The choice steps back as the terminal comes up, in the same three frames, over the room's own dark. */
+.first-scan[data-launching] .first-scan-body > :not(.scan-launch) {
+  animation: scan-launch-out 120ms 150ms steps(3) forwards;
+}
+
+@keyframes scan-launch-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.scan-launch-line {
+  color: var(--phosphor, var(--color-gold));
+  font-size: clamp(1rem, 2.2vw, 1.3125rem);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  text-shadow: 0 0 0.4em color-mix(in srgb, var(--phosphor, var(--color-gold)) 30%, transparent);
+}
+
+.scan-launch-prompt {
+  margin-right: 0.6em;
+  opacity: 0.6;
+}
+
+/* Each letter lands as the cursor's block, then settles into type. */
+.scan-launch-char {
+  white-space: pre;
+  opacity: 0;
+  animation: scan-launch-char 60ms linear forwards;
+  animation-delay: calc(280ms + var(--i) * var(--step));
+}
+
+@keyframes scan-launch-char {
+  0%,
+  99% {
+    opacity: 1;
+    background-color: var(--phosphor, var(--color-gold));
+    color: var(--color-void);
+  }
+  100% {
+    opacity: 1;
+    background-color: transparent;
+    color: var(--phosphor, var(--color-gold));
+  }
+}
+
+.scan-launch-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.15em;
+  margin-left: 0.1em;
+  vertical-align: text-bottom;
+  background: var(--phosphor, var(--color-gold));
+  opacity: 0;
+  animation: scan-launch-cursor 900ms steps(1) infinite;
+  animation-delay: calc(280ms + var(--chars, 16) * var(--step));
+}
+
+@keyframes scan-launch-cursor {
+  0% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0;
+  }
+}
+
+.scan-launch-status {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  opacity: 0;
+  animation: scan-launch-show 160ms 720ms steps(3) forwards;
+}
+
+@keyframes scan-launch-show {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 52rem) {
+  .scan-launch {
+    padding: 1.5rem 1.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-scan[data-launching] .first-scan-glow,
+  .first-scan[data-launching] .first-scan-key .key-face,
+  .scan-launch,
+  .scan-launch-char,
+  .scan-launch-cursor,
+  .scan-launch-status {
+    animation: none;
+  }
+
+  .first-scan[data-launching] .first-scan-glow {
+    opacity: 0.9;
+  }
+
+  .first-scan[data-launching] .first-scan-body > :not(.scan-launch) {
+    animation: none;
+    opacity: 0;
+  }
+
+  .scan-launch-char,
+  .scan-launch-cursor,
+  .scan-launch-status {
+    opacity: 1;
+  }
+}
+
+/* ---- The Deep scan key and its launcher ----------------------------------- */
+
+.scan-launcher-prompt {
+  flex: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scan-launcher-key:is(:hover, :focus-visible) .scan-launcher-cursor {
+    animation: blink 1s steps(1) infinite;
+  }
+}
+
+.scan-launcher {
+  width: min(66rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  background: transparent;
+  color: var(--color-sand);
+}
+
+.scan-launcher::backdrop {
+  background:
+    repeating-conic-gradient(rgb(0 0 0 / 0.35) 0 25%, transparent 0 50%) 0 0 / 4px 4px,
+    rgb(13 10 7 / 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.scan-launcher[open] {
+  animation: scan-launcher-in 180ms ease-out;
+}
+
+@keyframes scan-launcher-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.scan-launcher-body {
+  position: relative;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+}
+
+/* The dialog's gold lintel and edge, over the room. */
+.scan-launcher-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow:
+    inset 0 0 0 1px var(--color-edge),
+    inset 0 3px 0 var(--color-gold);
+  pointer-events: none;
+}
+
+.scan-launcher .first-scan {
+  min-height: min(33rem, calc(100dvh - 2rem));
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
+.scan-launcher .first-scan-body {
+  padding-top: 3.25rem;
+}
+
+/* The list and the line under it keep their room, so the dialog holds still while the filter narrows the list. */
+.scan-launcher .first-scan-repos[data-scroll] {
+  align-content: start;
+  height: 17rem;
+}
+
+.scan-launcher .first-scan-go {
+  min-height: 4.75rem;
+}
+
+.scan-launcher-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-dust);
+  cursor: pointer;
+}
+
+.scan-launcher-close:hover {
+  color: var(--color-bright);
+}
+
+/* Nothing to close while a scan is starting. */
+.scan-launcher-body:has(.scan-launch) .scan-launcher-close {
+  visibility: hidden;
+}
+
+@media (max-width: 52rem) {
+  .scan-launcher .first-scan-scene {
+    height: 9rem;
+  }
+
+  .scan-launcher .first-scan-body {
+    padding-top: 0;
+  }
+
+  .scan-launcher .first-scan-repos[data-scroll] {
+    height: min(17rem, 36dvh);
+  }
+
+  .scan-launcher .first-scan-go {
+    min-height: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-launcher[open] {
+    animation: none;
+  }
 }
