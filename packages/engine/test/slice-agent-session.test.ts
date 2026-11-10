@@ -215,6 +215,27 @@ describe("agentSessionStatus and collectAgentSession", () => {
     expect(await collectAgentSession(sandbox, again)).toEqual({ verdicts: [], finished: true, turns: 7, exitCode: 0 });
   });
 
+  test("verdicts appended one per line are read, and those of a session that never finished are kept", async () => {
+    const lines = ['{"id":"F1","verdict":"false","attacker":"none","blocker":"src/a.ts:3","victim":"none","reason":"guarded"}', '{"id":"F2","verdict":"real","attacker":"any signed-in user","blocker":"none","victim":"other orgs","reason":"no check"}'];
+    const append = lines.map((line) => `cat >> "${sandbox.file(SESSION_FILES.verdicts)}" <<'EOF'\n${line}\nEOF`).join("\n");
+    installFakeCli(sandbox, `${append}\necho '${RESULT()}'`);
+    const ids = await startAgentSession(sandbox, { kind: "refute", findings: [], relay: RELAY });
+    const done = await collectAgentSession(sandbox, ids);
+    expect(done.error).toBeUndefined();
+    expect(done.verdicts.map((v) => [v.id, v.verdict])).toEqual([
+      ["F1", "false"],
+      ["F2", "real"],
+    ]);
+
+    // Cut short: the CLI wrote two verdicts, half of a third, and no final result.
+    installFakeCli(sandbox, `${append}\nprintf '%s' '{"id":"F3","verdict":"re' >> "${sandbox.file(SESSION_FILES.verdicts)}"`);
+    const cut = await startAgentSession(sandbox, { kind: "refute", findings: [], relay: RELAY });
+    const partial = await collectAgentSession(sandbox, cut);
+    expect(partial.finished).toBe(false);
+    expect(partial.error).toContain("agent ended without a result");
+    expect(partial.verdicts.map((v) => v.id)).toEqual(["F1", "F2"]);
+  });
+
   test("refuses a verdicts file the agent swapped for a symlink", async () => {
     writeFileSync(join(sandbox.base, "secret"), VERDICTS);
     installFakeCli(sandbox, `ln -s "${join(sandbox.base, "secret")}" "${sandbox.file(SESSION_FILES.verdicts)}"; echo '${RESULT()}'`);

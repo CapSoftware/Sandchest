@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGENT_CLI_VERSION, AGENT_PLACEHOLDER_TOKEN, agentCliArgs, agentCliEnv, agentCliInstall, agentCliPath, parseAgentStream } from "../src/scan/slice";
+import { AGENT_CLI_VERSION, AGENT_MAX_OUTPUT_TOKENS, AGENT_PLACEHOLDER_TOKEN, agentCliArgs, agentCliEnv, agentCliInstall, agentCliPath, parseAgentStream } from "../src/scan/slice";
 
 describe("agent CLI adapter", () => {
   test("installs a given version, or the tested one, under a prefix, once", () => {
@@ -40,6 +40,12 @@ describe("agent CLI adapter", () => {
     expect(new Set(models).size).toBe(1);
     expect(models[0]).toBeTruthy();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  test("caps what one model call may write, thinking included", () => {
+    const env = agentCliEnv({ baseUrl: "http://127.0.0.1:4100", configDir: "/home/user/agent/cli-config" });
+    expect(AGENT_MAX_OUTPUT_TOKENS).toBe(8_000);
+    expect(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("8000");
   });
 });
 

@@ -11,6 +11,23 @@ describe("briefs", () => {
     expect(VARIANT_BRIEF).toContain('"variant_of"');
     expect(REFUTE_AGENT_PROMPT).toContain(`cat ${AGENT_PATHS.brief}`);
   });
+
+  test("both briefs have each verdict appended on its own line as it is made, never printed or rewritten", () => {
+    for (const brief of [REFUTE_BRIEF, VARIANT_BRIEF]) {
+      expect(brief).toContain(`cat >> ${AGENT_PATHS.verdicts} <<'EOF'`);
+      expect(brief).toContain("ONE JSON object on ONE line");
+      expect(brief).toContain("never rewrite or reprint the file");
+      expect(brief).not.toContain("Print it");
+      expect(brief).not.toContain("JSON array");
+    }
+    expect(REFUTE_BRIEF).toContain("As soon as you have ruled on a finding, and before you start the next one");
+    // The variants file exists even when nothing is found; each sibling is ruled on once, and nothing found is an answer.
+    expect(VARIANT_BRIEF).toContain("one line holding []");
+    expect(VARIANT_BRIEF).toContain("Rule on each sibling once and move on.");
+    expect(VARIANT_BRIEF).toContain("An empty result is an acceptable answer.");
+    expect(REFUTE_AGENT_PROMPT).toContain(`Append each verdict to ${AGENT_PATHS.verdicts}`);
+    expect(VARIANT_AGENT_PROMPT).toContain(`Append each new weakness to ${AGENT_PATHS.verdicts}`);
+  });
 });
 
 describe("sessionTexts", () => {
@@ -94,6 +111,33 @@ describe("parseVerdicts", () => {
     ]);
     const [variant] = parseVerdicts('[{"id":"V1","variant_of":"F2","verdict":"real","location":"src/c.ts:7"}]');
     expect(variant).toMatchObject({ id: "V1", variantOf: "F2", location: "src/c.ts:7" });
+  });
+
+  test("reads one object per line, as the briefs ask: paths in brackets, a later line for the same id, a cut last line", () => {
+    const file = [
+      '{"id":"F1","verdict":"false","attacker":"none","blocker":"app/api/[...route]/items.ts:12","victim":"none","reason":"guard at app/s/[videoId]/page.tsx:3 [checked]"}',
+      '{"id":"F2","verdict":"real","attacker":"any signed-in user","blocker":"none","victim":"other orgs","reason":"CORRECTED: no owner filter at src/b.ts:40"}',
+      '{"id":"F3","verdict":"unsure","attacker":"none","blocker":"none","victim":"none","reason":"first look"}',
+      '{"id":"F3","verdict":"false","attacker":"none","blocker":"src/c.ts:9","victim":"none","reason":"second look"}',
+      '{"id":"F4","verdict":"real","attacker":"mem',
+    ].join("\n");
+    const v = parseVerdicts(file);
+    expect(v.map((x) => [x.id, x.verdict, x.corrected])).toEqual([
+      ["F1", "false", false],
+      ["F2", "real", true],
+      ["F3", "unsure", false],
+      ["F3", "false", false],
+    ]);
+    expect(v[0]!.blocker).toBe("app/api/[...route]/items.ts:12");
+  });
+
+  test("a variants file that starts with an empty array and then lists what was found", () => {
+    expect(parseVerdicts("[]\n")).toEqual([]);
+    const v = parseVerdicts('[]\n{"id":"V1","variant_of":"F2","verdict":"real","attacker":"member","location":"app/s/[videoId]/x.ts:12","victim":"org","reason":"no check [see a.ts:3]"}\n{"id":"V2","variant_of":"F2","verdict":"real","location":"b.ts:9"}\n');
+    expect(v.map((x) => [x.id, x.variantOf, x.location])).toEqual([
+      ["V1", "F2", "app/s/[videoId]/x.ts:12"],
+      ["V2", "F2", "b.ts:9"],
+    ]);
   });
 
   test("picks the array with the most verdicts, the last on a tie", () => {

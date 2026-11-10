@@ -13,6 +13,12 @@ const MODEL = "claude-sonnet-4-5";
 /** What the CLI sends as its credential. The relay drops it and adds the real one. */
 export const AGENT_PLACEHOLDER_TOKEN = "sandbox-placeholder";
 export const AGENT_MAX_TURNS = 400;
+/**
+ * The most one model call may write, thinking included. The model can think itself into a loop, and the
+ * endpoint honours no thinking budget of its own: without this, such a call runs to the CLI's own limit,
+ * several times longer, before it is cut and tried again.
+ */
+export const AGENT_MAX_OUTPUT_TOKENS = 8_000;
 
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
@@ -69,6 +75,7 @@ export function agentCliEnv(options: { baseUrl: string; configDir: string }): Re
     ANTHROPIC_DEFAULT_SONNET_MODEL: MODEL,
     ANTHROPIC_DEFAULT_OPUS_MODEL: MODEL,
     CLAUDE_CODE_SUBAGENT_MODEL: MODEL,
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(AGENT_MAX_OUTPUT_TOKENS),
     DISABLE_TELEMETRY: "1",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_ERROR_REPORTING: "1",
