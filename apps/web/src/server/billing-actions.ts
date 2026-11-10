@@ -10,7 +10,7 @@
  * purchase id the charge is made under, so confirming it again (a second
  * tab, a retry after a timeout) never charges twice.
  */
-import { DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, MAX_PURCHASE_CREDITS, PLAN, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
+import { DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, PLAN, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
 import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -21,12 +21,13 @@ import { autumn, buyCredits, chargePurchase, saveAutoTopUpChoice, syncBilling } 
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
+import { PurchaseCredits } from "./purchase-credits";
 import { captureException } from "./sentry";
 
 export type BillingOutcome = { error?: string; saved?: boolean };
 
 const Id = z.uuid();
-const Credits = z.coerce.number().int().min(1).max(MAX_PURCHASE_CREDITS);
+const Credits = PurchaseCredits;
 /** Plans that can be bought now: the retired ones keep working but aren't sold. */
 const OfferedPlan = z.enum(PLANS.filter((p) => p.offered).map((p) => p.id) as [PlanId, ...PlanId[]]);
 const Purchase = z.discriminatedUnion("kind", [

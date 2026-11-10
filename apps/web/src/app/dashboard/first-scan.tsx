@@ -5,7 +5,7 @@ import { AddCredits } from "@/components/app/add-credits";
 import { HackerMark } from "@/components/hacker/hacker-mark";
 import { Submit } from "@/components/app/submit";
 import { linesLabel } from "@/lib/briefing";
-import { plural } from "@/lib/format";
+import { creditCount, creditsText } from "@/lib/format";
 import type { FirstScan as FirstScanData } from "@/lib/first-scan";
 import { dig, type DigOutcome } from "@/server/dig-action";
 import "./first-scan.css";
@@ -46,7 +46,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
     const holds = data.orgs.find((o) => o.id === r.orgId)?.credits ?? null;
     if (holds === null) return "";
     if (r.unsized && holds < r.credits) return "being priced";
-    return `${r.unsized ? "up to " : ""}${plural(r.credits, "credit")}`;
+    return `${r.unsized ? "up to " : ""}${creditsText(r.credits)}`;
   };
 
   return (
@@ -130,7 +130,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
                 </>
               ) : short ? (
                 <>
-                  Needs {plural(repo.credits, "credit")}; {org.login} has {org.credits}.{" "}
+                  Needs {creditsText(repo.credits)}; {org.login} has {creditCount(org.credits)}.{" "}
                   <button type="button" className="first-scan-link" onClick={() => setTopping(true)}>
                     Add credits
                   </button>
@@ -138,7 +138,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
               ) : (
                 <>
                   {repo.unsized ? "Up to " : ""}
-                  {plural(repo.credits, "credit")} of {many ? `${org.login}’s` : "your"} {org.credits}
+                  {creditsText(repo.credits)} of {many ? `${org.login}’s` : "your"} {creditCount(org.credits)}
                   {repo.unsized && <span className="first-scan-fine">Held while it’s mapped, then charged what it measures.</span>}
                 </>
               )}

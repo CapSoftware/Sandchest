@@ -4,7 +4,7 @@ import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
 import { Reveal, ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack, type LiveLoop } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
-import { compactNumber, plural, SCAN_KIND_LABEL } from "@/lib/format";
+import { compactNumber, creditsText, plural, SCAN_KIND_LABEL } from "@/lib/format";
 import { readHacker } from "@/lib/hacker";
 import type { OrgPlan } from "@/server/org-plans";
 import "../../../rig.css";
@@ -115,7 +115,7 @@ export function ScanView({ row, again, next, waitingOn, loop }: { row: ScanRow; 
           {scan.billing === "charged" && scan.credits > 0 && (
             <div className="stat">
               <dt>Cost</dt>
-              <dd>{plural(scan.credits, "credit")}</dd>
+              <dd>{creditsText(scan.credits)}</dd>
             </div>
           )}
         </dl>

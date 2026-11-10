@@ -5,6 +5,7 @@
  * and loading the review code on demand, so pages that only show the panel
  * never trace the workflow runtime.
  */
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import { repoForUser } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -17,7 +18,8 @@ import { captureException } from "./sentry";
 
 export type ReviewOutcome = { credits?: number; error?: string; topUp?: boolean; scanId?: string };
 
-const Input = z.object({ repoId: z.uuid(), prNumber: z.number().int().positive(), credits: z.number().int().min(0).max(100).optional() });
+// The price the person saw, up to well above the largest review in either credit unit.
+const Input = z.object({ repoId: z.uuid(), prNumber: z.number().int().positive(), credits: z.number().int().min(0).max(100 * CREDIT_PACK).optional() });
 
 const MESSAGES = {
   not_installed: "Sandchest is no longer installed on this repository.",

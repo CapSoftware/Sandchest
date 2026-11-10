@@ -4,18 +4,20 @@
  * card details never pass through an agent), and once a card is on file
  * credits are charged to it directly. Free credits need no card at all.
  */
-import { CREDIT_TIERS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, isTrial, MAX_PURCHASE_CREDITS, PLAN, TOP_UP, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_PACK, CREDIT_PRICE, CREDIT_TIERS, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, isTrial, MAX_PURCHASE_CREDITS, PLAN, TOP_UP, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { AutumnError, StripeError, type BillingState } from "@sandchest/billing";
 import { updateOrgSettings, type OrgBillingRow } from "@sandchest/db";
 import { z } from "zod";
 import { closedMessage, type ClaimOffer } from "@/lib/free-credits";
+import { perCredit } from "@/lib/pricing";
 import { track } from "../../analytics";
 import { autumn, billingEnabled, saveAutoTopUpChoice, stripe, syncBilling } from "../../billing";
 import { db } from "../../db";
 import { codeOffer, claimFreeCredits, claimOffers } from "../../free-credits";
 import { applyInvoiceDetails, InvoiceDetails } from "../../invoice-details";
 import { describeError } from "../../log";
+import { PurchaseCredits } from "../../purchase-credits";
 import { captureException } from "../../sentry";
 import { ApiError } from "../errors";
 import { AccountRef, flag, int, operation, type Context } from "../operation";
@@ -27,7 +29,11 @@ const PromotionCode = z
   .trim()
   .regex(/^[A-Za-z0-9_-]{1,64}$/)
   .describe("A promotion code, if the person has one. A free-credit code claims free credits instead of charging.");
-const Credits = int(1, MAX_PURCHASE_CREDITS).describe(`How many credits to buy (1-${MAX_PURCHASE_CREDITS}). Credits are $1 each, less in bigger purchases.`);
+const amounts = CREDIT_PACK === 1 ? `1-${MAX_PURCHASE_CREDITS}` : `${CREDIT_PACK}-${MAX_PURCHASE_CREDITS}, in multiples of ${CREDIT_PACK}`;
+const Credits = PurchaseCredits.describe(`How many credits to buy (${amounts}). Credits are ${perCredit(CREDIT_PRICE)}, less in bigger purchases.`);
+
+/** USD for one credit at a tier's price per pack, exact to the hundredth of a cent. */
+const usdPerCredit = (packPrice: number) => Math.round(packPrice * 100) / (100 * CREDIT_PACK);
 
 function requireBilling(): void {
   if (!billingEnabled()) throw new ApiError(400, "billing_disabled", "Billing is off on this deployment (self-hosted): nothing is limited and there is nothing to buy.");
@@ -66,7 +72,7 @@ function billingView(context: Context, org: { id: string; login: string; admin: 
         : `On free credits. buy_credits joins ${PLAN.name} with a card (a Stripe Checkout link for the person); credits left over carry across.`,
     prices: {
       plan: { id: PLAN.id, usd_per_month: PLAN.price },
-      credit_usd_by_purchase_size: CREDIT_TIERS.map((tier) => ({ from_credits: tier.from, usd_per_credit: tier.price })),
+      credit_usd_by_purchase_size: CREDIT_TIERS.map((tier) => ({ from_credits: tier.from, usd_per_credit: CREDIT_PACK === 1 ? tier.price : usdPerCredit(tier.price) })),
       deep_scan_credits_by_lines_of_code: DEEP_SCAN_TIERS.map((tier) => ({ below_loc: Number.isFinite(tier.maxLoc) ? tier.maxLoc : null, credits: tier.credits })),
       pr_review_credits_by_changed_lines: PR_REVIEW_TIERS.map((tier) => ({ up_to_lines: Number.isFinite(tier.maxLines) ? tier.maxLines : null, credits: tier.credits })),
       free: ["recon (mapping each repository)", "fix checks (pushes to the default branch)"],
@@ -293,7 +299,7 @@ export const billingOps = [
     input: z.object({
       account: AccountRef,
       enabled: flag(),
-      credits: Credits.optional().describe("How many credits each top-up buys. Default: the last choice, else 10."),
+      credits: Credits.optional().describe(`How many credits each top-up buys. Default: the last choice, else ${DEFAULT_CREDITS}.`),
       monthly_limit_usd: z.number().int().min(1).max(100_000).nullable().optional().describe(`The most auto top-up may spend in a month; null for no limit. Left out: the current limit, else $${DEFAULT_TOP_UP_LIMIT_USD}.`),
     }),
     idempotent: true,

@@ -1,3 +1,4 @@
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import type { DashboardRepo, FindingListItem, findingForUser, HackerRecord, Overview, scanForUser, ScanListItem, SettingsOrg, OrgBillingRow, OrgTeam } from "@sandchest/db";
 import type { FeedEvent } from "@/components/app/scan-live";
 import { DEFAULT_HACKER, type HackerProfile } from "./hacker";
@@ -509,7 +510,7 @@ function scanListItem(seed: ScanSeed): ScanListItem {
     createdAt: ago(seed.at),
     finishedAt: ago(seed.at - seed.minutes),
     durationMs: seed.minutes * 60_000,
-    credits: seed.credits,
+    credits: seed.credits * CREDIT_PACK,
     found,
   };
 }
@@ -611,7 +612,7 @@ export function demoScan(scanId: string): ScanRow | undefined {
       ...scanBase(seed.n, seed.repo, seed.kind, "completed", started, ago(seed.at - seed.minutes)).scan,
       prNumber: seed.pr ?? null,
       headSha: seed.pr ? "9c41e0a2b7d3f6e18a5c0b4d2e7f9a1c3b5d7e9f" : "HEAD",
-      credits: seed.credits,
+      credits: seed.credits * CREDIT_PACK,
       billing: seed.credits ? "charged" : "free",
       stats: seed.kind === "fix_check" ? seed.stats : { loc: seed.kind === "pr_review" ? 1_400 : repo.loc },
     },
@@ -681,7 +682,7 @@ export function demoRepos(): DashboardRepo[] {
       orgId: DEMO_ORG_ID,
       orgLogin: DEMO_LOGIN,
       orgAdmin: true,
-      billing: { planId: "standard", credits: 120, checkedAt: ago(5) },
+      billing: { planId: "standard", credits: 120 * CREDIT_PACK, checkedAt: ago(5) },
       loc: repo.loc,
       lastDeepScanAt: repo.lastDeep === null ? null : ago(repo.lastDeep),
       open: openBySeverity(repo.name),
@@ -712,8 +713,8 @@ export function demoOverview(days = 30): Overview {
   const open = none();
   for (const f of FINDINGS) if (f.status === "open") open[f.severity]++;
   return {
-    now: { pullRequests: 64, reviews: 71, deepScans: 3, found: 12, fixed: 7, credits: 96 },
-    before: { pullRequests: 52, reviews: 58, deepScans: 2, found: 9, fixed: 5, credits: 80 },
+    now: { pullRequests: 64, reviews: 71, deepScans: 3, found: 12, fixed: 7, credits: 96 * CREDIT_PACK },
+    before: { pullRequests: 52, reviews: 58, deepScans: 2, found: 9, fixed: 5, credits: 80 * CREDIT_PACK },
     open,
     days: Array.from({ length: days }, (_, i) => ({
       day: new Date(today - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10),
@@ -746,7 +747,7 @@ export function demoSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow; t
     endsAt: null,
     renewsAt: ago(-20 * DAY),
     nextPlanId: null,
-    credits: 120,
+    credits: 120 * CREDIT_PACK,
     creditsResetAt: ago(-20 * DAY),
     autoTopUp: null,
     activatedAt: ago(40 * DAY),

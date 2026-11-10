@@ -9,7 +9,7 @@ import { RepoSettingsForm } from "@/components/app/repo-settings";
 import { ScanRows } from "@/components/app/scan-rows";
 import { When } from "@/components/app/when";
 import { digState } from "@/lib/dig-state";
-import { compactNumber, plural, SEVERITIES } from "@/lib/format";
+import { compactNumber, creditsText, SEVERITIES } from "@/lib/format";
 import type { OrgPlan } from "@/server/org-plans";
 import "../../../rig.css";
 
@@ -37,7 +37,7 @@ export function RepoView({
   const open = SEVERITIES.reduce((sum, s) => sum + repo.open[s], 0);
   const dig = digState(repo);
   // What one scheduled deep scan costs: what Scan again would, or at most the top tier until recon sizes the repo.
-  const price = !plan ? null : dig.state === "ready" ? (dig.credits === undefined ? `up to ${plural(DEEP_SCAN_TIERS.at(-1)!.credits, "credit")}` : plural(dig.credits, "credit")) : null;
+  const price = !plan ? null : dig.state === "ready" ? (dig.credits === undefined ? `up to ${creditsText(DEEP_SCAN_TIERS.at(-1)!.credits)}` : creditsText(dig.credits)) : null;
 
   return (
     <>

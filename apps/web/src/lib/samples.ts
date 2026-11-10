@@ -1,3 +1,4 @@
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import type { DashboardRepo, FindingListItem, findingForUser, OrgBillingRow, OrgTeam, Overview, scanForUser, ScanListItem, SettingsOrg } from "@sandchest/db";
 import type { Severity } from "./format";
 import type { PullRow } from "@/server/pulls";
@@ -34,7 +35,7 @@ export function sampleRepos(): DashboardRepo[] {
     orgId: SAMPLE_ORG_ID,
     orgLogin: "acme",
     orgAdmin: true,
-    billing: { planId: "standard", credits: 120, checkedAt: ago(5) },
+    billing: { planId: "standard", credits: 120 * CREDIT_PACK, checkedAt: ago(5) },
     loc: 48_000 + i * 9_000,
     lastDeepScanAt: ago(60 * 24 * (i + 2)),
     open: { ...none(), ...open },
@@ -105,7 +106,7 @@ export function sampleScans(count = SCANS.length): ScanListItem[] {
     createdAt: ago(45 + i * 170),
     finishedAt: ago(40 + i * 170),
     durationMs: kind === "deep" ? 1_260_000 : 95_000,
-    credits,
+    credits: credits * CREDIT_PACK,
     found: { ...none(), ...found },
   }));
 }
@@ -114,8 +115,8 @@ export function sampleScans(count = SCANS.length): ScanListItem[] {
 export function sampleOverview(days = 30): Overview {
   const today = Date.now();
   return {
-    now: { pullRequests: 64, reviews: 71, deepScans: 3, found: 12, fixed: 7, credits: 96 },
-    before: { pullRequests: 52, reviews: 58, deepScans: 2, found: 9, fixed: 5, credits: 80 },
+    now: { pullRequests: 64, reviews: 71, deepScans: 3, found: 12, fixed: 7, credits: 96 * CREDIT_PACK },
+    before: { pullRequests: 52, reviews: 58, deepScans: 2, found: 9, fixed: 5, credits: 80 * CREDIT_PACK },
     open: { critical: 1, high: 3, medium: 6, low: 2 },
     days: Array.from({ length: days }, (_, i) => ({
       day: new Date(today - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10),
@@ -212,7 +213,7 @@ export function sampleScan(): NonNullable<Awaited<ReturnType<typeof scanForUser>
       baseSha: null,
       checkRunId: null,
       workflowRunId: null,
-      credits: 10,
+      credits: 10 * CREDIT_PACK,
       leads: null,
       stats: { loc: 48_200 },
       error: null,
@@ -244,7 +245,7 @@ export function sampleSettings(): { orgs: SettingsOrg[]; billing: OrgBillingRow;
     endsAt: null,
     renewsAt: ago(-60 * 24 * 20),
     nextPlanId: null,
-    credits: 120,
+    credits: 120 * CREDIT_PACK,
     creditsResetAt: ago(-60 * 24 * 20),
     autoTopUp: null,
     activatedAt: ago(60 * 24 * 40),
@@ -308,7 +309,7 @@ export function samplePulls(count = PULLS.length): PullRow[] {
             scanId: id(400 + i),
             status: review === "older" ? "completed" : review,
             headSha: review === "older" ? `old${i}` : `head${i}`,
-            credits: 1,
+            credits: CREDIT_PACK,
             trigger: "webhook",
             findings,
             at: ago(30 + i * 95),

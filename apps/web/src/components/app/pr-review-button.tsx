@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useState } from "react";
-import { plural } from "@/lib/format";
+import { creditsText } from "@/lib/format";
 import { quoteReview, startReview, type ReviewOutcome } from "@/server/pr-review-action";
 import { Submit } from "./submit";
 
@@ -28,7 +28,7 @@ export function PrReviewButton({ repoId, prNumber, again, priced }: { repoId: st
           </button>
           <input type="hidden" name="credits" value={state.credits} />
           <Submit className="key key-primary" name="step" value="start" pending="Starting…" track="pr-review-confirm">
-            {state.credits === 0 ? "Review for free" : `Review for ${plural(state.credits!, "credit")}`}
+            {state.credits === 0 ? "Review for free" : `Review for ${creditsText(state.credits!)}`}
           </Submit>
         </span>
       ) : (

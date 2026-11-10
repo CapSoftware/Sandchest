@@ -8,6 +8,8 @@
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { CREDIT_PRICE, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { linesLabel, type BriefingRepo } from "@/lib/briefing";
+import { creditCount, creditsText } from "@/lib/format";
+import { perCredit } from "@/lib/pricing";
 import { aside, HOODIES, PHOSPHORS, ROOMS, SHELLS, shellUser, swatch, VOICES } from "@/lib/hacker";
 import type { HackerProfile } from "@/lib/hacker";
 import type { Kit, Painter } from "./screen";
@@ -202,6 +204,12 @@ function neofetch(kit: Kit, t: number, since: number, m: RecruitModel) {
   kit.cursor(end + 4, kit.H - PAD, t, PX);
 }
 
+/** What the work costs, as the terms put it. */
+const RATES = [
+  `A pull request review: ${creditsText(PR_REVIEW_TIERS[0]!.credits)}, most of the time.`,
+  `A deep scan of a whole repository: ${creditCount(DEEP_SCAN_TIERS[0]!.credits)} to ${creditCount(DEEP_SCAN_TIERS.at(-1)!.credits)} by size.`,
+];
+
 /** The terms as a man page, signed at the bottom once they're hired. */
 function contract(kit: Kit, t: number, since: number, m: RecruitModel) {
   const name = m.profile.handle;
@@ -224,19 +232,13 @@ function contract(kit: Kit, t: number, since: number, m: RecruitModel) {
   if (!m.billing) {
     section("TERMS", ["Self-hosted. No plan, no credits, no limit but your own servers."]);
   } else if (!m.currentPlan && m.claim) {
-    section("SYNOPSIS", [`${m.claim} credits on the house. No card, nothing to pay.`]);
-    section("DESCRIPTION", [
-      `A pull request review: ${PR_REVIEW_TIERS[0]!.credits} credit, most of the time.`,
-      `A deep scan of a whole repository: ${DEEP_SCAN_TIERS[0]!.credits} to ${DEEP_SCAN_TIERS.at(-1)!.credits} by size.`,
-    ]);
+    section("SYNOPSIS", [`${creditCount(m.claim)} credits on the house. No card, nothing to pay.`]);
+    section("DESCRIPTION", RATES);
     section("AFTER", [`Work stops when they run out. $${PLAN.price} a month keeps it going.`]);
   } else if (!m.currentPlan) {
-    section("SYNOPSIS", [`$${PLAN.price} a month. Credits $${CREDIT_PRICE} each, ${m.credits} to start.`]);
-    section("DESCRIPTION", [
-      `A pull request review: ${PR_REVIEW_TIERS[0]!.credits} credit, most of the time.`,
-      `A deep scan of a whole repository: ${DEEP_SCAN_TIERS[0]!.credits} to ${DEEP_SCAN_TIERS.at(-1)!.credits} by size.`,
-    ]);
-    section("TOP-UP", [m.autoTopUp ? `${m.credits} more whenever fewer than ${TOP_UP_BELOW} are left.` : "Off. Reviews stop when credits run out."]);
+    section("SYNOPSIS", [`$${PLAN.price} a month. Credits ${perCredit(CREDIT_PRICE)}, ${creditCount(m.credits)} to start.`]);
+    section("DESCRIPTION", RATES);
+    section("TOP-UP", [m.autoTopUp ? `${creditCount(m.credits)} more whenever fewer than ${creditCount(TOP_UP_BELOW)} are left.` : "Off. Reviews stop when credits run out."]);
   }
 
   y += 64;

@@ -9,7 +9,8 @@
     "./costs": "./src/costs.ts",
     "./webhooks": "./src/webhooks.ts",
     "./tax-ids": "./src/tax-ids.ts",
-    "./usage": "./src/usage.ts"
+    "./usage": "./src/usage.ts",
+    "./units": "./src/units.ts"
   },
   "scripts": {
     "test": "bun test",

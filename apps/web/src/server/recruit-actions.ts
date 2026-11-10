@@ -10,7 +10,7 @@
  * charges it for the plan and the credits. Anything that needs Stripe's own
  * pages (a card step on the charge, or no keys) falls back to them.
  */
-import { AutumnError, DEFAULT_TOP_UP_LIMIT_USD, MAX_PURCHASE_CREDITS, PLAN, StripeError } from "@sandchest/billing";
+import { AutumnError, DEFAULT_TOP_UP_LIMIT_USD, PLAN, StripeError } from "@sandchest/billing";
 import { orgForAdmin, updateOrgSettings, userById } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -29,6 +29,7 @@ import { claimFreeCredits, codeOffer } from "./free-credits";
 import { HackerSchema } from "./hacker-schema";
 import { applyInvoiceDetails, InvoiceDetails, type InvoiceDetailsInput } from "./invoice-details";
 import { describeError } from "./log";
+import { PurchaseCredits } from "./purchase-credits";
 import { captureException } from "./sentry";
 
 /** `claimClosed`: free credits turned out not to be available for this account, so joining is paid after all. */
@@ -43,7 +44,7 @@ const Recruitment = z.object({ hacker: HackerSchema, company: Company });
 export type RecruitInput = z.input<typeof Recruitment>;
 
 /** What joining buys: credits to start on, and whether auto top-up buys that many again when they run low. */
-const Order = z.object({ credits: z.coerce.number().int().min(1).max(MAX_PURCHASE_CREDITS), autoTopUp: z.boolean() });
+const Order = z.object({ credits: PurchaseCredits, autoTopUp: z.boolean() });
 export type RecruitOrder = z.input<typeof Order>;
 const Id = z.uuid();
 

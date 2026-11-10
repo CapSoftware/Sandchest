@@ -1,7 +1,7 @@
 "use client";
 import { autoTopUpSize, CREDIT_AMOUNTS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { useActionState } from "react";
-import { usd } from "@/lib/format";
+import { creditCount, usd } from "@/lib/format";
 import { saveAutoTopUp, type BillingOutcome } from "@/server/billing-actions";
 import { Submit } from "./submit";
 
@@ -10,7 +10,7 @@ export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { org
   // Priced only on the current plan: earlier plans round up to their packs, and the panel says what that buys.
   const plan = planById(planId) ?? PLAN;
   const [state, action] = useActionState<BillingOutcome, FormData>(saveAutoTopUp.bind(null, orgId), {});
-  const amounts = CREDIT_AMOUNTS.includes(quantity as (typeof CREDIT_AMOUNTS)[number]) ? CREDIT_AMOUNTS : [...CREDIT_AMOUNTS, quantity].sort((a, b) => a - b);
+  const amounts = CREDIT_AMOUNTS.includes(quantity) ? CREDIT_AMOUNTS : [...CREDIT_AMOUNTS, quantity].sort((a, b) => a - b);
   return (
     <form action={action} className="auto-top-up">
       <p className="inline-form">
@@ -24,12 +24,12 @@ export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { org
         <select id={`quantity-${orgId}`} name="quantity" className="select" defaultValue={String(quantity)}>
           {amounts.map((amount) => (
             <option key={amount} value={amount}>
-              {amount} credits
+              {creditCount(amount)} credits
               {plan.id === PLAN.id && `, ${usd(autoTopUpSize(plan, amount).price)}`}
             </option>
           ))}
         </select>
-        <span className="field-help">when fewer than {TOP_UP_BELOW} are left</span>
+        <span className="field-help">when fewer than {creditCount(TOP_UP_BELOW)} are left</span>
       </p>
       <div className="inline-form">
         <label htmlFor={`limit-${orgId}`} className="field-help">

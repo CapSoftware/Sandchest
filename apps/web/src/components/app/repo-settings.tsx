@@ -2,10 +2,11 @@
 import type { DeepScanSchedule, PrReviewMode } from "@sandchest/db";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { fullDate, timeUntil } from "@/lib/format";
+import { PR_REVIEW_RANGE } from "@/lib/pricing";
 import { saveRepoSettings, type RepoSettingsOutcome } from "@/server/actions";
 
 const MODES: Array<{ id: PrReviewMode; label: string; help: string }> = [
-  { id: "auto", label: "Every push", help: "Each push to an open pull request is reviewed, for 1 to 3 credits by the size of the change." },
+  { id: "auto", label: "Every push", help: `Each push to an open pull request is reviewed, for ${PR_REVIEW_RANGE} by the size of the change.` },
   {
     id: "command",
     label: "When asked",

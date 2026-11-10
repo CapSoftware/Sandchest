@@ -4,6 +4,7 @@ import { z } from "zod";
 import { track } from "../../analytics";
 import { db } from "../../db";
 import { describeError } from "../../log";
+import { PR_REVIEW_RANGE } from "@/lib/pricing";
 import { firstRun } from "@/lib/schedule";
 import { captureException } from "../../sentry";
 import { ApiError, notFound } from "../errors";
@@ -89,7 +90,7 @@ export const scanOps = [
     name: "update_repo",
     title: "Change a repository's review settings",
     description:
-      "Changes how a repository is reviewed (anyone who can push to it). pr_reviews: \"auto\" reviews every push to a pull request (1 to 3 credits each), \"command\" only when someone comments /sandchest review, \"off\" never. deep_scan_schedule: \"off\", \"daily\", \"weekly\" or \"monthly\" deep scans, each paid like a manual one and skipped when nothing changed.",
+      `Changes how a repository is reviewed (anyone who can push to it). pr_reviews: "auto" reviews every push to a pull request (${PR_REVIEW_RANGE} each), "command" only when someone comments /sandchest review, "off" never. deep_scan_schedule: "off", "daily", "weekly" or "monthly" deep scans, each paid like a manual one and skipped when nothing changed.`,
     method: "PATCH",
     path: "/repos/{repo}",
     input: z.object({

@@ -28,8 +28,9 @@ const nextConfig: NextConfig = {
   experimental: { dynamicOnHover: true },
   // Workspace packages ship TypeScript source.
   transpilePackages: ["@sandchest/billing", "@sandchest/db", "@sandchest/email", "@sandchest/engine", "@sandchest/github", "@sandchest/workspace"],
-  // Inlined at build time, so code only the self-hosted server needs is dropped from every other build.
-  env: { SANDCHEST_STANDALONE: standalone ? "1" : "" },
+  // Inlined at build time, so code only the self-hosted server needs is dropped from every other build. The
+  // credit unit is inlined even when unset, so server and browser always price in the unit the build had.
+  env: { SANDCHEST_STANDALONE: standalone ? "1" : "", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: process.env.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT ?? "" },
   ...(standalone && {
     output: "standalone",
     // Trace from the repository root so workspace packages land in the output.

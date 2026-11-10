@@ -1,4 +1,4 @@
-import { isTrial, MAX_PURCHASE_CREDITS, planById, TOP_UP } from "@sandchest/billing/plans";
+import { isTrial, planById, purchasable, TOP_UP } from "@sandchest/billing/plans";
 import { orgForAdmin } from "@sandchest/db";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -23,7 +23,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const plan = planById(params.plan);
   const amount = (raw: string | undefined) => {
     const n = Number(raw);
-    return Number.isInteger(n) && n >= 1 && n <= MAX_PURCHASE_CREDITS ? n : undefined;
+    return purchasable(n) ? n : undefined;
   };
   const credits = amount(plan ? params.credits : params.topup);
   // Free credits aren't a plan anything is charged on: joining from them goes through Settings, to Stripe Checkout.

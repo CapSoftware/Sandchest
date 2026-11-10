@@ -4,6 +4,8 @@
  * Illustrative only: never paste real scan output here (see AGENTS.md).
  */
 
+import { PR_REVIEW_TIERS } from "@sandchest/billing/costs";
+import { creditsText } from "@/lib/format";
 import { brandAsset } from "@/lib/site";
 
 function Redacted({ chars }: { chars: number }) {
@@ -139,7 +141,7 @@ export function FindingStrip() {
         <span>
           <strong>Sandchest</strong> <span className="text-dust">found 1 high-severity issue</span>
         </span>
-        <span className="check-cost">Reviewed · 2 credits</span>
+        <span className="check-cost">Reviewed · {creditsText(PR_REVIEW_TIERS[1]!.credits)}</span>
       </div>
     </figure>
   );

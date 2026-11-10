@@ -1,5 +1,5 @@
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
-import { CREDIT_PRICE, FREE_CREDITS, PLAN } from "@sandchest/billing/plans";
+import { creditsWorth, FREE_CREDITS, PLAN } from "@sandchest/billing/plans";
 import type { Metadata } from "next";
 import { ChestStage } from "@/components/chest-stage";
 import { FindingStrip } from "@/components/finding-strip";
@@ -9,9 +9,10 @@ import { HowItWorks } from "@/components/how-it-works";
 import { Safety } from "@/components/safety";
 import { LiveLines } from "@/components/recruit/live-lines";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
+import { creditCount, creditsText } from "@/lib/format";
 
-const CREDITS = FREE_CREDITS.credits;
-const WORTH = CREDITS * CREDIT_PRICE;
+const CREDITS = creditCount(FREE_CREDITS.credits);
+const WORTH = creditsWorth(FREE_CREDITS.credits);
 /** Where the key goes: it remembers the claim, then starts recruiting (signing in first if needed). */
 const CLAIM = "/claim/start";
 
@@ -29,8 +30,8 @@ export const metadata: Metadata = {
  * `server/free-credits.ts`).
  */
 export default function ClaimPage() {
-  const reviews = Math.floor(CREDITS / PR_REVIEW_TIERS[0]!.credits);
-  const deepScans = Math.floor(CREDITS / DEEP_SCAN_TIERS[0]!.credits);
+  const reviews = Math.floor(FREE_CREDITS.credits / PR_REVIEW_TIERS[0]!.credits);
+  const deepScans = Math.floor(FREE_CREDITS.credits / DEEP_SCAN_TIERS[0]!.credits);
   return (
     <div className="page">
       <SiteHeader visitor="signed-out" />
@@ -65,13 +66,13 @@ export default function ClaimPage() {
             <li className="claim-perk">
               <span className="claim-perk-n">{reviews}</span>
               <span className="claim-perk-name">pull request reviews</span>
-              <span className="claim-perk-note">Most reviews cost {PR_REVIEW_TIERS[0]!.credits} credit. Each one reads the change the way an attacker would.</span>
+              <span className="claim-perk-note">Most reviews cost {creditsText(PR_REVIEW_TIERS[0]!.credits)}. Each one reads the change the way an attacker would.</span>
             </li>
             <li className="claim-perk">
               <span className="claim-perk-n">{deepScans}</span>
               <span className="claim-perk-name">deep scans</span>
               <span className="claim-perk-note">
-                Each reads a whole repository, every file: {DEEP_SCAN_TIERS[0]!.credits} to {DEEP_SCAN_TIERS.at(-1)!.credits} credits by size.
+                Each reads a whole repository, every file: {creditCount(DEEP_SCAN_TIERS[0]!.credits)} to {creditCount(DEEP_SCAN_TIERS.at(-1)!.credits)} credits by size.
               </span>
             </li>
             <li className="claim-perk">

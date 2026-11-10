@@ -1,4 +1,5 @@
 /** Words and numbers the dashboard shows. Server-side only: no locale or clock differences reach the browser. */
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -115,6 +116,16 @@ const SHORT_DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "sh
 /** "1 Dec 2026". */
 export function shortDate(date: Date): string {
   return SHORT_DATE.format(date);
+}
+
+/** A number of credits: grouped ("2,500") when credits are sold by the 100 and run to five figures, else as it is. */
+export function creditCount(count: number): string {
+  return CREDIT_PACK > 1 ? count.toLocaleString("en-US") : String(count);
+}
+
+/** "1 credit", "3 credits", "2,500 credits". */
+export function creditsText(count: number): string {
+  return `${creditCount(count)} ${count === 1 ? "credit" : "credits"}`;
 }
 
 /** "$20" or "$12.50". */

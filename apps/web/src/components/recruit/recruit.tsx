@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
-import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, creditsWorth, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { digAllCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
+import { creditCount, creditsText } from "@/lib/format";
+import { perCredit } from "@/lib/pricing";
 import { MANY_REPOS } from "@/lib/installation";
 import { closedMessage, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
 import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
@@ -137,7 +139,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (demo) {
       // The dev preview has no billing: DEMO20 takes 20% off, DEMOFREE gives free credits, anything else is refused.
       if (code.trim().toUpperCase() === "DEMOFREE") {
-        takeFreeCode({ code: "DEMOFREE", freeCredits: 20 });
+        takeFreeCode({ code: "DEMOFREE", freeCredits: FREE_CREDITS.credits });
         return null;
       }
       if (code.trim().toUpperCase() !== "DEMO20") return "That code isn’t valid, or has expired.";
@@ -458,7 +460,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (current === "plan") {
       if (!billing) return `Add ${name} to ${org}`;
       if (brief?.currentPlan) return "Save";
-      if (claiming) return `Claim ${intent!.credits} free credits`;
+      if (claiming) return `Claim ${creditCount(intent!.credits)} free credits`;
       if (!payOnPage) return `Pay ${usd(total)} on Stripe`;
       return "Continue to payment";
     }
@@ -683,7 +685,7 @@ function Title({ heading, children }: { heading: RefObject<HTMLHeadingElement | 
 function FreeCreditsBadge({ credits }: { credits: number }) {
   return (
     <p className="onboard-badge">
-      <span className="onboard-badge-n">{credits}</span> free credits, no card
+      <span className="onboard-badge-n">{creditCount(credits)}</span> free credits, no card
     </p>
   );
 }
@@ -724,7 +726,7 @@ function Connect({
       <div className="onboard-connect">
         <Title heading={heading}>Connect GitHub</Title>
         {gift}
-        <p className="onboard-lead">{claim ? `Your hacker works from your repositories. Connect them to claim ${claim.credits} free credits, no card needed.` : "Your hacker works from your repositories."}</p>
+        <p className="onboard-lead">{claim ? `Your hacker works from your repositories. Connect them to claim ${creditCount(claim.credits)} free credits, no card needed.` : "Your hacker works from your repositories."}</p>
         <ol className="onboard-path">
           {path.map((item) => (
             <li key={item.label} data-state={item.state}>
@@ -909,7 +911,7 @@ function Hacker({
 
 /** What auto top-up charges, and when: said in full wherever it can be turned off. */
 function autoTopUpTerms(credits: number): string {
-  return `Auto top-up adds ${credits} credits for ${usd(creditsPrice(credits))} whenever fewer than ${TOP_UP_BELOW} are left, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Change the limit any time in Settings. `;
+  return `Auto top-up adds ${creditCount(credits)} credits for ${usd(creditsPrice(credits))} whenever fewer than ${creditCount(TOP_UP_BELOW)} are left, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Change the limit any time in Settings. `;
 }
 const AUTO_TOP_UP_OFF = "Auto top-up is off, so pull request reviews stop when the credits run out. ";
 
@@ -986,12 +988,12 @@ function Credits({
     <dl className="onboard-rates">
       <div>
         <dt>Pull request review</dt>
-        <dd>{PR_REVIEW_TIERS[0]!.credits} credit</dd>
+        <dd>{creditsText(PR_REVIEW_TIERS[0]!.credits)}</dd>
       </div>
       <div>
         <dt>Deep scan</dt>
         <dd>
-          {scans[0]}–{scans.at(-1)} credits
+          {creditCount(scans[0]!)}–{creditCount(scans.at(-1)!)} credits
         </dd>
       </div>
     </dl>
@@ -1002,11 +1004,11 @@ function Credits({
       <>
         <Title heading={heading}>Claim your credits</Title>
         <div className="onboard-gift">
-          <span className="onboard-gift-n">{claim}</span>
+          <span className="onboard-gift-n">{creditCount(claim)}</span>
           <span className="onboard-gift-what">
             <span className="onboard-gift-name">free credits</span>
             <span className="onboard-gift-price">
-              <s>{usd(claim * PLAN_CREDIT_PRICE)}</s> $0.00 · no card
+              <s>{usd(creditsWorth(claim))}</s> $0.00 · no card
             </span>
           </span>
         </div>
@@ -1023,7 +1025,7 @@ function Credits({
         </p>
         {rates}
         <p className="onboard-help">
-          When they’re spent, {name} stops until {org} joins: ${PLAN.price} a month, and credits from ${PLAN_CREDIT_PRICE} each. Anything left over carries across.
+          When they’re spent, {name} stops until {org} joins: ${PLAN.price} a month, and credits from {perCredit(PLAN_CREDIT_PRICE)}. Anything left over carries across.
         </p>
       </>
     );
@@ -1042,7 +1044,7 @@ function Credits({
           {CREDIT_AMOUNTS.map((amount) => (
             <label key={amount} className="onboard-amount" data-on={credits === amount || undefined}>
               <input type="radio" name="credits-pick" checked={credits === amount} onChange={() => setCredits(amount)} />
-              <span className="onboard-amount-n">{amount}</span>
+              <span className="onboard-amount-n">{creditCount(amount)}</span>
               <span className="onboard-amount-usd">{usd(creditsPrice(amount))}</span>
               {creditsSaving(amount) > 0 && <span className="onboard-amount-save">Save {usd(creditsSaving(amount))}</span>}
             </label>
@@ -1050,7 +1052,7 @@ function Credits({
         </div>
         {all > 0 && repos.length <= MANY_REPOS && (
           <p className="onboard-help">
-            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} takes {all} credits.
+            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} takes {creditCount(all)} credits.
           </p>
         )}
       </fieldset>
@@ -1138,7 +1140,7 @@ function Pay({
           </div>
           <div>
             <dt>
-              {credits} credits
+              {creditCount(credits)} credits
               {creditsSaving(credits) > 0 && (
                 <span className="onboard-bill-saving">
                   , {usd(creditsSaving(credits))} off ({creditsDiscount(credits)}%)

@@ -1,12 +1,12 @@
 "use client";
-import { CREDIT_AMOUNTS, creditsPrice, creditsSaving, PLAN } from "@sandchest/billing/plans";
+import { creditsPrice, creditsSaving, PLAN, TOP_UP_AMOUNTS } from "@sandchest/billing/plans";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import { plural, usd } from "@/lib/format";
+import { creditCount, creditsText, usd } from "@/lib/format";
 import { addCredits, quoteCredits, type CreditsQuote } from "@/server/billing-actions";
 import "./add-credits.css";
 
 /** The packs offered, the larger ones cheaper per credit. */
-const AMOUNTS = [...CREDIT_AMOUNTS, 250, 500];
+const AMOUNTS = TOP_UP_AMOUNTS;
 
 export interface CreditsAccount {
   id: string;
@@ -113,11 +113,11 @@ export function AddCredits({
             <p className="add-credits-lede">
               {short > 0 ? (
                 <>
-                  This needs {plural(need!, "credit")}; {account.login} has {account.credits}.
+                  This needs {creditsText(need!)}; {account.login} has {creditCount(account.credits)}.
                 </>
               ) : (
                 <>
-                  {account.login} has {plural(account.credits, "credit")} left.
+                  {account.login} has {creditsText(account.credits)} left.
                 </>
               )}{" "}
               Bought credits never expire.
@@ -132,7 +132,7 @@ export function AddCredits({
                   {AMOUNTS.map((pack) => (
                     <label key={pack} className="add-credits-pack" data-on={pack === amount || undefined}>
                       <input type="radio" name="credits" value={pack} checked={pack === amount} onChange={() => setAmount(pack)} />
-                      <span className="add-credits-pack-n">{pack}</span>
+                      <span className="add-credits-pack-n">{creditCount(pack)}</span>
                       <span className="add-credits-pack-price">{usd(creditsPrice(pack))}</span>
                       {creditsSaving(pack) > 0 ? (
                         <span className="add-credits-pack-tag">Save {usd(creditsSaving(pack))}</span>
@@ -155,7 +155,7 @@ export function AddCredits({
 
                 <button type="button" className="key key-primary key-large key-glow add-credits-go" onClick={buy} disabled={buying || !priced} aria-busy={buying || undefined} data-track="add-credits">
                   <span className="key-face">
-                    {buying ? "Adding…" : joins ? `Continue to pay ${priced ? usd(quote.dueToday!) : ""}` : then ? `Add ${amount} credits and ${then.label}` : `Add ${amount} credits`}
+                    {buying ? "Adding…" : joins ? `Continue to pay ${priced ? usd(quote.dueToday!) : ""}` : then ? `Add ${creditCount(amount)} credits and ${then.label}` : `Add ${creditCount(amount)} credits`}
                   </span>
                 </button>
                 {(error ?? (quote.for === amount ? quote.error : undefined)) && (

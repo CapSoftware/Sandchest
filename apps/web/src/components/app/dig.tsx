@@ -1,7 +1,7 @@
 import type { DashboardRepo } from "@sandchest/db";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { digState } from "@/lib/dig-state";
-import { plural } from "@/lib/format";
+import { creditCount, creditsText } from "@/lib/format";
 import type { OrgPlan } from "@/server/org-plans";
 import { DigButton } from "./dig-button";
 import { HoverLink } from "./hover-link";
@@ -52,10 +52,10 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
             <span className="repo-dig-note">Priced once mapped, about a minute</span>
           </div>
         );
-      if (plan.credits < cost) return <DigButton repoId={repo.id} label={label} note={`Needs ${plural(cost, "credit")}; ${plan.credits} left`} account={account} need={cost} short />;
+      if (plan.credits < cost) return <DigButton repoId={repo.id} label={label} note={`Needs ${creditsText(cost)}; ${creditCount(plan.credits)} left`} account={account} need={cost} short />;
       const upTo = state.credits === undefined;
-      const note = `${upTo ? "Up to " : ""}${cost} of your ${plural(plan.credits, "credit")}`;
-      return <DigButton repoId={repo.id} label={label} note={note} confirm={`Scan for ${upTo ? "up to " : ""}${plural(cost, "credit")}`} account={account} need={cost} />;
+      const note = `${upTo ? "Up to " : ""}${creditCount(cost)} of your ${creditsText(plan.credits)}`;
+      return <DigButton repoId={repo.id} label={label} note={note} confirm={`Scan for ${upTo ? "up to " : ""}${creditsText(cost)}`} account={account} need={cost} />;
     }
   }
 }

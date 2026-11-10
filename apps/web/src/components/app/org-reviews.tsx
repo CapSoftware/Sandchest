@@ -2,6 +2,7 @@
 import type { PrReviewMode } from "@sandchest/db";
 import { useActionState, useState } from "react";
 import { plural } from "@/lib/format";
+import { PR_REVIEW_RANGE } from "@/lib/pricing";
 import { saveOrgReviews, type OrgReviewsOutcome } from "@/server/actions";
 import { Submit } from "./submit";
 
@@ -25,7 +26,7 @@ export function OrgReviewsForm({ orgId, mode, admin }: { orgId: string; mode: Pr
         <legend className="field-legend">Pull request reviews</legend>
         <p className="field-help">
           {chosen === "auto"
-            ? "Every push to a pull request is reviewed, for 1 to 3 credits by the size of the change."
+            ? `Every push to a pull request is reviewed, for ${PR_REVIEW_RANGE} by the size of the change.`
             : chosen === "command"
               ? "Only when someone with write access comments /sandchest review, or presses Review on the repository’s page."
               : "Pull requests aren’t reviewed, and /sandchest review is ignored."}{" "}

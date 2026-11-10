@@ -1,11 +1,11 @@
 "use client";
-import { CREDIT_AMOUNTS, creditsPrice, creditsSaving } from "@sandchest/billing/plans";
+import { creditsPrice, creditsSaving, TOP_UP_AMOUNTS } from "@sandchest/billing/plans";
 import { useActionState } from "react";
-import { usd } from "@/lib/format";
+import { creditCount, usd } from "@/lib/format";
 import { purchase, type BillingOutcome } from "@/server/billing-actions";
 import { Submit } from "./submit";
 
-const AMOUNTS = [...CREDIT_AMOUNTS, 250, 500];
+const AMOUNTS = TOP_UP_AMOUNTS;
 
 /** Buys credits. The charge is shown on a confirm page first. */
 export function TopUpForm({ orgId }: { orgId: string }) {
@@ -19,7 +19,7 @@ export function TopUpForm({ orgId }: { orgId: string }) {
       <select id={`credits-${orgId}`} name="credits" className="select" defaultValue={String(AMOUNTS[0])}>
         {AMOUNTS.map((amount) => (
           <option key={amount} value={amount}>
-            {amount} credits, {usd(creditsPrice(amount))}
+            {creditCount(amount)} credits, {usd(creditsPrice(amount))}
             {creditsSaving(amount) > 0 && ` (save ${usd(creditsSaving(amount))})`}
           </option>
         ))}
