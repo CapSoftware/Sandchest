@@ -57,6 +57,20 @@ describe("billView", () => {
     expect(view.usage).toBe(880);
   });
 
+  test("both verification sessions of a scan are one line, on the scan page and in the agent API", () => {
+    const view = billView(bill({ lines: [line("slice_hunt", 40_000), line("verify", 20_000), line("verify2", 12_500, { requests: 5, inputTokens: 700, outputTokens: 90 }), line("variants", 4_000)] }))!;
+    expect(view.groups.map((group) => group.label)).toEqual(["Hunting", "Verifying in a sandbox", "Looking for variants"]);
+    expect(view.groups[1]).toEqual({ kind: "model", label: "Verifying in a sandbox", calls: 7, inputTokens: 1_700, outputTokens: 290, credits: 325 });
+    expect(view.usage).toBe(765);
+    expect(billApiView(view).lines).toEqual([
+      { label: "Hunting", calls: 2, input_tokens: 1_000, output_tokens: 200, credits: 4 },
+      { label: "Verifying in a sandbox", calls: 7, input_tokens: 1_700, output_tokens: 290, credits: 3.25 },
+      { label: "Looking for variants", calls: 2, input_tokens: 1_000, output_tokens: 200, credits: 0.4 },
+    ]);
+    // A scan with one session reads the same as before.
+    expect(billView(bill({ lines: [line("verify", 20_000)] }))!.groups).toEqual([{ kind: "model", label: "Verifying in a sandbox", calls: 2, inputTokens: 1_000, outputTokens: 200, credits: 200 }]);
+  });
+
   test("lines add up exactly to the usage shown, however the charges round", () => {
     // Three thirds of a credit and change: rounded one by one they would show 0.33 + 0.33 + 0.33 = 0.99 of 1.00.
     for (const charges of [

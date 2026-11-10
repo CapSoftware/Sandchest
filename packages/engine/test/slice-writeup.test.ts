@@ -766,3 +766,58 @@ describe("mapping", () => {
     expect(entries).toEqual([{ id: "F3", attacker: "any signed-in user", location: `${PATH}:17`, what: `owner taken from the body at ${PATH}:17` }]);
   });
 });
+
+describe("a hunt of two bands, ruled on by two sessions", () => {
+  /** 45 candidates: the rename at F3, the read at F41 and the delete at F45; the rest cite nothing that is ever looked up. */
+  const wide = () =>
+    hunt(
+      Array.from({ length: 45 }, (_, i) => {
+        if (i === 2) return row("mass assignment", 15, 16, "name written without a role check", "PATCH /projects/:id");
+        if (i === 40) return row("idor", 1, 3, "project read without ownership check", "GET /projects/:id");
+        if (i === 44) return row("idor", 8, 10, "project deleted without ownership check", "DELETE /projects/:id");
+        return row("idor", 900 + i, 900 + i, "not a weakness", `GET /other/${i}`);
+      }),
+    );
+  const REAL = ["F3", "F41", "F45"];
+  /** The verdicts of a session given the candidates from `from` to `to`. */
+  const session = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => verdict(`F${from + i}`, REAL.includes(`F${from + i}`) ? "real" : "false"));
+
+  test("every band's confirmed candidates are written up, in rank order", async () => {
+    const h = wide();
+    expect(h.findings.map((f) => f.id)).toEqual(Array.from({ length: 45 }, (_, i) => `F${i + 1}`));
+    const result = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts: [...session(1, 30), ...session(31, 45)] });
+    expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F3", "Write-up of F41", "Write-up of F45"]);
+    expect(result.findings.map((f) => f.attackPath.at(-1)!.line)).toEqual([16, 3, 10]);
+    expect(result.counts).toMatchObject({ real: 3, false: 42, unsure: 0, unknown: 0, written: 3, dropped: 0 });
+    // The second session's verdicts first: the order they arrive in does not change the result.
+    const swapped = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts: [...session(31, 45), ...session(1, 30)] });
+    expect(swapped.findings.map((f) => f.title)).toEqual(result.findings.map((f) => f.title));
+  });
+
+  test("with the first band's verdicts alone, the second band's candidates are left as not ruled on", async () => {
+    const h = wide();
+    const result = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts: session(1, 30) });
+    expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F3"]);
+    expect(result.counts).toMatchObject({ real: 1, false: 29, unknown: 0 });
+  });
+
+  test("the confirmed findings handed to the variants session come from both, in rank order", () => {
+    const h = wide();
+    expect(confirmedEntries(h.findings, [...session(31, 45), ...session(1, 30)]).map((entry) => entry.id)).toEqual(REAL);
+    // The second session's alone: its candidates, each at the line it cites.
+    expect(confirmedEntries(h.findings, session(31, 45)).map((entry) => [entry.id, entry.location])).toEqual([
+      ["F41", `${PATH}:3`],
+      ["F45", `${PATH}:10`],
+    ]);
+  });
+
+  test("a variant of a finding from the second band is folded into it", async () => {
+    const h = wide();
+    const verdicts = [...session(1, 30), ...session(31, 45)];
+    const variant = parseVerdicts(JSON.stringify([{ id: "V1", variant_of: "F41", verdict: "real", attacker: "any signed-in user", location: `${PATH}:29`, victim: "other workspaces' projects", reason: "Archive has the same missing check." }]));
+    const result = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variant, confirmed: confirmedEntries(h.findings, verdicts) } });
+    expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F3", "Write-up of F41", "Write-up of F45"]);
+    expect(result.findings[1]!.alsoReportedAs!.map((place) => [place.at, place.variant])).toEqual([[`${PATH}:29`, true]]);
+    expect(result.counts).toMatchObject({ variants: 1, variantsUnknown: 0, folded: 1 });
+  });
+});

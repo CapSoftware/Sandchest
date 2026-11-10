@@ -64,7 +64,7 @@ publishStep.maxRetries = 5;
 
 // ---- The slice engine (deep scans and PR reviews) -----------------------------
 
-/** Polls of a sandbox session, 20 s apart: 40 minutes, after which it is stopped and what it wrote is collected. */
+/** Polls of the sandbox sessions under way, 20 s apart: 40 minutes, after which they are stopped and what they wrote is collected. */
 const SESSION_POLLS = 120;
 
 /**
@@ -73,9 +73,11 @@ const SESSION_POLLS = 120;
  */
 async function sliceSteps(scanId: string, pricing?: "usage" | "shadow"): Promise<void> {
   try {
-    // A pull request has no variants session. A hunt result recorded by older code has no `variants`: a deep scan's.
-    const { selected, variants } = await sliceHuntStep(scanId);
-    if (selected > 0 && (await sliceSession(scanId, "verify")) > 0 && variants !== false) await sliceSession(scanId, "variants");
+    // A pull request has no variants session. A hunt result recorded by older code has no `variants` (a deep
+    // scan's) and no `secondBand` (one verification session, as that code ran).
+    const { selected, variants, secondBand } = await sliceHuntStep(scanId);
+    const confirmed = selected > 0 ? await sliceSessions(scanId, secondBand === true ? ["verify", "verify2"] : ["verify"]) : 0;
+    if (confirmed > 0 && variants !== false) await sliceSessions(scanId, ["variants"]);
     await sliceWriteUpStep(scanId);
     if (pricing === "usage" || pricing === "shadow") await sliceBill(scanId);
     await slicePublishStep(scanId);
@@ -85,17 +87,29 @@ async function sliceSteps(scanId: string, pricing?: "usage" | "shadow"): Promise
   }
 }
 
-/** Starts a session, polls it until it ends or runs out of time, then collects it. Returns how many verdicts were real. */
-async function sliceSession(scanId: string, kind: SessionKind): Promise<number> {
-  if (!(await sliceStartStep(scanId, kind)).started) return 0;
-  let state = "running";
-  for (let polls = 0; state === "running" && polls < SESSION_POLLS; polls++) {
-    await sleep("20s");
-    ({ state } = await sliceStatusStep(scanId, kind));
+/**
+ * Starts the sessions one after another, so they run at the same time, polls them until every one has ended
+ * or the time runs out, then collects them in the order given. Returns how many verdicts were real across them.
+ *
+ * The first verification session decides: nothing else starts when it does not, and the scan fails as soon as
+ * it does. Any other session that fails or runs out of time is collected for what it wrote.
+ */
+async function sliceSessions(scanId: string, kinds: SessionKind[]): Promise<number> {
+  const states = new Map<SessionKind, string>();
+  for (const kind of kinds) {
+    if ((await sliceStartStep(scanId, kind)).started) states.set(kind, "running");
+    else if (kind === "verify") return 0;
   }
-  // A variants session that failed is collected for what it wrote; a verification that failed fails the scan.
-  if (state === "failed" && kind === "verify") throw new Error("The verification in the sandbox stopped before it finished. Nothing was charged.");
-  return (await sliceCollectStep(scanId, kind, state === "running")).real;
+  const running = () => [...states].filter(([, state]) => state === "running").map(([kind]) => kind);
+  const failed = () => states.get("verify") === "failed";
+  for (let polls = 0; running().length > 0 && !failed() && polls < SESSION_POLLS; polls++) {
+    await sleep("20s");
+    for (const kind of running()) if (!failed()) states.set(kind, (await sliceStatusStep(scanId, kind)).state);
+  }
+  if (failed()) throw new Error("The verification in the sandbox stopped before it finished. Nothing was charged.");
+  let real = 0;
+  for (const [kind, state] of states) real += (await sliceCollectStep(scanId, kind, state === "running")).real;
+  return real;
 }
 
 async function sliceHuntStep(scanId: string) {

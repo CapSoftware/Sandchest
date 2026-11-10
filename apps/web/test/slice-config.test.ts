@@ -1,7 +1,7 @@
 /** The slice engine's settings: off unless chosen, and then only with everything it needs. */
 import { describe, expect, test } from "bun:test";
 import { INDEXER_PORT } from "@sandchest/workspace";
-import { RELAY_PORT } from "@/server/slice-scan";
+import { RELAY_PORT, SECOND_RELAY_PORT } from "@/server/slice-scan";
 import { config, fastModeAvailable, fastRunAllowed, scanEngine, sliceBody, scanWorkspace } from "@/server/config";
 
 const base = {
@@ -107,8 +107,10 @@ describe("slice engine settings", () => {
     expect(() => config({ ...slice, ...build, SANDCHEST_SLICE_INDEXER_LINUX_SHA256: "nope" })).toThrow("SANDCHEST_SLICE_INDEXER_LINUX_SHA256");
   });
 
-  test("the relay's port is not the indexer's: both run in the same sandbox", () => {
+  test("the relays' ports are not the indexer's, nor each other's: all run in the same sandbox", () => {
     expect(RELAY_PORT).not.toBe(INDEXER_PORT);
+    expect(SECOND_RELAY_PORT).not.toBe(INDEXER_PORT);
+    expect(SECOND_RELAY_PORT).not.toBe(RELAY_PORT);
   });
 
   test("each ceiling is a positive decimal", () => {

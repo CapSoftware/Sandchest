@@ -215,6 +215,19 @@ describe("selectBillable", () => {
     expect(selectBillable(rows)).toEqual([rows[0]!, rows[2]!]);
   });
 
+  test("two sessions that run side by side count as two steps, whatever their attempts; under one step, only one would", () => {
+    const rows = [row("verify", 0, "ok", "0.1000000000", "verify"), row("verify2", 0, "ok", "0.3000000000", "verify2"), row("verify", 1, "ok", "0.2000000000", "verify")];
+    // The first session was run again: its second run counts, and so does the other session's one run.
+    expect(selectBillable(rows)).toEqual([rows[1]!, rows[2]!]);
+    expect(billLines(selectBillable(rows)).map((line) => [line.stage, line.requests, line.costMicroUsd])).toEqual([
+      ["verify2", 1, 300_000],
+      ["verify", 1, 200_000],
+    ]);
+    // Had the second session recorded under the first's step with the next attempt, the first's rows would be dropped.
+    const oneStep = [row("verify", 0, "ok", "0.1000000000", "verify"), row("verify", 1, "ok", "0.3000000000", "verify")];
+    expect(selectBillable(oneStep)).toEqual([oneStep[1]!]);
+  });
+
   test("no rows, nothing; refuses a negative or fractional attempt", () => {
     expect(selectBillable([])).toEqual([]);
     expect(() => selectBillable([row("hunt", -1, "ok", "1")])).toThrow(RangeError);

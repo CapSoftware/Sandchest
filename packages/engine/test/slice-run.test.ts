@@ -323,6 +323,40 @@ describe("runSliceHunt", () => {
     expect(priced.counts.selected).toBe(4);
   });
 
+  describe("selection", () => {
+    /** 70 handler files, each with one candidate of its own; the score falls with the file's number. */
+    const files = Array.from({ length: 70 }, (_, i) => `src/api/h${String(i + 1).padStart(2, "0")}.ts`);
+    const wide = {
+      listFiles: async () => files,
+      readFile: async (f: string) => (files.includes(f) ? "export async function handler(req) {\n  return db.items.find(req.params.id);\n}\n" : undefined),
+    };
+    const hunt: Row[][] = [files.map((f): Row => [f, "idor", "a", 2, "other users", "no owner check"]), [], []];
+    const scores = Object.fromEntries(files.map((f, i) => [`${f}:2`, Array.from({ length: 3 }, () => 9 - Math.floor(i / 8))]));
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `F${i + 1}`);
+
+    test("up to two bands of 30, numbered F1 to F60 in rank order", async () => {
+      const out = await runSliceHunt(repoOptions(fakeClient({ hunt, scores }), wide));
+      expect(out.counts).toMatchObject({ clusters: 70, kept: 70, selected: 60 });
+      expect(out.findings.map((f) => f.id)).toEqual(ids(60));
+      // Best-scored first, and each entry describes the candidate beside it.
+      expect(out.findings.map((f) => f.sink)).toEqual(files.slice(0, 60).map((f) => `${f}:2`));
+      expect(out.candidates.map((c) => `${c.rows[0]!.sink_file}:${c.rows[0]!.sink_line}`)).toEqual(out.findings.map((f) => f.sink));
+    });
+
+    test("`top` sets the most selected, and a smaller selection is the start of a larger one", async () => {
+      const all = await runSliceHunt(repoOptions(fakeClient({ hunt, scores }), wide));
+      const band = await runSliceHunt(repoOptions(fakeClient({ hunt, scores }), { ...wide, top: 30 }));
+      expect(band.counts.selected).toBe(30);
+      expect(band.findings).toEqual(all.findings.slice(0, 30));
+      expect(band.candidates).toEqual(all.candidates.slice(0, 30));
+      const few = await runSliceHunt(repoOptions(fakeClient({ hunt, scores }), { ...wide, top: 7 }));
+      expect(few.findings.map((f) => f.id)).toEqual(ids(7));
+      // Fewer candidates than `top`: all of them.
+      const more = await runSliceHunt(repoOptions(fakeClient({ hunt, scores }), { ...wide, top: 500 }));
+      expect(more.findings.map((f) => f.id)).toEqual(ids(70));
+    });
+  });
+
   test("the same replies give the same result whatever order the calls finish in", async () => {
     const plain = await runSliceHunt(repoOptions(fakeClient()));
     for (let run = 0; run < 5; run++) {
@@ -407,6 +441,18 @@ describe("runChangeHunt", () => {
     const out = await runChangeHunt({ client: none, changes: [{ path: FILE, additions: 3, ranges: [] }, { path: "src/api/gone.ts", additions: 2, ranges: [[1, 2]] }], readFile: textOf, passDelayMs: 0 });
     expect(none.requests).toHaveLength(0);
     expect(out.bundle).toEqual({ files: 0, lines: 0, mode: "change" });
+  });
+
+  test("a change selects 12 at most, as before: it has no second band", async () => {
+    const files = Array.from({ length: 20 }, (_, i) => `src/api/c${String(i + 1).padStart(2, "0")}.ts`);
+    const out = await runChangeHunt({
+      client: fakeClient({ hunt: [files.map((f): Row => [f, "idor", "a", 2, "other orgs", "id not scoped"]), [], []], scores: Object.fromEntries(files.map((f) => [`${f}:2`, [8, 8, 8]])) }),
+      changes: files.map((f) => ({ path: f, additions: 3, ranges: [[1, 3]] as Array<[number, number]> })),
+      readFile: async () => "export async function handler(req) {\n  return db.items.find(req.params.id);\n}\n",
+      passDelayMs: 0,
+    });
+    expect(out.counts).toMatchObject({ kept: 20, selected: 12 });
+    expect(out.findings.map((f) => f.id)).toEqual(Array.from({ length: 12 }, (_, i) => `F${i + 1}`));
   });
 
   test("a change with no server code makes no call", async () => {

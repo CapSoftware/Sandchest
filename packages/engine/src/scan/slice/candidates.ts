@@ -118,7 +118,10 @@ export function dedupe(clusters: Cluster[], scores: ScoreVotes): Candidate[] {
   return mergeInOrder(clusters, order, scores);
 }
 
+/** Candidates one verification session rules on: a band of the ranking. */
 export const TOP_K = 30;
+/** Bands a whole-repository hunt selects, each verified by a session of its own. */
+export const TOP_BANDS = 2;
 
 /**
  * The top `k` candidate indices: alternately the next best by score (max, mean, log of merged rows) and by

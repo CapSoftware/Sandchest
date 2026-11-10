@@ -20,6 +20,7 @@ import {
   schema,
   startUsageCall,
   unsettledScans,
+  updateScan,
   upsertInstallation,
   upsertRepos,
   type Db,
@@ -36,6 +37,7 @@ import { setAutumn, settleScan } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { requestDeepScan } from "@/server/dig";
 import { verifyGatewayToken } from "@/server/gateway";
+import { billView } from "@/lib/bill-view";
 import { stepOf, TRACKS } from "@/lib/scan-progress";
 import { quotePrReview, startPrReview } from "@/server/pr-review";
 import { beginScan, failScan, PAUSED_WAIT, publishScan, ScanFinished, type BeginResult } from "@/server/scans";
@@ -45,7 +47,7 @@ import { resetSliceLimit } from "@/server/slice-limit";
 import { setScanStarter } from "@/server/start";
 import { billSlice } from "@/server/usage-billing";
 import { SandboxGone, type SliceRuntime, type SliceSandbox } from "@/server/slice-runtime";
-import { cleanUpSlice, collectSliceSession, huntSlice, publishSlice, RELAY_PORT, sandboxKey, sliceSessionStatus, sliceState, startSliceSession, STOP_INDEXER, writeUpSlice, type SessionKind } from "@/server/slice-scan";
+import { cleanUpSlice, collectSliceSession, huntSlice, publishSlice, RELAY_PORT, sandboxKey, SECOND_RELAY_PORT, sliceSessionStatus, sliceState, startSliceSession, STOP_INDEXER, writeUpSlice, type SessionKind } from "@/server/slice-scan";
 import { FakeAutumn } from "./fake-autumn";
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
@@ -102,9 +104,25 @@ const PATH = "src/api/projects.ts";
 const REPO: Record<string, string> = { [PATH]: `${FILE.join("\n")}\n`, "README.md": "acme/app\n" };
 const LOC = 1_200;
 
-function symbolAt(line: number): string | null {
+/** One more handler file, with one candidate for the hunt at its line 3. */
+const HANDLER = /^src\/api\/handler\d+\.ts$/;
+const handlerPath = (n: number) => `src/api/handler${String(n).padStart(2, "0")}.ts`;
+const handlerFile = (n: number) => [`export async function handler${n}(req) {`, "  const id = req.params.id;", `  return db.items${n}.find(id);`, "}"];
+
+/** The checkout: the invented repository, and `host.extraFiles` handler files beside it. */
+function checkout(): Record<string, string> {
+  const extra = Array.from({ length: host.extraFiles }, (_, i) => [handlerPath(i + 1), `${handlerFile(i + 1).join("\n")}\n`] as const);
+  return { ...Object.fromEntries(extra), ...REPO };
+}
+
+/** A source file's lines; undefined for anything else. */
+function sourceLines(file: string): string[] | undefined {
+  return file === "README.md" ? undefined : checkout()[file]?.replace(/\n$/, "").split("\n");
+}
+
+function symbolAt(lines: string[], line: number): string | null {
   for (let i = line - 1; i >= 0; i--) {
-    const m = FILE[i]!.match(/function (\w+)/);
+    const m = lines[i]!.match(/function (\w+)/);
     if (m) return m[1]!;
   }
   return null;
@@ -118,14 +136,16 @@ function fakeIndexer(): IndexerClient {
     definitions: () => ({ definitions: [] }),
     deps: () => ({ dependencies: [] }),
     locate: (args) => ({
-      locations: (args.locations as Array<{ file: string; line: number }>).map(({ file, line }) =>
-        file === PATH && line <= FILE.length ? { file, line, exists: true, text: FILE[line - 1], symbol: symbolAt(line), totalLines: FILE.length } : { file, line, exists: false },
-      ),
+      locations: (args.locations as Array<{ file: string; line: number }>).map(({ file, line }) => {
+        const lines = sourceLines(file);
+        return lines && line <= lines.length ? { file, line, exists: true, text: lines[line - 1], symbol: symbolAt(lines, line), totalLines: lines.length } : { file, line, exists: false };
+      }),
     }),
     read_file: (args) => {
+      const lines = sourceLines(String(args.path)) ?? FILE;
       const start = Math.max(1, Number(args.startLine ?? 1));
-      const end = Math.min(FILE.length, Number(args.endLine ?? FILE.length));
-      return { path: args.path, startLine: start, endLine: end, totalLines: FILE.length, truncated: false, content: `${FILE.slice(start - 1, end).join("\n")}\n` };
+      const end = Math.min(lines.length, Number(args.endLine ?? lines.length));
+      return { path: args.path, startLine: start, endLine: end, totalLines: lines.length, truncated: false, content: `${lines.slice(start - 1, end).join("\n")}\n` };
     },
   };
   return {
@@ -187,9 +207,13 @@ const fakeLlm: LlmClient = {
     }
     const content = contentOf(request);
     if (content.includes(slice.SCORE_TASK)) return reply([...content.matchAll(/^C(\d+)\|/gm)].map((m) => `C${m[1]}|7`).join("\n"));
-    const entry = content.match(/^\[(E\d+)\] \S+ (\S+)/m);
-    if (model.empty || !entry) return reply("NONE");
-    return reply([`${entry[1]}|idor|a|${PATH}:3|other workspaces|project read without ownership check`, `${entry[1]}|sqli|a|${PATH}:17|all tenants|name reaches a raw query`].join("\n"));
+    if (model.empty) return reply("NONE");
+    // Two candidates in the invented file, and one in each extra handler file shown.
+    const rows = [...content.matchAll(/^\[(E\d+)\] \S+ (\S+)/gm)].flatMap(([, id, path]) => {
+      if (path === PATH) return [`${id}|idor|a|${PATH}:3|other workspaces|project read without ownership check`, `${id}|sqli|a|${PATH}:17|all tenants|name reaches a raw query`];
+      return HANDLER.test(path!) ? [`${id}|idor|a|${path}:3|other workspaces|item read without ownership check`] : [];
+    });
+    return reply(rows.length ? rows.join("\n") : "NONE");
   },
 };
 
@@ -206,21 +230,38 @@ const fastLlm: LlmClient = {
 
 interface FakeSession {
   kind: slice.AgentSessionKind;
+  /** The slot it was started in: only the second verification session has one. */
+  slot?: string;
+  /** The relay port it was given. */
+  port: number;
   findings: unknown[];
   token: string;
   polls: number;
+  /** Its model calls are in the ledger. */
+  metered: boolean;
   stopped: boolean;
   collected: number;
 }
+
+/**
+ * What the second verification session does. Beyond `finish`, `fail` and `throw`: `empty` ends having written no
+ * verdicts, `cut` never ends and has ruled on its first five candidates, `unreadable` ends but cannot be collected.
+ */
+type SecondOutcome = "finish" | "fail" | "throw" | "empty" | "cut" | "unreadable";
 
 /** What each session does: finish after `polls` status reads, or fail; and which verdicts it writes. */
 const host = {
   sandboxes: new Map<string, FakeSandbox>(),
   sessions: new Map<number, FakeSession>(),
-  started: [] as Array<{ kind: slice.AgentSessionKind; sandboxId: string }>,
+  started: [] as Array<{ kind: slice.AgentSessionKind; sandboxId: string; slot?: string }>,
   outcome: { refute: "finish", variants: "finish" } as Record<slice.AgentSessionKind, "finish" | "fail" | "throw">,
+  second: "finish" as SecondOutcome,
+  /** Sessions started and collected, in order, each by its token's stage. */
+  log: [] as string[],
   /** Verify: sinks ruled real. Variants: one sibling of the first confirmed finding. */
   realSinks: [`${PATH}:3`],
+  /** Handler files beside the invented repository, each one more candidate for the hunt. */
+  extraFiles: 0,
   /** The bulk read's pack command fails. */
   packFails: false,
   /** The sandbox's meter cannot be read. */
@@ -229,14 +270,22 @@ const host = {
   nextProcess: 100,
   reset() {
     this.outcome = { refute: "finish", variants: "finish" };
+    this.second = "finish";
+    this.log = [];
     this.realSinks = [`${PATH}:3`];
+    this.extraFiles = 0;
     this.started = [];
     this.packFails = false;
     this.usageFails = false;
   },
 };
 
-/** The bulk read's pack as the sandbox writes it: the wanted files of `REPO`, cut into parts. */
+/** What a session does: the second verification session's own outcome, else its kind's. */
+const outcomeOf = (session: { kind: slice.AgentSessionKind; slot?: string }): SecondOutcome => (session.slot === undefined ? host.outcome[session.kind] : host.second);
+/** A session's exit marker in the agent directory. */
+const exitMarker = (sandbox: FakeSandbox, slot?: string) => `${sandbox.agentDir}/${slice.sessionFiles(slot).exit}`;
+
+/** The bulk read's pack as the sandbox writes it: the wanted files of the checkout, cut into parts. */
 function pack(files: string[], partBytes: number): { parts: Buffer[]; summary: string } {
   const record = (kind: number, index: number, body = Buffer.alloc(0)) => {
     const h = Buffer.alloc(9);
@@ -245,7 +294,8 @@ function pack(files: string[], partBytes: number): { parts: Buffer[]; summary: s
     h.writeUInt32BE(body.length, 5);
     return Buffer.concat([h, body]);
   };
-  const records = files.map((file, i) => (REPO[file] === undefined ? record(0, i) : record(1, i, Buffer.from(REPO[file]!))));
+  const repo = checkout();
+  const records = files.map((file, i) => (repo[file] === undefined ? record(0, i) : record(1, i, Buffer.from(repo[file]!))));
   const stream = Buffer.concat([Buffer.from("SCB1"), ...records, record(2, files.length)]);
   const parts: Buffer[] = [];
   for (let at = 0; at < stream.length; at += partBytes) parts.push(stream.subarray(at, at + partBytes));
@@ -267,10 +317,19 @@ class FakeSandbox implements SliceSandbox {
   ttl: number[] = [];
   /** The commit each clone checked out. */
   cloned: Array<string | undefined> = [];
-  /** When the current session's CLI ended, as its exit marker's time. */
-  markerAt: number | undefined;
+  /** When each session's CLI ended, as its exit marker's time, by the marker's path. */
+  readonly markers = new Map<string, number>();
 
-  constructor(readonly id: string) {}
+  /** `setup` is the script the sandbox was made with. */
+  constructor(
+    readonly id: string,
+    readonly setup = "",
+  ) {}
+
+  /** When the session with no slot ended. */
+  get markerAt(): number | undefined {
+    return this.markers.get(exitMarker(this));
+  }
 
   private check(): void {
     if (this.gone || this.destroyed) throw new Error("sandbox is gone");
@@ -284,8 +343,11 @@ class FakeSandbox implements SliceSandbox {
     this.execs.push(cmd);
     const ok = (stdout: string): ExecResult => ({ exitCode: 0, stdout, stderr: "", timedOut: false, durationMs: 1 });
     if (cmd.join(" ") === "git rev-parse HEAD") return ok("0123456789abcdef0123456789abcdef01234567\n");
-    if (cmd.join(" ") === "git ls-files -z") return ok(Object.keys(REPO).join("\0"));
-    if (cmd[0] === "stat") return this.markerAt === undefined ? { ...ok(""), exitCode: 1 } : ok(`${Math.floor(this.markerAt / 1000)}\n`);
+    if (cmd.join(" ") === "git ls-files -z") return ok(Object.keys(checkout()).join("\0"));
+    if (cmd[0] === "stat") {
+      const at = this.markers.get(cmd.at(-1)!);
+      return at === undefined ? { ...ok(""), exitCode: 1 } : ok(`${Math.floor(at / 1000)}\n`);
+    }
     if (cmd[0] === "node" && cmd[3] === "--") {
       if (host.packFails) return { ...ok(""), exitCode: 1 };
       // `node -e <packer> -- <list> <part prefix> ...`, both in the private directory; parts of 16 bytes here.
@@ -300,7 +362,7 @@ class FakeSandbox implements SliceSandbox {
   async readFile(path: string): Promise<string> {
     this.check();
     this.singleReads.push(path);
-    const text = REPO[path];
+    const text = checkout()[path];
     if (text === undefined) throw new Error(`File not found: ${path}`);
     return text;
   }
@@ -354,10 +416,11 @@ class FakeSandbox implements SliceSandbox {
 const runtime: SliceRuntime = {
   async open({ ttlSeconds, setupScript }) {
     expect(ttlSeconds).toBe(90 * 60);
-    expect(setupScript).toContain(`LOOPBACK_PORTS='${RELAY_PORT}'`);
+    // The agent reaches its relay and nothing else: one port, or the two of a deep scan's verification sessions.
+    expect(setupScript).toMatch(new RegExp(`LOOPBACK_PORTS='${RELAY_PORT}( ${SECOND_RELAY_PORT})?'`));
     expect(setupScript).toContain("ALLOW_HOSTS=''");
     expect(setupScript).toContain("DNS='no'");
-    const sandbox = new FakeSandbox(`bx_fake${String(host.nextId++).padStart(4, "0")}`);
+    const sandbox = new FakeSandbox(`bx_fake${String(host.nextId++).padStart(4, "0")}`, setupScript);
     sandbox.ttl.push(ttlSeconds);
     host.sandboxes.set(sandbox.id, sandbox);
     return sandbox;
@@ -370,37 +433,52 @@ const runtime: SliceRuntime = {
   indexer: () => fakeIndexer(),
   async prepareAgentSandbox() {},
   async startAgentSession(sandbox, options) {
-    if (host.outcome[options.kind] === "throw") throw new Error("Relay exited before it was ready");
-    expect(options.relay.port).toBe(RELAY_PORT);
+    if (outcomeOf(options) === "throw") throw new Error("Relay exited before it was ready");
+    // A session with no slot has the first relay port; the one with a slot, the second.
+    expect(options.relay.port).toBe(options.slot === undefined ? RELAY_PORT : SECOND_RELAY_PORT);
     expect(options.relay.targetUrl).toBe("https://sandchest.test/api/gateway");
     const relayProcessId = host.nextProcess++;
     const agentProcessId = host.nextProcess++;
-    host.sessions.set(agentProcessId, { kind: options.kind, findings: options.findings, token: options.relay.token, polls: 0, stopped: false, collected: 0 });
-    host.started.push({ kind: options.kind, sandboxId: (sandbox as FakeSandbox).id });
-    (sandbox as FakeSandbox).markerAt = undefined;
-    return { relayProcessId, agentProcessId };
+    const slot = options.slot === undefined ? {} : { slot: options.slot };
+    host.sessions.set(agentProcessId, { kind: options.kind, ...slot, port: options.relay.port, findings: options.findings, token: options.relay.token, polls: 0, metered: false, stopped: false, collected: 0 });
+    host.started.push({ kind: options.kind, sandboxId: (sandbox as FakeSandbox).id, ...slot });
+    host.log.push(`start:${verifyGatewayToken(options.relay.token, SECRET)!.stage}`);
+    (sandbox as FakeSandbox).markers.delete(exitMarker(sandbox as FakeSandbox, options.slot));
+    return { relayProcessId, agentProcessId, ...slot };
   },
   async agentSessionStatus(sandbox, ids) {
     const session = host.sessions.get(ids.agentProcessId)!;
-    if (session.polls++ === 0) return "running";
-    if (host.outcome[session.kind] === "fail") return "failed";
-    // The agent's calls went through the gateway, which recorded them under the token's stage and attempt.
-    if ((sandbox as FakeSandbox).markerAt === undefined) {
+    expect(ids.slot).toBe(session.slot);
+    const outcome = outcomeOf(session);
+    const first = session.polls++ === 0;
+    // The agent's calls went through the gateway, which recorded them under the token's stage and attempt. The
+    // second verification session's are there from its first poll, so one that fails or is cut has spent something.
+    if (!session.metered && (session.slot === undefined ? !first && outcome !== "fail" : true)) {
       const claims = verifyGatewayToken(session.token, SECRET)!;
       const id = await startUsageCall(database, claims.scanId, { stage: claims.stage, role: "agent", attempt: claims.attempt });
-      await finishUsageCall(database, id, { status: "ok", inputTokens: 50, outputTokens: 5, costUsd: "0.002" });
-      (sandbox as FakeSandbox).markerAt = Date.now();
+      await finishUsageCall(database, id, { status: "ok", inputTokens: 50, outputTokens: 5, costUsd: session.slot === undefined ? "0.002" : "0.003" });
+      session.metered = true;
     }
+    if (first || outcome === "cut") return "running";
+    if (outcome === "fail") return "failed";
+    const marker = exitMarker(sandbox as FakeSandbox, session.slot);
+    if (!(sandbox as FakeSandbox).markers.has(marker)) (sandbox as FakeSandbox).markers.set(marker, Date.now());
     return "finished";
   },
   async collectAgentSession(_sandbox, ids) {
     const session = host.sessions.get(ids.agentProcessId)!;
+    expect(ids.slot).toBe(session.slot);
     session.stopped = true;
     session.collected++;
-    if (host.outcome[session.kind] === "fail") return { verdicts: [], finished: false, turns: 1, error: "agent did not finish" };
+    host.log.push(`collect:${verifyGatewayToken(session.token, SECRET)!.stage}`);
+    const outcome = outcomeOf(session);
+    if (outcome === "unreadable") throw new Error("The sandbox did not answer");
+    if (outcome === "fail") return { verdicts: [], finished: false, turns: 1, error: "agent did not finish" };
+    if (outcome === "empty") return { verdicts: [], finished: true, turns: 2, exitCode: 0, error: "no verdicts file" };
     if (session.kind === "refute") {
-      const entries = session.findings as slice.FindingsEntry[];
+      const entries = (session.findings as slice.FindingsEntry[]).slice(0, outcome === "cut" ? 5 : undefined);
       const verdicts = entries.map((entry) => ({ id: entry.id, verdict: host.realSinks.includes(entry.sink) ? "real" : "false", attacker: "any signed-in user", blocker: "none", victim: "other workspaces' projects", reason: "No ownership check." }));
+      if (outcome === "cut") return { verdicts: slice.parseVerdicts(JSON.stringify(verdicts)), finished: false, turns: 9, error: "agent did not finish" };
       return { verdicts: slice.parseVerdicts(JSON.stringify(verdicts)), finished: true, turns: 4, exitCode: 0 };
     }
     const [first] = session.findings as slice.ConfirmedEntry[];
@@ -524,21 +602,41 @@ async function newScan(kind: "deep" | "pr_review" | "recon" | "fix_check" = "dee
   return scan.id;
 }
 
-/** A session as the workflow drives it: start, poll until it ends (the sleeps left out), collect. */
-async function session(scanId: string, kind: SessionKind): Promise<number> {
-  if (!(await startSliceSession(scanId, kind)).started) return 0;
-  let state = "running";
-  for (let polls = 0; state === "running" && polls < 5; polls++) ({ state } = await sliceSessionStatus(scanId, kind));
-  if (state === "failed" && kind === "verify") throw new Error("The verification in the sandbox stopped before it finished. Nothing was charged.");
-  return (await collectSliceSession(scanId, kind, { timedOut: state === "running" })).real;
+/**
+ * Sessions as the workflow drives them: started one after another, polled until every one has ended (the sleeps
+ * left out) or the polls run out, then collected in order. Returns how many verdicts were real across them.
+ */
+async function sessions(scanId: string, kinds: SessionKind[]): Promise<number> {
+  const states = new Map<SessionKind, string>();
+  for (const kind of kinds) {
+    if ((await startSliceSession(scanId, kind)).started) states.set(kind, "running");
+    else if (kind === "verify") return 0;
+  }
+  const running = () => [...states].filter(([, state]) => state === "running").map(([kind]) => kind);
+  const failed = () => states.get("verify") === "failed";
+  for (let polls = 0; running().length > 0 && !failed() && polls < 5; polls++) {
+    for (const kind of running()) if (!failed()) states.set(kind, (await sliceSessionStatus(scanId, kind)).state);
+  }
+  if (failed()) throw new Error("The verification in the sandbox stopped before it finished. Nothing was charged.");
+  let real = 0;
+  for (const [kind, state] of states) real += (await collectSliceSession(scanId, kind, { timedOut: state === "running" })).real;
+  return real;
+}
+
+/** One session as the workflow drives it. */
+const session = (scanId: string, kind: SessionKind) => sessions(scanId, [kind]);
+
+/** Verification, then variants, as the workflow runs them from the hunt step's result (one recorded by older code has no `secondBand`). */
+async function verifyThenVariants(scanId: string, hunt: { selected: number; variants?: boolean; secondBand?: boolean }): Promise<void> {
+  const confirmed = hunt.selected > 0 ? await sessions(scanId, hunt.secondBand === true ? ["verify", "verify2"] : ["verify"]) : 0;
+  if (confirmed > 0 && hunt.variants !== false) await sessions(scanId, ["variants"]);
 }
 
 /** The workflow's slice path, then its fail path when a step throws. Returns the error, if one ended it. */
 async function runSlice(scanId: string): Promise<Error | undefined> {
   expect(await beginScan(scanId)).toEqual({ state: "running", engine: "slice" });
   try {
-    const { selected, variants } = await huntSlice(scanId, { passDelayMs: 0 });
-    if (selected > 0 && (await session(scanId, "verify")) > 0 && variants !== false) await session(scanId, "variants");
+    await verifyThenVariants(scanId, await huntSlice(scanId, { passDelayMs: 0 }));
     await writeUpSlice(scanId);
     await publishSlice(scanId);
     return undefined;
@@ -1268,8 +1366,7 @@ async function withSettings(env: Record<string, string>, fn: () => Promise<void>
 /** The slice steps up to the write-up, as the workflow runs them, after a begin step that must answer `expected`. */
 async function throughWriteUp(scanId: string, expected: BeginResult): Promise<void> {
   expect(await beginScan(scanId)).toEqual(expected);
-  const { selected, variants } = await huntSlice(scanId, { passDelayMs: 0 });
-  if (selected > 0 && (await session(scanId, "verify")) > 0 && variants !== false) await session(scanId, "variants");
+  await verifyThenVariants(scanId, await huntSlice(scanId, { passDelayMs: 0 }));
   await writeUpSlice(scanId);
 }
 
@@ -2131,5 +2228,369 @@ describe.skipIf(!available)("the slice engine's daily limit", () => {
         await failScan(deep, "test over");
       });
     }
+  });
+});
+
+// ---- Two verification sessions ----------------------------------------------------
+
+/** The hunt's result as the sandbox keeps it. */
+const huntOf = async (scanId: string) => JSON.parse((await sandboxOf(scanId)).private.get("slice-hunt.json")!) as { findings: slice.FindingsEntry[] };
+/** One of the sandbox's private files, parsed; undefined when there is none. */
+async function kept<T>(scanId: string, name: string): Promise<T | undefined> {
+  const text = (await sandboxOf(scanId)).private.get(name);
+  return text === undefined ? undefined : (JSON.parse(text) as T);
+}
+/** The fake sessions of a scan, in the order they started. */
+const sessionsOf = (scanId: string) => [...host.sessions.values()].filter((s) => verifyGatewayToken(s.token, SECRET)?.scanId === scanId);
+const idsOf = (entries: unknown[]) => (entries as Array<{ id: string }>).map((entry) => entry.id);
+const fromTo = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `F${from + i}`);
+/** Where each of the scan's findings lands, sorted. */
+async function findingSinks(scanId: string): Promise<string[]> {
+  const { findingIds } = (await scanById(database, scanId))!.stats as { findingIds: string[] };
+  const found = findingIds.length ? await database.query.findings.findMany({ where: (f, { inArray }) => inArray(f.id, findingIds) }) : [];
+  return found.map((f) => (f.attackPath as Array<{ file: string; line: number }>).at(-1)!).map((at) => `${at.file}:${at.line}`).sort();
+}
+const verifyStages = async (scanId: string) => (await stagesOf(scanId)).filter((s) => s.stage.startsWith("verify")).map((s) => [s.stage, s.attempt, s.ended, s.outcome]);
+/** The agent's ledger rows of one step: what the gateway recorded under that session's token. */
+const agentRows = async (scanId: string, step: string) => (await usage(scanId)).filter((r) => r.step === step).map((r) => [r.kind, r.stage, r.role, r.attempt, r.status, r.costUsd]);
+
+/** A deep scan, begun and hunted, whose hunt selected `extra + 2` candidates. */
+async function hunted(extra: number, expected: BeginResult = { state: "running", engine: "slice" }) {
+  host.extraFiles = extra;
+  const scanId = await newScan();
+  expect(await beginScan(scanId)).toEqual(expected);
+  const result = await huntSlice(scanId, { passDelayMs: 0 });
+  return { scanId, result, findings: (await huntOf(scanId)).findings };
+}
+
+describe.skipIf(!available)("two verification sessions", () => {
+  it("a hunt that selects 45 is verified by two sessions at the same time, each under its own stage, and the bill counts both", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      const { scanId, result, findings } = await hunted(43, { state: "running", engine: "slice", pricing: "usage" });
+      expect(result).toEqual({ selected: 45, variants: true, secondBand: true });
+      expect(idsOf(findings)).toEqual(fromTo(1, 45));
+      // The agent may reach the two relays, and nothing else.
+      const sandbox = await sandboxOf(scanId);
+      expect(sandbox.setup).toContain(`LOOPBACK_PORTS='${RELAY_PORT} ${SECOND_RELAY_PORT}'`);
+      expect(sandbox.setup).toContain("ALLOW_HOSTS=''");
+      expect(sandbox.setup).toContain("DNS='no'");
+
+      // One real candidate in each band.
+      host.realSinks = [findings[2]!.sink, findings[40]!.sink];
+      host.log = [];
+      expect(await sessions(scanId, ["verify", "verify2"])).toBe(2);
+      // Both were under way before either was collected.
+      expect(host.log).toEqual(["start:verify", "start:verify2", "collect:verify", "collect:verify2"]);
+      const [first, second] = sessionsOf(scanId);
+      expect(first).toMatchObject({ kind: "refute", port: RELAY_PORT, stopped: true, collected: 1 });
+      expect(first!.slot).toBeUndefined();
+      expect(first!.findings).toEqual(findings.slice(0, 30));
+      expect(second).toMatchObject({ kind: "refute", slot: "band2", port: SECOND_RELAY_PORT, stopped: true, collected: 1 });
+      expect(second!.findings).toEqual(findings.slice(30));
+      // Each token has its own stage and its own attempt of it, under the scan's one ceiling.
+      expect(tokensOf(scanId)).toMatchObject([
+        { scanId, stage: "verify", attempt: 0, ceilingMicroUsd: 500_000 },
+        { scanId, stage: "verify2", attempt: 0, ceilingMicroUsd: 500_000 },
+      ]);
+
+      // Counted per session; the verdicts of each kept, and the confirmed findings of both in rank order.
+      const state = sliceState((await scanById(database, scanId))!);
+      expect(state.sessions!.verify).toMatchObject({ attempt: 0, collected: true, verdicts: 30, real: 1 });
+      expect("slot" in state.sessions!.verify!).toBe(false);
+      expect(state.sessions!.verify2).toMatchObject({ slot: "band2", attempt: 0, collected: true, verdicts: 15, real: 1 });
+      expect(idsOf((await kept<slice.Verdict[]>(scanId, "slice-verify.json"))!)).toEqual(fromTo(1, 30));
+      expect(idsOf((await kept<slice.Verdict[]>(scanId, "slice-verify2.json"))!)).toEqual(fromTo(31, 45));
+      expect(idsOf((await kept<slice.ConfirmedEntry[]>(scanId, "slice-confirmed.json"))!)).toEqual(["F3", "F41"]);
+
+      // The variants session starts from both, and both are written up.
+      await sessions(scanId, ["variants"]);
+      expect(idsOf(sessionsOf(scanId)[2]!.findings)).toEqual(["F3", "F41"]);
+      expect(await writeUpSlice(scanId)).toEqual({ findings: 2 });
+      expect(await findingSinks(scanId)).toEqual([...host.realSinks].sort());
+      expect(sandbox.ttl).toEqual([5400, 5400, 5400, 5400]);
+
+      // The ledger: each session's calls under its own step.
+      expect(await agentRows(scanId, "verify")).toEqual([["model", "verify", "agent", 0, "ok", "0.0020000000"]]);
+      expect(await agentRows(scanId, "verify2")).toEqual([["model", "verify2", "agent", 0, "ok", "0.0030000000"]]);
+
+      // The bill counts every row, the second session's as much as the first's, and shows the two as one line.
+      expect(await bill(scanId)).toMatchObject({ state: "billed", status: "open" });
+      const stored = (await scanBill(database, scanId))!;
+      expect(stored.costMicroUsd).toBe(await ledgerMicroUsd(scanId));
+      expect(stored.dueMicroUsd).toBe(stored.costMicroUsd * 3);
+      expect(stored.lines.filter((line) => line.stage.startsWith("verify")).map((line) => [line.kind, line.stage, line.requests, line.costMicroUsd, line.chargeMicroUsd])).toEqual([
+        ["model", "verify2", 1, 3_000, 9_000],
+        ["model", "verify", 1, 2_000, 6_000],
+      ]);
+      const view = billView(stored)!;
+      expect(view.groups.filter((group) => group.label === "Verifying in a sandbox")).toEqual([{ kind: "model", label: "Verifying in a sandbox", calls: 2, inputTokens: 100, outputTokens: 10, credits: 150 }]);
+      expect(view.groups.map((group) => group.label)).not.toContain("Other analysis");
+      expect(view.usage).toBe(Math.round(stored.dueMicroUsd / 100));
+
+      await publishSlice(scanId);
+      expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: stored.credits });
+      expect(autumn.get(orgId).credits).toBe(10_000 - stored.credits);
+
+      // Each session is a stage of its own, started and ended.
+      expect((await stagesOf(scanId)).map((s) => [s.stage, s.attempt, s.ended, s.outcome])).toEqual([
+        ["queue", 0, true, "ok"],
+        ["sandbox", 0, true, "ok"],
+        ["select", 0, true, "ok"],
+        ["hunt", 0, true, "ok"],
+        ["score", 0, true, "ok"],
+        ["verify", 0, true, "ok"],
+        ["verify2", 0, true, "ok"],
+        ["variants", 0, true, "ok"],
+        ["writeup", 0, true, "ok"],
+        ["publish", 0, true, "ok"],
+      ]);
+      // The feed names the whole verification once when it starts and once when it is in, and no code.
+      const feed = await feedOf(scanId);
+      expect(feed.filter((message) => message.startsWith("Verifying"))).toEqual(["Verifying 45 candidates against the code in the sandbox…"]);
+      expect(feed.filter((message) => message.startsWith("Verified"))).toEqual(["Verified 45: 2 confirmed."]);
+      expect(feed.filter((message) => message.includes("second verification"))).toEqual([]);
+      for (const message of feed) expect(message).not.toContain("req.params");
+      await resetCarry();
+    });
+  });
+
+  it("a hunt that selects 30 or fewer is verified by one session, exactly as before", async () => {
+    const { scanId, result } = await hunted(28);
+    expect(result).toEqual({ selected: 30, variants: true, secondBand: false });
+    // Asked for all the same, a second session has nothing to rule on and does not start.
+    expect(await startSliceSession(scanId, "verify2")).toEqual({ started: false });
+    expect(host.started).toEqual([]);
+    await verifyThenVariants(scanId, result);
+    expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
+    await publishSlice(scanId);
+
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
+    expect(sessionsOf(scanId).map((s) => [s.kind, s.slot, s.port, s.findings.length])).toEqual([
+      ["refute", undefined, RELAY_PORT, 30],
+      ["variants", undefined, RELAY_PORT, 1],
+    ]);
+    expect(tokensOf(scanId).map((claims) => [claims!.stage, claims!.attempt])).toEqual([
+      ["verify", 0],
+      ["variants", 0],
+    ]);
+    const state = sliceState((await scanById(database, scanId))!);
+    expect(Object.keys(state.sessions!)).toEqual(["verify", "variants"]);
+    expect(Object.keys(state.sessions!.verify!).sort()).toEqual(["agentProcessId", "attempt", "collected", "real", "relayProcessId", "startedAt", "verdicts"]);
+    const sandbox = await sandboxOf(scanId);
+    expect([...sandbox.private.keys()].filter((name) => name.startsWith("slice-")).sort()).toEqual(["slice-confirmed.json", "slice-hunt.json", "slice-variants.json", "slice-verify.json"]);
+    expect(sandbox.ttl).toEqual([5400, 5400, 5400]);
+    expect(await verifyStages(scanId)).toEqual([["verify", 0, true, "ok"]]);
+    expect((await usage(scanId)).filter((r) => r.step === "verify2" || r.stage === "verify2")).toEqual([]);
+    const feed = await feedOf(scanId);
+    expect(feed.filter((message) => message.startsWith("Verif"))).toEqual(["Verifying 30 candidates against the code in the sandbox…", "Verified 30: 1 confirmed."]);
+  });
+
+  it("a second session that cannot start, fails, leaves no verdicts or cannot be read does not fail the scan: the first's findings are written up, and the scan is billed for what its ledger holds", async () => {
+    const NO_VERDICTS = "The second verification session left no verdicts; carrying on with the first.";
+    const cases: Array<{ second: SecondOutcome; says: string; stage: string; spent: boolean; recorded: Record<string, unknown> | undefined }> = [
+      { second: "throw", says: "Could not start the second verification session; carrying on with the first.", stage: "failed", spent: false, recorded: undefined },
+      { second: "fail", says: NO_VERDICTS, stage: "failed", spent: true, recorded: { slot: "band2", collected: true, verdicts: 0, real: 0 } },
+      { second: "empty", says: NO_VERDICTS, stage: "ok", spent: true, recorded: { slot: "band2", collected: true, verdicts: 0, real: 0 } },
+      { second: "unreadable", says: "The second verification session could not be read; carrying on with the first.", stage: "ok", spent: true, recorded: { slot: "band2" } },
+    ];
+    await withSettings(USAGE_ENV, async () => {
+      for (const { second, says, stage, spent, recorded } of cases) {
+        host.reset();
+        autumn.get(orgId).credits = 10_000;
+        await resetCarry();
+        const { scanId, result, findings } = await hunted(43, { state: "running", engine: "slice", pricing: "usage" });
+        // One real candidate in each band: the second band's is never ruled on.
+        host.realSinks = [findings[2]!.sink, findings[40]!.sink];
+        host.second = second;
+        await verifyThenVariants(scanId, result);
+        expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
+        expect(await findingSinks(scanId)).toEqual([findings[2]!.sink]);
+
+        const state = sliceState((await scanById(database, scanId))!);
+        expect(state.sessions!.verify).toMatchObject({ collected: true, verdicts: 30, real: 1 });
+        if (recorded) expect(state.sessions!.verify2).toMatchObject(recorded);
+        else expect(state.sessions!.verify2).toBeUndefined();
+        if (second === "unreadable") expect(state.sessions!.verify2!.collected).toBeUndefined();
+        expect(await verifyStages(scanId)).toEqual([
+          ["verify", 0, true, "ok"],
+          ["verify2", 0, true, stage],
+        ]);
+        // The variants session had the first band's finding to start from.
+        expect(idsOf(sessionsOf(scanId).at(-1)!.findings)).toEqual(["F3"]);
+        const feed = await feedOf(scanId);
+        expect(feed.filter((message) => message.includes("second verification"))).toEqual([says]);
+        expect(feed.filter((message) => message.startsWith("Verif"))).toEqual(["Verifying 45 candidates against the code in the sandbox…", "Verified 30: 1 confirmed."]);
+
+        // Billed from the ledger as it is: what the second session spent before it ended is in it.
+        expect(await agentRows(scanId, "verify2")).toEqual(spent ? [["model", "verify2", "agent", 0, "ok", "0.0030000000"]] : []);
+        expect(await bill(scanId)).toMatchObject({ state: "billed", status: "open" });
+        const stored = (await scanBill(database, scanId))!;
+        expect(stored.costMicroUsd).toBe(await ledgerMicroUsd(scanId));
+        expect(stored.lines.filter((line) => line.stage === "verify2").map((line) => line.costMicroUsd)).toEqual(spent ? [3_000] : []);
+        await publishSlice(scanId);
+        expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: stored.credits });
+        expect(autumn.get(orgId).credits).toBe(10_000 - stored.credits);
+      }
+      await resetCarry();
+    });
+  });
+
+  it("a second session that runs out of time is stopped, and the verdicts it had reached are kept", async () => {
+    const { scanId, result, findings } = await hunted(43);
+    // It rules on its first five candidates (F31 to F35) and never ends. F33 and F41 are real; only F33 is reached.
+    host.second = "cut";
+    host.realSinks = [findings[2]!.sink, findings[32]!.sink, findings[40]!.sink];
+    await verifyThenVariants(scanId, result);
+    const second = sessionsOf(scanId)[1]!;
+    expect(second).toMatchObject({ slot: "band2", stopped: true, collected: 1 });
+    expect(second.polls).toBe(5);
+    expect(sliceState((await scanById(database, scanId))!).sessions!.verify2).toMatchObject({ collected: true, verdicts: 5, real: 1 });
+    expect(idsOf((await kept<slice.Verdict[]>(scanId, "slice-verify2.json"))!)).toEqual(fromTo(31, 35));
+    expect(idsOf((await kept<slice.ConfirmedEntry[]>(scanId, "slice-confirmed.json"))!)).toEqual(["F3", "F33"]);
+    expect(await verifyStages(scanId)).toEqual([
+      ["verify", 0, true, "ok"],
+      ["verify2", 0, true, "failed"],
+    ]);
+    expect(await writeUpSlice(scanId)).toEqual({ findings: 2 });
+    expect(await findingSinks(scanId)).toEqual([findings[2]!.sink, findings[32]!.sink].sort());
+    await publishSlice(scanId);
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged" });
+    const feed = await feedOf(scanId);
+    expect(feed.filter((message) => message.includes("second verification"))).toEqual(["The second verification session stopped early; keeping the verdicts it reached."]);
+    // The line counts what was ruled on: the first band, and five of the second.
+    expect(feed.filter((message) => message.startsWith("Verified"))).toEqual(["Verified 35: 2 confirmed."]);
+  });
+
+  it("a first session that fails still fails the scan, with the second under way: nothing charged, the sandbox deleted", async () => {
+    host.extraFiles = 43;
+    host.outcome.refute = "fail";
+    const scanId = await newScan();
+    const credits = autumn.get(orgId).credits;
+    const error = await runSlice(scanId);
+    expect(error?.message).toBe("The verification in the sandbox stopped before it finished. Nothing was charged.");
+    // The second was running beside it, and was never collected: the sandbox goes with both.
+    expect(host.log).toEqual(["start:verify", "start:verify2"]);
+    expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+    expect(autumn.get(orgId).credits).toBe(credits);
+    expect((await sandboxOf(scanId)).destroyed).toBe(true);
+    expect(await verifyStages(scanId)).toEqual([
+      ["verify", 0, true, "failed"],
+      ["verify2", 0, true, "failed"],
+    ]);
+    expect((await stagesOf(scanId)).every((s) => s.ended)).toBe(true);
+    expect((await scanById(database, scanId))!.stats).not.toHaveProperty("findingIds");
+
+    // One that ends with no verdicts, when it is collected: the scan stops there, whatever the second wrote.
+    const empty = (await hunted(43)).scanId;
+    expect(await startSliceSession(empty, "verify")).toEqual({ started: true });
+    expect(await startSliceSession(empty, "verify2")).toEqual({ started: true });
+    await expect(collectSliceSession(empty, "verify")).rejects.toThrow("The verification in the sandbox ended without a result. Nothing was charged.");
+    await cleanUpSlice(empty);
+    await failScan(empty, "The verification in the sandbox ended without a result. Nothing was charged.");
+    expect(await scanById(database, empty)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+
+    // One that cannot start: the second is never started.
+    host.reset();
+    host.extraFiles = 43;
+    host.outcome.refute = "throw";
+    const unstarted = await newScan();
+    expect((await runSlice(unstarted))?.message).toBe("Relay exited before it was ready");
+    expect(host.started).toEqual([]);
+    expect(await scanById(database, unstarted)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+  });
+
+  it("a candidate only the second session confirmed leads to a variants session and a finding", async () => {
+    const { scanId, result, findings } = await hunted(43);
+    host.realSinks = [findings[35]!.sink];
+    await verifyThenVariants(scanId, result);
+    const state = sliceState((await scanById(database, scanId))!);
+    expect(state.sessions!.verify).toMatchObject({ collected: true, verdicts: 30, real: 0 });
+    expect(state.sessions!.verify2).toMatchObject({ collected: true, verdicts: 15, real: 1 });
+    expect(sessionsOf(scanId).map((s) => [s.kind, s.slot])).toEqual([
+      ["refute", undefined],
+      ["refute", "band2"],
+      ["variants", undefined],
+    ]);
+    expect(idsOf(sessionsOf(scanId)[2]!.findings)).toEqual(["F36"]);
+    expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
+    await publishSlice(scanId);
+    const scan = (await scanById(database, scanId))!;
+    expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
+    expect(await findingSinks(scanId)).toEqual([findings[35]!.sink]);
+    // The variant found of it is a place the finding lists.
+    const [finding] = await database.query.findings.findMany({ where: (f, { eq }) => eq(f.repoId, scan.repoId) });
+    expect((finding!.alsoReported as Array<{ at: string; variant: boolean }>).map((place) => [place.at, place.variant])).toEqual([[`${PATH}:23`, true]]);
+    expect((await feedOf(scanId)).filter((message) => message.startsWith("Verified"))).toEqual(["Verified 45: 1 confirmed."]);
+  });
+
+  it("a scan whose verification was recorded by the previous code completes", async () => {
+    const { scanId, findings } = await hunted(0);
+    expect(await startSliceSession(scanId, "verify")).toEqual({ started: true });
+    await sliceSessionStatus(scanId, "verify");
+    expect(await sliceSessionStatus(scanId, "verify")).toEqual({ state: "finished" });
+    const scan = (await scanById(database, scanId))!;
+    const started = sliceState(scan).sessions!.verify!;
+    // A session with no slot is recorded as that code recorded it.
+    expect(Object.keys(started).sort()).toEqual(["agentProcessId", "attempt", "relayProcessId", "startedAt"]);
+    // As that code left a collected verification: every verdict the session wrote in the one file (one of
+    // them under an id the hunt never gave), the confirmed findings, and the counts of the one session.
+    const verdicts = slice.parseVerdicts(
+      JSON.stringify([...findings.map((entry) => ({ id: entry.id, verdict: entry.sink === `${PATH}:3` ? "real" : "false", attacker: "any signed-in user", victim: "other workspaces", reason: "No ownership check." })), { id: "F31", verdict: "real", reason: "Not a candidate." }]),
+    );
+    const sandbox = await sandboxOf(scanId);
+    await sandbox.writePrivateFiles([
+      { name: "slice-verify.json", content: JSON.stringify(verdicts) },
+      { name: "slice-confirmed.json", content: JSON.stringify(slice.confirmedEntries(findings, verdicts, { checkoutRoot: sandbox.root })) },
+    ]);
+    await updateScan(database, scanId, { stats: { ...(scan.stats as Record<string, unknown>), slice: { ...sliceState(scan), sessions: { verify: { ...started, collected: true, verdicts: 3, real: 1 } } } } });
+
+    // The rest of the scan on this code.
+    expect(await collectSliceSession(scanId, "verify")).toEqual({ real: 1 });
+    await sessions(scanId, ["variants"]);
+    expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
+    await publishSlice(scanId);
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
+    expect(await findingSinks(scanId)).toEqual([`${PATH}:3`]);
+    expect(Object.keys(sliceState((await scanById(database, scanId))!).sessions!)).toEqual(["verify", "variants"]);
+    expect(await verifyStages(scanId)).toEqual([["verify", 0, true, "ok"]]);
+  });
+
+  it("a workflow run started by the previous code, which knows one verification session, verifies the first band and completes", async () => {
+    const { scanId, result, findings } = await hunted(43);
+    host.realSinks = [findings[2]!.sink, findings[40]!.sink];
+    // That run reads how many were selected and whether variants follow from the hunt step's result, and nothing else.
+    await verifyThenVariants(scanId, { selected: result.selected, variants: result.variants });
+    expect(sessionsOf(scanId).map((s) => [s.kind, s.slot, s.findings.length])).toEqual([
+      ["refute", undefined, 30],
+      ["variants", undefined, 1],
+    ]);
+    expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
+    await publishSlice(scanId);
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
+    expect(await findingSinks(scanId)).toEqual([findings[2]!.sink]);
+    expect(await verifyStages(scanId)).toEqual([["verify", 0, true, "ok"]]);
+    expect((await feedOf(scanId)).filter((message) => message.startsWith("Verified"))).toEqual(["Verified 30: 1 confirmed."]);
+  });
+
+  it("a pull request review never gets a second session, and its agent only the one relay port", async () => {
+    gh.files = [CHANGED, DOCS];
+    const scanId = await newScan("pr_review");
+    expect(await beginScan(scanId)).toEqual({ state: "running", engine: "slice" });
+    const result = await huntSlice(scanId, { passDelayMs: 0 });
+    expect(result).toEqual({ selected: 1, variants: false, secondBand: false });
+    expect((await sandboxOf(scanId)).setup).toContain(`LOOPBACK_PORTS='${RELAY_PORT}'`);
+    // Asked for one all the same, it starts nothing.
+    expect(await startSliceSession(scanId, "verify2")).toEqual({ started: false });
+    expect(await sessions(scanId, ["verify", "verify2"])).toBe(1);
+    expect(host.started.map((s) => [s.kind, s.slot])).toEqual([["refute", undefined]]);
+    expect(tokensOf(scanId).map((claims) => claims!.stage)).toEqual(["verify"]);
+    expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
+    await publishSlice(scanId);
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: prReviewCredits(3) });
+    expect(Object.keys(sliceState((await scanById(database, scanId))!).sessions!)).toEqual(["verify"]);
+    expect(await verifyStages(scanId)).toEqual([["verify", 0, true, "ok"]]);
+    expect((await usage(scanId)).filter((r) => r.step === "verify2")).toEqual([]);
   });
 });

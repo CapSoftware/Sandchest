@@ -5,7 +5,9 @@
  * invocation can poll and collect a session another one started.
  *
  * The sandbox is expected to be set up by `agentSandboxSetupScript` with the relay port as its only
- * loopback port, and no hosts or DNS.
+ * loopback port, and no hosts or DNS. Two sessions run side by side in one sandbox when one of them is
+ * given a slot: its files then have names of their own, and its relay a port of its own, which the setup
+ * must allow too.
  */
 import { posix } from "node:path";
 import { agentRelayCommand } from "@sandchest/workspace/agent-relay";
@@ -43,6 +45,21 @@ export const SESSION_FILES = {
   config: "cli-config",
 } as const;
 
+export type SessionFiles = Record<keyof typeof SESSION_FILES, string>;
+
+const SLOT = /^[a-z0-9]{1,16}$/;
+
+/**
+ * The files of a session. One with a slot has the slot's name in front of each (`<slot>-brief.md`,
+ * `<slot>-cli-config`...), so it shares no file with any other session in the agent directory; one
+ * without has `SESSION_FILES` as they are.
+ */
+export function sessionFiles(slot?: string): SessionFiles {
+  if (slot === undefined) return SESSION_FILES;
+  if (!SLOT.test(slot)) throw new Error(`Invalid session slot: ${slot.slice(0, 32)}`);
+  return Object.fromEntries(Object.entries(SESSION_FILES).map(([key, name]) => [key, `${slot}-${name}`])) as SessionFiles;
+}
+
 const INSTALL_TIMEOUT_MS = 300_000;
 const RELAY_READY_MS = 15_000;
 const RELAY_POLL_MS = 250;
@@ -55,10 +72,12 @@ const VERDICTS_MAX_BYTES = 2 * 1024 * 1024;
 export interface AgentSessionIds {
   relayProcessId: number;
   agentProcessId: number;
+  /** The slot the session was started with, if any: where its files are. */
+  slot?: string;
 }
 
 export interface AgentRelayOptions {
-  /** Loopback port: the one `loopbackPorts` entry of the sandbox setup. */
+  /** Loopback port: a `loopbackPorts` entry of the sandbox setup that no other running session uses. */
   port: number;
   /** Gateway base URL (the CLI's requests go to `<targetUrl>/v1/messages`). */
   targetUrl: string;
@@ -72,6 +91,8 @@ export interface StartAgentSessionOptions {
   findings: unknown[];
   relay: AgentRelayOptions;
   maxTurns?: number;
+  /** Lets the session run beside another in the same sandbox (see `sessionFiles`). Lowercase letters and digits. */
+  slot?: string;
 }
 
 export interface AgentSessionResult {
@@ -103,16 +124,16 @@ export async function prepareAgentSandbox(sandbox: AgentSandbox, options: { cliV
  * argument (`spawn` gives the command no stdin), the CLI's output to the stream file, and its exit
  * status to the exit marker once it ends.
  */
-export function wrapperScript(argv: string[], dir: string): string {
+export function wrapperScript(argv: string[], dir: string, files: SessionFiles = SESSION_FILES): string {
   const q = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
   const [bin, ...args] = argv;
   return [
     "# Runs one agent session; written by startAgentSession.",
     `D=${q(dir)}`,
-    `rm -rf -- "$D/${SESSION_FILES.config}" && mkdir -m 700 -- "$D/${SESSION_FILES.config}" || { echo 126 > "$D/${SESSION_FILES.exit}"; exit 126; }`,
-    `${q(bin!)} ${AGENT_PROMPT_FLAG} "$(cat "$D/${SESSION_FILES.prompt}")" ${args.map(q).join(" ")} > "$D/${SESSION_FILES.stream}" 2>&1`,
+    `rm -rf -- "$D/${files.config}" && mkdir -m 700 -- "$D/${files.config}" || { echo 126 > "$D/${files.exit}"; exit 126; }`,
+    `${q(bin!)} ${AGENT_PROMPT_FLAG} "$(cat "$D/${files.prompt}")" ${args.map(q).join(" ")} > "$D/${files.stream}" 2>&1`,
     "code=$?",
-    `printf '%s\\n' "$code" > "$D/${SESSION_FILES.exit}.tmp" && mv -f -- "$D/${SESSION_FILES.exit}.tmp" "$D/${SESSION_FILES.exit}"`,
+    `printf '%s\\n' "$code" > "$D/${files.exit}.tmp" && mv -f -- "$D/${files.exit}.tmp" "$D/${files.exit}"`,
     "exit $code",
     "",
   ].join("\n");
@@ -120,29 +141,31 @@ export function wrapperScript(argv: string[], dir: string): string {
 
 /**
  * Writes the session's files, starts the relay as the sandbox user and waits until it listens, then
- * starts the agent as the agent user. Files left by an earlier session are removed first (as the sandbox
- * user, unlinking anything the agent may have put in their place).
+ * starts the agent as the agent user. Files left by an earlier session of the same slot are removed first
+ * (as the sandbox user, unlinking anything the agent may have put in their place); another slot's files
+ * are never touched.
  */
 export async function startAgentSession(sandbox: AgentSandbox, options: StartAgentSessionOptions): Promise<AgentSessionIds> {
   const { relay } = options;
   const relayCommand = agentRelayCommand(relay);
+  const files = sessionFiles(options.slot);
   const dir = sandbox.agentDir;
-  const names = [SESSION_FILES.brief, SESSION_FILES.findings, SESSION_FILES.prompt, SESSION_FILES.wrapper, SESSION_FILES.verdicts, SESSION_FILES.stream, SESSION_FILES.exit, `${SESSION_FILES.exit}.tmp`];
+  const names = [files.brief, files.findings, files.prompt, files.wrapper, files.verdicts, files.stream, files.exit, `${files.exit}.tmp`];
   const cleared = await sandbox.exec(["rm", "-f", "--", ...names.map((name) => fileIn(sandbox, name))], { timeoutMs: 30_000 });
   if (cleared.exitCode !== 0) throw new Error(`Could not clear the agent directory: ${cleared.stderr.trim().slice(0, 300)}`);
 
   const { brief, prompt } = sessionTexts(options.kind, {
     app: sandbox.root,
-    brief: fileIn(sandbox, SESSION_FILES.brief),
-    findings: fileIn(sandbox, SESSION_FILES.findings),
-    verdicts: fileIn(sandbox, SESSION_FILES.verdicts),
+    brief: fileIn(sandbox, files.brief),
+    findings: fileIn(sandbox, files.findings),
+    verdicts: fileIn(sandbox, files.verdicts),
   });
   const argv = [agentCliPath(cliPrefix(sandbox)), ...agentCliArgs({ maxTurns: options.maxTurns })];
   await sandbox.writeAgentFiles([
-    { name: SESSION_FILES.brief, content: brief, mode: 0o644 },
-    { name: SESSION_FILES.findings, content: `${JSON.stringify(options.findings, null, 2)}\n`, mode: 0o644 },
-    { name: SESSION_FILES.prompt, content: prompt, mode: 0o644 },
-    { name: SESSION_FILES.wrapper, content: wrapperScript(argv, dir), mode: 0o644 },
+    { name: files.brief, content: brief, mode: 0o644 },
+    { name: files.findings, content: `${JSON.stringify(options.findings, null, 2)}\n`, mode: 0o644 },
+    { name: files.prompt, content: prompt, mode: 0o644 },
+    { name: files.wrapper, content: wrapperScript(argv, dir, files), mode: 0o644 },
   ]);
 
   const relayProcess = await sandbox.spawn(relayCommand.cmd, { env: relayCommand.env });
@@ -153,10 +176,10 @@ export async function startAgentSession(sandbox: AgentSandbox, options: StartAge
     throw error;
   }
 
-  const env = agentCliEnv({ baseUrl: `http://127.0.0.1:${relay.port}`, configDir: fileIn(sandbox, SESSION_FILES.config) });
+  const env = agentCliEnv({ baseUrl: `http://127.0.0.1:${relay.port}`, configDir: fileIn(sandbox, files.config) });
   try {
-    const agent = await sandbox.spawn(["sh", fileIn(sandbox, SESSION_FILES.wrapper)], { env, runAs: AGENT_USER });
-    return { relayProcessId: relayProcess.processId, agentProcessId: agent.processId };
+    const agent = await sandbox.spawn(["sh", fileIn(sandbox, files.wrapper)], { env, runAs: AGENT_USER });
+    return { relayProcessId: relayProcess.processId, agentProcessId: agent.processId, ...(options.slot !== undefined && { slot: options.slot }) };
   } catch (error) {
     await sandbox.process(relayProcess.processId).stop();
     throw error;
@@ -179,8 +202,8 @@ async function waitForRelay(sandbox: AgentSandbox, processId: number): Promise<v
 }
 
 /** The CLI's exit status from the marker, `null` while there is none. */
-async function exitMarker(sandbox: AgentSandbox): Promise<number | null | undefined> {
-  const text = (await sandbox.readAgentFile(SESSION_FILES.exit)).trim();
+async function exitMarker(sandbox: AgentSandbox, files: SessionFiles): Promise<number | null | undefined> {
+  const text = (await sandbox.readAgentFile(files.exit)).trim();
   if (!text) return null;
   return /^\d{1,3}$/.test(text) ? Number(text) : undefined;
 }
@@ -190,11 +213,12 @@ async function exitMarker(sandbox: AgentSandbox): Promise<number | null | undefi
  * the session's process is gone without the CLI having ended (killed, or the sandbox restarted).
  */
 export async function agentSessionStatus(sandbox: AgentSandbox, ids: AgentSessionIds): Promise<"running" | "finished" | "failed"> {
-  if ((await exitMarker(sandbox)) !== null) return "finished";
+  const files = sessionFiles(ids.slot);
+  if ((await exitMarker(sandbox, files)) !== null) return "finished";
   const status = await sandbox.process(ids.agentProcessId).status({ tailBytes: 1024 });
   if (status.state === "running") return "running";
   // The marker is written just before the process ends: look again.
-  return (await exitMarker(sandbox)) !== null ? "finished" : "failed";
+  return (await exitMarker(sandbox, files)) !== null ? "finished" : "failed";
 }
 
 /**
@@ -212,19 +236,20 @@ async function readSessionFile(sandbox: AgentSandbox, name: string, bytes: numbe
 }
 
 /**
- * Reads the verdicts and the end of the stream, then stops the relay (and the agent, if it still runs).
- * A missing or unusable verdicts file gives no verdicts and an `error`, never a throw.
+ * Reads the verdicts and the end of the stream, then stops the session's own relay (and its agent, if it
+ * still runs). A missing or unusable verdicts file gives no verdicts and an `error`, never a throw.
  *
  * The stream file can outgrow a file read, so only its last `STREAM_TAIL_BYTES` are read: the final
  * result (finished, turns, error) is its last line. Without one, `turns` counts only that tail.
  */
 export async function collectAgentSession(sandbox: AgentSandbox, ids: AgentSessionIds): Promise<AgentSessionResult> {
   const errors: string[] = [];
-  const marker = await exitMarker(sandbox).catch(() => undefined);
+  const files = sessionFiles(ids.slot);
+  const marker = await exitMarker(sandbox, files).catch(() => undefined);
 
   let verdicts: Verdict[] = [];
   try {
-    const file = await readSessionFile(sandbox, SESSION_FILES.verdicts, VERDICTS_MAX_BYTES, false);
+    const file = await readSessionFile(sandbox, files.verdicts, VERDICTS_MAX_BYTES, false);
     if (!file) errors.push("no verdicts file");
     else if (file.size > VERDICTS_MAX_BYTES) errors.push("verdicts file is too large");
     else {
@@ -237,7 +262,7 @@ export async function collectAgentSession(sandbox: AgentSandbox, ids: AgentSessi
 
   let stream = parseAgentStream("");
   try {
-    const file = await readSessionFile(sandbox, SESSION_FILES.stream, STREAM_TAIL_BYTES, true);
+    const file = await readSessionFile(sandbox, files.stream, STREAM_TAIL_BYTES, true);
     if (file) {
       // A cut tail starts mid-line: drop that part line.
       const text = file.size > STREAM_TAIL_BYTES ? file.text.slice(file.text.indexOf("\n") + 1) : file.text;

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_PATHS, AGENT_PROMPT_FLAG, agentCliArgs, agentCliPath, AGENT_USER, agentSessionStatus, collectAgentSession, prepareAgentSandbox, SESSION_FILES, startAgentSession, type AgentSandbox } from "../src/scan/slice";
+import { AGENT_PATHS, AGENT_PROMPT_FLAG, agentCliArgs, agentCliPath, AGENT_USER, agentSessionStatus, collectAgentSession, prepareAgentSandbox, SESSION_FILES, sessionFiles, startAgentSession, type AgentSandbox } from "../src/scan/slice";
 
 const TOKEN = "gateway-token-for-test";
 const RELAY = { port: 4100, targetUrl: "https://gateway.example.com/api/gateway", token: TOKEN };
@@ -265,5 +265,135 @@ describe("agentSessionStatus and collectAgentSession", () => {
     installFakeCli(sandbox, "true");
     const ids = await startAgentSession(sandbox, { kind: "refute", findings: [], relay: RELAY });
     expect(await agentSessionStatus(sandbox, ids)).toBe("running");
+  });
+});
+
+describe("two sessions side by side", () => {
+  const SLOT = "band2";
+  const SECOND_RELAY = { ...RELAY, port: 4101 };
+  const names = Object.values(SESSION_FILES);
+  /** A stand-in CLI that rules on the first candidate of the findings file its prompt names, in the verdicts file its prompt names. */
+  const RULES_ON_ITS_OWN = [
+    `findings="$(printf '%s' "$2" | grep -o '[^ ]*findings\\.json' | head -1)"`,
+    `verdicts="$(printf '%s' "$2" | grep -o '[^ ]*verdicts\\.json' | head -1)"`,
+    `id="$(grep -o '"F[0-9]*"' "$findings" | head -1)"`,
+    `printf '[{"id":%s,"verdict":"real","reason":"no check"}]' "$id" > "$verdicts"`,
+    `echo '${RESULT()}'`,
+  ].join("\n");
+
+  test("without a slot the files are the fixed ones; with one, each has the slot's name in front", () => {
+    expect(sessionFiles()).toBe(SESSION_FILES);
+    expect(sessionFiles(SLOT)).toEqual({
+      brief: "band2-brief.md",
+      findings: "band2-findings.json",
+      prompt: "band2-prompt.txt",
+      wrapper: "band2-run-agent.sh",
+      verdicts: "band2-verdicts.json",
+      stream: "band2-agent-stream.jsonl",
+      exit: "band2-agent.exit",
+      config: "band2-cli-config",
+    });
+    // No file of one is a file of the other.
+    expect(Object.values(sessionFiles(SLOT)).filter((name) => (names as string[]).includes(name))).toEqual([]);
+  });
+
+  test("each has its own files, relay port and config directory, and starting one leaves the other's files alone", async () => {
+    sandbox.runAgent = false;
+    installFakeCli(sandbox, "true");
+    const second = sessionFiles(SLOT);
+    const first = await startAgentSession(sandbox, { kind: "refute", findings: [{ id: "F1" }], relay: RELAY });
+    // What the first session has written so far.
+    writeFileSync(sandbox.file(SESSION_FILES.verdicts), '{"id":"F1","verdict":"real"}\n');
+    const other = await startAgentSession(sandbox, { kind: "refute", findings: [{ id: "F31" }], relay: SECOND_RELAY, slot: SLOT });
+    expect(first).toEqual({ relayProcessId: 100, agentProcessId: 101 });
+    expect("slot" in first).toBe(false);
+    expect(other).toEqual({ relayProcessId: 102, agentProcessId: 103, slot: SLOT });
+
+    // The second session's start cleared only its own names, and the first's files are as they were.
+    const cleared = sandbox.execs.filter((cmd) => cmd[0] === "rm");
+    expect(cleared).toHaveLength(2);
+    expect(cleared[0]!.slice(3).every((path) => names.some((name) => path === sandbox.file(name) || path === `${sandbox.file(name)}.tmp`))).toBe(true);
+    expect(cleared[1]!.slice(3).every((path) => path.startsWith(sandbox.file(`${SLOT}-`)))).toBe(true);
+    expect(readFileSync(sandbox.file(SESSION_FILES.verdicts), "utf8")).toBe('{"id":"F1","verdict":"real"}\n');
+    expect(JSON.parse(readFileSync(sandbox.file(SESSION_FILES.findings), "utf8"))).toEqual([{ id: "F1" }]);
+    expect(JSON.parse(readFileSync(sandbox.file(second.findings), "utf8"))).toEqual([{ id: "F31" }]);
+
+    // Each relay listens on its own port, and each agent talks to its own relay, with its own config directory.
+    const [relay, agent, relay2, agent2] = sandbox.spawned;
+    expect(Object.values(relay!.env!)).toContain("4100");
+    expect(Object.values(relay2!.env!)).toContain("4101");
+    expect(Object.values(relay2!.env!)).not.toContain("4100");
+    expect(Object.values(agent!.env!)).toEqual(expect.arrayContaining(["http://127.0.0.1:4100", sandbox.file(SESSION_FILES.config)]));
+    expect(Object.values(agent2!.env!)).toEqual(expect.arrayContaining(["http://127.0.0.1:4101", sandbox.file(second.config)]));
+    expect(agent!.cmd).toEqual(["sh", sandbox.file(SESSION_FILES.wrapper)]);
+    expect(agent2!.cmd).toEqual(["sh", sandbox.file(second.wrapper)]);
+
+    // The second session's brief, prompt and wrapper name its own files, never the first's.
+    for (const file of [second.brief, second.prompt, second.wrapper]) {
+      const text = readFileSync(sandbox.file(file), "utf8");
+      for (const name of names) expect(text).not.toContain(sandbox.file(name));
+    }
+    const brief = readFileSync(sandbox.file(second.brief), "utf8");
+    expect(brief).toContain(sandbox.file(second.findings));
+    expect(brief).toContain(sandbox.file(second.verdicts));
+    const wrapper = readFileSync(sandbox.file(second.wrapper), "utf8");
+    for (const file of [second.config, second.prompt, second.stream, second.exit]) expect(wrapper).toContain(`"$D/${file}"`);
+
+    // And the other way round: the first slot started again clears its own stale files, not the second's.
+    writeFileSync(sandbox.file(second.verdicts), '{"id":"F31","verdict":"false"}\n');
+    writeFileSync(sandbox.file(second.exit), "0\n");
+    await startAgentSession(sandbox, { kind: "variants", findings: [], relay: RELAY });
+    expect(existsSync(sandbox.file(SESSION_FILES.verdicts))).toBe(false);
+    expect(readFileSync(sandbox.file(second.verdicts), "utf8")).toBe('{"id":"F31","verdict":"false"}\n');
+    expect(readFileSync(sandbox.file(second.exit), "utf8")).toBe("0\n");
+  });
+
+  test("each is polled and collected by its own files, and collecting one stops only its own processes", async () => {
+    installFakeCli(sandbox, RULES_ON_ITS_OWN);
+    const first = await startAgentSession(sandbox, { kind: "refute", findings: [{ id: "F1" }], relay: RELAY });
+    // The second is still running: no exit marker of its own yet, whatever the first has written.
+    sandbox.runAgent = false;
+    const other = await startAgentSession(sandbox, { kind: "refute", findings: [{ id: "F31" }], relay: SECOND_RELAY, slot: SLOT });
+    expect(await agentSessionStatus(sandbox, first)).toBe("finished");
+    expect(await agentSessionStatus(sandbox, other)).toBe("running");
+
+    const done = await collectAgentSession(sandbox, first);
+    expect(done).toMatchObject({ finished: true, exitCode: 0 });
+    expect(done.verdicts.map((v) => [v.id, v.verdict])).toEqual([["F1", "real"]]);
+    expect(sandbox.stopped.sort()).toEqual([first.relayProcessId, first.agentProcessId]);
+    expect(sandbox.states.get(other.relayProcessId)).toBe("running");
+    expect(sandbox.states.get(other.agentProcessId)).toBe("running");
+
+    // The second ends: its wrapper writes its own verdicts, stream and exit marker.
+    Bun.spawnSync(sandbox.spawned[3]!.cmd, { cwd: sandbox.root, env: { PATH: process.env.PATH ?? "", ...sandbox.spawned[3]!.env } });
+    sandbox.states.set(other.agentProcessId, "exited");
+    expect(await agentSessionStatus(sandbox, other)).toBe("finished");
+    const result = await collectAgentSession(sandbox, other);
+    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject({ finished: true, turns: 7, exitCode: 0 });
+    expect(result.verdicts.map((v) => [v.id, v.verdict])).toEqual([["F31", "real"]]);
+    expect(sandbox.stopped.slice(2).sort()).toEqual([other.relayProcessId, other.agentProcessId]);
+    // The first session's files were not written by the second.
+    expect(readFileSync(sandbox.file(SESSION_FILES.verdicts), "utf8")).toContain('"F1"');
+    expect(readFileSync(sandbox.file(SESSION_FILES.verdicts), "utf8")).not.toContain('"F31"');
+  });
+
+  test("a second session that never wrote anything is failed and collected empty, beside a first that finished", async () => {
+    installFakeCli(sandbox, RULES_ON_ITS_OWN);
+    const first = await startAgentSession(sandbox, { kind: "refute", findings: [{ id: "F1" }], relay: RELAY });
+    sandbox.runAgent = false;
+    const other = await startAgentSession(sandbox, { kind: "refute", findings: [{ id: "F31" }], relay: SECOND_RELAY, slot: SLOT });
+    sandbox.states.set(other.agentProcessId, "lost");
+    expect(await agentSessionStatus(sandbox, other)).toBe("failed");
+    expect(await collectAgentSession(sandbox, other)).toEqual({ verdicts: [], finished: false, turns: 0, error: "no verdicts file; agent did not finish" });
+    expect((await collectAgentSession(sandbox, first)).verdicts.map((v) => v.id)).toEqual(["F1"]);
+  });
+
+  test("refuses a slot that is not a plain name before touching the sandbox", async () => {
+    for (const slot of ["", "../up", "a/b", "Band2", "x".repeat(17)]) {
+      await expect(startAgentSession(sandbox, { kind: "refute", findings: [], relay: SECOND_RELAY, slot })).rejects.toThrow(/Invalid session slot/);
+    }
+    expect(sandbox.spawned).toHaveLength(0);
+    expect(sandbox.execs).toHaveLength(0);
   });
 });

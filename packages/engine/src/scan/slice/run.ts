@@ -9,7 +9,7 @@ import { isFatal } from "../errors";
 import { Limiter, stageClients, type Pricing, type UsageSink } from "../metrics";
 import { findingsEntry, type FindingsEntry } from "./briefs";
 import { planBundle, type Bundle, type BundleMode, type Packet, type PlanDeps } from "./bundle";
-import { cluster, dedupe, TOP_K, topK, type Candidate, type Cluster } from "./candidates";
+import { cluster, dedupe, TOP_BANDS, TOP_K, topK, type Candidate, type Cluster } from "./candidates";
 import { changeBundle, changeCandidates, changedServerPaths, changesFromDiff, type ChangedSource, type Range } from "./change";
 import { candidateDeviance, type DevDef, type DevianceDeps } from "./deviance";
 import { answerText, huntMessages, loadLines, parseHuntReply, type HuntMode, type HuntRow, type LinesOf } from "./hunt";
@@ -52,7 +52,10 @@ export interface SliceRunOptions {
 
 export type SlicePhase = "select" | "hunt" | "score";
 
-export interface SliceHuntOptions extends SliceRunOptions, PlanDeps {}
+export interface SliceHuntOptions extends SliceRunOptions, PlanDeps {
+  /** The most candidates selected. Default `TOP_BANDS` bands of `TOP_K`. */
+  top?: number;
+}
 
 /** The change as diff text, or already parsed (the same result for the same change). */
 export type ChangeHuntOptions = SliceRunOptions & {
@@ -89,7 +92,7 @@ export interface SliceHuntResult {
   counts: SliceHuntCounts;
 }
 
-/** Whole repository: the bundle plan, hunt x3, score x3, dedupe, top 30 by score interleaved with score plus deviance. */
+/** Whole repository: the bundle plan, hunt x3, score x3, dedupe, the top two bands of 30 by score interleaved with score plus deviance. */
 export function runSliceHunt(options: SliceHuntOptions): Promise<SliceHuntResult> {
   const phases = phaseClock(options.onPhase);
   return phases.around(() => sliceHunt(options, phases));
@@ -108,7 +111,7 @@ async function sliceHunt(options: SliceHuntOptions, phases: PhaseClock): Promise
   const kept = dedupe(found.clusters, found.scores);
   const deviance = await candidateDeviance(kept, devianceDeps(options, listFiles));
   options.signal?.throwIfAborted();
-  const selected = topK(kept, deviance, TOP_K);
+  const selected = topK(kept, deviance, options.top ?? TOP_BANDS * TOP_K);
   return result(found, kept, selected, size, {});
 }
 

@@ -17,6 +17,8 @@ const STAGE_GROUP: Record<string, BillGroupLabel> = {
   slice_score: "Scoring",
   rate: "Scoring",
   verify: "Verifying in a sandbox",
+  // The second verification session of a deep scan: the same work, shown on the same line.
+  verify2: "Verifying in a sandbox",
   variants: "Looking for variants",
   structure: "Writing up",
   consolidate: "Writing up",

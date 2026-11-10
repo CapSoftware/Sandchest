@@ -1,8 +1,9 @@
 /**
  * A deep scan on the slice engine, in workflow steps that each fit a function's time limit: hunt (open a
- * sandbox, select code, hunt and score from this server), a verification session and a variants session
- * run by an agent inside the sandbox (started by one step, polled and collected by later ones), then the
- * write-up, persisted as a classic deep scan is.
+ * sandbox, select code, hunt and score from this server), verification and then a variants session run by
+ * an agent inside the sandbox (started by one step, polled and collected by later ones), then the
+ * write-up, persisted as a classic deep scan is. The hunt selects up to two bands of candidates; each band
+ * is verified by a session of its own, the two at the same time in the one sandbox.
  *
  * A pull request review runs the same steps: its hunt reads the change from GitHub and opens a sandbox
  * only for candidates to verify, it has no variants session, and it is persisted as a classic review is.
@@ -53,8 +54,12 @@ import { readSandboxUsage, UsageLedger } from "./usage-ledger";
 
 /** The sandbox stops itself this long after it is made, or after a session last started, if nothing deletes it. */
 export const SLICE_TTL_SECONDS = 90 * 60;
-/** The one loopback port the agent may reach: its relay to the gateway. Never the indexer's port, which is in use in the same sandbox. */
+/** The loopback port the agent may reach: its relay to the gateway. Never the indexer's port, which is in use in the same sandbox. */
 export const RELAY_PORT = 4180;
+/** The relay of a deep scan's second verification session, which runs beside the first: the one other port its agent may reach. */
+export const SECOND_RELAY_PORT = 4181;
+/** That session's slot: the name in front of its files in the agent directory. */
+const SECOND_SLOT = "band2";
 /** A session's gateway token outlives the longest a session is polled. */
 const SESSION_TOKEN_TTL_SECONDS = 60 * 60;
 /** The hunt step stops spending after this long, under the function's 800 s limit. */
@@ -66,9 +71,15 @@ const WRITEUP_BUDGET_MS = 10 * 60_000;
 const CLONE_TIMEOUT_MS = 4 * 60_000;
 
 /** The sandbox's private files. */
-const FILES = { hunt: "slice-hunt.json", verify: "slice-verify.json", confirmed: "slice-confirmed.json", variants: "slice-variants.json" } as const;
+const FILES = { hunt: "slice-hunt.json", verify: "slice-verify.json", verify2: "slice-verify2.json", confirmed: "slice-confirmed.json", variants: "slice-variants.json" } as const;
 
-export type SessionKind = "verify" | "variants";
+/**
+ * `verify` rules on the hunt's first band of candidates and `verify2` on its second, beside it. Each is also
+ * the stage its timings and its gateway token's ledger rows are recorded under, so a bill counts both.
+ */
+export type SessionKind = "verify" | "verify2" | "variants";
+
+const SESSION_NAMES: Record<SessionKind, string> = { verify: "Verification", verify2: "Second verification", variants: "Variants" };
 
 interface SessionState extends slice.AgentSessionIds {
   /** The gateway token's attempt, also the stage's. */
@@ -115,13 +126,14 @@ const FAST_UNAVAILABLE = "Fast mode is not available right now, so this scan run
  * Opens the sandbox (clone, indexer, agent CLI), runs the slice hunt and keeps its result in the sandbox.
  * A pull request is hunted from its change on GitHub first, and gets a sandbox only when something was
  * selected. A run of this step that is retried first deletes the sandbox the earlier run left. Returns how
- * many candidates were selected for verification, and whether a variants session follows it.
+ * many candidates were selected for verification, whether they fill a second band (verified by a second
+ * session), and whether a variants session follows.
  */
-export async function huntSlice(scanId: string, run: { attempt?: number; /** For tests. Default the engine's. */ passDelayMs?: number } = {}): Promise<{ selected: number; variants: boolean }> {
+export async function huntSlice(scanId: string, run: { attempt?: number; /** For tests. Default the engine's. */ passDelayMs?: number } = {}): Promise<{ selected: number; variants: boolean; secondBand: boolean }> {
   const scan = await requireScan(scanId);
-  // A pull request is verified, never searched for variants.
+  // A pull request is verified in one session, and never searched for variants.
   const variants = scan.kind !== "pr_review";
-  if (scan.status !== "running") return { selected: 0, variants };
+  if (scan.status !== "running") return { selected: 0, variants, secondBand: false };
   const installationId = scan.repo.org.installationId;
   if (!installationId || !scan.repo.enabled) throw new ScanFinished("Repository is no longer installed");
   const runtime = sliceRuntime();
@@ -142,7 +154,7 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
   try {
     if (guard.signal.aborted) throw guard.signal.reason;
     if (scan.fast && !fast && sliceState(scan).fast === undefined) events.write("progress", FAST_UNAVAILABLE);
-    if (scan.kind === "pr_review") return { selected: await huntChange({ scan, installation, attempt, stages, events, guard, passDelayMs: run.passDelayMs }), variants };
+    if (scan.kind === "pr_review") return { selected: await huntChange({ scan, installation, attempt, stages, events, guard, passDelayMs: run.passDelayMs }), variants, secondBand: false };
     events.write("stage:setup", "Starting a fresh sandbox and fetching the code…");
     const { sandbox, headSha, handle } = await openSandbox({ scan, installation, attempt, stages, events, started, fast: scan.fast ? fast : undefined });
     const indexer = runtime.indexer(handle);
@@ -176,7 +188,7 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
     const selected = result.findings.length;
     await saveSlice(scan.id, { loc, selected });
     events.write("progress", selected === 0 ? "Nothing worth verifying turned up." : `${selected} ${selected === 1 ? "candidate goes" : "candidates go"} to verification.`);
-    return { selected, variants };
+    return { selected, variants, secondBand: verifyBands(scan, result.findings).verify2.length > 0 };
   } catch (error) {
     return await stopped(scan, error, guard.signal);
   } finally {
@@ -294,7 +306,9 @@ async function openSandbox(input: { scan: LoadedScan; installation: Installation
     let opened: SliceSandbox | undefined;
     const ready = await prepareWorkspace({
       open: async () => {
-        opened = await runtime.open({ ttlSeconds: SLICE_TTL_SECONDS, setupScript: agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [RELAY_PORT], dns: false }) });
+        // A pull request is verified in one session, so its agent gets the one port.
+        const loopbackPorts = scan.kind === "pr_review" ? [RELAY_PORT] : [RELAY_PORT, SECOND_RELAY_PORT];
+        opened = await runtime.open({ ttlSeconds: SLICE_TTL_SECONDS, setupScript: agentSandboxSetupScript({ allowHosts: [], loopbackPorts, dns: false }) });
         // Recorded before anything else, so a later step can always find it and delete it.
         try {
           await saveSlice(scan.id, { sandboxId: opened.id, huntAttempt: attempt, ...(input.fast !== undefined && { fast: input.fast }) }, { replace: true });
@@ -322,13 +336,23 @@ async function openSandbox(input: { scan: LoadedScan; installation: Installation
 // ---- Sessions -----------------------------------------------------------------
 
 /**
- * Starts the verification or variants session, once: a session already recorded for that kind is not
- * started again. False when there is nothing to start. A variants session that cannot start never fails
- * the scan.
+ * The candidates each verification session rules on, in rank order: the hunt's first band, and its second.
+ * A pull request has one band.
+ */
+function verifyBands(scan: { kind: string }, findings: slice.FindingsEntry[]): Record<"verify" | "verify2", slice.FindingsEntry[]> {
+  return { verify: findings.slice(0, slice.TOP_K), verify2: scan.kind === "pr_review" ? [] : findings.slice(slice.TOP_K, 2 * slice.TOP_K) };
+}
+
+/**
+ * Starts a session, once: a session already recorded for that kind is not started again. False when there
+ * is nothing to start. The second verification session runs beside the first, in a slot and on a relay
+ * port of its own, and under its own stage, so its ledger rows are its own step's. Only the first
+ * verification session has to start: a second one, or a variants session, that cannot never fails the scan.
  */
 export async function startSliceSession(scanId: string, kind: SessionKind): Promise<{ started: boolean }> {
   const scan = await requireScan(scanId);
   if (scan.status !== "running") return { started: false };
+  if (kind === "verify2" && scan.kind === "pr_review") return { started: false };
   const state = sliceState(scan);
   if (state.sessions?.[kind]) return { started: true };
   const stages = new StageRecorder(scan.id);
@@ -341,8 +365,13 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
     if (budget && usdToMicroUsd(budget.spentUsd) >= ceilingMicroUsd) throw new SpendCeilingReached();
     const sandbox = await sliceRuntime().attach(requireSandboxId(state));
     let findings: unknown[];
-    if (kind === "verify") {
-      findings = (await readHunt(sandbox)).findings;
+    // What the verification rules on in all, for the line that announces it.
+    let verifying = 0;
+    if (kind !== "variants") {
+      const bands = verifyBands(scan, (await readHunt(sandbox)).findings);
+      findings = bands[kind];
+      verifying = bands.verify.length + bands.verify2.length;
+      if (kind === "verify2" && findings.length === 0) return { started: false };
     } else {
       findings = parseJson<slice.ConfirmedEntry[]>(await sandbox.readPrivateFile(FILES.confirmed)) ?? [];
       if (findings.length === 0) {
@@ -356,25 +385,24 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
     const token = mintGatewayToken({ scanId: scan.id, stage: kind, attempt, ceilingMicroUsd, ttlSeconds: SESSION_TOKEN_TTL_SECONDS, ...(fast && { fast: true }) }, secret);
     const startedAt = Date.now();
     stages.start(kind, attempt, new Date(startedAt));
+    const second = kind === "verify2";
     const ids = await sliceRuntime().startAgentSession(sandbox, {
-      kind: kind === "verify" ? "refute" : "variants",
+      kind: kind === "variants" ? "variants" : "refute",
       findings,
-      relay: { port: RELAY_PORT, targetUrl: gatewayEndpoint(config().SANDCHEST_APP_URL).baseUrl, token },
+      relay: { port: second ? SECOND_RELAY_PORT : RELAY_PORT, targetUrl: gatewayEndpoint(config().SANDCHEST_APP_URL).baseUrl, token },
+      ...(second && { slot: SECOND_SLOT }),
     });
-    await saveSlice(scan.id, { sessions: { ...state.sessions, [kind]: { relayProcessId: ids.relayProcessId, agentProcessId: ids.agentProcessId, attempt, startedAt } } });
-    events.write(
-      "stage:verify",
-      kind === "verify"
-        ? `Verifying ${findings.length} ${findings.length === 1 ? "candidate" : "candidates"} against the code in the sandbox…`
-        : `Looking for the same flaw elsewhere, from ${findings.length} confirmed ${findings.length === 1 ? "finding" : "findings"}…`,
-    );
+    await saveSlice(scan.id, { sessions: { ...state.sessions, [kind]: { relayProcessId: ids.relayProcessId, agentProcessId: ids.agentProcessId, ...(ids.slot !== undefined && { slot: ids.slot }), attempt, startedAt } } });
+    // The verification is announced once, by its first session, with both bands' candidates.
+    if (kind === "verify") events.write("stage:verify", `Verifying ${verifying} ${verifying === 1 ? "candidate" : "candidates"} against the code in the sandbox…`);
+    if (kind === "variants") events.write("stage:verify", `Looking for the same flaw elsewhere, from ${findings.length} confirmed ${findings.length === 1 ? "finding" : "findings"}…`);
     return { started: true };
   } catch (error) {
     if (attempt !== undefined) stages.end(kind, attempt, "failed");
     if (kind === "verify") return await stopped(scan, error);
     if (error instanceof ScanFinished || error instanceof SpendCeilingReached) return await stopped(scan, error);
-    console.error(`Variants session for scan ${scan.id} did not start: ${describeError(error)}`);
-    events.write("progress", "Could not look for variants; carrying on with what was verified.");
+    console.error(`${SESSION_NAMES[kind]} session for scan ${scan.id} did not start: ${describeError(error)}`);
+    events.write("progress", kind === "verify2" ? "Could not start the second verification session; carrying on with the first." : "Could not look for variants; carrying on with what was verified.");
     return { started: false };
   } finally {
     await Promise.allSettled([events.flush(), stages.flush()]);
@@ -395,12 +423,12 @@ export async function sliceSessionStatus(scanId: string, kind: SessionKind): Pro
   try {
     const sandbox = await sliceRuntime().attach(requireSandboxId(sliceState(scan)));
     const state = await sliceRuntime().agentSessionStatus(sandbox, session);
-    if (state === "finished") stages.end(kind, session.attempt, "ok", await sessionEndedAt(sandbox, session.startedAt));
+    if (state === "finished") stages.end(kind, session.attempt, "ok", await sessionEndedAt(sandbox, session));
     if (state === "failed") stages.end(kind, session.attempt, "failed");
     return { state };
   } catch (error) {
     if (kind === "verify") return await stopped(scan, error);
-    console.error(`Variants session status for scan ${scan.id} could not be read: ${describeError(error)}`);
+    console.error(`${SESSION_NAMES[kind]} session status for scan ${scan.id} could not be read: ${describeError(error)}`);
     stages.end(kind, session.attempt, "failed");
     return { state: "failed" };
   } finally {
@@ -410,8 +438,13 @@ export async function sliceSessionStatus(scanId: string, kind: SessionKind): Pro
 
 /**
  * Stops the session (if it still runs) and keeps its verdicts in the sandbox's private directory. Collected
- * once: a repeat returns what was counted. `timedOut` ends the session's stage as failed. A verification
- * that left no usable verdicts fails the scan; a variants session never does.
+ * once: a repeat returns what was counted. `timedOut` ends the session's stage as failed. A first
+ * verification session that left no usable verdicts fails the scan; a second one, or a variants session,
+ * never does: the scan carries on with what the first confirmed.
+ *
+ * A verification session keeps its rulings on its own band, and the confirmed findings of every band
+ * collected so far, in rank order, for the variants session. The workflow collects the first band, then the
+ * second.
  */
 export async function collectSliceSession(scanId: string, kind: SessionKind, options: { timedOut?: boolean } = {}): Promise<{ real: number }> {
   const scan = await requireScan(scanId);
@@ -422,25 +455,41 @@ export async function collectSliceSession(scanId: string, kind: SessionKind, opt
   if (session.collected) return { real: session.real ?? 0 };
   const stages = new StageRecorder(scan.id);
   const events = new EventWriter(db(), scan.id);
+  // The feed has the line that sums up the verification.
+  let summed = false;
   try {
     const runtime = sliceRuntime();
     const sandbox = await runtime.attach(requireSandboxId(state));
     const result = await runtime.collectAgentSession(sandbox, session);
     if (options.timedOut) stages.end(kind, session.attempt, "failed");
     let real: number;
-    if (kind === "verify") {
-      if (result.verdicts.length === 0 && result.error !== undefined) {
+    if (kind !== "variants") {
+      if (kind === "verify" && result.verdicts.length === 0 && result.error !== undefined) {
         console.error(`Verification for scan ${scan.id} left no verdicts: ${result.error.slice(0, 200)}`);
         throw new ScanFinished("The verification in the sandbox ended without a result. Nothing was charged.");
       }
       const hunt = await readHunt(sandbox);
-      const confirmed = slice.confirmedEntries(hunt.findings, result.verdicts, { checkoutRoot: sandbox.root });
+      const bands = verifyBands(scan, hunt.findings);
+      // A session rules only on the candidates it was given: a ruling under any other id is left out.
+      const given = new Set(bands[kind].map((entry) => entry.id));
+      const own = result.verdicts.filter((v) => given.has(v.id));
+      const other = kind === "verify" ? "verify2" : "verify";
+      const others = state.sessions?.[other]?.collected ? (parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES[other])) ?? []) : [];
+      const confirmed = slice.confirmedEntries(hunt.findings, [...others, ...own], { checkoutRoot: sandbox.root });
       await sandbox.writePrivateFiles([
-        { name: FILES.verify, content: JSON.stringify(result.verdicts) },
+        { name: FILES[kind], content: JSON.stringify(own) },
         { name: FILES.confirmed, content: JSON.stringify(confirmed) },
       ]);
-      real = confirmed.length;
-      events.write("progress", `Verified ${hunt.findings.length}: ${real} confirmed.`);
+      real = confirmed.filter((entry) => given.has(entry.id)).length;
+      if (kind === "verify2" && (own.length === 0 || result.error !== undefined)) {
+        console.error(`Second verification for scan ${scan.id} ended early: ${(result.error ?? "no verdicts").slice(0, 200)}`);
+        events.write("progress", own.length === 0 ? "The second verification session left no verdicts; carrying on with the first." : "The second verification session stopped early; keeping the verdicts it reached.");
+      }
+      // One line for the whole verification, written with its last session: the second, when one was started.
+      // The second band counts for the candidates it ruled on, which is fewer than it was given when it was cut short.
+      if (kind === "verify2") events.write("progress", `Verified ${bands.verify.length + new Set(own.map((v) => v.id)).size}: ${confirmed.length} confirmed.`);
+      else if (!state.sessions?.verify2) events.write("progress", `Verified ${bands.verify.length}: ${real} confirmed.`);
+      summed = true;
     } else {
       await sandbox.writePrivateFiles([{ name: FILES.variants, content: JSON.stringify(result.verdicts) }]);
       real = result.verdicts.filter((v) => v.verdict === "real").length;
@@ -450,8 +499,12 @@ export async function collectSliceSession(scanId: string, kind: SessionKind, opt
     return { real };
   } catch (error) {
     if (kind === "verify") return await stopped(scan, error);
-    console.error(`Variants session for scan ${scan.id} could not be collected: ${describeError(error)}`);
+    console.error(`${SESSION_NAMES[kind]} session for scan ${scan.id} could not be collected: ${describeError(error)}`);
     stages.end(kind, session.attempt, "failed");
+    if (kind === "verify2" && !summed) {
+      events.write("progress", "The second verification session could not be read; carrying on with the first.");
+      events.write("progress", `Verified ${Math.min(state.selected ?? 0, slice.TOP_K)}: ${state.sessions?.verify?.real ?? 0} confirmed.`);
+    }
     return { real: 0 };
   } finally {
     await Promise.allSettled([events.flush(), stages.flush()]);
@@ -489,9 +542,13 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
     const sandbox = scan.kind === "pr_review" && !state.sandboxId ? undefined : await runtime.attach(requireSandboxId(state));
     const sessions = state.sessions ?? {};
     let findings: Finding[] = [];
-    if (sandbox && (sessions.verify?.real ?? 0) > 0) {
+    if (sandbox && (sessions.verify?.real ?? 0) + (sessions.verify2?.real ?? 0) > 0) {
       const hunt = await readHunt(sandbox);
-      const verdicts = parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.verify)) ?? [];
+      // Every verification session's rulings, each on its own band of the hunt's candidates.
+      const verdicts = [
+        ...(parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.verify)) ?? []),
+        ...(sessions.verify2?.collected ? (parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.verify2)) ?? []) : []),
+      ];
       const variants = sessions.variants?.collected
         ? { verdicts: parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.variants)) ?? [], confirmed: parseJson<slice.ConfirmedEntry[]>(await sandbox.readPrivateFile(FILES.confirmed)) ?? [] }
         : undefined;
@@ -774,10 +831,10 @@ pkill -KILL -u "$u" -x sandchest-index || true
 sleep 1
 ! pgrep -u "$u" -x sandchest-index >/dev/null`;
 
-/** When the session's CLI ended: the exit marker's modification time, else now. */
-async function sessionEndedAt(sandbox: SliceSandbox, startedAt: number): Promise<Date> {
+/** When the session's CLI ended: its exit marker's modification time, else now. */
+async function sessionEndedAt(sandbox: SliceSandbox, { slot, startedAt }: Pick<SessionState, "slot" | "startedAt">): Promise<Date> {
   try {
-    const result = await sandbox.exec(["stat", "-c", "%Y", `${sandbox.agentDir}/${slice.SESSION_FILES.exit}`], { timeoutMs: 30_000 });
+    const result = await sandbox.exec(["stat", "-c", "%Y", `${sandbox.agentDir}/${slice.sessionFiles(slot).exit}`], { timeoutMs: 30_000 });
     const seconds = Number(result.stdout.trim());
     const at = seconds * 1000;
     // Whole seconds: the start may fall inside the same second.
