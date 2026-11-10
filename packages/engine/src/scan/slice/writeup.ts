@@ -105,6 +105,51 @@ export function categoryOf(kind: string): Category {
   return KIND_CATEGORY[normKind(kind)];
 }
 
+/**
+ * Weakness classes that name exactly one category. The hunt's kind is a word or a letter and often says nothing
+ * of the class; the write-up, made after reading the code, cites the weakness. These are the classes with one
+ * clear category each: anything else keeps the category the hunt's kind gave it.
+ */
+const CWE_CATEGORY: Record<number, Category> = {
+  89: "sql_injection",
+  564: "sql_injection",
+  943: "nosql_injection",
+  77: "command_injection",
+  78: "command_injection",
+  88: "command_injection",
+  94: "code_injection",
+  95: "code_injection",
+  1336: "template_injection",
+  22: "path_traversal",
+  23: "path_traversal",
+  36: "path_traversal",
+  918: "ssrf",
+  79: "xss",
+  80: "xss",
+  611: "xxe",
+  502: "insecure_deserialization",
+  601: "open_redirect",
+  352: "csrf",
+  1321: "prototype_pollution",
+  434: "unrestricted_file_upload",
+};
+
+/** The category a cited weakness names (`CWE-918`), when it names exactly one. */
+export function categoryOfCwe(cwe: string | null | undefined): Category | undefined {
+  const m = cwe?.match(/^\s*CWE-(\d{1,5})\s*$/i);
+  return m ? CWE_CATEGORY[Number(m[1])] : undefined;
+}
+
+/**
+ * The finding under the category its write-up's weakness names, with the fingerprint that category gives its
+ * sink. Unchanged when the weakness names no single category, or the one it already has.
+ */
+function filedByWeakness(finding: Finding, gated: GatedCandidate): Finding {
+  const category = categoryOfCwe(finding.cwe);
+  if (!category || category === finding.category) return finding;
+  return { ...finding, category, fingerprint: fingerprint(category, gated.path.at(-1)!) };
+}
+
 const HUNT_ATTACKERS: Record<string, Attacker> = { u: "unauthenticated", a: "any_user", m: "insider", admin: "admin" };
 
 /** The agent's least-privileged caller in words as an attacker class; undefined when it names none. */
@@ -167,17 +212,18 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
     }
   }
 
+  const enclosing = enclosingFunctions(options.indexer, options.signal);
   const built: Array<{ id: string; built: Built }> = [];
-  options.findings.forEach((entry, i) => {
+  for (const [i, entry] of options.findings.entries()) {
     const v = ruled.get(entry.id);
     const slice = options.candidates[i];
-    if (v?.verdict !== "real" || !slice) return;
-    const parent = fromVerdict(entry, slice, v, wrap, root);
+    if (v?.verdict !== "real" || !slice) continue;
+    const parent = await fromVerdict(entry, slice, v, wrap, enclosing, root);
     built.push({ id: entry.id, built: parent });
     for (const variant of variantsOf.get(entry.id) ?? []) {
-      built.push({ id: variant.id, built: fromVariant(variant, categoryOf(slice.rows[0]!.kind), confirmed.get(entry.id)!, attackerFor(entry, slice), wrap, root) });
+      built.push({ id: variant.id, built: await fromVariant(variant, categoryOf(slice.rows[0]!.kind), confirmed.get(entry.id)!, attackerFor(entry, slice), wrap, enclosing, root) });
     }
-  });
+  }
 
   // One fatal error (cancelled, out of quota, an unpriced call, indexer gone) stops every task at once.
   const controller = new AbortController();
@@ -262,7 +308,7 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
         // warning. A slice candidate has no proof of concept of its own, so that fallback is dropped instead.
         let fellBack = false;
         const own: ScanContext = { ...ctx, emit: (event) => (event.type === "warning" ? (fellBack = true) : emit(event)) };
-        const finding = unwrapFinding(await structure(own, rated.gated, rated.review), tag);
+        const finding = filedByWeakness(unwrapFinding(await structure(own, rated.gated, rated.review), tag), g);
         if (fellBack) {
           drops[i] = "write_up_failed";
           return undefined;
@@ -302,17 +348,66 @@ function lastRulings(verdicts: Verdict[]): Map<string, Verdict> {
   return out;
 }
 
+/**
+ * A hunt row of a whole file or a changed file is anchored where the code shown to the hunt began (line 1,
+ * or the start of a part of the file), not at a handler: its "route" is one of these words and the path.
+ */
+const SHOWN_CODE = /^(FILE|CHANGED) /;
+
+type Enclosing = (at: { file: string; line: number }) => Promise<{ line: number; name: string } | undefined>;
+
+/**
+ * The function around a line, from the indexer's definitions: the smallest one of at least three lines that
+ * holds the line, as the ranking's deviance reads it. Each file is asked for once. Undefined when the line is in no function, or the
+ * indexer cannot say.
+ */
+function enclosingFunctions(indexer: IndexerClient, signal?: AbortSignal): Enclosing {
+  const files = new Map<string, Promise<Array<{ name: string; file: string; line: number; endLine: number }>>>();
+  return async ({ file, line }) => {
+    let definitions = files.get(file);
+    if (!definitions) {
+      definitions = indexer
+        .call<{ definitions?: Array<{ name: string; file: string; line: number; endLine: number }> }>("definitions", { path: file, limit: 5000 }, signal)
+        .then((result) => (result.definitions ?? []).filter((d) => d.file === file && Number.isInteger(d.line) && Number.isInteger(d.endLine)))
+        .catch(() => []);
+      files.set(file, definitions);
+    }
+    const span = (d: { line: number; endLine: number }) => d.endLine - d.line;
+    const around = (await definitions).filter((d) => d.line <= line && line <= d.endLine && span(d) >= ENCLOSING_MIN_SPAN && span(d) < ENCLOSING_MAX_LINES).sort((a, b) => span(a) - span(b))[0];
+    return around ? { line: around.line, name: around.name } : undefined;
+  };
+}
+
+/** A definition longer than this is a module or a class, not the function around a line. */
+const ENCLOSING_MAX_LINES = 400;
+/** A definition of fewer than three lines is a constant or a one-line helper declared inside the function, not the function. */
+const ENCLOSING_MIN_SPAN = 2;
+
+/**
+ * Where a finding cited inside shown code enters: the start of the function around its sink, named by that
+ * function, or the sink itself when no function holds it.
+ */
+async function entryAround(sink: { file: string; line: number }, enclosing: Enclosing): Promise<{ at: { file: string; line: number }; name: string }> {
+  const around = await enclosing(sink);
+  return around ? { at: { file: sink.file, line: around.line }, name: around.name } : { at: sink, name: "" };
+}
+
 /** A hunt entry and the agent's `real` ruling as the old engine's candidate and review. */
-function fromVerdict(entry: FindingsEntry, slice: Candidate, v: Verdict, wrap: Wrap, root?: string): Built {
+async function fromVerdict(entry: FindingsEntry, slice: Candidate, v: Verdict, wrap: Wrap, enclosing: Enclosing, root?: string): Promise<Built> {
   const row = slice.rows[0]!;
   const category = categoryOf(row.kind);
-  const at = location(row.file, row.line, root);
+  let at = location(row.file, row.line, root);
   let sink = location(row.sink_file, row.sink_line, root);
   if (!at || !sink) return { drop: "invalid_location" };
   // A corrected ruling is about an adjacent weakness in the same function: describe that one, at the line it cites in that file.
   const claim = v.corrected ? correctionText(v) : row.why || entry.why;
   if (v.corrected) sink = firstLocation(claim, root, sink.file) ?? sink;
-  const route = row.title.startsWith(`${row.kind} in `) ? row.title.slice(row.kind.length + 4) : "";
+  let route = row.title.startsWith(`${row.kind} in `) ? row.title.slice(row.kind.length + 4) : "";
+  if (SHOWN_CODE.test(route)) {
+    const around = await entryAround(sink, enclosing);
+    at = around.at;
+    route = around.name;
+  }
   return {
     item: {
       candidate: candidate({
@@ -332,15 +427,16 @@ function fromVerdict(entry: FindingsEntry, slice: Candidate, v: Verdict, wrap: W
 }
 
 /** A real variant ruling as a candidate of its parent's category, cited at the location the agent found. */
-function fromVariant(v: Verdict, category: Category, parent: ConfirmedEntry, fallback: Attacker, wrap: Wrap, root?: string): Built {
+async function fromVariant(v: Verdict, category: Category, parent: ConfirmedEntry, fallback: Attacker, wrap: Wrap, enclosing: Enclosing, root?: string): Promise<Built> {
   const at = firstLocation(v.location ?? "", root);
   if (!at) return { drop: "invalid_location" };
+  const around = await entryAround(at, enclosing);
   return {
     item: {
       candidate: candidate({
         category,
-        entry: at,
-        route: "",
+        entry: around.at,
+        route: around.name,
         sink: at,
         attacker: attackerOf(v.attacker) ?? fallback,
         caller: v.attacker,

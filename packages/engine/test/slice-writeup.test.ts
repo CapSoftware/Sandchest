@@ -3,7 +3,7 @@ import { IndexerError, type IndexerClient } from "../src/indexer";
 import { LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient } from "../src/llm";
 import { CandidateSchema, WriteUpSchema, type ScanEvent } from "../src/scan";
 import { UnpricedCallError, type UsageEvent } from "../src/scan/metrics";
-import { attackerOf, categoryOf, confirmedEntries, findingsEntry, parseVerdicts, SLICE_SEVERITY, writeUpVerdicts, type Candidate, type HuntRow, type Rating, type Verdict, type WriteUpOptions } from "../src/scan/slice";
+import { attackerOf, categoryOf, categoryOfCwe, confirmedEntries, findingsEntry, parseVerdicts, SLICE_SEVERITY, writeUpVerdicts, type Candidate, type HuntRow, type Rating, type Verdict, type WriteUpOptions } from "../src/scan/slice";
 
 /** An invented service: four handlers, one per weakness the tests confirm. */
 const GAP = ["// ...", "// ...", "// ..."];
@@ -123,6 +123,8 @@ interface FakeOptions {
   rating?: (id: string) => Rating | "invalid";
   /** Throws this on every rating call. */
   throwOnRate?: unknown;
+  /** The weakness a candidate id's write-up cites. Default CWE-639. */
+  cwe?: (id: string) => string | null;
 }
 
 const READS: Rating = { gain: "read_others_data", victimMustAct: false, unusualSetup: false };
@@ -154,7 +156,7 @@ function fakeClient(options: FakeOptions = {}): LlmClient & { requests: ChatRequ
           JSON.stringify({
             title: `Write-up of ${id}`,
             severity: "high",
-            cwe: "CWE-639",
+            cwe: options.cwe ? options.cwe(id) : "CWE-639",
             impact: "Reads and changes other workspaces' projects.",
             mitigations: "",
             preconditions: "Any signed-in user.",
@@ -365,6 +367,93 @@ describe("writeUpVerdicts", () => {
     expect(runs.map((r) => r.findings.map((f) => f.fingerprint).join())).toEqual(Array(3).fill(runs[0]!.findings.map((f) => f.fingerprint).join()));
   });
 
+  /** The file's functions, as the indexer lists them. */
+  const DEFINITIONS = [
+    { name: "getProject", file: PATH, line: 1, endLine: 4 },
+    { name: "deleteProject", file: PATH, line: 8, endLine: 11 },
+    { name: "renameProject", file: PATH, line: 15, endLine: 18 },
+    { name: "search", file: PATH, line: 22, endLine: 24 },
+    { name: "archiveProject", file: PATH, line: 28, endLine: 30 },
+    // A constant declared inside a function is a definition too, and never the entry.
+    { name: "id", file: PATH, line: 9, endLine: 9 },
+    { name: "archived", file: PATH, line: 29, endLine: 29 },
+  ];
+  const withDefinitions = () => fakeIndexer({ definitions: (args) => ({ definitions: args.path === PATH ? DEFINITIONS : [] }) });
+
+  test("findings cited in a whole file enter at the function around each sink, so two in one file are both kept", async () => {
+    // Both rows are anchored where the shown code began: line 1 of the file.
+    const h = hunt([row("idor", 1, 3, "project read without ownership check", `FILE ${PATH}`), row("idor", 1, 10, "project deleted without ownership check", `FILE ${PATH}`)]);
+    const client = fakeClient();
+    const result = await writeUpVerdicts({ client, indexer: withDefinitions(), findings: h.findings, candidates: h.candidates, verdicts: [verdict("F1", "real"), verdict("F2", "real")] });
+    expect(result.dropped).toEqual([]);
+    expect(result.findings.map((f) => [f.entryPoint.line, f.entryPoint.description, f.attackPath.map((s) => s.line)])).toEqual([
+      [1, "getProject", [1, 3]],
+      [8, "deleteProject", [8, 10]],
+    ]);
+    // The function's name comes from the repository: it reaches the model as data.
+    expect(insideData(writeUpOf(client.requests, "F2"), "deleteProject")).toBe(true);
+  });
+
+  test("a changed file's finding enters at the function around its sink; a corrected one at the corrected line's", async () => {
+    const h = hunt([row("idor", 1, 10, "project deleted without ownership check", `CHANGED ${PATH} (changed lines: 8-11)`), row("idor", 1, 3, "project read without ownership check", `FILE ${PATH}`)]);
+    const result = await writeUpVerdicts({
+      client: fakeClient(),
+      indexer: withDefinitions(),
+      findings: h.findings,
+      candidates: h.candidates,
+      verdicts: [verdict("F1", "real"), verdict("F2", "real", `CORRECTED: the rename takes the owner from the body at ${PATH}:16`)],
+    });
+    expect(result.findings.map((f) => [f.entryPoint.line, f.attackPath.map((s) => s.line)])).toEqual([
+      [8, [8, 10]],
+      [15, [15, 16]],
+    ]);
+  });
+
+  test("with no function around the sink, or no answer from the indexer, the finding enters at its sink", async () => {
+    const h = hunt([row("idor", 1, 3, "project read without ownership check", `FILE ${PATH}`), row("idor", 1, 10, "project deleted without ownership check", `FILE ${PATH}`)]);
+    const verdicts = [verdict("F1", "real"), verdict("F2", "real")];
+    const none = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer({ definitions: () => ({ definitions: [] }) }), findings: h.findings, candidates: h.candidates, verdicts });
+    const down = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts });
+    for (const result of [none, down]) {
+      expect(result.dropped).toEqual([]);
+      expect(result.findings.map((f) => [f.entryPoint.line, f.entryPoint.description, f.attackPath.map((s) => s.line)])).toEqual([
+        [3, `${PATH}:3`, [3]],
+        [10, `${PATH}:10`, [10]],
+      ]);
+    }
+  });
+
+  test("a routed finding keeps the entry the hunt gave it; a variant enters at the function around it", async () => {
+    const h = hunt();
+    const verdicts = [verdict("F1", "real")];
+    const confirmed = confirmedEntries(h.findings, verdicts);
+    const variants = parseVerdicts(JSON.stringify([{ id: "V1", variant_of: "F1", verdict: "real", attacker: "any signed-in user", location: `${PATH}:29`, victim: "x", reason: "Same missing check." }]));
+    const result = await writeUpVerdicts({ client: fakeClient(), indexer: withDefinitions(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } });
+    expect(result.findings.map((f) => [f.entryPoint.line, f.entryPoint.description, f.attackPath.map((s) => s.line)])).toEqual([
+      [1, "GET /projects/:id", [1, 3]],
+      [28, "archiveProject", [28, 29]],
+    ]);
+  });
+
+  test("a finding is filed under the category its write-up's weakness names, with that category's fingerprint", async () => {
+    // The hunt wrote a letter for the kind of both: the first is a server-side request, the second access control.
+    const h = hunt([row("a", 1, 3, "fetches a caller-supplied address", "GET /projects/:id"), row("a", 8, 10, "project deleted without ownership check", "DELETE /projects/:id")]);
+    const verdicts = [verdict("F1", "real"), verdict("F2", "real")];
+    const plain = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts });
+    const named = await writeUpVerdicts({ client: fakeClient({ cwe: (id) => (id === "F1" ? "CWE-918" : "CWE-862") }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts });
+    expect(plain.findings.map((f) => f.category)).toEqual(["broken_access_control", "broken_access_control"]);
+    expect(named.findings.map((f) => [f.category, f.cwe])).toEqual([
+      ["ssrf", "CWE-918"],
+      ["broken_access_control", "CWE-862"],
+    ]);
+    // The identity follows the category; a finding whose category did not change keeps its fingerprint.
+    expect(named.findings[0]!.fingerprint).not.toBe(plain.findings[0]!.fingerprint);
+    expect(named.findings[0]!.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+    expect(named.findings[1]!.fingerprint).toBe(plain.findings[1]!.fingerprint);
+    const none = await writeUpVerdicts({ client: fakeClient({ cwe: () => null }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts });
+    expect(none.findings.map((f) => f.fingerprint)).toEqual(plain.findings.map((f) => f.fingerprint));
+  });
+
   test("the finding event is emitted once per finding written up", async () => {
     const events: ScanEvent[] = [];
     const result = await run(fakeClient({ invalidFor: ["F2"] }), [verdict("F1", "real"), verdict("F2", "real"), verdict("F4", "real")], { onEvent: (e) => events.push(e) });
@@ -480,6 +569,21 @@ describe("mapping", () => {
     expect(categoryOf("path-traversal")).toBe("path_traversal");
     expect(categoryOf("command injection")).toBe("command_injection");
     expect(categoryOf("other")).toBe("broken_access_control");
+  });
+
+  test("a cited weakness names a category only when it names exactly one", () => {
+    expect(categoryOfCwe("CWE-918")).toBe("ssrf");
+    expect(categoryOfCwe("cwe-89")).toBe("sql_injection");
+    expect(categoryOfCwe("CWE-79")).toBe("xss");
+    expect(categoryOfCwe("CWE-22")).toBe("path_traversal");
+    expect(categoryOfCwe("CWE-352")).toBe("csrf");
+    // Access control, rate limits and logic flaws span several categories: the hunt's stays.
+    expect(categoryOfCwe("CWE-862")).toBeUndefined();
+    expect(categoryOfCwe("CWE-639")).toBeUndefined();
+    expect(categoryOfCwe("CWE-770")).toBeUndefined();
+    expect(categoryOfCwe("CWE-9180")).toBeUndefined();
+    expect(categoryOfCwe("see CWE-918")).toBeUndefined();
+    expect(categoryOfCwe(null)).toBeUndefined();
   });
 
   test("the agent's caller in words maps onto an attacker class", () => {
