@@ -51,8 +51,8 @@ import { readSandboxUsage, UsageLedger } from "./usage-ledger";
 
 /** The sandbox stops itself this long after it is made, or after a session last started, if nothing deletes it. */
 export const SLICE_TTL_SECONDS = 90 * 60;
-/** The one loopback port the agent may reach: its relay to the gateway. */
-export const RELAY_PORT = 4100;
+/** The one loopback port the agent may reach: its relay to the gateway. Never the indexer's port, which is in use in the same sandbox. */
+export const RELAY_PORT = 4180;
 /** A session's gateway token outlives the longest a session is polled. */
 const SESSION_TOKEN_TTL_SECONDS = 60 * 60;
 /** The hunt step stops spending after this long, under the function's 800 s limit. */

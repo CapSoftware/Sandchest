@@ -33,7 +33,7 @@ import { stepOf, TRACKS } from "@/lib/scan-progress";
 import { beginScan, failScan, ScanFinished } from "@/server/scans";
 import { setServices } from "@/server/services";
 import { SandboxGone, type SliceRuntime, type SliceSandbox } from "@/server/slice-runtime";
-import { cleanUpSlice, collectSliceSession, huntSlice, publishSlice, sandboxKey, sliceSessionStatus, sliceState, startSliceSession, STOP_INDEXER, writeUpSlice, type SessionKind } from "@/server/slice-scan";
+import { cleanUpSlice, collectSliceSession, huntSlice, publishSlice, RELAY_PORT, sandboxKey, sliceSessionStatus, sliceState, startSliceSession, STOP_INDEXER, writeUpSlice, type SessionKind } from "@/server/slice-scan";
 import { FakeAutumn } from "./fake-autumn";
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgresql://sandchest:sandchest@127.0.0.1:5432/sandchest";
@@ -338,7 +338,7 @@ class FakeSandbox implements SliceSandbox {
 const runtime: SliceRuntime = {
   async open({ ttlSeconds, setupScript }) {
     expect(ttlSeconds).toBe(90 * 60);
-    expect(setupScript).toContain("LOOPBACK_PORTS='4100'");
+    expect(setupScript).toContain(`LOOPBACK_PORTS='${RELAY_PORT}'`);
     expect(setupScript).toContain("ALLOW_HOSTS=''");
     expect(setupScript).toContain("DNS='no'");
     const sandbox = new FakeSandbox(`bx_fake${String(host.nextId++).padStart(4, "0")}`);
@@ -355,7 +355,7 @@ const runtime: SliceRuntime = {
   async prepareAgentSandbox() {},
   async startAgentSession(sandbox, options) {
     if (host.outcome[options.kind] === "throw") throw new Error("Relay exited before it was ready");
-    expect(options.relay.port).toBe(4100);
+    expect(options.relay.port).toBe(RELAY_PORT);
     expect(options.relay.targetUrl).toBe("https://sandchest.test/api/gateway");
     const relayProcessId = host.nextProcess++;
     const agentProcessId = host.nextProcess++;
