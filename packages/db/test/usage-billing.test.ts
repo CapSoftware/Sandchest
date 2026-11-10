@@ -9,6 +9,7 @@ import {
   carryAfterVoid,
   createDb,
   insertUsage,
+  lastDeepScanCharges,
   markBillCharged,
   markWaivedBillSettled,
   noteBillReason,
@@ -574,6 +575,45 @@ describe("usageHistory", () => {
     expect(await usageHistory(database, await person([]), org.orgId)).toEqual([]);
     // An account with no bills has no history.
     expect(await usageHistory(database, userId, (await newOrg()).orgId)).toEqual([]);
+  });
+});
+
+describe("lastDeepScanCharges", () => {
+  /** A scan made `minutesAgo` minutes ago, with a bill of `status` when one is given. */
+  async function scanned(org: { orgId: string; repoId: string }, minutesAgo: number, bill?: { status: ScanBillDraft["status"]; credits: number }, scan: { kind?: "deep" | "pr_review"; status?: "completed" | "failed" | "running" } = {}) {
+    const [row] = await database
+      .insert(schema.scans)
+      .values({ repoId: org.repoId, orgId: org.orgId, kind: scan.kind ?? "deep", trigger: "manual", headSha: "HEAD", status: scan.status ?? "completed", createdAt: new Date(Date.now() - minutesAgo * 60_000) })
+      .returning();
+    if (bill) await database.insert(schema.scanBills).values({ ...draft(bill.credits * CREDIT, 0, { status: bill.status }), credits: bill.credits, scanId: row!.id, orgId: org.orgId });
+  }
+
+  it("the latest finished deep scan's charge, and nothing for a repository whose latest was not charged from usage", async () => {
+    const charged = await newOrg();
+    await scanned(charged, 90, { status: "charged", credits: 30 });
+    await scanned(charged, 30, { status: "charged", credits: 45 });
+    // Newer, but not finished deep scans: a review, a failed scan and one still running.
+    await scanned(charged, 20, { status: "charged", credits: 2 }, { kind: "pr_review" });
+    await scanned(charged, 10, { status: "voided", credits: 0 }, { status: "failed" });
+    await scanned(charged, 5, undefined, { status: "running" });
+
+    // Its latest finished deep scan was priced by size: no bill, so the older bill is not what it last cost.
+    const tiered = await newOrg();
+    await scanned(tiered, 60, { status: "charged", credits: 70 });
+    await scanned(tiered, 10);
+    const waived = await newOrg();
+    await scanned(waived, 10, { status: "waived", credits: 0 });
+    const open = await newOrg();
+    await scanned(open, 10, { status: "open", credits: 30 });
+    const shadow = await newOrg();
+    await scanned(shadow, 10, { status: "shadow", credits: 30 });
+    const never = await newOrg();
+
+    const charges = await lastDeepScanCharges(database, [charged, tiered, waived, open, shadow, never].map((org) => org.repoId));
+    expect([...charges]).toEqual([[charged.repoId, 45]]);
+    // Only the repositories asked for.
+    expect(await lastDeepScanCharges(database, [never.repoId])).toEqual(new Map());
+    expect(await lastDeepScanCharges(database, [])).toEqual(new Map());
   });
 });
 

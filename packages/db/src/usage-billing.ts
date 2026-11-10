@@ -235,6 +235,23 @@ export async function settleBilledScan(database: Db, scanId: string, outcome: "c
   });
 }
 
+/**
+ * What each repository's latest finished deep scan was charged, in credits, by repository id. Only where that
+ * scan was billed from its usage and the bill was charged for something: a scan priced by size, a waived or
+ * voided bill, or one still open says nothing, and neither does an older scan once a newer one finished. The
+ * caller passes repositories the person can already see.
+ */
+export async function lastDeepScanCharges(database: Db, repoIds: readonly string[]): Promise<Map<string, number>> {
+  if (repoIds.length === 0) return new Map();
+  const rows = await database
+    .selectDistinctOn([scans.repoId], { repoId: scans.repoId, status: scanBills.status, credits: scanBills.credits })
+    .from(scans)
+    .leftJoin(scanBills, eq(scanBills.scanId, scans.id))
+    .where(and(inArray(scans.repoId, [...repoIds]), eq(scans.kind, "deep"), eq(scans.status, "completed")))
+    .orderBy(scans.repoId, desc(scans.createdAt), desc(scans.id));
+  return new Map(rows.flatMap((row): Array<[string, number]> => (row.status === "charged" && row.credits ? [[row.repoId, row.credits]] : [])));
+}
+
 /** One bill in an account's usage history: when, which scan of which repository, and what it charged. */
 export interface UsageHistoryRow {
   scanId: string;
