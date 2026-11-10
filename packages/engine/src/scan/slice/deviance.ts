@@ -4,6 +4,7 @@
  * Language-agnostic: functions come from the indexer's definitions, auth calls from identifier text.
  */
 import { posix } from "node:path";
+import { BUNDLE_LIMITS, mapLimit } from "./bundle";
 import type { Candidate } from "./candidates";
 
 export interface DevDef {
@@ -102,14 +103,11 @@ export async function devianceOf(targets: Array<{ file: string; line: number }>,
     return out;
   };
 
-  const res: DevianceFeatures[] = [];
-  for (const { file, line } of targets) {
+  // Each location on its own, several at once: nothing is shared between them but the caches above.
+  return mapLimit(targets, BUNDLE_LIMITS.indexConcurrency, async ({ file, line }): Promise<DevianceFeatures> => {
     const ds = await deps.definitions(file);
     const d = ds.filter((x) => x.line <= line && line <= x.endLine && size(x) < 400).sort((a, b) => size(a) - size(b))[0];
-    if (!d) {
-      res.push({ fn: null });
-      continue;
-    }
+    if (!d) return { fn: null };
     const me = await authOf(d);
     const sibs = await siblings(d);
     const sa: Array<{ auth: string[]; mut: boolean }> = [];
@@ -120,7 +118,7 @@ export async function devianceOf(targets: Array<{ file: string; line: number }>,
     const mine = new Set(me.auth);
     const missing = [...freq.entries()].filter(([t, n]) => !mine.has(t) && n / Math.max(1, sibs.length) >= 0.5).sort((a, b) => b[1] - a[1]);
     const sibAuthShare = sa.filter((s) => s.auth.length > 0).length / Math.max(1, sibs.length);
-    res.push({
+    return {
       fn: `${d.name}@${d.file}:${d.line}`,
       lines: d.endLine - d.line + 1,
       auth: me.auth.slice(0, 12),
@@ -130,9 +128,8 @@ export async function devianceOf(targets: Array<{ file: string; line: number }>,
       dev: missing.length ? round2(missing[0]![1] / Math.max(1, sibs.length)) : 0,
       missing: missing.slice(0, 5).map(([t]) => t),
       mut: me.mut,
-    });
-  }
-  return res;
+    };
+  });
 }
 
 /** Deviance input for `topK`: features of each candidate's representative sink, keyed by candidate index. */

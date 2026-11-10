@@ -16,7 +16,7 @@ export {
   type PlanDeps,
   type SliceDeps,
   type Span,
-  type WholeOptions,
+  type WholeOptions, mapLimit
 } from "./bundle";
 export { answerText, CHANGE_TASK, HUNT_LENSES, HUNT_TASK, huntMessages, huntTask, lensTask, lineFields, loadLines, packetPrefix, parseHuntReply, renderCode, type HuntMode, type HuntRow, type LinesOf } from "./hunt";
 export { addVotes, candidateLine, parseScoreReply, retryBatches, SCORE_CHUNK, SCORE_SAMPLES, SCORE_TASK, scoreBatches, scoreMessages, toScoreVotes, type ScoreBatch, type ScoreVotes } from "./score";

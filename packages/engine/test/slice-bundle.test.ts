@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BUNDLE_LIMITS, bundleMode, cutSlicePackets, planBundle, sliceBundle, spanLines, wholeBundle, type Bundle, type Entry, type Span } from "../src/scan/slice";
+import { BUNDLE_LIMITS, bundleMode, cutSlicePackets, mapLimit, planBundle, sliceBundle, spanLines, wholeBundle, type Bundle, type Entry, type Span } from "../src/scan/slice";
 
 const lines = (n: number, word = "x") => Array.from({ length: n }, () => word).join("\n") + "\n";
 const entry = (at: string, start: number, end: number, extra: Partial<Entry> = {}): Entry => {
@@ -135,6 +135,68 @@ describe("sliceBundle", () => {
     expect(b.spans["src/lib/auth.ts:130"]!.end).toBe(150);
     expect(es[0]!.risk).toBe(1);
     expect(es[1]!.risk).toBe(2);
+  });
+});
+
+describe("sliceBundle against a slow indexer", () => {
+  const def = (name: string, file: string, line: number, endLine: number) => ({ name, file, line, endLine });
+  // Forty routes over twenty files; routes 0 and 20 share a handler, every handler calls one guard and one of two helpers.
+  const routeFiles = Array.from({ length: 20 }, (_, i) => `src/routes/r${String(i).padStart(2, "0")}.ts`);
+  const files: Record<string, string> = Object.fromEntries([...routeFiles.map((f) => [f, lines(600)]), ["src/lib/auth.ts", lines(300)]]);
+  const data = {
+    routes: Array.from({ length: 40 }, (_, i) => ({ method: i % 3 ? "GET" : "POST", path: `/r/${i}`, at: `${routeFiles[i % 20]}:${i < 20 ? 10 : i === 20 ? 10 : 200}`, chain: [], handlers: [`requireSession @ src/lib/auth.ts:5`] })),
+    defs: {
+      ...Object.fromEntries(routeFiles.map((f, i) => [f, [def(`first${i}`, f, 10, 120), def(`second${i}`, f, 200, 380)]])),
+      "src/lib/auth.ts": [def("requireSession", "src/lib/auth.ts", 5, 120), def("checkOwner", "src/lib/auth.ts", 130, 150), def("checkRole", "src/lib/auth.ts", 160, 240)],
+    } as Record<string, unknown[]>,
+    callees: Object.fromEntries(
+      routeFiles.flatMap((f, i) => [
+        [`first${i}`, { definition: def(`first${i}`, f, 10, 120), calls: [{ call: "checkOwner", definedAt: ["src/lib/auth.ts:130"] }] }],
+        [`second${i}`, { definition: def(`second${i}`, f, 200, 380), calls: [{ call: "checkRole", definedAt: ["src/lib/auth.ts:160"] }] }],
+      ]),
+    ) as Record<string, unknown>,
+  };
+
+  test("routes are resolved several at once, at most the limit, and the bundle is the one resolving them in turn gives", async () => {
+    const plain = fakeIndexer(data);
+    const inTurn = await sliceBundle({ indexer: plain, readFile: async (f) => files[f] });
+    let active = 0;
+    let peak = 0;
+    const asked = new Map<string, number>();
+    const slow = {
+      async call<T>(tool: string, args: Record<string, unknown> = {}): Promise<T> {
+        if (tool === "callees") asked.set(String(args.symbol), (asked.get(String(args.symbol)) ?? 0) + 1);
+        peak = Math.max(peak, ++active);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, Math.random() * 8));
+          return await plain.call<T>(tool, args);
+        } finally {
+          active--;
+        }
+      },
+    };
+    for (let run = 0; run < 3; run++) expect(await sliceBundle({ indexer: slow, readFile: async (f) => files[f] })).toEqual(inTurn);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(BUNDLE_LIMITS.indexConcurrency);
+    // Thirty-nine handlers, each entry in route order with its own id; the repeated handler appears once.
+    expect(inTurn.stats.entries).toBe(39);
+    // A definition's callees are asked for once per run, however many routes reach it.
+    expect(Math.max(...asked.values())).toBe(3);
+  });
+
+  test("mapLimit keeps the items' order and never runs more than the limit at once", async () => {
+    let active = 0;
+    let peak = 0;
+    const out = await mapLimit([5, 1, 4, 2, 3, 0], 2, async (ms, i) => {
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      active--;
+      return `${i}:${ms}`;
+    });
+    expect(out).toEqual(["0:5", "1:1", "2:4", "3:2", "4:3", "5:0"]);
+    expect(peak).toBe(2);
+    expect(await mapLimit([], 4, async () => 1)).toEqual([]);
+    await expect(mapLimit([1, 2], 2, async (n) => (n === 2 ? Promise.reject(new Error("no")) : n))).rejects.toThrow("no");
   });
 });
 

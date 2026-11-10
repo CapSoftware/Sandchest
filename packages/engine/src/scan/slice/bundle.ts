@@ -63,7 +63,23 @@ export const BUNDLE_LIMITS = {
   wholeBudget: 60_000,
   /** Line budget for slices plus whole files. */
   hybridBudget: 40_000,
+  /** Routes resolved against the indexer at once. The result is the same whatever this is. */
+  indexConcurrency: 16,
 };
+
+/** `fn` over `items`, at most `limit` at a time, results in the items' order. The first rejection rejects the whole. */
+export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+}
 
 interface Def {
   name: string;
@@ -131,12 +147,14 @@ export async function sliceBundle(deps: SliceDeps, maxLines = BUNDLE_LIMITS.pack
     if (!file || SKIP.test(file)) return undefined;
     return (await enclosing(file, line)) ?? (await defsOf(file)).find((d) => d.line === line);
   };
-  const linesCache = new Map<string, string[]>();
-  const linesOf = async (f: string) => {
+  const linesCache = new Map<string, Promise<string[]>>();
+  const linesOf = (f: string) => {
     let l = linesCache.get(f);
     if (!l) {
-      const text = await deps.readFile(f).catch(() => undefined);
-      l = text === undefined ? [] : text.split("\n");
+      l = deps
+        .readFile(f)
+        .catch(() => undefined)
+        .then((text) => (text === undefined ? [] : text.split("\n")));
       linesCache.set(f, l);
     }
     return l;
@@ -177,7 +195,15 @@ export async function sliceBundle(deps: SliceDeps, maxLines = BUNDLE_LIMITS.pack
     return { name: `${basename(file)}@${line}`, file, line, endLine: Math.max(line, end) };
   };
 
-  const callees = async (d: Def): Promise<Def[]> => {
+  // A definition's callees are asked for once, however many routes reach it.
+  const calleesCache = new Map<string, Promise<Def[]>>();
+  const callees = (d: Def): Promise<Def[]> => {
+    const key = `${d.name}\n${keyOf(d)}`;
+    let p = calleesCache.get(key);
+    if (!p) calleesCache.set(key, (p = calleesOf(d)));
+    return p;
+  };
+  const calleesOf = async (d: Def): Promise<Def[]> => {
     const r = await indexer
       .call<{ definitions: Array<{ definition: Def; calls: Array<{ call: string; definedAt: string[] }> }> }>("callees", { symbol: d.name, limit: 200 })
       .catch(() => ({ definitions: [] }));
@@ -193,16 +219,13 @@ export async function sliceBundle(deps: SliceDeps, maxLines = BUNDLE_LIMITS.pack
   };
 
   const routes = (await indexer.call<{ routes: RouteRow[] }>("routes", { limit: 5000 })).routes;
-  const entries: Entry[] = [];
-  const spans = new Map<string, Span>();
-  const seenHandler = new Set<string>();
-  for (const r of routes) {
-    if (SKIP.test(r.at)) continue;
+  // Each route is resolved against the indexer on its own, several at once: its handler, and the guard and
+  // helper spans it would add, in the order it would add them. Nothing is shared between routes but caches.
+  const resolved = await mapLimit(routes, BUNDLE_LIMITS.indexConcurrency, async (r) => {
+    if (SKIP.test(r.at)) return undefined;
     const h = (await atDef(r.at)) ?? (await inlineDef(r.at));
-    if (!h || seenHandler.has(keyOf(h))) continue;
-    seenHandler.add(keyOf(h));
-    // Whole-file slices (small route files) keep every handler in the file; named handlers are capped.
-    const handler = spanOf(h, h.line === 1 && h.name === basename(h.file) ? 400 : 140);
+    if (!h) return undefined;
+    const added: Span[] = [];
     // Guards: chain entries before the handler, resolved by the indexer's "name @ file:line" handler list.
     const guards: string[] = [];
     for (const g of r.handlers ?? []) {
@@ -211,7 +234,7 @@ export async function sliceBundle(deps: SliceDeps, maxLines = BUNDLE_LIMITS.pack
       const gd = await atDef(at);
       if (gd && keyOf(gd) !== keyOf(h) && family(gd.file) === family(h.file)) {
         const s = spanOf(gd, 50);
-        spans.set(s.key, s);
+        added.push(s);
         guards.push(s.key);
       }
     }
@@ -220,15 +243,30 @@ export async function sliceBundle(deps: SliceDeps, maxLines = BUNDLE_LIMITS.pack
     for (const d1 of await callees(h)) {
       if (!AUTHY.test(d1.name)) continue;
       const s1 = spanOf(d1, 50);
-      spans.set(s1.key, s1);
+      added.push(s1);
       helpers.push(s1.key);
       for (const d2 of await callees(d1)) {
         if (!AUTHY.test(d2.name)) continue;
         const s2 = spanOf(d2, 40);
-        spans.set(s2.key, s2);
+        added.push(s2);
         helpers.push(s2.key);
       }
     }
+    return { r, h, added, guards, helpers };
+  });
+
+  // Put together in route order, as if each route had been resolved in turn: a handler already seen is skipped
+  // with everything it would have added.
+  const entries: Entry[] = [];
+  const spans = new Map<string, Span>();
+  const seenHandler = new Set<string>();
+  for (const one of resolved) {
+    if (!one || seenHandler.has(keyOf(one.h))) continue;
+    const { r, h, added, guards, helpers } = one;
+    seenHandler.add(keyOf(h));
+    // Whole-file slices (small route files) keep every handler in the file; named handlers are capped.
+    const handler = spanOf(h, h.line === 1 && h.name === basename(h.file) ? 400 : 140);
+    for (const s of added) spans.set(s.key, s);
     const text = `${r.method} ${r.path} ${h.name}`;
     const risk = (r.method !== "GET" ? 1 : 0) + (RISKY.test(text) ? 1 : 0) + (helpers.length + guards.length === 0 ? 2 : 0);
     entries.push({ id: `E${entries.length + 1}`, method: r.method, path: r.path, at: r.at, handler, guards: [...new Set(guards)], helpers: [...new Set(helpers)].slice(0, 8), risk });
