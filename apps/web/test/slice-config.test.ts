@@ -80,6 +80,14 @@ describe("slice engine settings", () => {
     expect(scanWorkspace("someone-else", config({ ...slice, SANDCHEST_WORKSPACE: "sandbox" }))).toBe("boat");
   });
 
+  test("the slice engine's own indexer build is a URL with its checksum, both or neither", () => {
+    const build = { SANDCHEST_SLICE_INDEXER_LINUX_URL: "https://downloads.example.com/sandchest-index", SANDCHEST_SLICE_INDEXER_LINUX_SHA256: "a".repeat(64) };
+    expect(config({ ...slice, ...build })).toMatchObject(build);
+    expect(() => config({ ...slice, SANDCHEST_SLICE_INDEXER_LINUX_URL: build.SANDCHEST_SLICE_INDEXER_LINUX_URL })).toThrow("set both or neither");
+    expect(() => config({ ...slice, SANDCHEST_SLICE_INDEXER_LINUX_SHA256: build.SANDCHEST_SLICE_INDEXER_LINUX_SHA256 })).toThrow("set both or neither");
+    expect(() => config({ ...slice, ...build, SANDCHEST_SLICE_INDEXER_LINUX_SHA256: "nope" })).toThrow("SANDCHEST_SLICE_INDEXER_LINUX_SHA256");
+  });
+
   test("each ceiling is a positive decimal", () => {
     expect(config({ ...slice, SANDCHEST_SLICE_CEILING_USD: "1.25" }).SANDCHEST_SLICE_CEILING_USD).toBe("1.25");
     expect(config({ ...slice, SANDCHEST_SLICE_CEILING_PR_USD: "0.125" }).SANDCHEST_SLICE_CEILING_PR_USD).toBe("0.125");

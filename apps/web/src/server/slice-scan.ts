@@ -43,7 +43,7 @@ import { captureFromScan } from "./cves";
 import { gatewayEndpoint, mintGatewayToken, STALE_CALL_SECONDS } from "./gateway";
 import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
-import { indexerBinary, isEmptyRepoError, prepareWorkspace, publishScan, requireScan, ScanFinished, toChangedFile, toFindingInput, type LoadedScan } from "./scans";
+import { sliceIndexerBinary, isEmptyRepoError, prepareWorkspace, publishScan, requireScan, ScanFinished, toChangedFile, toFindingInput, type LoadedScan } from "./scans";
 import { captureException } from "./sentry";
 import { db, githubApp, sliceClient, sliceRuntime } from "./services";
 import { SandboxGone, type SliceSandbox } from "./slice-runtime";
@@ -301,7 +301,7 @@ async function openSandbox(input: { scan: LoadedScan; installation: Installation
         return opened;
       },
       clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
-      binary: indexerBinary("boat"),
+      binary: sliceIndexerBinary(),
       started: input.started,
       onRetry: (message) => events.write("progress", message),
     });
@@ -492,7 +492,7 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
         ? { verdicts: parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.variants)) ?? [], confirmed: parseJson<slice.ConfirmedEntry[]>(await sandbox.readPrivateFile(FILES.confirmed)) ?? [] }
         : undefined;
       events.write("stage:verify", "Writing up what was confirmed…");
-      const indexer = runtime.indexer(await restartIndexer(sandbox, indexerBinary("boat")));
+      const indexer = runtime.indexer(await restartIndexer(sandbox, sliceIndexerBinary()));
       const out = await slice.writeUpVerdicts({
         client: sliceClient(fast),
         indexer,

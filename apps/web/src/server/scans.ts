@@ -559,6 +559,15 @@ export function openBoatWorkspace(budgetMs: number): Promise<BoatWorkspace> {
   });
 }
 
+/** The indexer the slice engine runs in its sandbox: its own build when one is set, else the one every sandbox scan uses. */
+export function sliceIndexerBinary(): IndexerBinary {
+  const settings = config();
+  if (settings.SANDCHEST_SLICE_INDEXER_LINUX_URL && settings.SANDCHEST_SLICE_INDEXER_LINUX_SHA256) {
+    return { url: settings.SANDCHEST_SLICE_INDEXER_LINUX_URL, sha256: settings.SANDCHEST_SLICE_INDEXER_LINUX_SHA256 };
+  }
+  return indexerBinary("boat");
+}
+
 export function indexerBinary(workspace: Config["workspace"]): IndexerBinary {
   const settings = config();
   if (workspace === "local") return { path: settings.SANDCHEST_INDEXER_BIN ?? "sandchest-index" };

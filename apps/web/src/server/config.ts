@@ -92,6 +92,13 @@ const Schema = z.object({
   /** ...or as a release download, verified by checksum inside the sandbox. */
   SANDCHEST_INDEXER_LINUX_URL: z.url().optional(),
   SANDCHEST_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /**
+   * The indexer build the slice engine uses, as a release download with its checksum. Both or neither.
+   * Unset means the same build as every other scan (SANDCHEST_INDEXER_LINUX_*), so a newer indexer can be
+   * tried on the slice engine without changing what classic scans run.
+   */
+  SANDCHEST_SLICE_INDEXER_LINUX_URL: z.url().optional(),
+  SANDCHEST_SLICE_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   /** Which engine runs deep scans and PR reviews. Default `classic`. `slice` needs a Boat API key, the Linux indexer, the gateway and its ceilings. */
   SANDCHEST_ENGINE: z.enum(["classic", "slice"]).optional(),
   /** GitHub account logins, comma-separated, any case. When set, only these accounts' deep scans and PR reviews use the slice engine. */
@@ -141,6 +148,9 @@ export function config(env: Record<string, string | undefined> = process.env): C
   if (workspace === "boat" && !parsed.data.SANDCHEST_BOAT_API_KEY) throw new Error("Boat scans need SANDCHEST_BOAT_API_KEY.");
   const problems: string[] = [];
   if (parsed.data.SANDCHEST_ENGINE === "slice") {
+    if ((parsed.data.SANDCHEST_SLICE_INDEXER_LINUX_URL === undefined) !== (parsed.data.SANDCHEST_SLICE_INDEXER_LINUX_SHA256 === undefined)) {
+      problems.push("SANDCHEST_SLICE_INDEXER_LINUX_URL and SANDCHEST_SLICE_INDEXER_LINUX_SHA256: set both or neither");
+    }
     // The slice engine opens its own Boat sandboxes whatever SANDCHEST_WORKSPACE says, so classic scans stay where they run today.
     if (!parsed.data.SANDCHEST_BOAT_API_KEY) problems.push("SANDCHEST_BOAT_API_KEY: is required by the slice engine");
     if (!parsed.data.SANDCHEST_INDEXER_LINUX_BIN && !(parsed.data.SANDCHEST_INDEXER_LINUX_URL && parsed.data.SANDCHEST_INDEXER_LINUX_SHA256)) {
