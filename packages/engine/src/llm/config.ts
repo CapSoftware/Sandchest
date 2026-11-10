@@ -25,6 +25,11 @@ export interface LlmConfig {
    */
   temperature?: number;
   seed?: number;
+  /**
+   * Fields set on every request (endpoint options). Anything the request sets
+   * itself (model, messages, stream, tools, max tokens...) wins over them.
+   */
+  body?: Readonly<Record<string, unknown>>;
 }
 
 /**

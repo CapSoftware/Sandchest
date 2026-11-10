@@ -23,4 +23,5 @@ export { addVotes, candidateLine, parseScoreReply, retryBatches, SCORE_CHUNK, SC
 export { cluster, dedupe, mergeInOrder, normKind, orderBy, spots, TOP_K, topK, votesOf, type Candidate, type Cluster, type DevianceInput } from "./candidates";
 export { candidateDeviance, devianceOf, topLevel, type DevDef, type DevianceDeps, type DevianceFeatures } from "./deviance";
 export { CHANGE_LIMITS, changeBundle, changeCandidates, changedServerPaths, changeRegions, inDiff, parseDiffHunks, parseNumstat, type ChangeBundle, type ChangeCandidate, type Range } from "./change";
+export { runChangeHunt, runSliceHunt, SLICE_RUN, type ChangeHuntOptions, type SliceHuntCounts, type SliceHuntOptions, type SliceHuntResult, type SliceRunOptions } from "./run";
 export { AGENT_PATHS, ATTACKER_NAMES, correctionText, findingsEntry, parseVerdicts, REFUTE_AGENT_PROMPT, REFUTE_BRIEF, VARIANT_AGENT_PROMPT, VARIANT_BRIEF, type ConfirmedEntry, type FindingsEntry, type Verdict, type VerdictKind } from "./briefs";

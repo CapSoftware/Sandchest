@@ -134,7 +134,8 @@ function buildBody(config: LlmConfig, request: ChatRequest): string {
   const effort = request.reasoningEffort === undefined ? ROLE_REASONING[request.role] : request.reasoningEffort;
   if (effort) body.reasoning_effort = effort;
 
-  return JSON.stringify(body);
+  // Endpoint options go underneath, so the request's own fields always win.
+  return JSON.stringify(config.body ? { ...config.body, ...body } : body);
 }
 
 function toWireToolChoice(choice: ToolChoice) {
