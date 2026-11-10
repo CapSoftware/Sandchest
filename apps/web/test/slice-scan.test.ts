@@ -10,6 +10,8 @@ import {
   createScan,
   eventsSince,
   finishUsageCall,
+  orgCarry,
+  scanBill,
   scanById,
   scanStageRows,
   scanUsageRows,
@@ -26,12 +28,18 @@ import { prReviewCredits } from "@sandchest/billing";
 import { slice } from "@sandchest/engine/scan";
 import { GitHubError, type CheckConclusion, type CheckOutput, type GitHubApp, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { ExecResult, RepoRef } from "@sandchest/workspace";
+import { usdToMicroUsd } from "@sandchest/billing/usage";
 import { setAutumn } from "@/server/billing";
 import { resetConfig } from "@/server/config";
+import { requestDeepScan } from "@/server/dig";
 import { verifyGatewayToken } from "@/server/gateway";
 import { stepOf, TRACKS } from "@/lib/scan-progress";
-import { beginScan, failScan, ScanFinished } from "@/server/scans";
+import { quotePrReview, startPrReview } from "@/server/pr-review";
+import { beginScan, failScan, publishScan, ScanFinished, type BeginResult } from "@/server/scans";
+import { resetSentry } from "@/server/sentry";
 import { setServices } from "@/server/services";
+import { setScanStarter } from "@/server/start";
+import { billSlice } from "@/server/usage-billing";
 import { SandboxGone, type SliceRuntime, type SliceSandbox } from "@/server/slice-runtime";
 import { cleanUpSlice, collectSliceSession, huntSlice, publishSlice, RELAY_PORT, sandboxKey, sliceSessionStatus, sliceState, startSliceSession, STOP_INDEXER, writeUpSlice, type SessionKind } from "@/server/slice-scan";
 import { FakeAutumn } from "./fake-autumn";
@@ -211,6 +219,8 @@ const host = {
   realSinks: [`${PATH}:3`],
   /** The bulk read's pack command fails. */
   packFails: false,
+  /** The sandbox's meter cannot be read. */
+  usageFails: false,
   nextId: 1,
   nextProcess: 100,
   reset() {
@@ -218,6 +228,7 @@ const host = {
     this.realSinks = [`${PATH}:3`];
     this.started = [];
     this.packFails = false;
+    this.usageFails = false;
   },
 };
 
@@ -325,6 +336,7 @@ class FakeSandbox implements SliceSandbox {
   }
   async usage() {
     this.check();
+    if (host.usageFails) throw new Error("meter unavailable");
     return { seconds: 100, usd: 0.25, running: true };
   }
   async destroy(): Promise<void> {
@@ -420,6 +432,8 @@ const fakeGithub = {
   installation: () => ({
     cloneToken: async () => "token",
     pullFiles: async () => gh.files,
+    pull: async (_repo: string, number: number) => ({ state: "open", head: { sha: `pull${number}` }, base: { sha: "base" } }),
+    branchSha: async () => "HEAD",
     fileAt: async (_repo: string, path: string, ref: string) => {
       gh.reads.push(`${path}@${ref}`);
       if (gh.failing.has(path)) throw new GitHubError("GitHub 502: Bad Gateway", 502, true);
@@ -1204,5 +1218,491 @@ describe.skipIf(!available)("which engine a scan runs on", () => {
       delete process.env.SANDCHEST_ENGINE_ORGS;
       resetConfig();
     }
+  });
+});
+
+// ---- Usage billing ----------------------------------------------------------------
+
+/** Made-up settings: a multiplier of 3 at reservation. */
+const SHADOW_ENV = { SANDCHEST_USAGE_BILLING: "shadow", SANDCHEST_USAGE_MULTIPLIER: "3" };
+const USAGE_ENV = { SANDCHEST_USAGE_BILLING: "on", SANDCHEST_USAGE_MULTIPLIER: "3", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "cent" };
+const USAGE_KEYS = ["SANDCHEST_USAGE_BILLING", "SANDCHEST_USAGE_MULTIPLIER", "NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT"];
+const TIERED = { engine: "slice", mode: "tiered", unit: "dollar" } as const;
+
+/** Runs `fn` with usage billing unset, then `env` on top (blank means unset), then puts every setting back. */
+async function withSettings(env: Record<string, string>, fn: () => Promise<void>): Promise<void> {
+  const keys = [...new Set([...USAGE_KEYS, ...Object.keys(env)])];
+  const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of USAGE_KEYS) delete process.env[key];
+  Object.assign(process.env, env);
+  resetConfig();
+  try {
+    await fn();
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetConfig();
+  }
+}
+
+/** The slice steps up to the write-up, as the workflow runs them, after a begin step that must answer `expected`. */
+async function throughWriteUp(scanId: string, expected: BeginResult): Promise<void> {
+  expect(await beginScan(scanId)).toEqual(expected);
+  const { selected, variants } = await huntSlice(scanId, { passDelayMs: 0 });
+  if (selected > 0 && (await session(scanId, "verify")) > 0 && variants !== false) await session(scanId, "variants");
+  await writeUpSlice(scanId);
+}
+
+/** The bill step as the workflow polls it, the sleeps left out: the 41st poll is the last. */
+async function bill(scanId: string) {
+  for (let polls = 0; ; polls++) {
+    const result = await billSlice(scanId, { final: polls >= 40 });
+    if (result.state !== "waiting") return result;
+  }
+}
+
+/** The workflow's slice path, with the bill step only when the begin result asks for it. */
+async function runBilled(scanId: string, expected: BeginResult): Promise<void> {
+  await throughWriteUp(scanId, expected);
+  if (expected.pricing) await bill(scanId);
+  await publishSlice(scanId);
+}
+
+const ledgerMicroUsd = async (scanId: string) => (await usage(scanId)).reduce((sum, r) => sum + usdToMicroUsd(r.costUsd), 0);
+const resetCarry = () => database.$client`delete from usage_carry where org_id = ${orgId}`;
+
+/** A repository of its own, with its org, for Dig and dashboard reviews. */
+async function newRepo() {
+  repoCount++;
+  const [repo] = await upsertRepos(database, orgId, [{ githubRepoId: 5000 + repoCount, fullName: `acme/app-${repoCount}`, private: true, defaultBranch: "main" }]);
+  return (await database.query.repos.findFirst({ where: (r, { eq }) => eq(r.id, repo!.id), with: { org: true } }))!;
+}
+
+/** A Sentry on localhost for `fn`; returns the tags of every event it received. */
+async function withSentry(fn: () => Promise<void>): Promise<Array<Record<string, unknown>>> {
+  const tags: Array<Record<string, unknown>> = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      const [, , event] = (await request.text()).trim().split("\n").map((line) => JSON.parse(line) as { tags?: Record<string, unknown> });
+      tags.push(event?.tags ?? {});
+      return new Response("{}");
+    },
+  });
+  process.env.SENTRY_DSN = `http://publickey@127.0.0.1:${server.port}/5`;
+  resetSentry();
+  try {
+    await fn();
+  } finally {
+    delete process.env.SENTRY_DSN;
+    resetSentry();
+    server.stop(true);
+  }
+  return tags;
+}
+
+describe.skipIf(!available)("usage billing off", () => {
+  it("slice deep scans and PR reviews reserve, charge and run exactly as before; the row also says how they were priced", async () => {
+    await withSettings({}, async () => {
+      autumn.get(orgId).credits = 1_000;
+      const deep = await newScan();
+      const calls = autumn.calls.length;
+      expect(await runSlice(deep)).toBeUndefined();
+      const scan = (await scanById(database, deep))!;
+      // Not sized yet: the top tier is held, and the tier of what the hunt measured is charged.
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 25, credits: 5 });
+      expect(scan.pricing).toEqual(TIERED);
+      expect(autumn.get(orgId).credits).toBe(995);
+      expect(autumn.calls.slice(calls).filter((c) => c === "reserve" || c === "finalize")).toEqual(["reserve", "finalize"]);
+      expect(await scanBill(database, deep)).toBeUndefined();
+      expect("unwritten" in sliceState(scan)).toBe(false);
+
+      gh.files = [CHANGED, DOCS];
+      const review = await newScan("pr_review");
+      expect(await runSlice(review)).toBeUndefined();
+      const reviewed = (await scanById(database, review))!;
+      expect(reviewed).toMatchObject({ status: "completed", billing: "charged", creditsReserved: prReviewCredits(3), credits: prReviewCredits(3) });
+      expect(reviewed.pricing).toEqual(TIERED);
+      expect(autumn.get(orgId).credits).toBe(995 - prReviewCredits(3));
+      expect(await scanBill(database, review)).toBeUndefined();
+      expect(await orgCarry(database, orgId)).toBe(0);
+    });
+  });
+
+  it("classic deep scans and PR reviews reserve and charge as before, priced classic", async () => {
+    await withSettings({ SANDCHEST_ENGINE: "" }, async () => {
+      autumn.get(orgId).credits = 1_000;
+      // Not sized yet: the top tier is held, and what the engine measured is charged.
+      const deep = await newScan();
+      expect(await beginScan(deep)).toEqual({ state: "running" });
+      expect(await scanById(database, deep)).toMatchObject({ billing: "reserved", creditsReserved: 25, pricing: { engine: "classic", mode: "tiered", unit: "dollar" } });
+      expect(autumn.get(orgId).credits).toBe(975);
+      await database.$client`update scans set credits = 5, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${deep}`;
+      await publishScan(deep);
+      expect(await scanById(database, deep)).toMatchObject({ status: "completed", billing: "charged", credits: 5 });
+      expect(autumn.get(orgId).credits).toBe(995);
+
+      gh.files = [CHANGED, DOCS];
+      const review = await newScan("pr_review");
+      expect(await beginScan(review)).toEqual({ state: "running" });
+      expect(await scanById(database, review)).toMatchObject({ billing: "reserved", creditsReserved: prReviewCredits(3), pricing: { engine: "classic", mode: "tiered", unit: "dollar" } });
+      await database.$client`update scans set credits = ${prReviewCredits(3)}, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${review}`;
+      await publishScan(review);
+      expect(await scanById(database, review)).toMatchObject({ status: "completed", billing: "charged", credits: prReviewCredits(3) });
+      expect(autumn.get(orgId).credits).toBe(995 - prReviewCredits(3));
+    });
+  });
+
+  it("Dig and a dashboard review hold their tier price as before, and store how they were priced", async () => {
+    setScanStarter(async () => {});
+    try {
+      await withSettings({}, async () => {
+        autumn.get(orgId).credits = 1_000;
+        const dug = await requestDeepScan({ ...(await newRepo()), loc: 50_000 });
+        expect(dug.ok).toBe(true);
+        const dugId = (dug as { scanId: string }).scanId;
+        expect(await scanById(database, dugId)).toMatchObject({ billing: "reserved", creditsReserved: 5, pricing: TIERED });
+
+        gh.files = [CHANGED, DOCS];
+        const repo = await newRepo();
+        expect(await quotePrReview(repo, 7)).toMatchObject({ ok: true, credits: prReviewCredits(3) });
+        const started = await startPrReview(repo, 7, prReviewCredits(3));
+        expect(started).toMatchObject({ ok: true, credits: prReviewCredits(3) });
+        const reviewId = (started as { scanId: string }).scanId;
+        expect(await scanById(database, reviewId)).toMatchObject({ billing: "reserved", creditsReserved: prReviewCredits(3), pricing: TIERED });
+        expect(autumn.get(orgId).credits).toBe(1_000 - 5 - prReviewCredits(3));
+        await failScan(dugId, "test over");
+        await failScan(reviewId, "test over");
+        expect(autumn.get(orgId).credits).toBe(1_000);
+      });
+    } finally {
+      setScanStarter(undefined);
+    }
+  });
+
+  it("a scan keeps the engine it was reserved under when the setting changes before it starts", async () => {
+    setScanStarter(async () => {});
+    try {
+      autumn.get(orgId).credits = 1_000;
+      let onSlice = "";
+      await withSettings({}, async () => {
+        onSlice = (await requestDeepScan({ ...(await newRepo()), loc: 50_000 }) as { scanId: string }).scanId;
+      });
+      let onClassic = "";
+      await withSettings({ SANDCHEST_ENGINE: "" }, async () => {
+        onClassic = (await requestDeepScan({ ...(await newRepo()), loc: 50_000 }) as { scanId: string }).scanId;
+        // Reserved on the slice engine: it stays there with the setting now classic.
+        expect(await beginScan(onSlice)).toEqual({ state: "running", engine: "slice" });
+      });
+      await withSettings({}, async () => {
+        expect(await beginScan(onClassic)).toEqual({ state: "running" });
+      });
+      expect((await scanById(database, onSlice))!.pricing).toMatchObject({ engine: "slice" });
+      expect((await scanById(database, onClassic))!.pricing).toMatchObject({ engine: "classic" });
+      await failScan(onSlice, "test over");
+      await failScan(onClassic, "test over");
+    } finally {
+      setScanStarter(undefined);
+    }
+  });
+});
+
+describe.skipIf(!available)("usage billing in shadow", () => {
+  it("the tier price is reserved and charged as today; a shadow bill is stored beside it, from no carry, and the carry is untouched", async () => {
+    await withSettings(SHADOW_ENV, async () => {
+      autumn.get(orgId).credits = 1_000;
+      await resetCarry();
+      await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 7_000 });
+      const scanId = await newScan();
+      await runBilled(scanId, { state: "running", engine: "slice", pricing: "shadow" });
+
+      const scan = (await scanById(database, scanId))!;
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 25, credits: 5 });
+      expect(scan.pricing).toEqual({ engine: "slice", mode: "shadow", unit: "dollar", multiplierThousandths: 3000, ceilingMicroUsd: 500_000, fast: false });
+      expect(autumn.get(orgId).credits).toBe(995);
+
+      // Every ledger row is billable here: one attempt of each step, all priced.
+      const cost = await ledgerMicroUsd(scanId);
+      const bill = (await scanBill(database, scanId))!;
+      expect(bill).toMatchObject({ status: "shadow", reason: null, engine: "slice", fast: false, multiplierThousandths: 3000, creditMicroUsd: 1_000_000, costMicroUsd: cost, dueMicroUsd: cost * 3, carryInMicroUsd: 0 });
+      // The cap a usage scan would have held: the ceiling times the multiplier, in whole credits.
+      expect(bill.reservedCredits).toBe(2);
+      expect(bill.credits * 1_000_000 + bill.carryOutMicroUsd).toBe(bill.dueMicroUsd);
+      expect(bill.lines.map((line) => line.kind).sort()).toContain("sandbox");
+      expect(bill.lines.reduce((sum, line) => sum + line.costMicroUsd, 0)).toBe(cost);
+      expect(await orgCarry(database, orgId)).toBe(7_000);
+      await resetCarry();
+    });
+  });
+});
+
+describe.skipIf(!available)("usage billing on", () => {
+  it("holds credits covering the ceiling times the multiplier, bills the ledger, charges the bill and carries the rest to the next scan", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      model.costUsd = 0.0012345;
+      const first = await newScan();
+      await runBilled(first, { state: "running", engine: "slice", pricing: "usage" });
+
+      const scan = (await scanById(database, first))!;
+      // 0.5 USD × 3 in credits of a cent.
+      expect(scan.creditsReserved).toBe(150);
+      expect(scan.pricing).toEqual({ engine: "slice", mode: "usage", unit: "cent", multiplierThousandths: 3000, ceilingMicroUsd: 500_000, fast: false });
+      const bill = (await scanBill(database, first))!;
+      expect(bill).toMatchObject({ status: "open", reason: null, creditMicroUsd: 10_000, multiplierThousandths: 3000, reservedCredits: 150, carryInMicroUsd: 0, capped: false });
+      expect(bill.dueMicroUsd).toBe(bill.lines.reduce((sum, line) => sum + line.chargeMicroUsd, 0));
+      expect(bill.credits * 10_000 + bill.carryOutMicroUsd).toBe(bill.dueMicroUsd);
+      expect(bill.credits).toBeGreaterThan(0);
+      expect(bill.credits).toBeLessThanOrEqual(150);
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: bill.credits });
+      expect(autumn.get(orgId).credits).toBe(10_000 - bill.credits);
+      expect(autumn.get(orgId).locks.size).toBe(0);
+      expect(await orgCarry(database, orgId)).toBe(bill.carryOutMicroUsd);
+
+      // The next scan of the account starts from that carry.
+      const second = await newScan();
+      await runBilled(second, { state: "running", engine: "slice", pricing: "usage" });
+      const next = (await scanBill(database, second))!;
+      expect(next.carryInMicroUsd).toBe(bill.carryOutMicroUsd);
+      expect(next.credits * 10_000 + next.carryOutMicroUsd).toBe(next.dueMicroUsd + next.carryInMicroUsd);
+      expect(await orgCarry(database, orgId)).toBe(next.carryOutMicroUsd);
+      expect(autumn.get(orgId).credits).toBe(10_000 - bill.credits - next.credits);
+      await resetCarry();
+    });
+  });
+
+  it("a pull request review holds for its own ceiling; one with nothing to review holds 0 and is billed 0", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      gh.files = [CHANGED, DOCS];
+      const review = await newScan("pr_review");
+      await runBilled(review, { state: "running", engine: "slice", pricing: "usage" });
+      const scan = (await scanById(database, review))!;
+      // 0.3 USD × 3 in credits of a cent.
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 90 });
+      expect(scan.pricing).toMatchObject({ ceilingMicroUsd: 300_000 });
+      const bill = (await scanBill(database, review))!;
+      expect(bill).toMatchObject({ status: "open", reservedCredits: 90 });
+      expect(scan.credits).toBe(bill.credits);
+      expect(autumn.get(orgId).credits).toBe(10_000 - bill.credits);
+
+      await resetCarry();
+      gh.files = [DOCS];
+      const nothing = await newScan("pr_review");
+      await runBilled(nothing, { state: "running", engine: "slice", pricing: "usage" });
+      expect(await scanById(database, nothing)).toMatchObject({ status: "completed", creditsReserved: 0, credits: 0 });
+      expect(await scanBill(database, nothing)).toMatchObject({ status: "open", reservedCredits: 0, credits: 0, dueMicroUsd: 0, lines: [] });
+      expect(autumn.get(orgId).credits).toBe(10_000 - bill.credits);
+
+      // The dashboard quotes and holds the same.
+      setScanStarter(async () => {});
+      try {
+        gh.files = [CHANGED, DOCS];
+        const repo = await newRepo();
+        expect(await quotePrReview(repo, 9)).toMatchObject({ ok: true, credits: 90 });
+        const started = (await startPrReview(repo, 9, 90)) as { scanId: string };
+        expect(await scanById(database, started.scanId)).toMatchObject({ billing: "reserved", creditsReserved: 90, pricing: { mode: "usage", ceilingMicroUsd: 300_000 } });
+        const dug = (await requestDeepScan({ ...(await newRepo()), loc: 50_000 })) as { scanId: string };
+        expect(await scanById(database, dug.scanId)).toMatchObject({ billing: "reserved", creditsReserved: 150, pricing: { mode: "usage", ceilingMicroUsd: 500_000 } });
+        await failScan(started.scanId, "test over");
+        await failScan(dug.scanId, "test over");
+      } finally {
+        setScanStarter(undefined);
+      }
+      await resetCarry();
+    });
+  });
+
+  it("a bill over what was held is capped: the held credits are charged and the carry is left as it was", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 4_000 });
+      // The sandbox's cost comes on top of the model calls the ceiling stopped at, so the review spends past it.
+      model.costUsd = 0.02;
+      gh.files = [CHANGED, DOCS];
+      const review = await newScan("pr_review");
+      await runBilled(review, { state: "running", engine: "slice", pricing: "usage" });
+      const bill = (await scanBill(database, review))!;
+      expect(bill).toMatchObject({ status: "open", capped: true, credits: 90, reservedCredits: 90, carryInMicroUsd: 4_000, carryOutMicroUsd: 4_000 });
+      expect(bill.dueMicroUsd).toBeGreaterThan(900_000);
+      expect(await scanById(database, review)).toMatchObject({ status: "completed", billing: "charged", credits: 90 });
+      expect(autumn.get(orgId).credits).toBe(10_000 - 90);
+      expect(await orgCarry(database, orgId)).toBe(4_000);
+      await resetCarry();
+    });
+  });
+
+  it("an untrusted ledger is waived for each reason: nothing charged, the carry untouched, the reason reported", async () => {
+    const cases: Array<{ reason: string; before?: () => Promise<void>; after?: (scanId: string) => Promise<void> }> = [
+      {
+        reason: "unpriced",
+        after: async (scanId) => {
+          await database.insert(schema.scanUsage).values({ scanId, kind: "model", stage: "verify", costUsd: "0", costSource: "provider", step: "verify", status: "unpriced" });
+        },
+      },
+      {
+        reason: "started",
+        after: async (scanId) => {
+          await database.insert(schema.scanUsage).values({ scanId, kind: "model", stage: "verify", costUsd: "0", costSource: "provider", step: "verify", status: "started", createdAt: new Date(Date.now() - 20 * 60_000) });
+        },
+      },
+      {
+        // The write-up's rows cannot be written: the ledger keeps trying, then counts them.
+        reason: "unwritten",
+        before: async () => {
+          await database.$client.unsafe(`create function refuse_writeup_usage() returns trigger language plpgsql as $$ begin if new.step = 'writeup' then raise exception 'refused'; end if; return new; end $$`);
+          await database.$client.unsafe(`create trigger refuse_writeup_usage before insert on scan_usage for each row execute function refuse_writeup_usage()`);
+        },
+        after: async () => {
+          await database.$client.unsafe(`drop trigger refuse_writeup_usage on scan_usage; drop function refuse_writeup_usage()`);
+        },
+      },
+      {
+        reason: "sandbox_missing",
+        before: async () => {
+          host.usageFails = true;
+        },
+      },
+    ];
+    await withSettings(USAGE_ENV, async () => {
+      for (const { reason, before, after } of cases) {
+        autumn.get(orgId).credits = 10_000;
+        await resetCarry();
+        await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 3_000 });
+        const scanId = await newScan();
+        await before?.();
+        const reports = await withSentry(async () => {
+          await throughWriteUp(scanId, { state: "running", engine: "slice", pricing: "usage" });
+          await after?.(scanId);
+          expect(await bill(scanId)).toEqual({ state: "billed", status: "waived", credits: 0 });
+        });
+        host.usageFails = false;
+        // Reported with the scan and the reason only.
+        expect(reports.filter((tags) => tags.reason !== undefined)).toEqual([expect.objectContaining({ source: "billing", scan_id: scanId, reason })]);
+        const stored = (await scanBill(database, scanId))!;
+        expect(stored).toMatchObject({ status: "waived", reason, credits: 0, capped: false, carryInMicroUsd: 3_000, carryOutMicroUsd: 3_000, reservedCredits: 150 });
+        expect(stored.lines.length).toBeGreaterThan(0);
+        if (reason === "unwritten") expect(Object.values(sliceState((await scanById(database, scanId))!).unwritten ?? {}).some((n) => n > 0)).toBe(true);
+        expect((await scanById(database, scanId))!.credits).toBe(0);
+        await publishSlice(scanId);
+        expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: 0 });
+        expect(autumn.get(orgId).credits).toBe(10_000);
+        expect(await orgCarry(database, orgId)).toBe(3_000);
+      }
+      await resetCarry();
+    });
+  });
+
+  it("a call still under way makes the bill step wait; its last poll bills the ledger as it is", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      const scanId = await newScan();
+      await throughWriteUp(scanId, { state: "running", engine: "slice", pricing: "usage" });
+      const id = await startUsageCall(database, scanId, { stage: "verify", role: "agent" });
+      expect(await billSlice(scanId)).toEqual({ state: "waiting" });
+      expect(await scanBill(database, scanId)).toBeUndefined();
+      // The call ends: the next poll bills it.
+      await finishUsageCall(database, id, { status: "ok", costUsd: "0.002" });
+      expect(await billSlice(scanId)).toMatchObject({ state: "billed", status: "open" });
+      await publishSlice(scanId);
+
+      // One that never ends: the last poll bills the ledger as it is, untrusted.
+      const stuck = await newScan();
+      await throughWriteUp(stuck, { state: "running", engine: "slice", pricing: "usage" });
+      await startUsageCall(database, stuck, { stage: "verify", role: "agent" });
+      expect(await bill(stuck)).toEqual({ state: "billed", status: "waived", credits: 0 });
+      expect(await scanBill(database, stuck)).toMatchObject({ reason: "started" });
+      await publishSlice(stuck);
+      expect(await scanById(database, stuck)).toMatchObject({ credits: 0, billing: "charged" });
+      await resetCarry();
+    });
+  });
+
+  it("the bill step run again changes nothing", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      const scanId = await newScan();
+      await throughWriteUp(scanId, { state: "running", engine: "slice", pricing: "usage" });
+      const once = await bill(scanId);
+      const stored = await scanBill(database, scanId);
+      const carry = await orgCarry(database, orgId);
+      // A later write (here, the write-up run again would set the tier price) is put back to the bill's.
+      await database.$client`update scans set credits = 5 where id = ${scanId}`;
+      expect(await bill(scanId)).toEqual(once);
+      expect(await scanBill(database, scanId)).toEqual(stored);
+      expect(await orgCarry(database, orgId)).toBe(carry);
+      expect((await scanById(database, scanId))!.credits).toBe(stored!.credits);
+      await publishSlice(scanId);
+      // Once published, it is left alone.
+      expect(await billSlice(scanId)).toEqual({ state: "skipped" });
+      expect(await scanBill(database, scanId)).toEqual(stored);
+      await resetCarry();
+    });
+  });
+
+  it("the multiplier, the credit, the mode and the ceiling are the scan's pricing, not settings changed mid-scan", async () => {
+    autumn.get(orgId).credits = 10_000;
+    await resetCarry();
+    const scanId = await newScan();
+    await withSettings(USAGE_ENV, async () => {
+      expect(await beginScan(scanId)).toEqual({ state: "running", engine: "slice", pricing: "usage" });
+    });
+    // A ceiling the hunt would stop at, another multiplier, credits of a dollar, and only shadow billing.
+    await withSettings({ SANDCHEST_USAGE_BILLING: "shadow", SANDCHEST_USAGE_MULTIPLIER: "7", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar", SANDCHEST_SLICE_CEILING_USD: "0.0001" }, async () => {
+      const { selected } = await huntSlice(scanId, { passDelayMs: 0 });
+      expect(selected).toBe(2);
+      expect(await session(scanId, "verify")).toBe(1);
+      await session(scanId, "variants");
+      await writeUpSlice(scanId);
+      expect(tokensOf(scanId).map((claims) => claims!.ceilingMicroUsd)).toEqual([500_000, 500_000]);
+      expect(await bill(scanId)).toMatchObject({ state: "billed", status: "open" });
+      await publishSlice(scanId);
+    });
+    const stored = (await scanBill(database, scanId))!;
+    expect(stored).toMatchObject({ status: "open", multiplierThousandths: 3000, creditMicroUsd: 10_000, reservedCredits: 150 });
+    expect(stored.dueMicroUsd).toBe(stored.lines.reduce((sum, line) => sum + Math.round((line.costMicroUsd * 3000) / 1000), 0));
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: stored.credits });
+    expect(autumn.get(orgId).credits).toBe(10_000 - stored.credits);
+    await resetCarry();
+  });
+
+  it("the begin result carries the pricing mode only for slice scans billed from usage or in shadow", async () => {
+    const settle = (scanId: string) => failScan(scanId, "test over");
+    autumn.get(orgId).credits = 10_000;
+    await withSettings({}, async () => {
+      const scanId = await newScan();
+      expect(await beginScan(scanId)).toEqual({ state: "running", engine: "slice" });
+      await settle(scanId);
+    });
+    for (const [env, pricing] of [
+      [SHADOW_ENV, "shadow"],
+      [USAGE_ENV, "usage"],
+    ] as const) {
+      await withSettings(env, async () => {
+        const deep = await newScan();
+        expect(await beginScan(deep)).toEqual({ state: "running", engine: "slice", pricing });
+        await settle(deep);
+        // Recon and fix checks stay classic and tiered.
+        const recon = await newScan("recon");
+        const begun = await beginScan(recon);
+        expect(begun).toEqual({ state: begun.state });
+        expect((await scanById(database, recon))!.pricing).toMatchObject({ engine: "classic", mode: "tiered" });
+        await settle(recon);
+      });
+    }
+    // An account the slice engine does not take is classic, so tiered, with usage billing on.
+    await withSettings({ ...USAGE_ENV, SANDCHEST_ENGINE_ORGS: "example-org" }, async () => {
+      const outside = await newScan();
+      expect(await beginScan(outside)).toEqual({ state: "running" });
+      expect((await scanById(database, outside))!.pricing).toEqual({ engine: "classic", mode: "tiered", unit: "cent" });
+      await settle(outside);
+    });
   });
 });

@@ -184,6 +184,24 @@ describe("writeScanBill", () => {
     }
   });
 
+  it("a shadow bill may be computed from no carry, whatever the account's; other bills may not", async () => {
+    const org = await newOrg();
+    await billed(await newScan(org), 6_000);
+    const shadow = await newScan(org);
+    const { bill, created } = await writeScanBill(database, shadow, () => draft(7_500, 0, { status: "shadow" }));
+    expect(created).toBe(true);
+    expect(bill).toMatchObject({ status: "shadow", carryInMicroUsd: 0, carryOutMicroUsd: 7_500 });
+    expect(await orgCarry(database, org.orgId)).toBe(6_000);
+    // Neither another carry, nor no carry for a bill that is not shadow.
+    await expect(writeScanBill(database, await newScan(org), () => draft(7_500, 1_000, { status: "shadow" }))).rejects.toThrow("not computed from the account's carry");
+    for (const status of ["open", "waived"] as const) {
+      const scanId = await newScan(org);
+      await expect(writeScanBill(database, scanId, () => draft(7_500, 0, { status }))).rejects.toThrow("not computed from the account's carry");
+      expect(await scanBill(database, scanId)).toBeUndefined();
+    }
+    expect(await orgCarry(database, org.orgId)).toBe(6_000);
+  });
+
   it("refuses a bill not computed from the carry it was given, or one that does not settle, and stores nothing", async () => {
     const org = await newOrg();
     await billed(await newScan(org), 6_000);

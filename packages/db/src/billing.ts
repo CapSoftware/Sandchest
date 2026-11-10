@@ -4,7 +4,7 @@
  */
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { creditClaims, orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users } from "./schema";
+import { creditClaims, orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users, type ScanPricing } from "./schema";
 
 export type OrgBillingRow = typeof orgBilling.$inferSelect;
 export type OrgBillingInput = Omit<OrgBillingRow, "orgId" | "activatedAt" | "checkedAt" | "creditLevel" | "creditLevelAt" | "creditLevelRev">;
@@ -245,11 +245,11 @@ export async function orgAdminContacts(database: Db, orgId: string): Promise<Org
 
 // ---- Scan credits ------------------------------------------------------------
 
-/** Records a reservation. False if the scan already holds one (a retried step). */
-export async function markScanReserved(database: Db, scanId: string, credits: number): Promise<boolean> {
+/** Records a reservation, and how the scan was priced when given. False if the scan already holds one (a retried step). */
+export async function markScanReserved(database: Db, scanId: string, credits: number, pricing?: ScanPricing): Promise<boolean> {
   const rows = await database
     .update(scans)
-    .set({ billing: "reserved", creditsReserved: credits })
+    .set({ billing: "reserved", creditsReserved: credits, ...(pricing && { pricing }) })
     .where(and(eq(scans.id, scanId), isNull(scans.billing)))
     .returning({ id: scans.id });
   return rows.length === 1;

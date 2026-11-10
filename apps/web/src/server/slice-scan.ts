@@ -31,6 +31,8 @@ import {
   updateScan,
   upsertFindings,
   usageBudgetState,
+  usageKeyRecorded,
+  type ScanPricing,
   type StageOutcome,
 } from "@sandchest/db";
 import { LlmQuotaError } from "@sandchest/engine/llm";
@@ -38,7 +40,7 @@ import { adoptKnownFingerprints, changedLines, DEFAULT_LIMITS, relevantChanges, 
 import { parsePatch, type Installation } from "@sandchest/github";
 import type { IndexerBinary, IndexerHandle } from "@sandchest/workspace";
 import { agentSandboxSetupScript, bulkReadFiles } from "@sandchest/workspace/boat";
-import { config, fastModeAvailable, fastRunAllowed } from "./config";
+import { config, fastModeAvailable, fastRunAllowed, sliceCeilingMicroUsd } from "./config";
 import { captureFromScan } from "./cves";
 import { gatewayEndpoint, mintGatewayToken, STALE_CALL_SECONDS } from "./gateway";
 import { describeError } from "./log";
@@ -92,6 +94,8 @@ export interface SliceState {
   written?: boolean;
   /** Set by the hunt of a scan flagged fast: whether it runs fast. Every later step follows it. */
   fast?: boolean;
+  /** For a scan billed from its usage: ledger rows each step run (`hunt:0`, `writeup:1`...) could not write. */
+  unwritten?: Record<string, number>;
 }
 
 /** The scan's spend reached SANDCHEST_SLICE_CEILING_USD. */
@@ -177,7 +181,7 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
     return await stopped(scan, error, guard.signal);
   } finally {
     await inventory?.read;
-    await Promise.allSettled([events.flush(), inventory?.done, closeLedger(scan.id, ledger), stages.flush()]);
+    await Promise.allSettled([events.flush(), inventory?.done, closeLedger(scan, ledger, `hunt:${attempt}`), stages.flush()]);
   }
 }
 
@@ -332,7 +336,7 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
   let attempt: number | undefined;
   try {
     const fast = runsFast(scan);
-    const { ceilingMicroUsd, secret } = sliceLimits(scan.kind, fast);
+    const { ceilingMicroUsd, secret } = sliceLimits(scan, fast);
     const budget = await usageBudgetState(db(), scan.id, STALE_CALL_SECONDS);
     if (budget && usdToMicroUsd(budget.spentUsd) >= ceilingMicroUsd) throw new SpendCeilingReached();
     const sandbox = await sliceRuntime().attach(requireSandboxId(state));
@@ -518,7 +522,7 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
     const recognised = adoptKnownFingerprints(findings, await knownFindings(db(), scan.repo.id));
     const { ids, newIds } = await upsertFindings(db(), scan.repo.id, scan, recognised.map(toFindingInput));
     const credits = review ? (review.files ? prReviewCredits(review.changedLines) : 0) : (deepScanCredits(state.loc!) ?? 0);
-    await closeLedger(scan.id, ledger);
+    const unwritten = await closeLedger(scan, ledger, `writeup:${attempt}`);
     const model = (await scanUsageTotals(db(), scan.id)).filter((total) => total.kind === "model");
     await recordMetrics(db(), scan.id, {
       inputTokens: model.reduce((sum, t) => sum + t.inputTokens, 0),
@@ -530,7 +534,8 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
       candidates: state.selected ?? 0,
       survivors: ids.length,
     });
-    const written: SliceState = { ...state, findings: ids.length, written: true };
+    // The count `closeLedger` just kept, if it kept one, is not lost under the state this step began with.
+    const written: SliceState = { ...state, ...(unwritten && { unwritten }), findings: ids.length, written: true };
     if (review) {
       await updateScan(db(), scan.id, { credits, stats: { findingIds: ids, newFindingIds: newIds, review, slice: written } });
     } else {
@@ -548,7 +553,7 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
     stages.end("writeup", attempt, "failed");
     return await stopped(scan, error, guard.signal);
   } finally {
-    await Promise.allSettled([events.flush(), closeLedger(scan.id, ledger), stages.flush()]);
+    await Promise.allSettled([events.flush(), closeLedger(scan, ledger, `writeup:${attempt}`), stages.flush()]);
   }
 }
 
@@ -610,26 +615,32 @@ async function stopped(scan: LoadedScan, error: unknown, signal?: AbortSignal): 
  */
 function runsFast(scan: LoadedScan): boolean {
   const recorded = sliceState(scan).fast;
+  // A scan priced with `fast` runs fast only if it was allowed to when priced (its hold covers it) and still can.
+  if (recorded === undefined && scan.pricing?.fast !== undefined) return scan.pricing.fast && fastModeAvailable();
   if (recorded === undefined) return fastRunAllowed(scan, scan.repo.org.githubLogin);
   if (recorded && !fastModeAvailable()) throw new ScanFinished("The slice engine is no longer configured.");
   return recorded;
 }
 
-/** The scan's ceiling (a fast run's, a pull request's own, or a deep scan's) and the gateway secret. */
-function sliceLimits(kind: string, fast: boolean): { ceilingMicroUsd: number; secret: string } {
+/**
+ * The scan's ceiling and the gateway secret. The ceiling is the one the scan was priced with, when its pricing
+ * has one (so it never spends past what it holds), else the settings' (a fast run's, a pull request's own, or a
+ * deep scan's).
+ */
+function sliceLimits(scan: { kind: string; pricing: ScanPricing | null }, fast: boolean): { ceilingMicroUsd: number; secret: string } {
   const settings = config();
-  const ceiling = fast ? settings.SANDCHEST_SLICE_CEILING_FAST_USD : kind === "pr_review" ? settings.SANDCHEST_SLICE_CEILING_PR_USD : settings.SANDCHEST_SLICE_CEILING_USD;
-  if (!ceiling || !settings.SANDCHEST_GATEWAY_SECRET) throw new ScanFinished("The slice engine is no longer configured.");
-  return { ceilingMicroUsd: usdToMicroUsd(ceiling), secret: settings.SANDCHEST_GATEWAY_SECRET };
+  const ceilingMicroUsd = scan.pricing?.ceilingMicroUsd ?? sliceCeilingMicroUsd(scan.kind, fast, settings);
+  if (!ceilingMicroUsd || !settings.SANDCHEST_GATEWAY_SECRET) throw new ScanFinished("The slice engine is no longer configured.");
+  return { ceilingMicroUsd, secret: settings.SANDCHEST_GATEWAY_SECRET };
 }
 
 /**
  * The ledger's sink, adding each call's cost to what the scan had spent when the step began. At the
  * ceiling it aborts the returned signal, which the engine is given: no further call starts.
  */
-async function spendGuard(scan: { id: string; kind: string }, ledger: UsageLedger, fast: boolean): Promise<{ onUsage: UsageSink; signal: AbortSignal }> {
+async function spendGuard(scan: { id: string; kind: string; pricing: ScanPricing | null }, ledger: UsageLedger, fast: boolean): Promise<{ onUsage: UsageSink; signal: AbortSignal }> {
   const scanId = scan.id;
-  const { ceilingMicroUsd } = sliceLimits(scan.kind, fast);
+  const { ceilingMicroUsd } = sliceLimits(scan, fast);
   const budget = await usageBudgetState(db(), scanId, STALE_CALL_SECONDS);
   let spent = budget ? usdToMicroUsd(budget.spentUsd) : 0;
   const controller = new AbortController();
@@ -649,11 +660,51 @@ async function spendGuard(scan: { id: string; kind: string }, ledger: UsageLedge
   };
 }
 
-async function closeLedger(scanId: string, ledger: UsageLedger): Promise<void> {
+/**
+ * Closes a step's ledger and reports rows it could not write. For a scan billed from its usage (or in shadow),
+ * the count is also kept in `stats.slice.unwritten` under the step's run (`run`), so the bill knows its ledger
+ * is short; that map is returned when it was saved.
+ */
+async function closeLedger(scan: { id: string; pricing: ScanPricing | null }, ledger: UsageLedger, run: string): Promise<SliceState["unwritten"]> {
+  const scanId = scan.id;
   const { unwritten } = await ledger.close();
-  if (unwritten === 0) return;
+  const saved = usageBilled(scan.pricing) ? await recordUnwritten(scanId, run, unwritten) : undefined;
+  if (unwritten === 0) return saved;
   console.error(`Usage ledger for scan ${scanId}: ${unwritten} rows not written`);
   await captureException(Object.assign(new Error("Usage ledger rows were not written"), { name: "UsageLedgerUnwritten" }), { source: "billing", tags: { scan_id: scanId, rows: unwritten }, handled: true });
+  return saved;
+}
+
+/** Whether a scan's pricing has a bill computed from its ledger: `usage` or `shadow`. */
+export function usageBilled(pricing: ScanPricing | null | undefined): pricing is ScanPricing & { mode: "usage" | "shadow" } {
+  return pricing?.mode === "usage" || pricing?.mode === "shadow";
+}
+
+/**
+ * Keeps a step run's count of unwritten rows in `stats.slice.unwritten`, replacing that run's earlier count (a
+ * ledger closed twice counts its rows once). Nothing is written for a run with none and no earlier count. Best
+ * effort: a failure is reported, never fails the step.
+ */
+async function recordUnwritten(scanId: string, run: string, rows: number): Promise<SliceState["unwritten"]> {
+  try {
+    const scan = await scanById(db(), scanId);
+    const current = sliceState(scan ?? { stats: null }).unwritten ?? {};
+    if (rows === 0 && current[run] === undefined) return undefined;
+    const unwritten = { ...current, [run]: rows };
+    await saveSlice(scanId, { unwritten });
+    return unwritten;
+  } catch (error) {
+    console.error(`Unwritten usage rows for scan ${scanId} were not recorded: ${describeError(error)}`);
+    await captureException(error, { source: "billing", tags: { action: "record_unwritten", scan_id: scanId }, handled: true });
+    return undefined;
+  }
+}
+
+/** Whether the cost row of the scan's current sandbox is in its ledger. Undefined for a scan with no sandbox. */
+export async function sandboxCostRecorded(scan: { id: string; stats: unknown }): Promise<boolean | undefined> {
+  const { sandboxId } = sliceState(scan);
+  if (!sandboxId) return undefined;
+  return usageKeyRecorded(db(), scan.id, sandboxKey(sandboxId));
 }
 
 /**

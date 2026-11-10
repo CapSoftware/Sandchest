@@ -8,7 +8,8 @@ import { prReviewCredits } from "@sandchest/billing";
 import { createScan, deleteUnstartedScan, prReviewStates, type Org, type Repo } from "@sandchest/db";
 import { changedLines, relevantChanges } from "@sandchest/engine/scan";
 import { parsePatch, type PullFile } from "@sandchest/github";
-import { autumn, billingEnabled, reserveScan } from "./billing";
+import { autumn, billingEnabled, heldCredits, reserveScan } from "./billing";
+import { scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
 import { startScan } from "./start";
@@ -33,7 +34,7 @@ export async function startPrReview(repo: InstalledRepo, prNumber: number, confi
   // With billing off nothing is priced, so there is nothing to confirm.
   if (billingEnabled() && checked.credits > confirmed) return { ok: false, reason: "price_changed", credits: checked.credits };
 
-  const { pull, credits } = checked;
+  const { pull, credits, pricing } = checked;
   const { scan, created } = await createScan(db(), {
     id: randomUUID(),
     repoId: repo.id,
@@ -48,7 +49,7 @@ export async function startPrReview(repo: InstalledRepo, prNumber: number, confi
   if (!created) return { ok: false, reason: "reviewed", scanId: scan.id };
   let gate: Awaited<ReturnType<typeof reserveScan>>;
   try {
-    gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits);
+    gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits, true, { pricing });
   } catch (error) {
     await autumn()?.finalize({ customerId: repo.org.id, lockId: scan.id, action: "release" }).catch(() => {});
     await deleteUnstartedScan(db(), scan.id);
@@ -74,7 +75,9 @@ async function reviewable(repo: InstalledRepo, prNumber: number) {
     return { ok: false as const, reason: "reviewed" as const, scanId: latest.scanId };
   }
   const files = await installation.pullFiles(repo.fullName, prNumber);
-  return { ok: true as const, pull, credits: reviewCredits(files) };
+  // What is quoted is what is held: a review billed from its usage holds enough for its ceiling.
+  const pricing = scanPricing({ kind: "pr_review", fast: false }, repo.org.githubLogin);
+  return { ok: true as const, pull, credits: heldCredits(pricing, reviewCredits(files)), pricing };
 }
 
 /** What a review of these files costs: the engine's own measure of the change (SPEC §12). */

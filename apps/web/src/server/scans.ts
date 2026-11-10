@@ -61,8 +61,8 @@ import type { IndexerBinary, IndexerHandle, Workspace } from "@sandchest/workspa
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { BoatWorkspace } from "@sandchest/workspace/boat";
-import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
-import { config, scanEngine, scanWorkspace, type Config } from "./config";
+import { billingEnabled, heldCredits, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
+import { config, scanEngine, scanPricing, scanWorkspace, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
@@ -86,8 +86,11 @@ const CHECK_NAME = "Sandchest";
 /** A scan's job is done; retries and duplicate starts must not redo it. */
 export class ScanFinished extends Error {}
 
-/** `engine` is set only for a scan the slice engine runs; anything else (old results included) runs classic. */
-export type BeginResult = { state: "running" | "queued" | "done"; engine?: "slice" };
+/**
+ * `engine` is set only for a scan the slice engine runs; anything else (old results included) runs classic.
+ * `pricing` is set only for a slice scan billed from its usage (or in shadow): only then does a bill step run.
+ */
+export type BeginResult = { state: "running" | "queued" | "done"; engine?: "slice"; pricing?: "usage" | "shadow" };
 
 /**
  * Lets the scan run (its credits held, or the org's plan checked), claims a
@@ -102,12 +105,16 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
     await updateScan(db(), scan.id, { status: "cancelled", error: "A newer push to this pull request is reviewed instead.", finishedAt: new Date() });
     return { state: "done" };
   }
+  // How the scan was priced when its credits were reserved, if they were: by an earlier run of this step, by Dig or the dashboard, or just below.
+  let pricing = scan.pricing;
   if (scan.status === "queued" && scan.billing === null && billingEnabled()) {
-    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, await scanCredits(scan), true, { evenWhenEmpty: scan.kind === "fix_check" });
+    const priced = scanPricing(scan, scan.repo.org.githubLogin);
+    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, heldCredits(priced, await scanCredits(scan)), true, { evenWhenEmpty: scan.kind === "fix_check", pricing: priced });
     if (!gate.ok) {
       await refuse(scan, gate);
       return { state: "done" };
     }
+    pricing = priced;
   }
   // A deep scan of a repo still being mapped waits for the map and builds on it, rather than mapping it again
   // beside the recon (the first deep scan starts the moment recon does).
@@ -138,7 +145,10 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
       });
     await updateScan(db(), scan.id, { checkRunId });
   }
-  if (scanEngine(scan.kind, scan.repo.org.githubLogin) === "slice") return { state: "running", engine: "slice" };
+  // A scan holding credits keeps the engine it was priced for, whatever the settings say now.
+  if ((pricing?.engine ?? scanEngine(scan.kind, scan.repo.org.githubLogin)) === "slice") {
+    return { state: "running", engine: "slice", ...((pricing?.mode === "usage" || pricing?.mode === "shadow") && { pricing: pricing.mode }) };
+  }
   return { state: "running" };
 }
 

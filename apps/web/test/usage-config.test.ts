@@ -1,6 +1,7 @@
 /** Usage billing settings: off unless chosen, a multiplier always checked, and on only with what it needs. */
 import { describe, expect, test } from "bun:test";
-import { config, creditUnit, scanPricingMode, usageMultiplierThousandths } from "@/server/config";
+import { heldCredits, usageHold } from "@/server/billing";
+import { config, creditMicroUsd, creditUnit, scanPricing, scanPricingMode, sliceCeilingMicroUsd, usageMultiplierThousandths } from "@/server/config";
 
 const base = {
   DATABASE_URL: "postgres://sandchest@postgres/sandchest",
@@ -97,5 +98,51 @@ describe("usage billing settings", () => {
     expect(scanPricingMode("slice", settings("off"))).toBe("tiered");
     expect(scanPricingMode("slice", settings("shadow"))).toBe("shadow");
     expect(scanPricingMode("slice", settings("on"))).toBe("usage");
+  });
+});
+
+describe("how a scan is priced at reservation", () => {
+  const deep = { kind: "deep", fast: false };
+  const review = { kind: "pr_review", fast: false };
+  const usage = { ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "on", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "cent" };
+  /** Made-up fast settings, with a fast ceiling below and above the deep one. */
+  const fastly = (ceiling: string) => ({ ...usage, SANDCHEST_SLICE_CEILING_FAST_USD: ceiling, LLM_AGENT_FAST_MODEL: "fast-model", LLM_SLICE_FAST_BODY: '{"serving":"fast"}' });
+
+  test("usage billing off: engine, tiered, the unit; nothing else, and the tier price is held", () => {
+    expect(scanPricing(deep, "acme", config(slice))).toEqual({ engine: "slice", mode: "tiered", unit: "dollar" });
+    expect(scanPricing(review, "acme", config(base))).toEqual({ engine: "classic", mode: "tiered", unit: "dollar" });
+    expect(scanPricing({ kind: "recon", fast: false }, "acme", config(usage))).toEqual({ engine: "classic", mode: "tiered", unit: "cent" });
+    expect(heldCredits(scanPricing(deep, "acme", config(slice)), 25)).toBe(25);
+    // Shadow holds the tier price too.
+    expect(heldCredits(scanPricing(deep, "acme", config({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "shadow" })), 25)).toBe(25);
+  });
+
+  test("usage and shadow: the multiplier and the ceiling of the kind; usage holds credits covering their product", () => {
+    expect(scanPricing(deep, "acme", config(usage))).toEqual({ engine: "slice", mode: "usage", unit: "cent", multiplierThousandths: 2500, ceilingMicroUsd: 500_000, fast: false });
+    expect(scanPricing(review, "acme", config(usage))).toMatchObject({ ceilingMicroUsd: 250_000 });
+    expect(scanPricing(deep, "acme", config({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "shadow" }))).toMatchObject({ mode: "shadow", unit: "dollar", ceilingMicroUsd: 500_000 });
+    // 0.5 × 2.5 = 1.25 USD: 125 cents. 0.25 × 2.5 = 0.625 USD: 63 cents, rounded up.
+    expect(heldCredits(scanPricing(deep, "acme", config(usage)), 25)).toBe(125);
+    expect(heldCredits(scanPricing(review, "acme", config(usage)), 1)).toBe(63);
+    // A review with nothing to review holds nothing.
+    expect(heldCredits(scanPricing(review, "acme", config(usage)), 0)).toBe(0);
+    expect(usageHold({ engine: "slice", mode: "usage", unit: "dollar", multiplierThousandths: 1000, ceilingMicroUsd: 1_000_001 })).toBe(2);
+  });
+
+  test("a scan that may run fast is priced for the larger of the fast and deep ceilings", () => {
+    expect(scanPricing({ kind: "deep", fast: true }, "acme", config(fastly("0.4")))).toMatchObject({ fast: true, ceilingMicroUsd: 500_000 });
+    expect(scanPricing({ kind: "deep", fast: true }, "acme", config(fastly("2.5")))).toMatchObject({ fast: true, ceilingMicroUsd: 2_500_000 });
+    // Not flagged, or fast mode not available: the deep ceiling alone.
+    expect(scanPricing(deep, "acme", config(fastly("2.5")))).toMatchObject({ fast: false, ceilingMicroUsd: 500_000 });
+    expect(scanPricing({ kind: "deep", fast: true }, "acme", config(usage))).toMatchObject({ fast: false, ceilingMicroUsd: 500_000 });
+  });
+
+  test("a credit's size and the slice ceilings in micro-dollars", () => {
+    expect(creditMicroUsd("dollar")).toBe(1_000_000);
+    expect(creditMicroUsd("cent")).toBe(10_000);
+    expect(sliceCeilingMicroUsd("deep", false, config(slice))).toBe(500_000);
+    expect(sliceCeilingMicroUsd("pr_review", false, config(slice))).toBe(250_000);
+    expect(sliceCeilingMicroUsd("deep", true, config(slice))).toBeUndefined();
+    expect(sliceCeilingMicroUsd("deep", false, config(base))).toBeUndefined();
   });
 });

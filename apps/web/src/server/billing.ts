@@ -41,10 +41,12 @@ import {
   type OrgBillingInput,
   type OrgBillingRow,
   type OrgSettings,
+  type ScanPricing,
   updateOrgSettings,
 } from "@sandchest/db";
+import { chargeMicroUsd, creditsCovering } from "@sandchest/billing/usage";
 import { after } from "next/server";
-import { config } from "./config";
+import { config, creditMicroUsd } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
 import { noticeCredits } from "./notices";
@@ -290,12 +292,27 @@ export async function buyCredits(
 export type Gate = { ok: true } | { ok: false; reason: "no_plan" | "out_of_credits"; credits: number };
 
 /**
+ * What a scan holds: its tier price, or for a scan billed from its usage, the credits covering its ceiling times
+ * the multiplier. A pull request review with nothing to review holds 0 either way.
+ */
+export function heldCredits(pricing: ScanPricing, tierCredits: number): number {
+  if (pricing.mode !== "usage" || tierCredits === 0) return tierCredits;
+  return usageHold(pricing);
+}
+
+/** The credits a usage-billed scan holds: enough for its ceiling times the multiplier, in the credit it was priced in. */
+export function usageHold(pricing: ScanPricing): number {
+  if (pricing.ceilingMicroUsd === undefined || pricing.multiplierThousandths === undefined) throw new Error("The scan's pricing has no ceiling or multiplier");
+  return creditsCovering(chargeMicroUsd(pricing.ceilingMicroUsd, pricing.multiplierThousandths), creditMicroUsd(pricing.unit));
+}
+
+/**
  * Lets a scan run: holds its credits in Autumn, or for a free scan checks the
  * org has a plan. Idempotent per scan, since the scan id is the lock id.
  * Records the hold on the scan unless `record` is false (the scan row does
- * not exist yet).
+ * not exist yet), with `pricing` in the same write.
  */
-export async function reserveScan(scanId: string, org: BillingOrg, credits: number, record = true, options: { evenWhenEmpty?: boolean } = {}): Promise<Gate> {
+export async function reserveScan(scanId: string, org: BillingOrg, credits: number, record = true, options: { evenWhenEmpty?: boolean; pricing?: ScanPricing } = {}): Promise<Gate> {
   const client = autumn();
   if (!client) return { ok: true };
   if (credits === 0) {
@@ -318,7 +335,7 @@ export async function reserveScan(scanId: string, org: BillingOrg, credits: numb
       if (stored) await noticeCredits(org, stored, seen).catch(logFailure("credits email"));
     }
   }
-  if (record) await markScanReserved(db(), scanId, credits);
+  if (record) await markScanReserved(db(), scanId, credits, options.pricing);
   return { ok: true };
 }
 

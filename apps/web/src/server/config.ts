@@ -2,7 +2,8 @@
  * Server configuration, validated once. A misconfigured deployment fails on
  * its first request with every problem listed, not halfway through a scan.
  */
-import { parseMultiplier } from "@sandchest/billing/usage";
+import { parseMultiplier, usdToMicroUsd } from "@sandchest/billing/usage";
+import type { ScanPricing } from "@sandchest/db";
 import { z } from "zod";
 
 /** A positive amount in USD, at most six digits each side of the point. */
@@ -247,9 +248,39 @@ export function creditUnit(settings: Config = config()): "dollar" | "cent" {
   return settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT ?? "dollar";
 }
 
+/** One credit in micro-dollars. */
+export function creditMicroUsd(unit: "dollar" | "cent"): number {
+  return unit === "cent" ? 10_000 : 1_000_000;
+}
+
+/** A slice scan's ceiling in micro-dollars, as the settings give it: a fast run's, a pull request's or a deep scan's. Undefined when unset. */
+export function sliceCeilingMicroUsd(kind: string, fast: boolean, settings: Config = config()): number | undefined {
+  const ceiling = fast ? settings.SANDCHEST_SLICE_CEILING_FAST_USD : kind === "pr_review" ? settings.SANDCHEST_SLICE_CEILING_PR_USD : settings.SANDCHEST_SLICE_CEILING_USD;
+  return ceiling ? usdToMicroUsd(ceiling) : undefined;
+}
+
+/**
+ * How a scan is priced if its credits are reserved now: its engine, its pricing mode and the credit's size; for
+ * `usage` and `shadow`, also the multiplier, whether it may run fast, and the most it may spend (a pull request's
+ * ceiling, a deep scan's, or for a scan that may run fast the larger of the fast and deep ones, since a fast scan
+ * can fall back to standard).
+ */
+export function scanPricing(scan: { kind: string; fast: boolean }, githubLogin: string, settings: Config = config()): ScanPricing {
+  const engine = scanEngine(scan.kind, githubLogin, settings);
+  const mode = scanPricingMode(engine, settings);
+  const unit = creditUnit(settings);
+  if (mode === "tiered") return { engine, mode, unit };
+  const fast = fastRunAllowed(scan, githubLogin, settings);
+  const standard = sliceCeilingMicroUsd(scan.kind, false, settings);
+  const ceilingMicroUsd = fast ? Math.max(sliceCeilingMicroUsd(scan.kind, true, settings) ?? 0, standard ?? 0) : standard;
+  const multiplierThousandths = usageMultiplierThousandths(settings);
+  if (!ceilingMicroUsd || multiplierThousandths === undefined) throw new Error("Usage billing needs the scan's ceiling and the multiplier");
+  return { engine, mode, unit, multiplierThousandths, ceilingMicroUsd, fast };
+}
+
 /**
  * How a scan on an engine is priced: `tiered` (credits by size) for classic scans always, and for slice scans
- * while usage billing is off; `shadow` or `usage` for slice scans otherwise. Nothing calls it yet.
+ * while usage billing is off; `shadow` or `usage` for slice scans otherwise.
  */
 export function scanPricingMode(engine: "classic" | "slice", settings: Config = config()): "tiered" | "shadow" | "usage" {
   if (engine !== "slice") return "tiered";

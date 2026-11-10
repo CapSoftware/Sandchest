@@ -58,7 +58,7 @@ export interface ScanBillDraft {
   dueMicroUsd: number;
   reservedCredits: number;
   credits: number;
-  /** Must be the carry the draft was computed from, as passed to it. */
+  /** Must be the carry the draft was computed from, as passed to it. A shadow bill may say 0 instead. */
   carryInMicroUsd: number;
   carryOutMicroUsd: number;
   capped: boolean;
@@ -92,7 +92,9 @@ export async function writeScanBill(
     if (existing) return { bill: existing, created: false };
 
     const draft = await build(carry.microUsd);
-    if (draft.carryInMicroUsd !== carry.microUsd) throw new Error("The bill was not computed from the account's carry");
+    // A shadow bill may be computed from no carry instead: it never moves the account's.
+    const fromNoCarry = draft.status === "shadow" && draft.carryInMicroUsd === 0;
+    if (draft.carryInMicroUsd !== carry.microUsd && !fromNoCarry) throw new Error("The bill was not computed from the account's carry");
     if (MOVES_CARRY.includes(draft.status)) checkSettlement(draft);
 
     const [inserted] = await tx

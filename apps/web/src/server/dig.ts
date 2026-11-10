@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { activeDeepScan, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
 import { digState } from "@/lib/dig-state";
-import { autumn, reserveScan } from "./billing";
+import { autumn, heldCredits, reserveScan } from "./billing";
+import { scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
 import { startScan } from "./start";
@@ -39,8 +40,10 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     // A repo recon has not sized yet holds the most a deep scan can cost, and is charged what the scan
     // measures (never more than it held). Inside the try: a failure here cleans up like any other, and never
     // leaves a scan to be charged later.
-    credits = state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits;
-    gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits);
+    // How the scan is priced is decided here, with its hold, and stored with it.
+    const pricing = scanPricing(scan, repo.org.githubLogin);
+    credits = heldCredits(pricing, state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
+    gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits, true, { pricing });
   } catch (error) {
     // Give back anything Autumn may hold, and the slot.
     await autumn()?.finalize({ customerId: repo.org.id, lockId: scan.id, action: "release" }).catch(() => {});

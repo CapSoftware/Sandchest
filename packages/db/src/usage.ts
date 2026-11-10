@@ -102,6 +102,16 @@ export async function scanUsageTotals(database: Db, scanId: string): Promise<Usa
     .orderBy(asc(scanUsage.kind), asc(scanUsage.stage));
 }
 
+/** Whether the scan's ledger has the row written under `key`. */
+export async function usageKeyRecorded(database: Db, scanId: string, key: string): Promise<boolean> {
+  const [row] = await database
+    .select({ id: scanUsage.id })
+    .from(scanUsage)
+    .where(and(eq(scanUsage.scanId, scanId), eq(scanUsage.key, key)))
+    .limit(1);
+  return row !== undefined;
+}
+
 /** What the scan's sandbox cost, beside its model cost. A scan with no metrics row yet is left alone. */
 export async function setComputeCost(database: Db, scanId: string, usd: number): Promise<void> {
   await database.update(scanMetrics).set({ computeCostUsd: usd.toFixed(6) }).where(eq(scanMetrics.scanId, scanId));

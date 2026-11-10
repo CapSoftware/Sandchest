@@ -9,6 +9,7 @@ import { FatalError, getStepMetadata, sleep } from "workflow";
 import { beginScan as begin, executeScan as execute, failScan as fail, publishScan as publish, ScanFinished } from "@/server/scans";
 import { captureException } from "@/server/sentry";
 import { cleanUpSlice, collectSliceSession, huntSlice, publishSlice, sliceSessionStatus, startSliceSession, writeUpSlice, type SessionKind } from "@/server/slice-scan";
+import { billSlice } from "@/server/usage-billing";
 
 /** How long a scan waits for an org concurrency slot before giving up. */
 const MAX_QUEUE_POLLS = 720; // × 10 s = 2 hours
@@ -17,19 +18,19 @@ export async function scanWorkflow(scanId: string): Promise<{ state: string }> {
   "use workflow";
 
   try {
-    let { state, engine } = await beginStep(scanId);
+    let { state, engine, pricing } = await beginStep(scanId);
     for (let polls = 0; state === "queued"; polls++) {
       if (polls >= MAX_QUEUE_POLLS) {
         await failStep(scanId, "Waited too long for a free scan slot.");
         return { state: "failed" };
       }
       await sleep("10s");
-      ({ state, engine } = await beginStep(scanId));
+      ({ state, engine, pricing } = await beginStep(scanId));
     }
     if (state === "done") return { state };
     // Only a begin result that says so runs the slice engine; any other (one recorded by older code included) runs as before.
     if (engine === "slice") {
-      await sliceSteps(scanId);
+      await sliceSteps(scanId, pricing);
       return { state: "completed" };
     }
 
@@ -66,13 +67,17 @@ publishStep.maxRetries = 5;
 /** Polls of a sandbox session, 20 s apart: 40 minutes, after which it is stopped and what it wrote is collected. */
 const SESSION_POLLS = 120;
 
-/** Hunt, verify, variants, write-up, publish. On a failure the sandbox is cleaned up, then the error goes on to the fail step. */
-async function sliceSteps(scanId: string): Promise<void> {
+/**
+ * Hunt, verify, variants, write-up, the bill (only for a scan whose begin result says it is billed from its
+ * usage, or in shadow), publish. On a failure the sandbox is cleaned up, then the error goes on to the fail step.
+ */
+async function sliceSteps(scanId: string, pricing?: "usage" | "shadow"): Promise<void> {
   try {
     // A pull request has no variants session. A hunt result recorded by older code has no `variants`: a deep scan's.
     const { selected, variants } = await sliceHuntStep(scanId);
     if (selected > 0 && (await sliceSession(scanId, "verify")) > 0 && variants !== false) await sliceSession(scanId, "variants");
     await sliceWriteUpStep(scanId);
+    if (pricing === "usage" || pricing === "shadow") await sliceBill(scanId);
     await slicePublishStep(scanId);
   } catch (error) {
     await sliceCleanupStep(scanId);
@@ -121,6 +126,19 @@ async function sliceWriteUpStep(scanId: string) {
   return finishing("slice_writeup", scanId, () => writeUpSlice(scanId, { attempt: getStepMetadata().attempt }));
 }
 sliceWriteUpStep.maxRetries = 1;
+
+/** Polls of the bill step, 30 s apart, while a model call may still be under way; the last one bills the ledger as it is. */
+const BILL_POLLS = 40;
+
+async function sliceBill(scanId: string): Promise<void> {
+  for (let polls = 0; (await sliceBillStep(scanId, polls >= BILL_POLLS)).state === "waiting"; polls++) await sleep("30s");
+}
+
+async function sliceBillStep(scanId: string, final: boolean) {
+  "use step";
+  return finishing("slice_bill", scanId, () => billSlice(scanId, { final }));
+}
+sliceBillStep.maxRetries = 5;
 
 async function slicePublishStep(scanId: string) {
   "use step";
