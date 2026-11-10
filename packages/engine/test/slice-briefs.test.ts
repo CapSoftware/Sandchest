@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGENT_PATHS, correctionText, findingsEntry, parseVerdicts, REFUTE_AGENT_PROMPT, REFUTE_BRIEF, VARIANT_BRIEF, type Candidate, type HuntRow } from "../src/scan/slice";
+import { AGENT_PATHS, correctionText, findingsEntry, parseVerdicts, REFUTE_AGENT_PROMPT, REFUTE_BRIEF, sessionTexts, VARIANT_AGENT_PROMPT, VARIANT_BRIEF, type Candidate, type HuntRow } from "../src/scan/slice";
 
 describe("briefs", () => {
   test("brief and prompt name the sandbox paths and the verdict shape", () => {
@@ -10,6 +10,28 @@ describe("briefs", () => {
     expect(REFUTE_BRIEF).toContain("CORRECTED:");
     expect(VARIANT_BRIEF).toContain('"variant_of"');
     expect(REFUTE_AGENT_PROMPT).toContain(`cat ${AGENT_PATHS.brief}`);
+  });
+});
+
+describe("sessionTexts", () => {
+  const paths = { app: "/home/user/repo", brief: "/home/user/agent/brief.md", findings: "/home/user/agent/findings.json", verdicts: "/home/user/agent/verdicts.json" };
+
+  test("puts the real paths in place of the measured ones and changes nothing else", () => {
+    for (const [kind, brief, prompt] of [
+      ["refute", REFUTE_BRIEF, REFUTE_AGENT_PROMPT],
+      ["variants", VARIANT_BRIEF, VARIANT_AGENT_PROMPT],
+    ] as const) {
+      const out = sessionTexts(kind, paths);
+      expect(out.brief).not.toContain("/tmp/");
+      expect(out.prompt).not.toContain("/tmp/");
+      expect(out.brief).toContain(paths.app);
+      expect(out.brief).toContain(paths.verdicts);
+      expect(out.prompt).toContain(`cat ${paths.brief} and cat ${paths.findings}`);
+      // Swapping back gives the original text exactly.
+      const back = (text: string) => text.replaceAll(paths.findings, AGENT_PATHS.findings).replaceAll(paths.verdicts, AGENT_PATHS.verdicts).replaceAll(paths.brief, AGENT_PATHS.brief).replaceAll(paths.app, AGENT_PATHS.app);
+      expect(back(out.brief)).toBe(brief);
+      expect(back(out.prompt)).toBe(prompt);
+    }
   });
 });
 

@@ -14,6 +14,7 @@ import { INDEXER_PORT, type IndexerHandle } from "./indexer";
 import { BASE_ENV, cloneCommand, DEFAULT_CLONE_TIMEOUT_MS, resolveInside } from "./shared";
 
 export { agentSandboxSetupScript, type AgentSandboxSetup } from "./boat-setup";
+export { AGENT_RELAY_ENV, AGENT_RELAY_MAX_BODY, agentRelayCommand, agentRelayScript, type AgentRelaySettings } from "./agent-relay";
 
 export const BOAT_API_URL = "https://boat.dev/api/v1";
 

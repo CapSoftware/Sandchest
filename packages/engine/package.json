@@ -17,6 +17,7 @@
     "scan": "bun --env-file=../../.env.local src/cli.ts",
     "sanity": "bun --env-file=../../.env.local src/sanity.ts",
     "test": "bun test",
+    "test:boat": "bun --env-file=../../.env.local test test/agent-session-sandbox.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

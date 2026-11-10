@@ -57,6 +57,17 @@ export const REFUTE_AGENT_PROMPT =
 export const VARIANT_AGENT_PROMPT =
   "You are doing variant analysis on findings already confirmed in your own company's codebase, by CODE ANALYSIS ONLY: do not build or run the app. First run: cat /tmp/brief.md and cat /tmp/findings.json. Then follow the brief: for each confirmed finding, use your shell to read and grep the repo at /tmp/app, find its sibling handlers and check each one for the same weakness, citing the deciding file:line. Write /tmp/verdicts.json. Be strict; report only siblings that really have the flaw.";
 
+export type AgentSessionKind = "refute" | "variants";
+
+/**
+ * The brief and the opening prompt of a session, with the measured `/tmp/...` paths replaced by where
+ * the checkout and the session's files really are. Nothing else in the text changes.
+ */
+export function sessionTexts(kind: AgentSessionKind, paths: Record<keyof typeof AGENT_PATHS, string>): { brief: string; prompt: string } {
+  const place = (text: string) => (Object.keys(AGENT_PATHS) as Array<keyof typeof AGENT_PATHS>).reduce((out, key) => out.replaceAll(AGENT_PATHS[key], paths[key]), text);
+  return kind === "refute" ? { brief: place(REFUTE_BRIEF), prompt: place(REFUTE_AGENT_PROMPT) } : { brief: place(VARIANT_BRIEF), prompt: place(VARIANT_AGENT_PROMPT) };
+}
+
 /** One confirmed finding handed to the variant session. */
 export interface ConfirmedEntry {
   id: string;

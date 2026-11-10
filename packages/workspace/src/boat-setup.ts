@@ -8,10 +8,12 @@ export interface AgentSandboxSetup {
   checkoutDir?: string;
   /** The one directory the agent may write. Default `/home/user/agent` (`BoatWorkspace.agentDir`). */
   workDir?: string;
-  /** Hosts the agent may reach on TCP 443, e.g. its model gateway. Resolved to addresses when the script runs. */
+  /** Hosts the agent may reach on TCP 443, e.g. its model gateway. Resolved to addresses when the script runs. May be empty when `loopbackPorts` is not. */
   allowHosts: string[];
   /** Loopback TCP ports the agent may reach (a local tool server, say). Default none. */
   loopbackPorts?: number[];
+  /** Let the agent query the configured resolvers. Default true; false leaves it no DNS at all. */
+  dns?: boolean;
 }
 
 const USER = /^[a-z_][a-z0-9_-]{0,31}$/;
@@ -33,7 +35,8 @@ const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
  *   access;
  * - installs iptables and ip6tables rules, as root, that drop every packet
  *   that user sends except TCP 443 to the addresses `allowHosts` resolve to,
- *   DNS to the resolvers in /etc/resolv.conf, and `loopbackPorts`.
+ *   DNS to the resolvers in /etc/resolv.conf (unless `dns` is false), and
+ *   `loopbackPorts`.
  *
  * The script runs as Boat's sandbox user (passwordless sudo) under `set -eu`;
  * any failure (no iptables, a host that does not resolve, an agent that can
@@ -45,7 +48,8 @@ const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
  *   becomes unreachable; one behind a shared CDN address makes every other
  *   site on that address reachable too (TLS SNI is not checked).
  * - DNS is allowed to the configured resolvers, which forward anywhere, so a
- *   determined agent can still leak data through DNS queries.
+ *   determined agent can still leak data through DNS queries. `dns: false`
+ *   closes that, for an agent that reaches only `loopbackPorts`.
  * - Only this user's traffic is filtered. Processes started by the sandbox
  *   user (clone, indexer, setup) are not, and the agent can still talk to them
  *   over `loopbackPorts`.
@@ -62,9 +66,9 @@ export function agentSandboxSetupScript(setup: AgentSandboxSetup): string {
   const checkoutDir = checkPath(setup.checkoutDir ?? "/home/user/repo", "checkoutDir");
   const workDir = checkPath(setup.workDir ?? "/home/user/agent", "workDir");
   if (isWithin(workDir, checkoutDir) || isWithin(checkoutDir, workDir)) throw new WorkspaceError("checkoutDir and workDir must not contain each other");
-  if (setup.allowHosts.length === 0) throw new WorkspaceError("allowHosts is empty: the agent could reach nothing but DNS");
-  for (const host of setup.allowHosts) if (!HOST.test(host)) throw new WorkspaceError(`Invalid host: ${host.slice(0, 253)}`);
   const ports = setup.loopbackPorts ?? [];
+  if (setup.allowHosts.length === 0 && ports.length === 0) throw new WorkspaceError("allowHosts and loopbackPorts are both empty: the agent could reach nothing but DNS");
+  for (const host of setup.allowHosts) if (!HOST.test(host)) throw new WorkspaceError(`Invalid host: ${host.slice(0, 253)}`);
   for (const port of ports) if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new WorkspaceError(`Invalid port: ${port}`);
 
   const ancestors = [...new Set([...parents(checkoutDir), ...parents(workDir)])];
@@ -76,6 +80,7 @@ CHECKOUT='${checkoutDir}'
 WORKDIR='${workDir}'
 ALLOW_HOSTS='${setup.allowHosts.join(" ")}'
 LOOPBACK_PORTS='${ports.join(" ")}'
+DNS='${setup.dns === false ? "no" : "yes"}'
 CHAIN=SANDCHEST_AGENT
 SANDBOX_USER="$(id -un)"
 SANDBOX_GROUP="$(id -gn)"
@@ -118,9 +123,11 @@ for host in $ALLOW_HOSTS; do
 done
 NS4=""
 NS6=""
-for ns in $(awk '$1 == "nameserver" { sub(/%.*/, "", $2); print $2 }' /etc/resolv.conf); do
-  case "$ns" in *:*) NS6="$NS6 $ns" ;; *) NS4="$NS4 $ns" ;; esac
-done
+if [ "$DNS" = yes ]; then
+  for ns in $(awk '$1 == "nameserver" { sub(/%.*/, "", $2); print $2 }' /etc/resolv.conf); do
+    case "$ns" in *:*) NS6="$NS6 $ns" ;; *) NS4="$NS4 $ns" ;; esac
+  done
+fi
 
 firewall() {
   t="$1"; addresses="$2"; resolvers="$3"
