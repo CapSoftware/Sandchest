@@ -2,6 +2,7 @@
  * Server configuration, validated once. A misconfigured deployment fails on
  * its first request with every problem listed, not halfway through a scan.
  */
+import { parseMultiplier } from "@sandchest/billing/usage";
 import { z } from "zod";
 
 /** A positive amount in USD, at most six digits each side of the point. */
@@ -108,6 +109,12 @@ const Schema = z.object({
   /** The gateway reads these itself (see `loadFastGatewayUpstream`); here they only tell whether fast mode is available. */
   LLM_AGENT_FAST_MODEL: z.string().optional(),
   LLM_AGENT_FAST_BODY: z.string().optional(),
+  /** Usage billing for slice scans: `off` (default), `shadow` (a usage bill beside the tiered charge, never charged) or `on`. */
+  SANDCHEST_USAGE_BILLING: z.enum(["off", "shadow", "on"]).optional(),
+  /** The multiplier on cost for usage bills: a decimal from 1 to 100, up to three places. Read with `usageMultiplierThousandths`; never logged. */
+  SANDCHEST_USAGE_MULTIPLIER: z.string().optional(),
+  /** What one credit is worth: `dollar` (default) or `cent`. */
+  NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: z.enum(["dollar", "cent"]).optional(),
 });
 
 export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" | "boat" };
@@ -132,8 +139,8 @@ export function config(env: Record<string, string | undefined> = process.env): C
     throw new Error("Sandbox scans need SANDCHEST_INDEXER_LINUX_BIN, or SANDCHEST_INDEXER_LINUX_URL with SANDCHEST_INDEXER_LINUX_SHA256.");
   }
   if (workspace === "boat" && !parsed.data.SANDCHEST_BOAT_API_KEY) throw new Error("Boat scans need SANDCHEST_BOAT_API_KEY.");
+  const problems: string[] = [];
   if (parsed.data.SANDCHEST_ENGINE === "slice") {
-    const problems: string[] = [];
     // The slice engine opens its own Boat sandboxes whatever SANDCHEST_WORKSPACE says, so classic scans stay where they run today.
     if (!parsed.data.SANDCHEST_BOAT_API_KEY) problems.push("SANDCHEST_BOAT_API_KEY: is required by the slice engine");
     if (!parsed.data.SANDCHEST_INDEXER_LINUX_BIN && !(parsed.data.SANDCHEST_INDEXER_LINUX_URL && parsed.data.SANDCHEST_INDEXER_LINUX_SHA256)) {
@@ -148,8 +155,9 @@ export function config(env: Record<string, string | undefined> = process.env): C
       const fast = sliceBody(parsed.data[name]);
       if ("problem" in fast) problems.push(`${name}: ${fast.problem}`);
     }
-    if (problems.length > 0) throw new Error(`Invalid server configuration:\n  ${problems.join("\n  ")}`);
   }
+  problems.push(...usageBillingProblems(parsed.data));
+  if (problems.length > 0) throw new Error(`Invalid server configuration:\n  ${problems.join("\n  ")}`);
   const result = { ...parsed.data, workspace };
   if (env === process.env) cached = result;
   return result;
@@ -197,6 +205,48 @@ export function fastModeAvailable(settings: Config = config()): boolean {
  */
 export function fastRunAllowed(scan: { fast: boolean; kind: string }, githubLogin: string, settings: Config = config()): boolean {
   return scan.fast && scan.kind === "deep" && scanEngine(scan.kind, githubLogin, settings) === "slice" && fastModeAvailable(settings);
+}
+
+/**
+ * What is wrong with the usage billing settings. A multiplier that is set must be valid even with usage billing
+ * off, so a typo is caught before the day it matters. `shadow` and `on` need the slice engine and a multiplier;
+ * `on` also needs credits worth a cent. Problems never repeat the multiplier's value.
+ */
+function usageBillingProblems(settings: z.infer<typeof Schema>): string[] {
+  const problems: string[] = [];
+  const multiplier = settings.SANDCHEST_USAGE_MULTIPLIER;
+  if (multiplier !== undefined && parseMultiplier(multiplier) === undefined) {
+    problems.push("SANDCHEST_USAGE_MULTIPLIER: must be a decimal from 1 to 100 with at most three decimal places");
+  }
+  const billing = settings.SANDCHEST_USAGE_BILLING ?? "off";
+  if (billing === "off") return problems;
+  if (multiplier === undefined) problems.push("SANDCHEST_USAGE_MULTIPLIER: is required by usage billing");
+  if (settings.SANDCHEST_ENGINE !== "slice") problems.push("SANDCHEST_ENGINE: must be slice for usage billing");
+  if (billing === "on" && settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT !== "cent") problems.push("NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: must be cent when usage billing is on");
+  return problems;
+}
+
+/** The usage multiplier in thousandths (1,000 = cost price), or undefined when it is not set. */
+export function usageMultiplierThousandths(settings: Config = config()): number | undefined {
+  const text = settings.SANDCHEST_USAGE_MULTIPLIER;
+  return text === undefined ? undefined : parseMultiplier(text);
+}
+
+/** What one credit is worth. Default `dollar`. */
+export function creditUnit(settings: Config = config()): "dollar" | "cent" {
+  return settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT ?? "dollar";
+}
+
+/**
+ * How a scan on an engine is priced: `tiered` (credits by size) for classic scans always, and for slice scans
+ * while usage billing is off; `shadow` or `usage` for slice scans otherwise. Nothing calls it yet.
+ */
+export function scanPricingMode(engine: "classic" | "slice", settings: Config = config()): "tiered" | "shadow" | "usage" {
+  if (engine !== "slice") return "tiered";
+  const billing = settings.SANDCHEST_USAGE_BILLING ?? "off";
+  if (billing === "on") return "usage";
+  if (billing === "shadow") return "shadow";
+  return "tiered";
 }
 
 /** LLM_SLICE_BODY as an object (empty when unset), or what is wrong with it. */

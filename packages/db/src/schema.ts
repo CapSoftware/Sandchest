@@ -126,6 +126,20 @@ export const repoMemory = pgTable("repo_memory", {
   updatedAt: updatedAt(),
 });
 
+/** How a scan was priced when its credits were reserved: which engine, which way of billing, and the credit's size. */
+export interface ScanPricing {
+  engine: "classic" | "slice";
+  /** `tiered`: credits by size, as before usage billing. `usage`: billed from the ledger. `shadow`: tiered, with a usage bill computed beside it. */
+  mode: "tiered" | "usage" | "shadow";
+  /** What one credit is worth. */
+  unit: "dollar" | "cent";
+  /** The multiplier on cost, in thousandths. Usage and shadow only. */
+  multiplierThousandths?: number;
+  /** The most the scan may spend, in micro-dollars. */
+  ceilingMicroUsd?: number;
+  fast?: boolean;
+}
+
 export const scanKind = pgEnum("scan_kind", ["recon", "pr_review", "deep", "fix_check"]);
 export const scanStatus = pgEnum("scan_status", ["queued", "running", "publishing", "completed", "failed", "cancelled", "refused"]);
 
@@ -162,6 +176,8 @@ export const scans = pgTable(
     billing: text("billing", { enum: ["reserved", "charged", "released"] }),
     /** Chosen when a deep scan is started: its model calls go to faster serving, under their own ceiling. */
     fast: boolean("fast").notNull().default(false),
+    /** What the scan was priced for when its credits were reserved. Null for scans priced before usage billing. */
+    pricing: jsonb("pricing").$type<ScanPricing>(),
     createdAt: createdAt(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -289,6 +305,87 @@ export const scanStages = pgTable(
     outcome: text("outcome", { enum: STAGE_OUTCOMES }),
   },
   (table) => [uniqueIndex("scan_stages_run_unique").on(table.scanId, table.stage, table.attempt), index("scan_stages_scan_idx").on(table.scanId)],
+);
+
+/**
+ * What an account owes under one credit, carried from one usage bill to the next. Read and written only under a
+ * lock on its row (usage-billing.ts), so two bills of one account never read the same carry.
+ */
+export const usageCarry = pgTable(
+  "usage_carry",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => orgs.id, { onDelete: "cascade" }),
+    carryMicroUsd: bigint("carry_micro_usd", { mode: "number" }).notNull().default(0),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check("usage_carry_not_negative", sql`${table.carryMicroUsd} >= 0`)],
+);
+
+/**
+ * `open`: computed, its credits not yet taken. `charged`: taken. `waived`: not charged, with a reason. `voided`:
+ * withdrawn while open, its carry given back. `shadow`: computed beside a tiered charge, never charged.
+ */
+export const SCAN_BILL_STATUSES = ["open", "charged", "waived", "voided", "shadow"] as const;
+export type ScanBillStatus = (typeof SCAN_BILL_STATUSES)[number];
+
+/** One line of a usage bill: counts, tokens, seconds and micro-dollar amounts. Never code or model text. */
+export interface ScanBillLine {
+  kind: string;
+  stage: string;
+  requests: number;
+  inputTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  seconds: number;
+  costMicroUsd: number;
+  chargeMicroUsd: number;
+}
+
+/**
+ * A scan's usage bill, one per scan. A financial record, so the scan and the org it names cannot be deleted while
+ * it exists (the only scans the app deletes are ones that never started, which have no bill).
+ */
+export const scanBills = pgTable(
+  "scan_bills",
+  {
+    scanId: uuid("scan_id")
+      .primaryKey()
+      .references(() => scans.id, { onDelete: "restrict" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => orgs.id, { onDelete: "restrict" }),
+    status: text("status", { enum: SCAN_BILL_STATUSES }).notNull(),
+    /** Why it was waived or voided. */
+    reason: text("reason"),
+    engine: text("engine", { enum: ["classic", "slice"] }).notNull(),
+    fast: boolean("fast").notNull().default(false),
+    multiplierThousandths: integer("multiplier_thousandths").notNull(),
+    /** What one credit was worth. */
+    creditMicroUsd: integer("credit_micro_usd").notNull(),
+    costMicroUsd: bigint("cost_micro_usd", { mode: "number" }).notNull(),
+    dueMicroUsd: bigint("due_micro_usd", { mode: "number" }).notNull(),
+    reservedCredits: integer("reserved_credits").notNull(),
+    credits: integer("credits").notNull(),
+    carryInMicroUsd: bigint("carry_in_micro_usd", { mode: "number" }).notNull(),
+    carryOutMicroUsd: bigint("carry_out_micro_usd", { mode: "number" }).notNull(),
+    /** Held to the reserved credits; the excess was not charged and not carried. */
+    capped: boolean("capped").notNull().default(false),
+    lines: jsonb("lines").$type<ScanBillLine[]>().notNull(),
+    createdAt: createdAt(),
+    /** When it was charged. */
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("scan_bills_org_idx").on(table.orgId, table.createdAt),
+    check("scan_bills_status", sql`${table.status} in ('open', 'charged', 'waived', 'voided', 'shadow')`),
+    check(
+      "scan_bills_amounts",
+      sql`${table.creditMicroUsd} > 0 and ${table.multiplierThousandths} >= 0 and ${table.costMicroUsd} >= 0 and ${table.dueMicroUsd} >= 0 and ${table.reservedCredits} >= 0 and ${table.credits} >= 0 and ${table.credits} <= ${table.reservedCredits} and ${table.carryInMicroUsd} >= 0 and ${table.carryOutMicroUsd} >= 0`,
+    ),
+  ],
 );
 
 export const findingStatus = pgEnum("finding_status", ["open", "fixed", "dismissed", "verified"]);

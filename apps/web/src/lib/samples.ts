@@ -220,6 +220,7 @@ export function sampleScan(): NonNullable<Awaited<ReturnType<typeof scanForUser>
       creditsReserved: 0,
       billing: "charged",
       fast: false,
+      pricing: null,
       createdAt: started,
       startedAt: started,
       finishedAt: ago(39),

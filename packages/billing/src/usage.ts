@@ -109,6 +109,146 @@ export function settleCredits(dueMicroUsd: number, carryMicroUsd: number, credit
   return { credits: toSafe(credits), carryMicroUsd: toSafe(total - credits * BigInt(size)) };
 }
 
+// ---- Usage bills -------------------------------------------------------------
+
+/** How a ledger row's call ended (the ledger's `status`). */
+export type UsageRowStatus = "started" | "ok" | "failed" | "aborted" | "unpriced";
+
+/** A ledger row as a bill reads it: which run of which step wrote it, and how it ended. */
+export interface BillableUsageRow extends UsageLedgerRow {
+  /** The unit of work that can be run again. */
+  step: string;
+  /** Which run of its step wrote the row. */
+  attempt: number;
+  status: UsageRowStatus;
+}
+
+/**
+ * The rows a bill counts. Per step, only rows of that step's highest attempt (a step run again
+ * replaces its earlier runs); of those, `ok` rows and `aborted` rows that cost something. Order kept.
+ */
+export function selectBillable<Row extends BillableUsageRow>(rows: readonly Row[]): Row[] {
+  const latest = new Map<string, number>();
+  for (const row of rows) {
+    const attempt = nonNegative(row.attempt, "attempt");
+    const highest = latest.get(row.step);
+    if (highest === undefined || attempt > highest) latest.set(row.step, attempt);
+  }
+  return rows.filter((row) => {
+    if (row.attempt !== latest.get(row.step)) return false;
+    if (row.status === "ok") return true;
+    return row.status === "aborted" && scaled(row.costUsd, EXACT_DECIMALS) > 0n;
+  });
+}
+
+/** What the app knows about a scan's ledger beyond its rows. */
+export interface LedgerFacts {
+  /** Rows the app knows it failed to write. */
+  unwrittenRows: number;
+  /** A sandbox ran for the scan. */
+  sandboxExpected: boolean;
+  /** The sandbox's cost row is in the ledger. */
+  sandboxRecorded: boolean;
+}
+
+export type LedgerDistrust = "unpriced" | "started" | "unwritten" | "sandbox_missing";
+
+/**
+ * Whether a scan's ledger can be billed from at all. Call it only once nothing of the scan can still be
+ * in flight: a `started` row is then a call whose outcome was never seen, and makes the ledger untrusted.
+ * Every attempt counts here, not only the billable ones. The first reason found, in this order: a row
+ * `unpriced`, a row `started`, rows known unwritten, a sandbox that ran with no cost row.
+ */
+export function ledgerTrust(rows: readonly Pick<BillableUsageRow, "status">[], facts: LedgerFacts): { trusted: true } | { trusted: false; reason: LedgerDistrust } {
+  const unwritten = nonNegative(facts.unwrittenRows, "count of unwritten rows");
+  if (rows.some((row) => row.status === "unpriced")) return { trusted: false, reason: "unpriced" };
+  if (rows.some((row) => row.status === "started")) return { trusted: false, reason: "started" };
+  if (unwritten > 0) return { trusted: false, reason: "unwritten" };
+  if (facts.sandboxExpected && !facts.sandboxRecorded) return { trusted: false, reason: "sandbox_missing" };
+  return { trusted: true };
+}
+
+export const MIN_MULTIPLIER_THOUSANDTHS = 1_000;
+export const MAX_MULTIPLIER_THOUSANDTHS = 100_000;
+
+/**
+ * A multiplier written as a decimal (`1` to `100`, at most three decimals) in thousandths, read digit by
+ * digit. Undefined for anything else, spaces, signs and exponents included.
+ */
+export function parseMultiplier(text: string): number | undefined {
+  if (typeof text !== "string") return undefined;
+  const match = /^(\d{1,3})(?:\.(\d{1,3}))?$/.exec(text);
+  if (!match) return undefined;
+  const thousandths = Number(match[1]) * 1000 + Number((match[2] ?? "").padEnd(3, "0"));
+  if (thousandths < MIN_MULTIPLIER_THOUSANDTHS || thousandths > MAX_MULTIPLIER_THOUSANDTHS) return undefined;
+  return thousandths;
+}
+
+/** The fewest whole credits worth at least the amount: 0 for 0. */
+export function creditsCovering(amountMicroUsd: number, creditMicroUsd: number): number {
+  const amount = BigInt(nonNegative(amountMicroUsd, "amount"));
+  const size = nonNegative(creditMicroUsd, "credit size");
+  if (size === 0) throw new RangeError("A credit must be worth more than nothing");
+  return toSafe((amount + BigInt(size) - 1n) / BigInt(size));
+}
+
+/** A bill line with what it charges: its cost times the multiplier. */
+export interface UsageBillLine extends BillLine {
+  chargeMicroUsd: number;
+}
+
+export interface UsageBillInput {
+  /** Every row of the scan's ledger; the bill picks the billable ones itself. */
+  rows: readonly BillableUsageRow[];
+  /** 1,000 to 100,000. */
+  multiplierThousandths: number;
+  /** What one credit is worth. */
+  creditMicroUsd: number;
+  /** The account's carry before this bill, under one credit. */
+  carryInMicroUsd: number;
+  /** Credits held for the scan before it ran: the most it can be charged. */
+  reservedCredits: number;
+}
+
+export interface UsageBill {
+  lines: UsageBillLine[];
+  /** The lines' costs. */
+  costMicroUsd: number;
+  /** The lines' charges, so the bill adds up exactly as shown. */
+  dueMicroUsd: number;
+  /** Whole credits to charge, never more than were reserved. */
+  credits: number;
+  carryInMicroUsd: number;
+  /** The account's carry after this bill, under one credit. */
+  carryOutMicroUsd: number;
+  /** The charge was held to the reserved credits. What was due beyond them is never charged, now or later. */
+  capped: boolean;
+}
+
+/**
+ * A scan's usage bill. Pure; it does not ask whether the ledger can be trusted (`ledgerTrust`), the caller
+ * does. Not capped: `credits × credit + carryOut = due + carryIn`. Capped: the reserved credits are charged
+ * and the carry is left as it was, so the excess is ours, never carried into a later bill.
+ */
+export function usageBill(input: UsageBillInput): UsageBill {
+  const multiplier = nonNegative(input.multiplierThousandths, "multiplier");
+  if (multiplier < MIN_MULTIPLIER_THOUSANDTHS || multiplier > MAX_MULTIPLIER_THOUSANDTHS) throw new RangeError(`The multiplier must be from 1,000 to 100,000 thousandths: ${multiplier}`);
+  const size = nonNegative(input.creditMicroUsd, "credit size");
+  if (size === 0) throw new RangeError("A credit must be worth more than nothing");
+  const carryIn = nonNegative(input.carryInMicroUsd, "carry");
+  if (carryIn >= size) throw new RangeError(`The carry must be under one credit: ${carryIn}`);
+  const reserved = nonNegative(input.reservedCredits, "reserved credits");
+
+  const lines = billLines(selectBillable(input.rows)).map((line) => ({ ...line, chargeMicroUsd: chargeMicroUsd(line.costMicroUsd, multiplier) }));
+  const costMicroUsd = toSafe(lines.reduce((sum, line) => sum + BigInt(line.costMicroUsd), 0n));
+  const dueMicroUsd = toSafe(lines.reduce((sum, line) => sum + BigInt(line.chargeMicroUsd), 0n));
+  const settled = settleCredits(dueMicroUsd, carryIn, size);
+  if (settled.credits > reserved) {
+    return { lines, costMicroUsd, dueMicroUsd, credits: reserved, carryInMicroUsd: carryIn, carryOutMicroUsd: carryIn, capped: true };
+  }
+  return { lines, costMicroUsd, dueMicroUsd, credits: settled.credits, carryInMicroUsd: carryIn, carryOutMicroUsd: settled.carryMicroUsd, capped: false };
+}
+
 /**
  * A non-negative decimal as an integer count of 10^-`decimals` units, rounded half up. Strings are
  * parsed digit by digit; a number goes through its shortest round-trip decimal form, never through

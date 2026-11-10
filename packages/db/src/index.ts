@@ -18,3 +18,5 @@ export * from "./usage";
 export { USAGE_COST_SOURCES, USAGE_KINDS, USAGE_STATUSES, type UsageCostSource, type UsageKind, type UsageStatus } from "./schema";
 export * from "./stages";
 export { STAGE_OUTCOMES, type StageOutcome } from "./schema";
+export * from "./usage-billing";
+export { SCAN_BILL_STATUSES, type ScanBillLine, type ScanBillStatus, type ScanPricing } from "./schema";
