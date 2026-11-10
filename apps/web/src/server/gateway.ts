@@ -40,6 +40,8 @@ export interface GatewayClaims {
   ceilingMicroUsd: number;
   /** Unix seconds. */
   expiresAt: number;
+  /** Calls go to the fast endpoint. Absent means the standard one, as in every token minted before it existed. */
+  fast?: true;
 }
 
 const TOKEN_PREFIX = "sgw1";
@@ -54,6 +56,7 @@ const ClaimsSchema = z.object({
   a: z.number().int().min(0).max(1_000_000),
   c: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   e: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  f: z.literal(true).optional(),
 });
 
 function sign(body: string, secret: string): string {
@@ -64,7 +67,7 @@ function sign(body: string, secret: string): string {
 export function mintGatewayToken(claims: Omit<GatewayClaims, "expiresAt"> & { ttlSeconds: number }, secret: string, now: number = Date.now()): string {
   if (secret.length < MIN_SECRET_LENGTH) throw new Error("The gateway secret is too short");
   if (!Number.isInteger(claims.ttlSeconds) || claims.ttlSeconds < 1 || claims.ttlSeconds > MAX_TOKEN_TTL_SECONDS) throw new RangeError(`A gateway token lasts 1 to ${MAX_TOKEN_TTL_SECONDS} seconds`);
-  const payload = ClaimsSchema.parse({ s: claims.scanId, t: claims.stage, a: claims.attempt, c: claims.ceilingMicroUsd, e: Math.floor(now / 1000) + claims.ttlSeconds });
+  const payload = ClaimsSchema.parse({ s: claims.scanId, t: claims.stage, a: claims.attempt, c: claims.ceilingMicroUsd, e: Math.floor(now / 1000) + claims.ttlSeconds, ...(claims.fast && { f: true }) });
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${TOKEN_PREFIX}.${body}.${sign(body, secret)}`;
 }
@@ -85,7 +88,7 @@ export function verifyGatewayToken(token: string, secret: string, now: number = 
   }
   const parsed = ClaimsSchema.safeParse(payload);
   if (!parsed.success || parsed.data.e * 1000 <= now) return undefined;
-  return { scanId: parsed.data.s, stage: parsed.data.t, attempt: parsed.data.a, ceilingMicroUsd: parsed.data.c, expiresAt: parsed.data.e };
+  return { scanId: parsed.data.s, stage: parsed.data.t, attempt: parsed.data.a, ceilingMicroUsd: parsed.data.c, expiresAt: parsed.data.e, ...(parsed.data.f && { fast: true as const }) };
 }
 
 /** Where a sandbox's agent sends its model calls, and the one host it therefore has to reach. */
@@ -137,19 +140,54 @@ export function loadGatewayUpstream(env: Record<string, string | undefined> = pr
     if (!apiKey) problems.push("LLM_AGENT_API_KEY or LLM_API_KEY: is required");
     if (!model) problems.push("LLM_AGENT_MODEL or LLM_MODEL: is required");
   }
-  let body: Record<string, unknown> = {};
-  if (data.LLM_AGENT_BODY) {
-    try {
-      const value: unknown = JSON.parse(data.LLM_AGENT_BODY);
-      if (!isRecord(value)) problems.push("LLM_AGENT_BODY: must be a JSON object");
-      else if (CALLER_FIELDS.some((field) => field in value)) problems.push(`LLM_AGENT_BODY: must not set ${CALLER_FIELDS.join(", ")}`);
-      else body = value;
-    } catch {
-      problems.push("LLM_AGENT_BODY: must be a JSON object");
-    }
-  }
+  const body = upstreamBody("LLM_AGENT_BODY", data.LLM_AGENT_BODY, problems);
   if (problems.length > 0) throw new Error(`Invalid gateway configuration:\n  ${problems.join("\n  ")}`);
   return { baseUrl: baseUrl!.replace(/\/+$/, ""), apiKey: apiKey!, model: model!, body };
+}
+
+const FastUpstreamSchema = UpstreamSchema.extend({
+  LLM_AGENT_FAST_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
+  LLM_AGENT_FAST_API_KEY: optionalText,
+  LLM_AGENT_FAST_MODEL: optionalText,
+  LLM_AGENT_FAST_BODY: optionalText,
+});
+
+/**
+ * Where the gateway forwards a fast run's calls: `LLM_AGENT_FAST_BASE_URL`, `LLM_AGENT_FAST_API_KEY` and
+ * `LLM_AGENT_FAST_MODEL`, each falling back as `loadGatewayUpstream` does. The body is `LLM_AGENT_FAST_BODY`
+ * alone, never the standard one: it is what picks the serving. With neither the fast model nor the fast body
+ * set, nothing would differ from a standard call, so that is an error too. Throws one error naming every problem.
+ */
+export function loadFastGatewayUpstream(env: Record<string, string | undefined> = process.env): GatewayUpstream {
+  const parsed = FastUpstreamSchema.safeParse(Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined && value.trim() !== "")));
+  const problems = parsed.success ? [] : parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+  const data = parsed.success ? parsed.data : {};
+  const baseUrl = data.LLM_AGENT_FAST_BASE_URL ?? data.LLM_AGENT_BASE_URL ?? data.LLM_BASE_URL;
+  const apiKey = data.LLM_AGENT_FAST_API_KEY ?? data.LLM_AGENT_API_KEY ?? data.LLM_API_KEY;
+  const model = data.LLM_AGENT_FAST_MODEL ?? data.LLM_AGENT_MODEL ?? data.LLM_MODEL;
+  if (parsed.success) {
+    if (!baseUrl) problems.push("LLM_AGENT_FAST_BASE_URL, LLM_AGENT_BASE_URL or LLM_BASE_URL: is required");
+    if (!apiKey) problems.push("LLM_AGENT_FAST_API_KEY, LLM_AGENT_API_KEY or LLM_API_KEY: is required");
+    if (!model) problems.push("LLM_AGENT_FAST_MODEL, LLM_AGENT_MODEL or LLM_MODEL: is required");
+    if (!data.LLM_AGENT_FAST_MODEL && !data.LLM_AGENT_FAST_BODY) problems.push("LLM_AGENT_FAST_MODEL or LLM_AGENT_FAST_BODY: is required for fast runs");
+  }
+  const body = upstreamBody("LLM_AGENT_FAST_BODY", data.LLM_AGENT_FAST_BODY, problems);
+  if (problems.length > 0) throw new Error(`Invalid gateway configuration:\n  ${problems.join("\n  ")}`);
+  return { baseUrl: baseUrl!.replace(/\/+$/, ""), apiKey: apiKey!, model: model!, body };
+}
+
+/** A body setting as an object (empty when unset). A problem with it is added to `problems`. */
+function upstreamBody(name: string, text: string | undefined, problems: string[]): Record<string, unknown> {
+  if (!text) return {};
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!isRecord(value)) problems.push(`${name}: must be a JSON object`);
+    else if (CALLER_FIELDS.some((field) => field in value)) problems.push(`${name}: must not set ${CALLER_FIELDS.join(", ")}`);
+    else return value;
+  } catch {
+    problems.push(`${name}: must be a JSON object`);
+  }
+  return {};
 }
 
 // ---- Request ----------------------------------------------------------------
@@ -176,8 +214,8 @@ const FORWARDED_FIELDS = ["messages", "system", "tools", "tool_choice", "max_tok
 export interface GatewayDeps {
   /** Signs tokens. Undefined means the gateway is off: every request gets 404. */
   secret: string | undefined;
-  /** Where calls go. Called once per request; a throw is a misconfigured gateway (503). */
-  upstream: () => GatewayUpstream;
+  /** Where calls go, from the verified token alone. Called once per request; a throw is a misconfigured gateway (503). */
+  upstream: (claims: GatewayClaims) => GatewayUpstream;
   fetch: typeof fetch;
   budget: (scanId: string) => Promise<UsageBudgetState | undefined>;
   /** Opens the call's ledger row. */
@@ -212,7 +250,7 @@ export async function handleGatewayRequest(request: Request, deps: GatewayDeps):
 
   let upstream: GatewayUpstream;
   try {
-    upstream = deps.upstream();
+    upstream = deps.upstream(claims);
   } catch (error) {
     deps.report(error, "gateway configuration");
     return refuse(503, "api_error", "The gateway is not configured");

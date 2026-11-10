@@ -6,7 +6,7 @@ import { after } from "next/server";
 import { finishUsageCall, startUsageCall, usageBudgetState } from "@sandchest/db";
 import { config } from "@/server/config";
 import { db } from "@/server/db";
-import { handleGatewayRequest, loadGatewayUpstream, STALE_CALL_SECONDS, type GatewayUpstream } from "@/server/gateway";
+import { handleGatewayRequest, loadFastGatewayUpstream, loadGatewayUpstream, STALE_CALL_SECONDS, type GatewayUpstream } from "@/server/gateway";
 import { describeError } from "@/server/log";
 import { captureException } from "@/server/sentry";
 
@@ -15,11 +15,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 600;
 
 let upstream: GatewayUpstream | undefined;
+let fastUpstream: GatewayUpstream | undefined;
 
 export async function POST(request: Request): Promise<Response> {
   return handleGatewayRequest(request, {
     secret: config().SANDCHEST_GATEWAY_SECRET,
-    upstream: () => (upstream ??= loadGatewayUpstream()),
+    // The signed token picks the endpoint. A fast one that cannot be loaded is a 503, never the standard one.
+    upstream: (claims) => (claims.fast ? (fastUpstream ??= loadFastGatewayUpstream()) : (upstream ??= loadGatewayUpstream())),
     fetch,
     budget: (scanId) => usageBudgetState(db(), scanId, STALE_CALL_SECONDS),
     start: (scanId, call) => startUsageCall(db(), scanId, call),

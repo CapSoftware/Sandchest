@@ -5,9 +5,9 @@ import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig,
 import { createMavenRepository, createOsvCatalog, type MavenRepository, type OsvCatalog } from "@sandchest/engine/advisories";
 import { createOsvClient, loadClassifierPrice, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import type { GitHubApp } from "@sandchest/github";
-import { config, sliceBody } from "./config";
+import { config, fastModeAvailable, sliceBody } from "./config";
 import { db, setDb } from "./db";
-import { loadGatewayUpstream } from "./gateway";
+import { loadFastGatewayUpstream, loadGatewayUpstream } from "./gateway";
 import { githubApp, setGithubApp } from "./github-app";
 import { mailer, setMailer } from "./mailer";
 import { boatSliceRuntime, type SliceRuntime } from "./slice-runtime";
@@ -20,6 +20,8 @@ interface Services {
   llm: LlmClient;
   /** The slice engine's own model calls (hunt and write-up). */
   slice: LlmClient;
+  /** The same for fast runs. */
+  sliceFast: LlmClient;
   sliceRuntime: SliceRuntime;
   classifier: Classifier | undefined;
   osv: OsvClient | undefined;
@@ -44,8 +46,21 @@ export function llmClient(): LlmClient {
   return (instances.llm ??= createLlmClient(loadLlmConfig()));
 }
 
-/** The slice engine's hunt and write-up client: the gateway's endpoint, key and model, with LLM_SLICE_BODY on every request. */
-export function sliceClient(): LlmClient {
+/**
+ * The slice engine's hunt and write-up client: the gateway's endpoint, key and model, with LLM_SLICE_BODY on every
+ * request. A fast run's: the fast gateway endpoint's, with LLM_SLICE_FAST_BODY alone; throws when fast mode is not available.
+ */
+export function sliceClient(fast = false): LlmClient {
+  if (fast) {
+    if (!instances.sliceFast) {
+      if (!fastModeAvailable()) throw new Error("Fast mode is not configured");
+      const { baseUrl, apiKey, model } = loadFastGatewayUpstream();
+      const body = sliceBody(config().LLM_SLICE_FAST_BODY);
+      if ("problem" in body) throw new Error(`Invalid server configuration:\n  LLM_SLICE_FAST_BODY: ${body.problem}`);
+      instances.sliceFast = createLlmClient({ baseUrl, apiKey, model, body: body.body });
+    }
+    return instances.sliceFast;
+  }
   if (!instances.slice) {
     const { baseUrl, apiKey, model } = loadGatewayUpstream();
     const body = sliceBody(config().LLM_SLICE_BODY);

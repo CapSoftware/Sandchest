@@ -160,6 +160,8 @@ export const scans = pgTable(
     creditsReserved: integer("credits_reserved"),
     /** Where the scan's credits stand. Null for free scans and when billing is off. */
     billing: text("billing", { enum: ["reserved", "charged", "released"] }),
+    /** Chosen when a deep scan is started: its model calls go to faster serving, under their own ceiling. */
+    fast: boolean("fast").notNull().default(false),
     createdAt: createdAt(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),

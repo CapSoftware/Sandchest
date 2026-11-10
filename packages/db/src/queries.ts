@@ -142,6 +142,8 @@ export interface NewScan {
   headSha: string;
   baseSha?: string;
   prNumber?: number;
+  /** A deep scan on faster serving. Default false. */
+  fast?: boolean;
 }
 
 /**

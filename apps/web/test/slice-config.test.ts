@@ -1,6 +1,6 @@
 /** The slice engine's settings: off unless chosen, and then only with everything it needs. */
 import { describe, expect, test } from "bun:test";
-import { config, scanEngine, sliceBody } from "@/server/config";
+import { config, fastModeAvailable, fastRunAllowed, scanEngine, sliceBody } from "@/server/config";
 
 const base = {
   DATABASE_URL: "postgres://sandchest@postgres/sandchest",
@@ -79,5 +79,67 @@ describe("slice engine settings", () => {
     expect(sliceBody("{nope")).toEqual({ problem: "must be a JSON object" });
     expect(config({ ...slice, LLM_SLICE_BODY: '{"a":1}' }).LLM_SLICE_BODY).toBe('{"a":1}');
     expect(() => config({ ...slice, LLM_SLICE_BODY: "null" })).toThrow("LLM_SLICE_BODY: must be a JSON object");
+  });
+});
+
+describe("fast mode", () => {
+  const ceiling = { SANDCHEST_SLICE_CEILING_FAST_USD: "0.75" };
+  const model = { LLM_AGENT_FAST_MODEL: "fast-model" };
+  const agentBody = { LLM_AGENT_FAST_BODY: '{"serving":"fast"}' };
+  const sliceFastBody = { LLM_SLICE_FAST_BODY: '{"serving":"fast"}' };
+
+  test("unset, it does not exist, and nothing new is required", () => {
+    expect(fastModeAvailable(config(base))).toBe(false);
+    expect(fastModeAvailable(config(slice))).toBe(false);
+    expect(fastModeAvailable(config({ ...slice, SANDCHEST_SLICE_CEILING_FAST_USD: " ", LLM_AGENT_FAST_MODEL: "", LLM_AGENT_FAST_BODY: "", LLM_SLICE_FAST_BODY: " " }))).toBe(false);
+  });
+
+  test("available only on the slice engine, with its ceiling, and with both the agent's and the engine's calls changed", () => {
+    const available = (env: Record<string, string>) => fastModeAvailable(config({ ...slice, ...env }));
+    expect(available({ ...ceiling, ...model })).toBe(true);
+    expect(available({ ...ceiling, ...agentBody, ...sliceFastBody })).toBe(true);
+    expect(available({ ...ceiling, ...model, ...agentBody, ...sliceFastBody })).toBe(true);
+    // Only the agent's calls changed, or only the engine's.
+    expect(available({ ...ceiling, ...agentBody })).toBe(false);
+    expect(available({ ...ceiling, ...sliceFastBody })).toBe(false);
+    // No ceiling of its own.
+    expect(available({ ...model, ...agentBody, ...sliceFastBody })).toBe(false);
+    // Not the slice engine: everything set still offers nothing.
+    expect(fastModeAvailable(config({ ...base, ...ceiling, ...model, ...agentBody, ...sliceFastBody }))).toBe(false);
+    expect(fastModeAvailable(config({ ...base, SANDCHEST_ENGINE: "classic", ...ceiling, ...model }))).toBe(false);
+  });
+
+  test("some fast settings without the rest are valid configuration, just not offered", () => {
+    for (const env of [ceiling, model, agentBody, sliceFastBody, { ...ceiling, ...agentBody }]) {
+      expect(() => config({ ...slice, ...env })).not.toThrow();
+      expect(fastModeAvailable(config({ ...slice, ...env }))).toBe(false);
+    }
+  });
+
+  test("a malformed fast ceiling or body is a configuration error", () => {
+    for (const bad of ["0", "-1", "1e3", "abc", "1.1234567"]) expect(() => config({ ...slice, SANDCHEST_SLICE_CEILING_FAST_USD: bad })).toThrow("SANDCHEST_SLICE_CEILING_FAST_USD");
+    for (const name of ["LLM_SLICE_FAST_BODY", "LLM_AGENT_FAST_BODY"]) {
+      for (const bad of ["null", "[1]", "{nope", '"text"']) expect(() => config({ ...slice, ...ceiling, ...model, [name]: bad })).toThrow(`${name}: must be a JSON object`);
+    }
+    // As LLM_SLICE_BODY: the bodies are only read on the slice engine.
+    expect(() => config({ ...base, LLM_SLICE_FAST_BODY: "null", LLM_AGENT_FAST_BODY: "null" })).not.toThrow();
+  });
+
+  test("the fast bodies never come from the standard ones", () => {
+    const settings = config({ ...slice, ...ceiling, ...model, LLM_SLICE_BODY: '{"serving":"standard"}' });
+    expect(settings.LLM_SLICE_FAST_BODY).toBeUndefined();
+    expect(sliceBody(settings.LLM_SLICE_FAST_BODY)).toEqual({ body: {} });
+    // A standard body alone makes nothing fast.
+    expect(fastModeAvailable(config({ ...slice, ...ceiling, LLM_SLICE_BODY: '{"a":1}' }))).toBe(false);
+  });
+
+  test("a scan runs fast only when flagged, a deep scan, on the slice engine for its account, with fast mode available", () => {
+    const on = config({ ...slice, ...ceiling, ...model });
+    expect(fastRunAllowed({ fast: true, kind: "deep" }, "acme", on)).toBe(true);
+    expect(fastRunAllowed({ fast: false, kind: "deep" }, "acme", on)).toBe(false);
+    for (const kind of ["pr_review", "recon", "fix_check"]) expect(fastRunAllowed({ fast: true, kind }, "acme", on)).toBe(false);
+    expect(fastRunAllowed({ fast: true, kind: "deep" }, "acme", config({ ...slice, ...ceiling, ...model, SANDCHEST_ENGINE_ORGS: "example-org" }))).toBe(false);
+    expect(fastRunAllowed({ fast: true, kind: "deep" }, "acme", config({ ...slice, ...model }))).toBe(false);
+    expect(fastRunAllowed({ fast: true, kind: "deep" }, "acme", config({ ...base, ...ceiling, ...model }))).toBe(false);
   });
 });

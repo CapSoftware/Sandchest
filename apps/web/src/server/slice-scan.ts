@@ -38,7 +38,7 @@ import { adoptKnownFingerprints, changedLines, DEFAULT_LIMITS, relevantChanges, 
 import { parsePatch, type Installation } from "@sandchest/github";
 import type { IndexerBinary, IndexerHandle } from "@sandchest/workspace";
 import { agentSandboxSetupScript, bulkReadFiles } from "@sandchest/workspace/boat";
-import { config } from "./config";
+import { config, fastModeAvailable, fastRunAllowed } from "./config";
 import { captureFromScan } from "./cves";
 import { gatewayEndpoint, mintGatewayToken, STALE_CALL_SECONDS } from "./gateway";
 import { describeError } from "./log";
@@ -90,6 +90,8 @@ export interface SliceState {
   /** Findings written by the write-up; set once they are persisted. */
   findings?: number;
   written?: boolean;
+  /** Set by the hunt of a scan flagged fast: whether it runs fast. Every later step follows it. */
+  fast?: boolean;
 }
 
 /** The scan's spend reached SANDCHEST_SLICE_CEILING_USD. */
@@ -101,6 +103,7 @@ export class SpendCeilingReached extends Error {
 }
 
 const CEILING_MESSAGE = "The scan reached its spending ceiling, so it was stopped. Nothing was charged.";
+const FAST_UNAVAILABLE = "Fast mode is not available right now, so this scan runs at standard speed.";
 
 // ---- Hunt ---------------------------------------------------------------------
 
@@ -128,14 +131,16 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
 
   const events = new EventWriter(db(), scan.id);
   const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows), step: "hunt", attempt });
-  const guard = await spendGuard(scan, ledger);
+  const fast = runsFast(scan);
+  const guard = await spendGuard(scan, ledger, fast);
   const started = Date.now();
   let inventory: ReturnType<typeof captureFromScan> | undefined;
   try {
     if (guard.signal.aborted) throw guard.signal.reason;
+    if (scan.fast && !fast && sliceState(scan).fast === undefined) events.write("progress", FAST_UNAVAILABLE);
     if (scan.kind === "pr_review") return { selected: await huntChange({ scan, installation, attempt, stages, events, guard, passDelayMs: run.passDelayMs }), variants };
     events.write("stage:setup", "Starting a fresh sandbox and fetching the code…");
-    const { sandbox, headSha, handle } = await openSandbox({ scan, installation, attempt, stages, events, started });
+    const { sandbox, headSha, handle } = await openSandbox({ scan, installation, attempt, stages, events, started, fast: scan.fast ? fast : undefined });
     const indexer = runtime.indexer(handle);
 
     // Lines of code as the classic engine measures them, for the charge and the size limit.
@@ -147,7 +152,7 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
 
     const files = checkoutFiles(sandbox);
     const result = await slice.runSliceHunt({
-      client: sliceClient(),
+      client: sliceClient(fast),
       indexer,
       listFiles: files.list,
       readFile: files.read,
@@ -273,9 +278,9 @@ function readChangedFiles(files: string[], read: (file: string) => Promise<strin
 
 /**
  * A fresh sandbox with the scan's commit checked out, the indexer running and the agent CLI installed,
- * timed as the `sandbox` stage. Recorded in `stats.slice` the moment it exists.
+ * timed as the `sandbox` stage. Recorded in `stats.slice` the moment it exists, with `fast` when given.
  */
-async function openSandbox(input: { scan: LoadedScan; installation: Installation; attempt: number; stages: StageRecorder; events: EventWriter; started: number }): Promise<{ sandbox: SliceSandbox; headSha: string; handle: IndexerHandle }> {
+async function openSandbox(input: { scan: LoadedScan; installation: Installation; attempt: number; stages: StageRecorder; events: EventWriter; started: number; fast?: boolean }): Promise<{ sandbox: SliceSandbox; headSha: string; handle: IndexerHandle }> {
   const { scan, installation, attempt, stages, events } = input;
   const settings = config();
   const runtime = sliceRuntime();
@@ -288,7 +293,7 @@ async function openSandbox(input: { scan: LoadedScan; installation: Installation
         opened = await runtime.open({ ttlSeconds: SLICE_TTL_SECONDS, setupScript: agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [RELAY_PORT], dns: false }) });
         // Recorded before anything else, so a later step can always find it and delete it.
         try {
-          await saveSlice(scan.id, { sandboxId: opened.id, huntAttempt: attempt }, { replace: true });
+          await saveSlice(scan.id, { sandboxId: opened.id, huntAttempt: attempt, ...(input.fast !== undefined && { fast: input.fast }) }, { replace: true });
         } catch (error) {
           await opened.destroy().catch(() => {});
           throw error;
@@ -326,7 +331,8 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
   const events = new EventWriter(db(), scan.id);
   let attempt: number | undefined;
   try {
-    const { ceilingMicroUsd, secret } = sliceLimits(scan.kind);
+    const fast = runsFast(scan);
+    const { ceilingMicroUsd, secret } = sliceLimits(scan.kind, fast);
     const budget = await usageBudgetState(db(), scan.id, STALE_CALL_SECONDS);
     if (budget && usdToMicroUsd(budget.spentUsd) >= ceilingMicroUsd) throw new SpendCeilingReached();
     const sandbox = await sliceRuntime().attach(requireSandboxId(state));
@@ -343,7 +349,7 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
     // Keeps the sandbox alive for the whole session: it would otherwise stop at its first deadline.
     await sandbox.extendTtl(SLICE_TTL_SECONDS);
     attempt = await nextUsageAttempt(db(), scan.id, kind);
-    const token = mintGatewayToken({ scanId: scan.id, stage: kind, attempt, ceilingMicroUsd, ttlSeconds: SESSION_TOKEN_TTL_SECONDS }, secret);
+    const token = mintGatewayToken({ scanId: scan.id, stage: kind, attempt, ceilingMicroUsd, ttlSeconds: SESSION_TOKEN_TTL_SECONDS, ...(fast && { fast: true }) }, secret);
     const startedAt = Date.now();
     stages.start(kind, attempt, new Date(startedAt));
     const ids = await sliceRuntime().startAgentSession(sandbox, {
@@ -467,7 +473,8 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
   const stages = new StageRecorder(scan.id);
   const events = new EventWriter(db(), scan.id);
   const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows), step: "writeup", attempt });
-  const guard = await spendGuard(scan, ledger);
+  const fast = runsFast(scan);
+  const guard = await spendGuard(scan, ledger, fast);
   const started = Date.now();
   stages.start("writeup", attempt, new Date(started));
   try {
@@ -487,7 +494,7 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
       events.write("stage:verify", "Writing up what was confirmed…");
       const indexer = runtime.indexer(await restartIndexer(sandbox, indexerBinary(config().workspace)));
       const out = await slice.writeUpVerdicts({
-        client: sliceClient(),
+        client: sliceClient(fast),
         indexer,
         findings: hunt.findings,
         candidates: hunt.candidates,
@@ -596,10 +603,22 @@ async function stopped(scan: LoadedScan, error: unknown, signal?: AbortSignal): 
   throw error;
 }
 
-/** The scan's ceiling (a pull request's own, or a deep scan's) and the gateway secret. */
-function sliceLimits(kind: string): { ceilingMicroUsd: number; secret: string } {
+/**
+ * Whether this step runs fast. The hunt of a scan flagged fast decides, from the flag and the settings, and
+ * records the answer in `stats.slice`; every later step, and a retried hunt, follows that record, so a run
+ * never changes mode halfway. A fast run whose fast settings are gone stops, as a run whose ceiling is gone does.
+ */
+function runsFast(scan: LoadedScan): boolean {
+  const recorded = sliceState(scan).fast;
+  if (recorded === undefined) return fastRunAllowed(scan, scan.repo.org.githubLogin);
+  if (recorded && !fastModeAvailable()) throw new ScanFinished("The slice engine is no longer configured.");
+  return recorded;
+}
+
+/** The scan's ceiling (a fast run's, a pull request's own, or a deep scan's) and the gateway secret. */
+function sliceLimits(kind: string, fast: boolean): { ceilingMicroUsd: number; secret: string } {
   const settings = config();
-  const ceiling = kind === "pr_review" ? settings.SANDCHEST_SLICE_CEILING_PR_USD : settings.SANDCHEST_SLICE_CEILING_USD;
+  const ceiling = fast ? settings.SANDCHEST_SLICE_CEILING_FAST_USD : kind === "pr_review" ? settings.SANDCHEST_SLICE_CEILING_PR_USD : settings.SANDCHEST_SLICE_CEILING_USD;
   if (!ceiling || !settings.SANDCHEST_GATEWAY_SECRET) throw new ScanFinished("The slice engine is no longer configured.");
   return { ceilingMicroUsd: usdToMicroUsd(ceiling), secret: settings.SANDCHEST_GATEWAY_SECRET };
 }
@@ -608,9 +627,9 @@ function sliceLimits(kind: string): { ceilingMicroUsd: number; secret: string } 
  * The ledger's sink, adding each call's cost to what the scan had spent when the step began. At the
  * ceiling it aborts the returned signal, which the engine is given: no further call starts.
  */
-async function spendGuard(scan: { id: string; kind: string }, ledger: UsageLedger): Promise<{ onUsage: UsageSink; signal: AbortSignal }> {
+async function spendGuard(scan: { id: string; kind: string }, ledger: UsageLedger, fast: boolean): Promise<{ onUsage: UsageSink; signal: AbortSignal }> {
   const scanId = scan.id;
-  const { ceilingMicroUsd } = sliceLimits(scan.kind);
+  const { ceilingMicroUsd } = sliceLimits(scan.kind, fast);
   const budget = await usageBudgetState(db(), scanId, STALE_CALL_SECONDS);
   let spent = budget ? usdToMicroUsd(budget.spentUsd) : 0;
   const controller = new AbortController();

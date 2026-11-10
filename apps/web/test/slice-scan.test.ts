@@ -134,6 +134,8 @@ const model = {
   /** The hunt finds nothing. */
   empty: false,
   requests: [] as ChatRequest[],
+  /** The requests of those that came through the fast client. */
+  fastRequests: [] as ChatRequest[],
 };
 
 const reply = (content: string): ChatResult => ({
@@ -176,6 +178,15 @@ const fakeLlm: LlmClient = {
     const entry = content.match(/^\[(E\d+)\] \S+ (\S+)/m);
     if (model.empty || !entry) return reply("NONE");
     return reply([`${entry[1]}|idor|a|${PATH}:3|other workspaces|project read without ownership check`, `${entry[1]}|sqli|a|${PATH}:17|all tenants|name reaches a raw query`].join("\n"));
+  },
+};
+
+/** The fast client: the same answers, counted apart. */
+const fastLlm: LlmClient = {
+  config: { baseUrl: "http://fake-fast", apiKey: "k", model: "m" },
+  async chat(request) {
+    model.fastRequests.push(request);
+    return fakeLlm.chat(request);
   },
 };
 
@@ -451,7 +462,7 @@ beforeAll(async () => {
   resetConfig();
   database = createDb(url.toString(), { max: 5 });
   await migrate(database);
-  setServices({ db: database, github: fakeGithub, slice: fakeLlm, sliceRuntime: runtime });
+  setServices({ db: database, github: fakeGithub, slice: fakeLlm, sliceFast: fastLlm, sliceRuntime: runtime });
   setAutumn(autumn);
   const { org } = await upsertInstallation(database, 77, { githubAccountId: 900, githubLogin: "acme", type: "Organization" }, []);
   orgId = org.id;
@@ -459,7 +470,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setAutumn(undefined);
-  setServices({ slice: undefined, sliceRuntime: undefined });
+  setServices({ slice: undefined, sliceFast: undefined, sliceRuntime: undefined });
   for (const [key, value] of Object.entries(saved)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -481,16 +492,17 @@ const it = (name: string, fn: () => Promise<void>) =>
       model.costUsd = 0.001;
       model.empty = false;
       model.requests = [];
+      model.fastRequests = [];
       await fn();
     },
     30_000,
   );
 
 /** A queued scan of a fresh repository, so scans never share a repository's one active deep scan. */
-async function newScan(kind: "deep" | "pr_review" | "recon" | "fix_check" = "deep"): Promise<string> {
+async function newScan(kind: "deep" | "pr_review" | "recon" | "fix_check" = "deep", options: { fast?: boolean } = {}): Promise<string> {
   repoCount++;
   const [repo] = await upsertRepos(database, orgId, [{ githubRepoId: 5000 + repoCount, fullName: `acme/app-${repoCount}`, private: true, defaultBranch: "main" }]);
-  const { scan } = await createScan(database, { repoId: repo!.id, orgId, kind, trigger: "manual", headSha: "HEAD", ...(kind === "pr_review" && { prNumber: repoCount, headSha: `head${repoCount}` }) });
+  const { scan } = await createScan(database, { repoId: repo!.id, orgId, kind, trigger: "manual", headSha: "HEAD", ...(kind === "pr_review" && { prNumber: repoCount, headSha: `head${repoCount}` }), ...(options.fast && { fast: true }) });
   return scan.id;
 }
 
@@ -973,6 +985,168 @@ describe.skipIf(!available)("pull request reviews on the slice engine", () => {
     expect(model.requests.length).toBeGreaterThan(0);
     const feed = await eventsSince(database, scanId, 0, 500);
     expect(feed.some((e) => e.message === "3 changed files were too large or could not be read, and were left out.")).toBe(true);
+  });
+});
+
+// ---- Fast deep scans ------------------------------------------------------------
+
+const FAST_ENV: Record<string, string> = { SANDCHEST_SLICE_CEILING_FAST_USD: "0.4", LLM_AGENT_FAST_MODEL: "fast-model", LLM_SLICE_FAST_BODY: '{"serving":"fast"}' };
+const FAST_UNAVAILABLE = "Fast mode is not available right now, so this scan runs at standard speed.";
+
+/** Runs `fn` with fast mode available (or with `env`), then puts the settings back. */
+async function withFast(fn: () => Promise<void>, env: Record<string, string> = FAST_ENV): Promise<void> {
+  const before = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  resetConfig();
+  try {
+    await fn();
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetConfig();
+  }
+}
+
+/** The claims of every gateway token handed to this scan's sessions, in the order they started. */
+const tokensOf = (scanId: string) =>
+  [...host.sessions.values()].map((s) => verifyGatewayToken(s.token, SECRET)).filter((claims) => claims?.scanId === scanId);
+const feedOf = async (scanId: string) => (await eventsSince(database, scanId, 0, 500)).map((e) => e.message);
+
+describe.skipIf(!available)("fast deep scans", () => {
+  it("a fast deep scan: every engine call on the fast client, fast tokens under the fast ceiling, otherwise as a standard scan", async () => {
+    await withFast(async () => {
+      const scanId = await newScan("deep", { fast: true });
+      const credits = autumn.get(orgId).credits;
+      expect(await runSlice(scanId)).toBeUndefined();
+
+      const scan = (await scanById(database, scanId))!;
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 5, fast: true });
+      expect(autumn.get(orgId).credits).toBe(credits - 5);
+      expect((scan.stats as { findingIds: string[] }).findingIds).toHaveLength(2);
+      expect(sliceState(scan)).toMatchObject({ fast: true, written: true, findings: 2 });
+      // Hunt, scoring and write-up all went through the fast client.
+      expect(model.requests.length).toBeGreaterThan(0);
+      expect(model.fastRequests).toEqual(model.requests);
+      expect(model.fastRequests.some((r) => contentOf(r).includes(slice.SCORE_TASK))).toBe(true);
+      expect(model.fastRequests.some((r) => r.responseFormat?.json_schema.name === "finding")).toBe(true);
+      // Both sessions' tokens send the agent's calls to the fast endpoint, under the fast ceiling.
+      expect(tokensOf(scanId)).toMatchObject([
+        { stage: "verify", attempt: 0, ceilingMicroUsd: 400_000, fast: true },
+        { stage: "variants", attempt: 0, ceilingMicroUsd: 400_000, fast: true },
+      ]);
+      // Metered as any slice scan is.
+      const rows = await usage(scanId);
+      expect(rows.filter((r) => r.step === "hunt" && r.kind === "model").every((r) => r.attempt === 0 && r.status === "ok")).toBe(true);
+      expect(rows.filter((r) => r.step === "writeup").length).toBeGreaterThan(0);
+      expect(rows.filter((r) => r.step === "verify").map((r) => [r.role, r.attempt])).toEqual([["agent", 0]]);
+      expect(rows.filter((r) => r.kind === "sandbox")).toHaveLength(1);
+      expect(await feedOf(scanId)).not.toContain(FAST_UNAVAILABLE);
+    });
+  });
+
+  it("a fast run is stopped by the fast ceiling, not the standard one", async () => {
+    // Under the fast ceiling (0.4), three hunt calls of 0.15 cross it; under the standard one (0.5) they would not.
+    await withFast(async () => {
+      model.costUsd = 0.15;
+      const scanId = await newScan("deep", { fast: true });
+      const error = await runSlice(scanId);
+      expect(error).toBeInstanceOf(ScanFinished);
+      expect(error!.message).toContain("spending ceiling");
+      expect(model.requests.filter((r) => contentOf(r).includes(slice.SCORE_TASK))).toHaveLength(0);
+      expect(model.fastRequests).toHaveLength(3);
+      const spent = (await usage(scanId)).filter((r) => r.kind === "model").reduce((sum, r) => sum + Number(r.costUsd), 0);
+      expect(spent).toBeGreaterThanOrEqual(0.4);
+      expect(spent).toBeLessThan(0.5);
+      expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+    });
+
+    // A fast ceiling above the standard one: the hunt carries on past where a standard run would stop.
+    await withFast(
+      async () => {
+        model.costUsd = 0.2;
+        model.requests = [];
+        const scanId = await newScan("deep", { fast: true });
+        expect((await beginScan(scanId)).engine).toBe("slice");
+        expect((await huntSlice(scanId, { passDelayMs: 0 })).selected).toBe(2);
+        const spent = (await usage(scanId)).filter((r) => r.kind === "model").reduce((sum, r) => sum + Number(r.costUsd), 0);
+        expect(spent).toBeGreaterThan(0.5);
+        expect(model.requests.filter((r) => contentOf(r).includes(slice.SCORE_TASK)).length).toBeGreaterThan(0);
+        await cleanUpSlice(scanId);
+        await failScan(scanId, "test over");
+      },
+      { ...FAST_ENV, SANDCHEST_SLICE_CEILING_FAST_USD: "2.5" },
+    );
+  });
+
+  it("a fast run whose fast settings disappear mid-scan stops; it never carries on as a standard run", async () => {
+    let scanId = "";
+    await withFast(async () => {
+      scanId = await newScan("deep", { fast: true });
+      expect((await beginScan(scanId)).engine).toBe("slice");
+      await huntSlice(scanId, { passDelayMs: 0 });
+      expect(sliceState((await scanById(database, scanId))!).fast).toBe(true);
+    });
+    // The fast ceiling is gone; the standard one is still set.
+    await expect(startSliceSession(scanId, "verify")).rejects.toThrow("The slice engine is no longer configured.");
+    expect(host.started).toEqual([]);
+    expect(tokensOf(scanId)).toEqual([]);
+    const before = model.requests.length;
+    await expect(writeUpSlice(scanId)).rejects.toThrow("The slice engine is no longer configured.");
+    expect(model.requests).toHaveLength(before);
+    await cleanUpSlice(scanId);
+    await failScan(scanId, "stopped");
+    expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+  });
+
+  it("a scan flagged fast while fast mode is not available runs standard, and its feed says so once", async () => {
+    const scanId = await newScan("deep", { fast: true });
+    expect(await runSlice(scanId)).toBeUndefined();
+    const scan = (await scanById(database, scanId))!;
+    expect(scan).toMatchObject({ status: "completed", credits: 5, fast: true });
+    expect(sliceState(scan).fast).toBe(false);
+    expect(model.requests.length).toBeGreaterThan(0);
+    expect(model.fastRequests).toEqual([]);
+    const tokens = tokensOf(scanId);
+    expect(tokens).toMatchObject([
+      { stage: "verify", ceilingMicroUsd: 500_000 },
+      { stage: "variants", ceilingMicroUsd: 500_000 },
+    ]);
+    for (const claims of tokens) expect(claims!.fast).toBeUndefined();
+    expect((await feedOf(scanId)).filter((m) => m === FAST_UNAVAILABLE)).toHaveLength(1);
+  });
+
+  it("with fast mode available, an unflagged deep scan runs exactly as before", async () => {
+    await withFast(async () => {
+      const scanId = await newScan();
+      expect(await runSlice(scanId)).toBeUndefined();
+      const scan = (await scanById(database, scanId))!;
+      expect(scan).toMatchObject({ status: "completed", credits: 5, fast: false });
+      expect("fast" in sliceState(scan)).toBe(false);
+      expect(model.fastRequests).toEqual([]);
+      const tokens = tokensOf(scanId);
+      expect(tokens.map((claims) => [claims!.stage, claims!.ceilingMicroUsd])).toEqual([
+        ["verify", 500_000],
+        ["variants", 500_000],
+      ]);
+      for (const claims of tokens) expect(Object.keys(claims!)).not.toContain("fast");
+      expect(await feedOf(scanId)).not.toContain(FAST_UNAVAILABLE);
+    });
+  });
+
+  it("a pull request review flagged fast runs standard, under its own ceiling", async () => {
+    await withFast(async () => {
+      gh.files = [CHANGED, DOCS];
+      const scanId = await newScan("pr_review", { fast: true });
+      expect(await runSlice(scanId)).toBeUndefined();
+      expect(await scanById(database, scanId)).toMatchObject({ status: "completed", credits: prReviewCredits(3) });
+      expect(model.requests.length).toBeGreaterThan(0);
+      expect(model.fastRequests).toEqual([]);
+      const tokens = tokensOf(scanId);
+      expect(tokens).toMatchObject([{ stage: "verify", ceilingMicroUsd: 300_000 }]);
+      expect(tokens[0]!.fast).toBeUndefined();
+    });
   });
 });
 

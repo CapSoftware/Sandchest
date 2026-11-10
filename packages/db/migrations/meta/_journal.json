@@ -148,6 +148,13 @@
       "when": 1794281498086,
       "tag": "0020_scan_stages",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794286159619,
+      "tag": "0021_scan_fast",
+      "breakpoints": true
     }
   ]
 }

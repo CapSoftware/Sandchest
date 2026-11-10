@@ -101,6 +101,13 @@ const Schema = z.object({
   SANDCHEST_SLICE_CEILING_PR_USD: usd().optional(),
   /** A JSON object of fields set on every model request of the slice engine's own calls (endpoint options). */
   LLM_SLICE_BODY: z.string().optional(),
+  /** Fast deep scans (see `fastModeAvailable`): the most one may cost, in USD. */
+  SANDCHEST_SLICE_CEILING_FAST_USD: usd().optional(),
+  /** LLM_SLICE_BODY for fast runs. Never falls back to it: the body is what picks the serving. */
+  LLM_SLICE_FAST_BODY: z.string().optional(),
+  /** The gateway reads these itself (see `loadFastGatewayUpstream`); here they only tell whether fast mode is available. */
+  LLM_AGENT_FAST_MODEL: z.string().optional(),
+  LLM_AGENT_FAST_BODY: z.string().optional(),
 });
 
 export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" | "boat" };
@@ -133,6 +140,10 @@ export function config(env: Record<string, string | undefined> = process.env): C
     if (!parsed.data.SANDCHEST_SLICE_CEILING_PR_USD) problems.push("SANDCHEST_SLICE_CEILING_PR_USD: is required by the slice engine");
     const body = sliceBody(parsed.data.LLM_SLICE_BODY);
     if ("problem" in body) problems.push(`LLM_SLICE_BODY: ${body.problem}`);
+    for (const name of ["LLM_SLICE_FAST_BODY", "LLM_AGENT_FAST_BODY"] as const) {
+      const fast = sliceBody(parsed.data[name]);
+      if ("problem" in fast) problems.push(`${name}: ${fast.problem}`);
+    }
     if (problems.length > 0) throw new Error(`Invalid server configuration:\n  ${problems.join("\n  ")}`);
   }
   const result = { ...parsed.data, workspace };
@@ -151,6 +162,25 @@ export function scanEngine(kind: string, githubLogin: string, settings: Config =
     if (!logins.includes(githubLogin.toLowerCase())) return "classic";
   }
   return "slice";
+}
+
+/**
+ * Whether a deep scan may be started fast: the slice engine runs, SANDCHEST_SLICE_CEILING_FAST_USD is set, and
+ * both the agent's calls (LLM_AGENT_FAST_MODEL or LLM_AGENT_FAST_BODY) and the engine's own calls
+ * (LLM_AGENT_FAST_MODEL or LLM_SLICE_FAST_BODY) really differ from standard ones.
+ */
+export function fastModeAvailable(settings: Config = config()): boolean {
+  if (settings.SANDCHEST_ENGINE !== "slice" || !settings.SANDCHEST_SLICE_CEILING_FAST_USD) return false;
+  const model = settings.LLM_AGENT_FAST_MODEL !== undefined;
+  return (model || settings.LLM_AGENT_FAST_BODY !== undefined) && (model || settings.LLM_SLICE_FAST_BODY !== undefined);
+}
+
+/**
+ * Whether a scan flagged fast may run fast now: a deep scan, on the slice engine for its account, with fast
+ * mode available. Anything else runs standard.
+ */
+export function fastRunAllowed(scan: { fast: boolean; kind: string }, githubLogin: string, settings: Config = config()): boolean {
+  return scan.fast && scan.kind === "deep" && scanEngine(scan.kind, githubLogin, settings) === "slice" && fastModeAvailable(settings);
 }
 
 /** LLM_SLICE_BODY as an object (empty when unset), or what is wrong with it. */

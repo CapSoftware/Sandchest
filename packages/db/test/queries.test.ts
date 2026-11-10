@@ -202,6 +202,16 @@ describe("scans", () => {
     expect(Object.fromEntries(earlier)).toEqual({ A: { scanId: first.id, headSha: "aaa" }, B: { scanId: second.id, headSha: "bbb" } });
   });
 
+  it("a scan is standard unless created fast; rows written without the column are standard", async () => {
+    const { org, repos } = await upsertInstallation(database, 9050, { ...account, githubAccountId: 150 }, [repo(150), repo(151), repo(152)]);
+    const standard = await createScan(database, { repoId: repos[0]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "std" });
+    const fast = await createScan(database, { repoId: repos[1]!.id, orgId: org.id, kind: "deep", trigger: "manual", headSha: "fast", fast: true });
+    expect(standard.scan.fast).toBe(false);
+    expect(fast.scan.fast).toBe(true);
+    const [raw] = await database.$client<Array<{ fast: boolean }>>`insert into scans (repo_id, org_id, kind, trigger, head_sha) values (${repos[2]!.id}, ${org.id}, 'deep', 'manual', 'raw') returning fast`;
+    expect(raw!.fast).toBe(false);
+  });
+
   it("never creates two reviews for one PR head", async () => {
     const { org, repos } = await upsertInstallation(database, 9002, { ...account, githubAccountId: 102 }, [repo(10)]);
     const input = { repoId: repos[0]!.id, orgId: org.id, kind: "pr_review" as const, trigger: "webhook" as const, headSha: "abc", prNumber: 7 };

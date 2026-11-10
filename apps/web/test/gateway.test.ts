@@ -3,15 +3,18 @@
  * every call written to the usage ledger with what it cost. The model endpoint is faked; the second
  * half runs against a real Postgres.
  */
+import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
 import { createDb, createScan, finishUsageCall, insertUsage, nextUsageAttempt, scanUsageRows, startUsageCall, upsertInstallation, usageBudgetState, type Db, type UsageBudgetState, type UsageCallResult } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import { POST as route } from "@/app/api/gateway/v1/messages/route";
 import { resetConfig } from "@/server/config";
+import { setDb } from "@/server/db";
 import {
   gatewayEndpoint,
   handleGatewayRequest,
+  loadFastGatewayUpstream,
   loadGatewayUpstream,
   MAX_ABORTED_UNPRICED,
   MAX_BODY_BYTES,
@@ -145,6 +148,34 @@ describe("gateway tokens", () => {
     expect(token({ ttlSeconds: MAX_TOKEN_TTL_SECONDS })).toStartWith("sgw1.");
   });
 
+  test("a fast token says so; a standard one carries no such claim", () => {
+    expect(verifyGatewayToken(token({ fast: true }), SECRET, NOW)).toEqual({ scanId: SCAN, stage: "verify", attempt: 2, ceilingMicroUsd: 300_000, expiresAt: NOW / 1000 + 900, fast: true });
+    expect(Object.keys(verifyGatewayToken(token(), SECRET, NOW)!)).not.toContain("fast");
+  });
+
+  test("a token minted before the fast claim existed still verifies, as standard", () => {
+    // The old format, signed as the old code signed it.
+    const body = Buffer.from(JSON.stringify({ s: SCAN, t: "verify", a: 2, c: 300_000, e: NOW / 1000 + 900 })).toString("base64url");
+    const old = `sgw1.${body}.${createHmac("sha256", SECRET).update(`sgw1.${body}`).digest("base64url")}`;
+    const claims = verifyGatewayToken(old, SECRET, NOW);
+    expect(claims).toEqual({ scanId: SCAN, stage: "verify", attempt: 2, ceilingMicroUsd: 300_000, expiresAt: NOW / 1000 + 900 });
+    expect(claims!.fast).toBeUndefined();
+    // A standard token is still minted in exactly that format.
+    expect(token()).toBe(old);
+  });
+
+  test("the fast claim cannot be added, removed or set to anything else after signing", () => {
+    const resign = (t: string, change: (claims: Record<string, unknown>) => Record<string, unknown>, sign = false) => {
+      const [prefix, body, signature] = t.split(".") as [string, string, string];
+      const changed = Buffer.from(JSON.stringify(change(JSON.parse(Buffer.from(body, "base64url").toString())))).toString("base64url");
+      return `${prefix}.${changed}.${sign ? createHmac("sha256", SECRET).update(`sgw1.${changed}`).digest("base64url") : signature}`;
+    };
+    expect(verifyGatewayToken(resign(token(), (c) => ({ ...c, f: true })), SECRET, NOW)).toBeUndefined();
+    expect(verifyGatewayToken(resign(token({ fast: true }), ({ f: _f, ...c }) => c), SECRET, NOW)).toBeUndefined();
+    // Even signed, a claim other than `true` is not one a token may carry.
+    for (const f of [false, 1, "true", null]) expect(verifyGatewayToken(resign(token(), (c) => ({ ...c, f }), true), SECRET, NOW)).toBeUndefined();
+  });
+
   test("the sandbox is pointed at the app's own host", () => {
     expect(gatewayEndpoint("https://www.sandchest.test/")).toEqual({ baseUrl: "https://www.sandchest.test/api/gateway", host: "www.sandchest.test" });
     expect(gatewayEndpoint("http://localhost:3000")).toEqual({ baseUrl: "http://localhost:3000/api/gateway", host: "localhost" });
@@ -177,6 +208,41 @@ describe("gateway upstream settings", () => {
 
   test("the fixed request fields cannot take over the caller's conversation or model", () => {
     for (const field of ["model", "messages", "system", "tools", "tool_choice", "stream"]) expect(() => loadGatewayUpstream({ ...engine, LLM_AGENT_BODY: JSON.stringify({ [field]: "x" }) })).toThrow("must not set");
+  });
+
+  const agent = { ...engine, LLM_AGENT_BASE_URL: "https://agent.test/v1", LLM_AGENT_API_KEY: "agent-key", LLM_AGENT_MODEL: "agent-model", LLM_AGENT_BODY: '{"usage":{"include":true}}' };
+
+  test("the standard endpoint never reads the fast settings, even broken ones", () => {
+    const fast = { LLM_AGENT_FAST_BASE_URL: "ftp://x", LLM_AGENT_FAST_API_KEY: "fast-key", LLM_AGENT_FAST_MODEL: "fast-model", LLM_AGENT_FAST_BODY: "nope" };
+    expect(loadGatewayUpstream({ ...agent, ...fast })).toEqual(loadGatewayUpstream(agent));
+  });
+
+  test("fast: endpoint, key and model fall back to the agent's then the engine's; the body is the fast body alone", () => {
+    expect(loadFastGatewayUpstream({ ...agent, LLM_AGENT_FAST_MODEL: "fast-model" })).toEqual({ baseUrl: "https://agent.test/v1", apiKey: "agent-key", model: "fast-model", body: {} });
+    expect(loadFastGatewayUpstream({ ...engine, LLM_AGENT_BODY: '{"usage":{"include":true}}', LLM_AGENT_FAST_BODY: '{"serving":"fast"}' })).toEqual({
+      baseUrl: "https://engine.test/v1",
+      apiKey: "engine-key",
+      model: "engine-model",
+      body: { serving: "fast" },
+    });
+    expect(loadFastGatewayUpstream({ ...agent, LLM_AGENT_FAST_BASE_URL: "https://fast.test/v1/", LLM_AGENT_FAST_API_KEY: "fast-key", LLM_AGENT_FAST_MODEL: "fast-model", LLM_AGENT_FAST_BODY: '{"serving":"fast"}' })).toEqual({
+      baseUrl: "https://fast.test/v1",
+      apiKey: "fast-key",
+      model: "fast-model",
+      body: { serving: "fast" },
+    });
+  });
+
+  test("fast: with neither the fast model nor the fast body, nothing would differ, so it is refused", () => {
+    expect(() => loadFastGatewayUpstream(agent)).toThrow("LLM_AGENT_FAST_MODEL or LLM_AGENT_FAST_BODY: is required for fast runs");
+    expect(() => loadFastGatewayUpstream({ ...agent, LLM_AGENT_FAST_BASE_URL: "https://fast.test/v1", LLM_AGENT_FAST_API_KEY: "fast-key", LLM_AGENT_FAST_MODEL: " ", LLM_AGENT_FAST_BODY: "" })).toThrow("is required for fast runs");
+    expect(() => loadFastGatewayUpstream({ LLM_AGENT_FAST_MODEL: "fast-model" })).toThrow(/LLM_BASE_URL[\s\S]*LLM_API_KEY/);
+  });
+
+  test("fast: a malformed setting is named", () => {
+    expect(() => loadFastGatewayUpstream({ ...agent, LLM_AGENT_FAST_MODEL: "m", LLM_AGENT_FAST_BASE_URL: "ftp://x" })).toThrow("LLM_AGENT_FAST_BASE_URL");
+    for (const body of ["[1]", "nope", '"text"', "null"]) expect(() => loadFastGatewayUpstream({ ...agent, LLM_AGENT_FAST_BODY: body })).toThrow("LLM_AGENT_FAST_BODY: must be a JSON object");
+    for (const field of ["model", "messages", "system", "tools", "tool_choice", "stream"]) expect(() => loadFastGatewayUpstream({ ...agent, LLM_AGENT_FAST_BODY: JSON.stringify({ [field]: "x" }) })).toThrow("LLM_AGENT_FAST_BODY: must not set");
   });
 });
 
@@ -420,6 +486,60 @@ describe("gateway: what is forwarded", () => {
       expect(text).toBe(WHOLE);
       expect(text).not.toContain(UPSTREAM_KEY);
     }
+  });
+});
+
+describe("gateway: which endpoint", () => {
+  const FAST: GatewayUpstream = { baseUrl: "https://fast.test/v1", apiKey: "fast-key", model: "fast-model", body: { serving: "fast" } };
+  const byClaim: GatewayDeps["upstream"] = (claims) => (claims.fast ? FAST : UPSTREAM);
+  /** A request dressed up as fast in every way the caller controls. */
+  const fastLooking = { model: "fast-model", max_tokens: 5, messages: [{ role: "user", content: "hi" }], fast: true, serving: "fast", speed: "fast" };
+
+  test("chosen from the verified token alone: a standard token gets the standard endpoint, body and model, whatever it sends", async () => {
+    const seen: unknown[] = [];
+    const h = harness(() => Response.json({ type: "message", usage: { input_tokens: 1, output_tokens: 1, cost: 0.001 } }), { upstream: (claims) => (seen.push(claims), byClaim(claims)) });
+    const response = await handleGatewayRequest(call(fastLooking, { authorization: `Bearer ${token()}`, "x-fast": "1", "x-serving": "fast" }), h.deps);
+    expect(response.status).toBe(200);
+    expect(seen).toEqual([verifyGatewayToken(token(), SECRET, NOW)]);
+    expect(h.sent).toEqual([
+      {
+        url: "https://models.test/v1/messages",
+        headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${UPSTREAM_KEY}` },
+        body: { max_tokens: 5, messages: fastLooking.messages, usage: { include: true }, model: "agent-model" },
+      },
+    ]);
+  });
+
+  test("a fast token gets the fast endpoint, key, body and model", async () => {
+    const h = harness(() => Response.json({ type: "message", usage: { input_tokens: 1, output_tokens: 1, cost: 0.001 } }), { upstream: byClaim });
+    const response = await handleGatewayRequest(call({ max_tokens: 5, messages: [{ role: "user", content: "hi" }], usage: { include: true } }, { authorization: `Bearer ${token({ fast: true })}` }), h.deps);
+    expect(response.status).toBe(200);
+    expect(h.sent).toEqual([
+      {
+        url: "https://fast.test/v1/messages",
+        headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer fast-key" },
+        body: { max_tokens: 5, messages: [{ role: "user", content: "hi" }], serving: "fast", model: "fast-model" },
+      },
+    ]);
+    // Recorded as any call is: the token's scan, stage and attempt.
+    expect(h.started).toEqual([{ scanId: SCAN, stage: "verify", role: "agent", attempt: 2 }]);
+    expect(h.finished).toEqual([{ id: 1, status: "ok", inputTokens: 1, cachedTokens: 0, outputTokens: 1, reasoningTokens: 0, costUsd: 0.001 }]);
+  });
+
+  test("a fast token whose endpoint cannot be loaded: 503 and reported, never sent to the standard endpoint", async () => {
+    const h = harness(undefined, {
+      upstream: (claims) => {
+        if (claims.fast) throw new Error("Invalid gateway configuration: LLM_AGENT_FAST_MODEL");
+        return UPSTREAM;
+      },
+    });
+    const response = await handleGatewayRequest(call(undefined, { authorization: `Bearer ${token({ fast: true })}` }), h.deps);
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("LLM_AGENT_FAST");
+    expect(h.reports).toEqual(["gateway configuration"]);
+    expect([h.calls.budget, h.sent.length, h.started.length]).toEqual([0, 0, 0]);
+    // The standard endpoint still works for standard tokens.
+    expect((await handleGatewayRequest(call({ messages: [] }), h.deps)).status).toBe(200);
   });
 });
 
@@ -821,6 +941,61 @@ describe("gateway: the ledger in Postgres", () => {
       resetConfig();
       expect((await route(call(undefined, { authorization: "Bearer nope" }))).status).toBe(401);
     } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+      resetConfig();
+    }
+  });
+
+  test("the route sends a fast token to the fast endpoint and a standard one to the standard endpoint, and never swaps them", async () => {
+    if (!available) return;
+    const url = new URL(ADMIN_URL);
+    url.pathname = `/${NAME}`;
+    const saved = { ...process.env };
+    const realFetch = globalThis.fetch;
+    const sent: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (to: string, init: RequestInit) => {
+      sent.push({ url: to, authorization: (init.headers as Record<string, string>).authorization!, body: JSON.parse(init.body as string) });
+      return Response.json({ type: "message", usage: { input_tokens: 1, output_tokens: 1, cost: 0.001 } });
+    }) as unknown as typeof fetch;
+    for (const key of Object.keys(process.env)) if (key.startsWith("LLM_")) delete process.env[key];
+    Object.assign(process.env, {
+      DATABASE_URL: url.toString(),
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_PRIVATE_KEY: "unused",
+      GITHUB_WEBHOOK_SECRET: "unused",
+      SANDCHEST_APP_URL: "https://sandchest.test",
+      SANDCHEST_GATEWAY_SECRET: SECRET,
+      LLM_BASE_URL: "https://standard.test/v1",
+      LLM_API_KEY: "standard-key",
+      LLM_MODEL: "standard-model",
+      LLM_AGENT_BODY: '{"usage":{"include":true}}',
+    });
+    resetConfig();
+    setDb(database);
+    try {
+      const scanId = await runningScan();
+      const mint = (fast: boolean) => ({ authorization: `Bearer ${mintGatewayToken({ scanId, stage: "verify", attempt: 0, ceilingMicroUsd: 300_000, ttlSeconds: 600, ...(fast && { fast: true as const }) }, SECRET)}` });
+      const messages = [{ role: "user", content: "hi" }];
+      const fastLooking = { model: "fast-model", max_tokens: 5, messages, serving: "fast", fast: true };
+
+      // No fast settings: a fast token is refused, not forwarded anywhere.
+      expect((await route(call(fastLooking, mint(true)))).status).toBe(503);
+      expect(sent).toEqual([]);
+
+      Object.assign(process.env, { LLM_AGENT_FAST_BASE_URL: "https://fast.test/v1", LLM_AGENT_FAST_API_KEY: "fast-key", LLM_AGENT_FAST_MODEL: "fast-model", LLM_AGENT_FAST_BODY: '{"serving":"fast"}' });
+      expect((await route(call(fastLooking, { ...mint(false), "x-fast": "1" }))).status).toBe(200);
+      expect((await route(call({ max_tokens: 5, messages }, mint(true)))).status).toBe(200);
+      expect(sent).toEqual([
+        { url: "https://standard.test/v1/messages", authorization: "Bearer standard-key", body: { max_tokens: 5, messages, usage: { include: true }, model: "standard-model" } },
+        { url: "https://fast.test/v1/messages", authorization: "Bearer fast-key", body: { max_tokens: 5, messages, serving: "fast", model: "fast-model" } },
+      ]);
+      expect((await scanUsageRows(database, scanId)).map((row) => [row.stage, row.status, row.costUsd])).toEqual([
+        ["verify", "ok", "0.0010000000"],
+        ["verify", "ok", "0.0010000000"],
+      ]);
+    } finally {
+      globalThis.fetch = realFetch;
       for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
       Object.assign(process.env, saved);
       resetConfig();
