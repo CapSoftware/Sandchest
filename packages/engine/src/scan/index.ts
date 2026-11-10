@@ -18,6 +18,7 @@ export { classifyEntryPoints, entryPointCandidates, mergeRecovered, type Classif
 export { accessControlGroups } from "./hunt";
 export type { RouteInfo } from "./tools";
 export { investigateAuthModel } from "./investigate";
+export * as slice from "./slice";
 export type { Runtime, RuntimeExecOptions, RuntimeExecResult } from "./runtime";
 export {
   bringUp,
