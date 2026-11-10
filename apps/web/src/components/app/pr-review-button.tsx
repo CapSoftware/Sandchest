@@ -28,7 +28,7 @@ export function PrReviewButton({ repoId, prNumber, again, priced }: { repoId: st
           </button>
           <input type="hidden" name="credits" value={state.credits} />
           <Submit className="key key-primary" name="step" value="start" pending="Starting…" track="pr-review-confirm">
-            {state.credits === 0 ? "Review for free" : `Review for ${creditsText(state.credits!)}`}
+            {state.credits === 0 ? "Review for free" : `Review for ${state.upTo ? "up to " : ""}${creditsText(state.credits!)}`}
           </Submit>
         </span>
       ) : (

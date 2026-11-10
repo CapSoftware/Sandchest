@@ -5,9 +5,11 @@
 import { DEEP_SCAN_TIERS, deepScanCredits } from "@sandchest/billing/costs";
 import { isTrial, planById } from "@sandchest/billing/plans";
 import type { DashboardRepo, FindingListItem, ScanListItem, SettingsOrg } from "@sandchest/db";
+import type { BillView } from "@/lib/bill-view";
 import { readHacker } from "@/lib/hacker";
 import { installationSettingsUrl } from "@/lib/installation";
 import { config } from "../config";
+import type { UsageQuote } from "../usage-quote";
 
 const iso = (date: Date | string | null | undefined) => (date ? new Date(date).toISOString() : null);
 
@@ -47,10 +49,23 @@ export function accountView(org: SettingsOrg, appUrl: string, billing: StoredBil
   };
 }
 
-/** What a deep scan of a repository would cost now, in credits. */
-export function deepScanPrice(repo: { loc: number | null }) {
+/**
+ * What a deep scan of a repository would cost now, in credits. `usage`: the account's scans are billed from their
+ * usage, so there is no fixed price: `up_to_credits` is the most one is charged (what it holds), and `fast` says
+ * whether a fast one can be started and the most it is charged.
+ */
+export function deepScanPrice(repo: { loc: number | null }, usage?: UsageQuote) {
   const credits = repo.loc === null ? null : deepScanCredits(repo.loc);
   const tooLarge = repo.loc !== null && credits === undefined;
+  if (usage) {
+    return {
+      credits: null,
+      held_until_sized: null,
+      too_large: tooLarge,
+      up_to_credits: usage.hold,
+      fast: usage.fast !== undefined ? { available: true, up_to_credits: usage.fast } : { available: false },
+    };
+  }
   return {
     credits: credits ?? null,
     /** Before recon has sized the repo, the largest price is held and only what it measures is charged. */
@@ -59,7 +74,27 @@ export function deepScanPrice(repo: { loc: number | null }) {
   };
 }
 
-export function repoView(repo: DashboardRepo, appUrl: string) {
+/** A scan's usage bill, as the scan page shows it: what each part used and came to in credits. Never costs or money. */
+export function billApiView(bill: BillView) {
+  const credits = (hundredths: number) => hundredths / 100;
+  return {
+    status: bill.status,
+    lines: bill.groups.map((group) =>
+      group.kind === "sandbox"
+        ? { label: group.label, sandbox_seconds: group.seconds, credits: credits(group.credits) }
+        : { label: group.label, calls: group.calls, input_tokens: group.inputTokens, output_tokens: group.outputTokens, credits: credits(group.credits) },
+    ),
+    usage: credits(bill.usage),
+    carried_in: credits(bill.carriedIn),
+    charged: bill.charged,
+    carried_out: credits(bill.carriedOut),
+    capped: bill.capped,
+    fast: bill.fast,
+    held: bill.held,
+  };
+}
+
+export function repoView(repo: DashboardRepo, appUrl: string, usage?: UsageQuote) {
   return {
     id: repo.id,
     full_name: repo.fullName,
@@ -75,7 +110,7 @@ export function repoView(repo: DashboardRepo, appUrl: string) {
     pr_reviews: repo.prReviews,
     deep_scan_schedule: repo.deepScanSchedule,
     next_deep_scan_at: iso(repo.nextDeepScanAt),
-    deep_scan: deepScanPrice(repo),
+    deep_scan: deepScanPrice(repo, usage),
     url: `${appUrl}/dashboard/repos/${repo.id}`,
   };
 }

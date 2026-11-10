@@ -16,7 +16,8 @@ import { db } from "./db";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 
-export type ReviewOutcome = { credits?: number; error?: string; topUp?: boolean; scanId?: string };
+/** `upTo`: `credits` is the most the review can be charged (it's billed from its usage). Absent otherwise. */
+export type ReviewOutcome = { credits?: number; upTo?: true; error?: string; topUp?: boolean; scanId?: string };
 
 // The price the person saw, up to well above the largest review in either credit unit.
 const Input = z.object({ repoId: z.uuid(), prNumber: z.number().int().positive(), credits: z.number().int().min(0).max(100 * CREDIT_PACK).optional() });
@@ -64,12 +65,12 @@ async function run(step: "quote" | "start", input: { repoId: string; prNumber: n
   if (!result.ok) {
     await record(result.reason, { credits: result.credits, scanId: "scanId" in result ? result.scanId : undefined });
     // A price that went up since it was shown (someone pushed) is shown again, to be confirmed.
-    if (result.reason === "price_changed") return { credits: result.credits, error: "The pull request changed: here’s the new price." };
+    if (result.reason === "price_changed") return { credits: result.credits, ...(result.upTo && { upTo: true as const }), error: "The pull request changed: here’s the new price." };
     if (result.reason === "reviewed") revalidatePath(`/dashboard/repos/${row.repo.id}`);
     const message = result.reason === "out_of_credits" && result.credits ? `Out of credits: this review needs ${result.credits}.` : MESSAGES[result.reason];
     return { error: message, topUp: result.reason === "no_plan" || result.reason === "out_of_credits", scanId: result.scanId };
   }
   await record("ok", { credits: result.credits, scanId: result.scanId || undefined });
-  if (step === "quote") return { credits: result.credits };
+  if (step === "quote") return { credits: result.credits, ...(result.upTo && { upTo: true as const }) };
   redirect(`/dashboard/scans/${result.scanId}`);
 }

@@ -32,8 +32,9 @@ export function FirstScan({ data }: { data: FirstScanData }) {
     return q ? data.repos.filter((r) => r.fullName.toLowerCase().includes(q) || r.id === chosen) : data.repos;
   }, [data.repos, query, chosen]);
   const short = org.credits !== null && org.credits < repo.credits;
-  // Not sized yet and more than the account holds: recon prices it within a minute or so of joining.
-  const pricing = short && repo.unsized;
+  // Not sized yet and more than the account holds: recon prices it within a minute or so of joining. A scan
+  // billed from its usage is priced the same whatever its size, so it never waits for that.
+  const pricing = short && repo.unsized && !repo.usage;
   const many = data.orgs.length > 1;
   const [topping, setTopping] = useState(false);
   const router = useRouter();
@@ -45,6 +46,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
   const credits = (r: (typeof data.repos)[number]) => {
     const holds = data.orgs.find((o) => o.id === r.orgId)?.credits ?? null;
     if (holds === null) return "";
+    if (r.usage) return `up to ${creditsText(r.credits)}`;
     if (r.unsized && holds < r.credits) return "being priced";
     return `${r.unsized ? "up to " : ""}${creditsText(r.credits)}`;
   };
@@ -137,9 +139,13 @@ export function FirstScan({ data }: { data: FirstScanData }) {
                 </>
               ) : (
                 <>
-                  {repo.unsized ? "Up to " : ""}
+                  {repo.unsized || repo.usage ? "Up to " : ""}
                   {creditsText(repo.credits)} of {many ? `${org.login}’s` : "your"} {creditCount(org.credits)}
-                  {repo.unsized && <span className="first-scan-fine">Held while it’s mapped, then charged what it measures.</span>}
+                  {repo.usage ? (
+                    <span className="first-scan-fine">Held while it runs, then charged what it uses.</span>
+                  ) : (
+                    repo.unsized && <span className="first-scan-fine">Held while it’s mapped, then charged what it measures.</span>
+                  )}
                 </>
               )}
             </p>

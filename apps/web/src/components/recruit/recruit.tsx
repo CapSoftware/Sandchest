@@ -982,19 +982,24 @@ function Credits({
   }
 
   const repos = brief?.repos ?? [];
-  const all = digAllCredits(repos);
+  const usage = brief?.usage;
+  const all = digAllCredits(repos, usage?.deepScan);
   const scans = DEEP_SCAN_TIERS.map((tier) => tier.credits);
   const rates = (
     <dl className="onboard-rates">
       <div>
         <dt>Pull request review</dt>
-        <dd>{creditsText(PR_REVIEW_TIERS[0]!.credits)}</dd>
+        <dd>{usage ? `Up to ${creditsText(usage.prReview)}` : creditsText(PR_REVIEW_TIERS[0]!.credits)}</dd>
       </div>
       <div>
         <dt>Deep scan</dt>
-        <dd>
-          {creditCount(scans[0]!)}–{creditCount(scans.at(-1)!)} credits
-        </dd>
+        {usage ? (
+          <dd>Up to {creditsText(usage.deepScan)}</dd>
+        ) : (
+          <dd>
+            {creditCount(scans[0]!)}–{creditCount(scans.at(-1)!)} credits
+          </dd>
+        )}
       </div>
     </dl>
   );
@@ -1052,7 +1057,7 @@ function Credits({
         </div>
         {all > 0 && repos.length <= MANY_REPOS && (
           <p className="onboard-help">
-            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} takes {creditCount(all)} credits.
+            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} takes {usage ? `up to ${creditCount(all)}` : creditCount(all)} credits.
           </p>
         )}
       </fieldset>

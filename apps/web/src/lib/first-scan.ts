@@ -18,6 +18,8 @@ export interface FirstScanRepo {
   credits: number;
   /** Recon hasn't sized it yet: `credits` is what's held, not the price. */
   unsized: boolean;
+  /** Billed from its usage: `credits` is the most it holds, whatever its size, and it's charged what it uses. Absent otherwise. */
+  usage?: true;
 }
 
 export interface FirstScanOrg {
@@ -43,7 +45,7 @@ export interface FirstScan {
  */
 export function firstScan(
   repos: DashboardRepo[],
-  plans: Map<string, { planId: string | null; credits: number } | undefined>,
+  plans: Map<string, { planId: string | null; credits: number; usage?: { hold: number } } | undefined>,
   hackers: Array<{ orgId: string; hacker: unknown }>,
 ): FirstScan | undefined {
   if (repos.some((repo) => repo.lastDeepScanAt || repo.activeDeepScanId)) return undefined;
@@ -56,6 +58,8 @@ export function firstScan(
     .flatMap((repo): FirstScanRepo[] => {
       const state = digState({ loc: repo.loc, activeDeepScanId: null });
       if (state.state !== "ready") return [];
+      const usage = plans.get(repo.orgId)?.usage;
+      if (usage) return [{ id: repo.id, fullName: repo.fullName, private: repo.private, loc: repo.loc, orgId: repo.orgId, credits: usage.hold, unsized: state.credits === undefined, usage: true }];
       return [{ id: repo.id, fullName: repo.fullName, private: repo.private, loc: repo.loc, orgId: repo.orgId, credits: state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits, unsized: state.credits === undefined }];
     });
   if (offered.length === 0) return undefined;

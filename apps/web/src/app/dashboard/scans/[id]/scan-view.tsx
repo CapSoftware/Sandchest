@@ -2,8 +2,10 @@ import type { DashboardRepo, scanForUser } from "@sandchest/db";
 import { Dig } from "@/components/app/dig";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
+import { ScanBill } from "@/components/app/scan-bill";
 import { Reveal, ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack, type LiveLoop } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
+import type { BillView } from "@/lib/bill-view";
 import { compactNumber, creditsText, plural, SCAN_KIND_LABEL } from "@/lib/format";
 import { readHacker } from "@/lib/hacker";
 import type { OrgPlan } from "@/server/org-plans";
@@ -19,16 +21,43 @@ export function title(kind: string, prNumber: number | null): string {
 }
 
 /**
+ * Whether a scan started fast ran fast, to say so on its page: from its bill, or while it runs, from whether its
+ * hunt really runs fast (else from its pricing). Never for a scan not started fast.
+ */
+export function ranFast(scan: Pick<ScanRow["scan"], "fast" | "stats" | "pricing">, bill?: Pick<BillView, "fast">): boolean {
+  if (!scan.fast) return false;
+  if (bill) return bill.fast;
+  const slice = (scan.stats as { slice?: { fast?: boolean } } | null)?.slice;
+  return slice?.fast ?? scan.pricing?.fast === true;
+}
+
+/**
  * A scan, drawn from what the page read; its loading state draws it from a sample scan. `again` is the Dig key
  * of a finished deep scan's repo; `next` is the deep scan a running recon is mapping the repo for, and
  * `waitingOn` the recon a queued deep scan waits for. The demo plays `loop` instead of following the scan, and shows
- * its findings as the feed names them.
+ * its findings as the feed names them. `bill` is the scan's usage bill as a customer sees it, for a scan billed
+ * from its usage once the bill is written.
  */
-export function ScanView({ row, again, next, waitingOn, loop }: { row: ScanRow; again?: { repo: DashboardRepo; plan: OrgPlan }; next?: string; waitingOn?: string; loop?: LiveLoop }) {
+export function ScanView({
+  row,
+  again,
+  next,
+  waitingOn,
+  loop,
+  bill,
+}: {
+  row: ScanRow;
+  again?: { repo: DashboardRepo; plan: OrgPlan };
+  next?: string;
+  waitingOn?: string;
+  loop?: LiveLoop;
+  bill?: BillView;
+}) {
   const { scan, repo, org, metrics, findings, events } = row;
   const live = ACTIVE.has(scan.status);
   const shown = findings.filter((finding) => finding.confidence !== "low");
   const stats = (scan.stats ?? {}) as { loc?: number; checked?: number; fixed?: number };
+  const fast = ranFast(scan, bill);
 
   const initial = {
     kind: scan.kind,
@@ -57,6 +86,7 @@ export function ScanView({ row, again, next, waitingOn, loop }: { row: ScanRow; 
             <h1 className="page-title">{title(scan.kind, scan.prNumber)}</h1>
             <p className="page-sub">
               <ScanStatus /> on <code>{scan.headSha === "HEAD" ? "the default branch" : scan.headSha.slice(0, 7)}</code>
+              {fast && " · Fast"}
             </p>
           </div>
           {scan.prNumber !== null && (
@@ -119,6 +149,8 @@ export function ScanView({ row, again, next, waitingOn, loop }: { row: ScanRow; 
             </div>
           )}
         </dl>
+
+        {bill && <ScanBill bill={bill} />}
 
         {shown.length > 0 && (
           <Reveal>

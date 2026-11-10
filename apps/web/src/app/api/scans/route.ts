@@ -28,5 +28,8 @@ export async function POST(request: Request): Promise<Response> {
     case "no_plan":
     case "out_of_credits":
       return Response.json({ error: result.reason === "no_plan" ? "this account has no plan" : "out of credits", credits: result.credits }, { status: 402 });
+    case "fast_unavailable":
+      // Not reached: this route never asks for a fast scan.
+      return Response.json({ error: "fast scans are not available" }, { status: 422 });
   }
 }

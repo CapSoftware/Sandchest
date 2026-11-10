@@ -1,16 +1,18 @@
 /** Repositories and scans: what's installed, deep scans on demand, and following a scan live. */
-import { canSeeScan, dashboardRepos, dashboardScans, DEEP_SCAN_SCHEDULES, feedSince, PR_REVIEW_MODES, scanForUser, scanStatusOnly, threatModel, updateRepoSettings } from "@sandchest/db";
+import { canSeeScan, dashboardRepos, dashboardScans, DEEP_SCAN_SCHEDULES, feedSince, PR_REVIEW_MODES, scanBill, scanForUser, scanStatusOnly, threatModel, updateRepoSettings } from "@sandchest/db";
 import { z } from "zod";
 import { track } from "../../analytics";
 import { db } from "../../db";
 import { describeError } from "../../log";
+import { deepScanQuote, quotesByAccount } from "../../usage-quote";
+import { billView } from "@/lib/bill-view";
 import { PR_REVIEW_RANGE } from "@/lib/pricing";
 import { firstRun } from "@/lib/schedule";
 import { captureException } from "../../sentry";
 import { ApiError, notFound } from "../errors";
-import { AccountRef, int, operation, RepoRef, Uuid } from "../operation";
+import { AccountRef, flag, int, operation, RepoRef, Uuid } from "../operation";
 import { resolveAccount, resolveRepo } from "../resolve";
-import { iso, repoView, scanListView } from "../views";
+import { billApiView, iso, repoView, scanListView } from "../views";
 
 const DONE = new Set(["completed", "failed", "cancelled", "refused"]);
 /** The longest a request waits for a scan to move on: under every proxy's idle timeout. */
@@ -23,6 +25,9 @@ async function scanView(userId: string, scanId: string, appUrl: string) {
   if (!row) throw notFound("scan");
   const { scan, repo, metrics } = row;
   const stats = (scan.stats ?? {}) as { loc?: number; checked?: number; fixed?: number };
+  // Only a scan billed from its usage has a bill a customer sees; no other scan reads one, and its view has no `bill`.
+  const stored = scan.pricing?.mode === "usage" ? await scanBill(db(), scan.id) : undefined;
+  const bill = stored ? billView(stored) : undefined;
   return {
     id: scan.id,
     kind: scan.kind,
@@ -42,6 +47,7 @@ async function scanView(userId: string, scanId: string, appUrl: string) {
     error: scan.status === "failed" || scan.status === "refused" ? scan.error : null,
     findings: row.findings.map((finding) => ({ id: finding.id, title: finding.title, severity: finding.severity, confidence: finding.confidence, status: finding.status, location: finding.sink ? { file: finding.sink.file, line: finding.sink.line } : null })),
     url: `${appUrl}/dashboard/scans/${scan.id}`,
+    ...(bill && { bill: billApiView(bill) }),
   };
 }
 
@@ -50,7 +56,7 @@ export const scanOps = [
     name: "list_repos",
     title: "List repositories",
     description:
-      "Repositories Sandchest can scan for this person (installed, with push access), most exposed first: open findings by severity, the latest scan, and what a deep scan costs now.",
+      "Repositories Sandchest can scan for this person (installed, with push access), most exposed first: open findings by severity, the latest scan, and what a deep scan costs now. Where an account's scans are billed by what they use, deep_scan has up_to_credits (the most one is charged) and fast (whether a fast scan can be started, and the most it is charged).",
     method: "GET",
     path: "/repos",
     input: z.object({ account: AccountRef.optional().describe("Only this account's repositories.") }),
@@ -58,7 +64,8 @@ export const scanOps = [
     async run(context, input) {
       const repos = await dashboardRepos(db(), context.principal.userId);
       const account = input.account ? await resolveAccount(context, input.account) : undefined;
-      return { repos: repos.filter((repo) => !account || repo.orgId === account.id).map((repo) => repoView(repo, context.appUrl)) };
+      const quote = quotesByAccount();
+      return { repos: repos.filter((repo) => !account || repo.orgId === account.id).map((repo) => repoView(repo, context.appUrl, quote(repo.orgLogin))) };
     },
   }),
 
@@ -79,7 +86,7 @@ export const scanOps = [
       ]);
       if (!row) throw notFound("repository");
       return {
-        ...repoView(row, context.appUrl),
+        ...repoView(row, context.appUrl, deepScanQuote(row.orgLogin)),
         recent_scans: scans.map((scan) => scanListView(scan, context.appUrl)),
         threat_model: model ? { commit: model.commitSha, model: model.threatModel } : null,
       };
@@ -116,7 +123,7 @@ export const scanOps = [
       if (!ok) throw notFound("repository");
       const [row] = await dashboardRepos(db(), context.principal.userId, { repoId: repo.id });
       if (!row) throw notFound("repository");
-      return repoView(row, context.appUrl);
+      return repoView(row, context.appUrl, deepScanQuote(row.orgLogin));
     },
   }),
 
@@ -124,11 +131,14 @@ export const scanOps = [
     name: "start_deep_scan",
     title: "Start a deep scan",
     description:
-      "Starts a deep scan of a whole repository: the hacker reads it end to end for exploitable vulnerabilities (a few minutes). Credits are held now and only what the scan measures is charged. One at a time per repository. Then call get_scan with wait to follow it.",
+      "Starts a deep scan of a whole repository: the hacker reads it end to end for exploitable vulnerabilities (a few minutes). Credits are held now and only what the scan measures is charged. One at a time per repository. Then call get_scan with wait to follow it. Pass fast=true for a faster run where list_repos says deep_scan.fast is available (it costs more); it is refused anywhere else.",
     method: "POST",
     path: "/repos/{repo}/scans",
     status: 202,
-    input: z.object({ repo: RepoRef }),
+    input: z.object({
+      repo: RepoRef,
+      fast: flag().optional().describe("Run it fast: a faster model, which costs about 3x on average. Only where list_repos says deep_scan.fast is available."),
+    }),
     openWorld: true,
     async run(context, input) {
       const row = await resolveRepo(context, input.repo);
@@ -142,7 +152,7 @@ export const scanOps = [
       const { requestDeepScan } = await import("../../dig");
       let result: Awaited<ReturnType<typeof requestDeepScan>>;
       try {
-        result = await requestDeepScan({ ...row.repo, org: row.org });
+        result = await requestDeepScan({ ...row.repo, org: row.org }, "manual", input.fast === true ? { fast: true } : {});
       } catch (error) {
         console.error(`Agent deep scan failed: ${describeError(error)}`);
         await captureException(error, { source: "dig", tags: { via: context.surface }, handled: true });
@@ -163,10 +173,16 @@ export const scanOps = [
             throw new ApiError(402, "no_plan", `${login} has no plan, so nothing scans. Call get_billing for ${login}: claim free credits or buy credits first.`, { account: login });
           case "out_of_credits":
             throw new ApiError(402, "out_of_credits", `${login} doesn't have enough credits${result.credits ? `: this deep scan needs ${result.credits}` : ""}. Call buy_credits for ${login}.`, { account: login, credits_needed: result.credits ?? null });
+          case "fast_unavailable":
+            throw new ApiError(422, "fast_unavailable", `Fast deep scans aren't available for ${login}. Start it without fast.`, { account: login });
         }
       }
       await record("ok", { scanId: result.scanId });
-      return { scan: await scanView(context.principal.userId, result.scanId, context.appUrl), message: "Started. Call get_scan with wait=50 to follow it until it's done." };
+      const message =
+        result.heldUpTo !== undefined
+          ? `Started, holding up to ${result.heldUpTo} ${result.heldUpTo === 1 ? "credit" : "credits"}: it's charged what it uses, never more. Call get_scan with wait=50 to follow it until it's done.`
+          : "Started. Call get_scan with wait=50 to follow it until it's done.";
+      return { scan: await scanView(context.principal.userId, result.scanId, context.appUrl), message };
     },
   }),
 
@@ -196,7 +212,7 @@ export const scanOps = [
     name: "get_scan",
     title: "Get a scan",
     description:
-      "A scan's status and the findings it reported. Pass wait (seconds, up to 50) to hold the request until the scan finishes or the time is up, then call again while done is false. Deep scans take a few minutes.",
+      "A scan's status and the findings it reported. Pass wait (seconds, up to 50) to hold the request until the scan finishes or the time is up, then call again while done is false. Deep scans take a few minutes. A scan billed by what it used also has bill: what each part used and came to in credits (lines), its usage, what was carried in from earlier scans, charged, and carried to the next scan, whether it was capped at the credits held, whether it ran fast, and the credits held.",
     method: "GET",
     path: "/scans/{id}",
     input: z.object({ id: Uuid("scan"), wait: int(0, MAX_WAIT_S).optional().describe(`Seconds to wait for the scan to finish (0-${MAX_WAIT_S}).`) }),

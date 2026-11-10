@@ -1,5 +1,5 @@
 "use client";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useRef, useState } from "react";
 import { dig, type DigOutcome } from "@/server/dig-action";
 import { AddCredits, type CreditsAccount } from "./add-credits";
 import { Submit } from "./submit";
@@ -8,7 +8,8 @@ import { Submit } from "./submit";
  * Starts a deep scan, then opens its live feed. When it costs credits, the
  * first press only asks: the second, on a key that names the price, starts it.
  * Short of credits (`short`, or refused for them), the key opens the dialog to
- * add them, which starts the scan once they're in.
+ * add them, which starts the scan once they're in. `fast`: the account is offered a fast scan, chosen with a
+ * switch on the confirming key, unticked each time it opens.
  */
 export function DigButton({
   repoId,
@@ -18,6 +19,7 @@ export function DigButton({
   account,
   need,
   short = false,
+  fast,
 }: {
   repoId: string;
   label: string;
@@ -28,13 +30,22 @@ export function DigButton({
   /** Credits the scan holds. */
   need?: number;
   short?: boolean;
+  /** A fast scan, where the account is offered one: its confirming key, the credits it holds, and its note. */
+  fast?: { confirm: string; need: number; note: string };
 }) {
-  const [state, action] = useActionState<DigOutcome>(() => dig(repoId), {});
+  const [fastOn, setFastOn] = useState(false);
+  // Read when the action runs, also when it runs again after credits were added.
+  const fastChosen = useRef(false);
+  const chooseFast = (on: boolean) => {
+    fastChosen.current = on;
+    setFastOn(on);
+  };
+  const [state, action] = useActionState<DigOutcome>(() => (fastChosen.current ? dig(repoId, { fast: true }) : dig(repoId)), {});
   const [asking, setAsking] = useState(false);
   const [topping, setTopping] = useState(false);
   const toppable = account !== undefined && (short || state.topUp === true);
   const topUp = account && (
-    <AddCredits account={account} need={need} open={topping} onClose={() => setTopping(false)} then={{ label: "start the scan", run: () => startTransition(() => action()) }} />
+    <AddCredits account={account} need={fast && fastOn ? fast.need : need} open={topping} onClose={() => setTopping(false)} then={{ label: "start the scan", run: () => startTransition(() => action()) }} />
   );
   if (short && account) {
     return (
@@ -56,14 +67,31 @@ export function DigButton({
       ) : (
         <span className="dig-confirm">
           {confirm && (
-            <button type="button" className="dig-cancel" onClick={() => setAsking(false)} data-track="deep-scan-cancel">
+            <button
+              type="button"
+              className="dig-cancel"
+              onClick={() => {
+                setAsking(false);
+                chooseFast(false);
+              }}
+              data-track="deep-scan-cancel"
+            >
               Cancel
             </button>
           )}
           <Submit className="key key-primary" pending="Starting…" track="deep-scan-confirm">
-            {confirm ?? label}
+            {fast && fastOn ? fast.confirm : (confirm ?? label)}
           </Submit>
         </span>
+      )}
+      {fast && confirm && asking && (
+        <label className="toggle dig-fast">
+          <input type="checkbox" checked={fastOn} onChange={(event) => chooseFast(event.target.checked)} data-track="deep-scan-fast" />
+          <span className="dig-fast-text">
+            <span className="dig-fast-name">Fast</span>
+            <span className="dig-fast-help">Uses a faster model. Costs about 3x on average.</span>
+          </span>
+        </label>
       )}
       {state.error ? (
         <span className="repo-dig-error" role="alert">
@@ -84,7 +112,7 @@ export function DigButton({
             ))}
         </span>
       ) : (
-        <span className="repo-dig-note">{note}</span>
+        <span className="repo-dig-note">{fast && fastOn ? fast.note : note}</span>
       )}
       {topUp}
     </form>

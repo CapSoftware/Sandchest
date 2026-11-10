@@ -128,6 +128,11 @@ export function creditsText(count: number): string {
   return `${creditCount(count)} ${count === 1 ? "credit" : "credits"}`;
 }
 
+/** Hundredths of a credit, as a usage bill shows them: "4.27", or "1,204.50" where credits are grouped. */
+export function creditHundredths(hundredths: number): string {
+  return `${creditCount(Math.floor(hundredths / 100))}.${String(hundredths % 100).padStart(2, "0")}`;
+}
+
 /** "$20" or "$12.50". */
 export function usd(amount: number): string {
   return `$${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;

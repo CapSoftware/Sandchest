@@ -1,5 +1,6 @@
 import { CREDIT_PACK } from "@sandchest/billing/plans";
-import type { DashboardRepo, FindingListItem, findingForUser, OrgBillingRow, OrgTeam, Overview, scanForUser, ScanListItem, SettingsOrg } from "@sandchest/db";
+import type { DashboardRepo, FindingListItem, findingForUser, OrgBillingRow, OrgTeam, Overview, scanForUser, ScanListItem, SettingsOrg, UsageHistoryRow } from "@sandchest/db";
+import { billView, type BillView } from "./bill-view";
 import type { Severity } from "./format";
 import type { PullRow } from "@/server/pulls";
 
@@ -234,6 +235,54 @@ export function sampleScan(): NonNullable<Awaited<ReturnType<typeof scanForUser>
       .map(({ id, title, severity, confidence, status, sink }) => ({ id, title, severity, confidence, status: status as "open", sink })),
     events: FEED.map((message, i) => ({ seq: i + 1, type: message.startsWith("Finding") ? "finding" : "step", message, createdAt: new Date(started.getTime() + i * 63_000) })),
   };
+}
+
+/** A usage bill as the scan page shows it: every part of a deep scan, a carry in and out. Made-up amounts, in cent credits. */
+export function sampleBill(): BillView {
+  const line = (stage: string, requests: number, inputTokens: number, outputTokens: number, chargeMicroUsd: number, kind = "model", seconds = 0) => ({
+    kind,
+    stage,
+    requests,
+    inputTokens,
+    cachedTokens: 0,
+    outputTokens,
+    reasoningTokens: 0,
+    seconds,
+    costMicroUsd: 0,
+    chargeMicroUsd,
+  });
+  return billView({
+    status: "charged",
+    fast: false,
+    creditMicroUsd: 10_000,
+    reservedCredits: 150,
+    credits: 38,
+    carryInMicroUsd: 4_600,
+    carryOutMicroUsd: 3_500,
+    capped: false,
+    lines: [
+      line("slice_hunt", 24, 410_000, 38_000, 214_000),
+      line("slice_score", 6, 52_000, 4_100, 31_500),
+      line("verify", 9, 120_000, 16_000, 88_200),
+      line("variants", 3, 30_000, 2_900, 12_700),
+      line("structure", 4, 21_000, 6_400, 9_400),
+      line("sandbox", 1, 0, 0, 23_100, "sandbox", 412.5),
+    ],
+  })!;
+}
+
+/** An account's recent usage bills, as the billing page lists them. */
+export function sampleUsageHistory(count = 6): UsageHistoryRow[] {
+  const repos = ["acme/api", "acme/web", "acme/api", "acme/billing", "acme/worker", "acme/api"];
+  return repos.slice(0, count).map((repoFullName, i) => ({
+    scanId: id(400 + i),
+    billedAt: ago(60 * 24 * i + 90),
+    status: "charged",
+    credits: [38, 12, 9, 41, 7, 15][i]!,
+    kind: i % 3 === 0 ? "deep" : "pr_review",
+    prNumber: i % 3 === 0 ? null : 212 - i * 3,
+    repoFullName,
+  }));
 }
 
 /** One account on the plan, with its repositories and team, as Settings reads it. */

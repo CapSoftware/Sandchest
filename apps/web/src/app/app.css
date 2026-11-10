@@ -1424,6 +1424,80 @@ html:not([data-js]) .no-js-submit {
   color: var(--critical);
 }
 
+/* A usage bill: what each part of the scan used, in credits, on hairline seams. */
+
+.bill {
+  width: 100%;
+  max-width: 36rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.bill th,
+.bill td {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--color-seam);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.bill thead th {
+  padding-top: 0;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.bill .bill-n {
+  padding-left: 1.5rem;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.bill tbody .bill-n {
+  color: var(--color-sand);
+}
+
+.bill-what {
+  color: var(--color-bright);
+}
+
+.bill-detail {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+  font-variant-numeric: tabular-nums;
+}
+
+.bill-part {
+  white-space: nowrap;
+}
+
+.bill tfoot th,
+.bill tfoot td {
+  color: var(--color-muted);
+}
+
+.bill tfoot .bill-charged th,
+.bill tfoot .bill-charged td {
+  color: var(--color-bright);
+  font-weight: 600;
+}
+
+.bill-meta,
+.bill-note {
+  max-width: 36rem;
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--color-dust);
+}
+
+.bill-note {
+  margin-top: 0.25rem;
+}
+
 .scan-error {
   max-width: 68ch;
   margin-top: 1rem;
@@ -2868,6 +2942,71 @@ html:not([data-js]) .no-js-submit {
   white-space: nowrap;
 }
 
+/* An account's usage bills, on the billing page. */
+
+.usage-row {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 0.9fr) minmax(0, 1fr) 7.5rem;
+  grid-template-areas: "when what repo credits";
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding: 0.7rem 0.75rem;
+  margin: 0 -0.75rem;
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: background-color 120ms;
+}
+
+.usage-row:hover {
+  background: var(--color-soot);
+}
+
+.usage-row-when {
+  grid-area: when;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-row-what {
+  grid-area: what;
+  min-width: 0;
+  color: var(--color-bright);
+  white-space: nowrap;
+}
+
+.usage-row-repo {
+  grid-area: repo;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-dust);
+  font-size: 0.8125rem;
+}
+
+.usage-row-credits {
+  grid-area: credits;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--color-sand);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 36rem) {
+  .usage-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "what credits"
+      "repo when";
+  }
+  .usage-row-when {
+    text-align: right;
+  }
+}
+
 .scan-row-took {
   grid-area: took;
   text-align: right;
@@ -3070,6 +3209,38 @@ html:not([data-js]) .no-js-submit {
 
 .dig-cancel:hover {
   color: var(--color-sand);
+}
+
+/* A fast scan, where the account is offered one: a switch under the confirming key, its line under it. */
+.dig-fast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name box"
+    "help help";
+  align-items: center;
+  gap: 0.15rem 0.6rem;
+  max-width: 24rem;
+  text-align: right;
+}
+
+.dig-fast input {
+  grid-area: box;
+}
+
+.dig-fast-text {
+  display: contents;
+}
+
+.dig-fast-name {
+  grid-area: name;
+  font-size: 0.8125rem;
+}
+
+.dig-fast-help {
+  grid-area: help;
+  font-size: 0.75rem;
+  color: var(--color-dust);
 }
 
 .stat-text {

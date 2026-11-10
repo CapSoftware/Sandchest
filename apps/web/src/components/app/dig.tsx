@@ -42,9 +42,26 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
         );
       // Billing off: nothing to price.
       if (!plan) return <DigButton repoId={repo.id} label={label} note="Whole repository" />;
+      const account = { id: repo.orgId, login: repo.orgLogin, credits: plan.credits, admin: repo.orgAdmin };
+      // Billed from its usage: the most it can be charged is held, whatever the repo's size, and named as a maximum.
+      if (plan.usage) {
+        const hold = plan.usage.hold;
+        if (plan.credits < hold) return <DigButton repoId={repo.id} label={label} note={`Needs ${creditsText(hold)}; ${creditCount(plan.credits)} left`} account={account} need={hold} short />;
+        const fast = plan.usage.fast;
+        return (
+          <DigButton
+            repoId={repo.id}
+            label={label}
+            note={`Up to ${creditCount(hold)} of your ${creditsText(plan.credits)}`}
+            confirm={`Scan for up to ${creditsText(hold)}`}
+            account={account}
+            need={hold}
+            {...(fast !== undefined && { fast: { confirm: `Scan for up to ${creditsText(fast)}`, need: fast, note: `Up to ${creditCount(fast)} of your ${creditsText(plan.credits)}` } })}
+          />
+        );
+      }
       // An unsized repo holds the top tier and is charged what it measures.
       const cost = state.credits ?? MAX_DEEP_SCAN_CREDITS;
-      const account = { id: repo.orgId, login: repo.orgLogin, credits: plan.credits, admin: repo.orgAdmin };
       // Too few to hold the most it can cost: recon prices it within a minute, often for less.
       if (plan.credits < cost && state.credits === undefined)
         return (

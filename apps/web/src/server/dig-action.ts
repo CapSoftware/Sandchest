@@ -15,7 +15,8 @@ import { captureException } from "./sentry";
 
 export type DigOutcome = { error?: string; topUp?: boolean };
 
-export async function dig(repoId: string): Promise<DigOutcome> {
+/** `options.fast`: the person ticked Fast. The server decides whether the account may have it, never the browser. */
+export async function dig(repoId: string, options?: { fast?: boolean }): Promise<DigOutcome> {
   const user = await viewer();
   const row = z.uuid().safeParse(repoId).success ? await repoForUser(db(), user.id, repoId) : undefined;
   if (!row) {
@@ -32,7 +33,7 @@ export async function dig(repoId: string): Promise<DigOutcome> {
   const { requestDeepScan } = await import("./dig");
   let result: Awaited<ReturnType<typeof requestDeepScan>>;
   try {
-    result = await requestDeepScan({ ...row.repo, org: row.org });
+    result = await requestDeepScan({ ...row.repo, org: row.org }, "manual", options?.fast === true ? { fast: true } : {});
   } catch (error) {
     // GitHub or billing unreachable. Credits held for a scan that never started are given back.
     console.error(`Dig failed: ${describeError(error)}`);
@@ -49,6 +50,7 @@ export async function dig(repoId: string): Promise<DigOutcome> {
       too_large: "This repository is over a million lines. Get in touch to scan it.",
       no_plan: `${row.org.githubLogin} needs a plan before Sandchest can scan.`,
       out_of_credits: result.credits ? `Out of credits: this deep scan needs ${result.credits}.` : `${row.org.githubLogin} is out of credits. Top up to keep scanning.`,
+      fast_unavailable: "Fast scans aren’t available for this account.",
     };
     return { error: messages[result.reason], topUp: result.reason === "no_plan" || result.reason === "out_of_credits" };
   }

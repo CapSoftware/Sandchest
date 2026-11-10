@@ -13,6 +13,7 @@ import { installationSettingsUrl } from "@/lib/installation";
 import { db } from "./db";
 import { githubApp } from "./github-app";
 import { describeError } from "./log";
+import { deepScanQuote, prReviewQuote } from "./usage-quote";
 
 const TTL_MS = 10 * 60_000;
 const WAIT_MS = 3_000;
@@ -82,5 +83,13 @@ export async function briefing(user: { id: string; email: string | null }, orgId
     company: saved ?? { name, email: user.email && !user.email.endsWith("@users.noreply.github.com") ? user.email : "" },
     hacker: org.settings.hacker ? readHacker(org.settings.hacker) : null,
     currentPlan: row.billing?.planId ?? null,
+    ...usageQuote(org.githubLogin),
   };
+}
+
+/** What recruiting quotes for an account whose scans are billed from their usage; nothing for any other. */
+function usageQuote(githubLogin: string): Pick<Briefing, "usage"> {
+  const deep = deepScanQuote(githubLogin);
+  const prReview = prReviewQuote(githubLogin);
+  return deep && prReview !== undefined ? { usage: { deepScan: deep.hold, prReview } } : {};
 }

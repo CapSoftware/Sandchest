@@ -14,8 +14,9 @@ import { describeError } from "./log";
 import { db, githubApp } from "./services";
 import { startScan } from "./start";
 
+/** `upTo`: the review is billed from its usage, so `credits` is the most it can be charged. Absent otherwise. */
 export type PrReviewResult =
-  | { ok: true; scanId: string; credits: number }
+  | { ok: true; scanId: string; credits: number; upTo?: true }
   | { ok: false; reason: "not_installed" | "reviews_off" | "not_open" | "reviewed" | "no_plan" | "out_of_credits"; scanId?: string; credits?: number };
 
 type InstalledRepo = Repo & { org: Org };
@@ -24,15 +25,20 @@ type InstalledRepo = Repo & { org: Org };
 export async function quotePrReview(repo: InstalledRepo, prNumber: number): Promise<PrReviewResult> {
   const checked = await reviewable(repo, prNumber);
   if (!checked.ok) return checked;
-  return { ok: true, scanId: "", credits: checked.credits };
+  return { ok: true, scanId: "", credits: checked.credits, ...(upTo(checked) && { upTo: true as const }) };
+}
+
+/** Whether a quote is a maximum: the review is billed from its usage and holds something. */
+function upTo(checked: { credits: number; pricing: { mode: string } }): boolean {
+  return checked.pricing.mode === "usage" && checked.credits > 0;
 }
 
 /** Starts a review of the PR's head. `credits` is the price the person confirmed: a higher one now is asked again. */
-export async function startPrReview(repo: InstalledRepo, prNumber: number, confirmed: number): Promise<PrReviewResult | { ok: false; reason: "price_changed"; credits: number }> {
+export async function startPrReview(repo: InstalledRepo, prNumber: number, confirmed: number): Promise<PrReviewResult | { ok: false; reason: "price_changed"; credits: number; upTo?: true }> {
   const checked = await reviewable(repo, prNumber);
   if (!checked.ok) return checked;
   // With billing off nothing is priced, so there is nothing to confirm.
-  if (billingEnabled() && checked.credits > confirmed) return { ok: false, reason: "price_changed", credits: checked.credits };
+  if (billingEnabled() && checked.credits > confirmed) return { ok: false, reason: "price_changed", credits: checked.credits, ...(upTo(checked) && { upTo: true as const }) };
 
   const { pull, credits, pricing } = checked;
   const { scan, created } = await createScan(db(), {

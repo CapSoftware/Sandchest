@@ -219,6 +219,16 @@ export function fastRunAllowed(scan: { fast: boolean; kind: string }, githubLogi
 }
 
 /**
+ * Whether a person may choose a fast deep scan for an account: fast mode is available, the account's deep scans
+ * run on the slice engine, and they are billed from their usage (a fast scan costs more, so only a scan charged
+ * what it uses is offered one). Never decided by the browser.
+ */
+export function fastOffered(githubLogin: string, settings: Config = config()): boolean {
+  const engine = scanEngine("deep", githubLogin, settings);
+  return fastModeAvailable(settings) && engine === "slice" && scanPricingMode(engine, settings) === "usage";
+}
+
+/**
  * What is wrong with the usage billing settings. A multiplier that is set must be valid even with usage billing
  * off, so a typo is caught before the day it matters. `shadow` and `on` need the slice engine and a multiplier;
  * `on` also needs credits worth a cent. Problems never repeat the multiplier's value.

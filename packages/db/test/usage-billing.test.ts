@@ -17,6 +17,7 @@ import {
   schema,
   settleBilledScan,
   upsertInstallation,
+  usageHistory,
   voidScanBill,
   writeScanBill,
   type Db,
@@ -517,5 +518,60 @@ describe("constraints", () => {
     // The same row, valid, is stored.
     await database.insert(schema.scanBills).values(row);
     expect(await scanBill(database, scanId)).toMatchObject({ status: "shadow" });
+  });
+});
+
+describe("usageHistory", () => {
+  let people = 0;
+  /** A person who can see the given repositories, as the dashboard records it. */
+  async function person(repoIds: string[]): Promise<string> {
+    people++;
+    const [user] = await database.insert(schema.users).values({ name: "Pat", email: `pat${people}@example.com` }).returning();
+    if (repoIds.length > 0) await database.insert(schema.permissionCache).values(repoIds.map((repoId) => ({ userId: user!.id, repoId, permission: "write" as const })));
+    return user!.id;
+  }
+
+  /** A bill stored as it stands, made `minutesAgo` minutes ago. */
+  async function stored(org: { orgId: string; repoId: string }, status: ScanBillDraft["status"], minutesAgo: number, extra: { kind?: "deep" | "pr_review"; prNumber?: number; credits?: number } = {}) {
+    const [scan] = await database
+      .insert(schema.scans)
+      .values({ repoId: org.repoId, orgId: org.orgId, kind: extra.kind ?? "deep", trigger: "manual", headSha: "HEAD", status: "completed", prNumber: extra.prNumber ?? null })
+      .returning();
+    const credits = extra.credits ?? 3;
+    await database.insert(schema.scanBills).values({ ...draft(credits * CREDIT, 0, { status }), credits, scanId: scan!.id, orgId: org.orgId, createdAt: new Date(Date.now() - minutesAgo * 60_000) });
+    return scan!.id;
+  }
+
+  it("charged and waived bills only, newest first, with the scan and repository they belong to", async () => {
+    const org = await newOrg();
+    const userId = await person([org.repoId]);
+    const charged = await stored(org, "charged", 30, { credits: 7 });
+    const waived = await stored(org, "waived", 20, { kind: "pr_review", prNumber: 12, credits: 0 });
+    await stored(org, "open", 10);
+    await stored(org, "voided", 5);
+    await stored(org, "shadow", 1);
+    const rows = await usageHistory(database, userId, org.orgId);
+    expect(rows.map((row) => row.scanId)).toEqual([waived, charged]);
+    expect(rows[0]).toMatchObject({ status: "waived", credits: 0, kind: "pr_review", prNumber: 12, repoFullName: "acme/app" });
+    expect(rows[1]).toMatchObject({ status: "charged", credits: 7, kind: "deep", prNumber: null, repoFullName: "acme/app" });
+    expect(rows[1]!.billedAt).toBeInstanceOf(Date);
+    // Never a cost, a multiplier or an amount of money.
+    expect(Object.keys(rows[0]!).sort()).toEqual(["billedAt", "credits", "kind", "prNumber", "repoFullName", "scanId", "status"]);
+  });
+
+  it("only the account asked for, and only repositories the person can see; at most `limit`", async () => {
+    const org = await newOrg();
+    const other = await newOrg();
+    const [hidden] = await database.insert(schema.repos).values({ orgId: org.orgId, githubRepoId: 990_000 + installs, fullName: "acme/hidden", private: true, defaultBranch: "main" }).returning();
+    const userId = await person([org.repoId, other.repoId]);
+    const mine = await Promise.all([1, 2, 3].map((minutes) => stored(org, "charged", minutes)));
+    await stored({ orgId: org.orgId, repoId: hidden!.id }, "charged", 0);
+    await stored(other, "charged", 0);
+    expect((await usageHistory(database, userId, org.orgId)).map((row) => row.scanId)).toEqual(mine);
+    expect((await usageHistory(database, userId, org.orgId, 2)).map((row) => row.scanId)).toEqual(mine.slice(0, 2));
+    // Someone who can see none of its repositories sees none of its bills.
+    expect(await usageHistory(database, await person([]), org.orgId)).toEqual([]);
+    // An account with no bills has no history.
+    expect(await usageHistory(database, userId, (await newOrg()).orgId)).toEqual([]);
   });
 });

@@ -37,7 +37,16 @@ export function RepoView({
   const open = SEVERITIES.reduce((sum, s) => sum + repo.open[s], 0);
   const dig = digState(repo);
   // What one scheduled deep scan costs: what Scan again would, or at most the top tier until recon sizes the repo.
-  const price = !plan ? null : dig.state === "ready" ? (dig.credits === undefined ? `up to ${creditsText(DEEP_SCAN_TIERS.at(-1)!.credits)}` : creditsText(dig.credits)) : null;
+  // Billed from its usage, the most it holds (a scheduled scan is never fast).
+  const price = !plan
+    ? null
+    : dig.state === "ready"
+      ? plan.usage
+        ? `up to ${creditsText(plan.usage.hold)}`
+        : dig.credits === undefined
+          ? `up to ${creditsText(DEEP_SCAN_TIERS.at(-1)!.credits)}`
+          : creditsText(dig.credits)
+      : null;
 
   return (
     <>

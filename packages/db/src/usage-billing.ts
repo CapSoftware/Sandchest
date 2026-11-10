@@ -3,10 +3,10 @@
  * caller (`usageBill` in @sandchest/billing); this stores it and moves the carry exactly once per bill, always
  * under a lock on the account's carry row, so two bills of one account never start from the same carry.
  */
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { settleScan as settleScanRow } from "./billing";
 import type { Db } from "./client";
-import { scanBills, scans, scanUsage, usageCarry, type ScanBillLine, type ScanBillStatus, type UsageKind, type UsageStatus } from "./schema";
+import { permissionCache, repos, scanBills, scans, scanUsage, usageCarry, type ScanBillLine, type ScanBillStatus, type UsageKind, type UsageStatus } from "./schema";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -233,4 +233,46 @@ export async function settleBilledScan(database: Db, scanId: string, outcome: "c
     await markWaivedBillSettled(tx, scanId);
     return true;
   });
+}
+
+/** One bill in an account's usage history: when, which scan of which repository, and what it charged. */
+export interface UsageHistoryRow {
+  scanId: string;
+  billedAt: Date;
+  status: "charged" | "waived";
+  credits: number;
+  kind: string;
+  prNumber: number | null;
+  repoFullName: string;
+}
+
+/**
+ * An account's recent usage bills that a person sees: charged and waived ones only (an open bill is not settled
+ * yet, a voided or shadow one was never charged), newest first, at most `limit`. Only bills of scans of
+ * repositories the person can see, as on every dashboard page, so no other repository's name is ever listed.
+ */
+export async function usageHistory(database: Db, userId: string, orgId: string, limit = 20): Promise<UsageHistoryRow[]> {
+  const rows = await database
+    .select({
+      scanId: scanBills.scanId,
+      billedAt: scanBills.createdAt,
+      status: scanBills.status,
+      credits: scanBills.credits,
+      kind: scans.kind,
+      prNumber: scans.prNumber,
+      repoFullName: repos.fullName,
+    })
+    .from(scanBills)
+    .innerJoin(scans, eq(scans.id, scanBills.scanId))
+    .innerJoin(repos, eq(repos.id, scans.repoId))
+    .where(
+      and(
+        eq(scanBills.orgId, orgId),
+        inArray(scanBills.status, ["charged", "waived"]),
+        sql`exists (select 1 from ${permissionCache} pc where pc.user_id = ${userId} and pc.repo_id = ${repos.id})`,
+      ),
+    )
+    .orderBy(desc(scanBills.createdAt), desc(scanBills.scanId))
+    .limit(limit);
+  return rows as UsageHistoryRow[];
 }

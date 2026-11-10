@@ -1,4 +1,4 @@
-import type { OrgBillingRow, SettingsOrg, userAgentAccess } from "@sandchest/db";
+import type { OrgBillingRow, SettingsOrg, UsageHistoryRow, userAgentAccess } from "@sandchest/db";
 import type { ReactNode } from "react";
 import { AgentPromptButton } from "@/components/agent-prompt-button";
 import { CreateKeyForm } from "@/components/app/agent-keys";
@@ -10,6 +10,7 @@ import { OrgReviewsForm } from "@/components/app/org-reviews";
 import { OrgSettingsForm } from "@/components/app/org-settings";
 import { ForgetShapesForm } from "@/components/app/skeleton";
 import { LeaveTeam, TeamPanel, type TeamRow } from "@/components/app/team";
+import { UsageHistory } from "@/components/app/usage-history";
 import { timeAgo } from "@/lib/format";
 import { readHacker } from "@/lib/hacker";
 import { signOut } from "@/server/actions";
@@ -99,13 +100,18 @@ export function TeamView({ orgs, teams, memberOf }: { orgs: SettingsOrg[]; teams
 }
 
 /** Billing: each account's plan, credits and auto top-up. */
-export function BillingView({ orgs, billing }: { orgs: SettingsOrg[]; billing: Array<OrgBillingRow | null> }) {
+/** Billing: each account's plan and credits, and its recent usage bills when it has any. `usage` is by account id. */
+export function BillingView({ orgs, billing, usage }: { orgs: SettingsOrg[]; billing: Array<OrgBillingRow | null>; usage?: Record<string, UsageHistoryRow[]> }) {
   if (orgs.length === 0) return <NoAccounts />;
-  return orgs.map((org, index) => (
-    <Account key={org.id} org={org}>
-      <BillingPanel org={org} billing={billing[index] ?? null} />
-    </Account>
-  ));
+  return orgs.map((org, index) => {
+    const bills = usage?.[org.id] ?? [];
+    return (
+      <Account key={org.id} org={org}>
+        <BillingPanel org={org} billing={billing[index] ?? null} />
+        {bills.length > 0 && <UsageHistory rows={bills} />}
+      </Account>
+    );
+  });
 }
 
 /** Repositories: what Sandchest can read in each account, and where that's chosen. */

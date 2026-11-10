@@ -39,16 +39,22 @@ export interface Briefing {
   company: { name: string; email: string };
   hacker: HackerProfile | null;
   currentPlan: string | null;
+  /** Set only when the account's scans are billed from their usage: the most a deep scan and a review can be charged. */
+  usage?: { deepScan: number; prReview: number };
 }
 
-/** Credits for one deep scan of a repository, with an unmeasured one counted at the top tier. */
-export function digCredits(repo: Pick<BriefingRepo, "loc">): number {
+/**
+ * Credits for one deep scan of a repository, with an unmeasured one counted at the top tier. `upTo`: the account's
+ * scans are billed from their usage, and this is the most one can be charged, whatever the repository's size.
+ */
+export function digCredits(repo: Pick<BriefingRepo, "loc">, upTo?: number): number {
+  if (upTo !== undefined) return upTo;
   return (repo.loc === null ? undefined : deepScanCredits(repo.loc)) ?? DEEP_SCAN_TIERS.at(-1)!.credits;
 }
 
-/** Credits for one deep scan of each repository, with unmeasured ones counted at the top tier. */
-export function digAllCredits(repos: readonly Pick<BriefingRepo, "loc">[]): number {
-  return repos.reduce((sum, repo) => sum + digCredits(repo), 0);
+/** Credits for one deep scan of each repository, with unmeasured ones counted at the top tier (or each at `upTo`, as `digCredits`). */
+export function digAllCredits(repos: readonly Pick<BriefingRepo, "loc">[], upTo?: number): number {
+  return repos.reduce((sum, repo) => sum + digCredits(repo, upTo), 0);
 }
 
 /** "42k lines", "1.2M lines", or nothing until recon has counted. */

@@ -1,8 +1,9 @@
-import { dashboardRepos, pendingRecon, scanForUser } from "@sandchest/db";
+import { dashboardRepos, pendingRecon, scanBill, scanForUser } from "@sandchest/db";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { PageShape } from "@/components/app/skeleton";
+import { billView } from "@/lib/bill-view";
 import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
 import { db } from "@/server/db";
@@ -38,9 +39,12 @@ export default async function ScanPage({ params }: Params) {
       : undefined;
   // A deep scan queued behind its repo's recon points back to it: that's what it's waiting on.
   const waitingOn = row.scan.kind === "deep" && row.scan.status === "queued" ? await pendingRecon(db(), row.repo.id) : undefined;
+  // Only a scan billed from its usage has a bill a customer sees: no other scan reads one.
+  const stored = row.scan.pricing?.mode === "usage" ? await scanBill(db(), row.scan.id) : undefined;
+  const bill = stored ? billView(stored) : undefined;
   return (
     <PageShape id="scan">
-      <ScanView row={row} again={again} next={next} waitingOn={waitingOn} />
+      <ScanView row={row} again={again} next={next} waitingOn={waitingOn} {...(bill && { bill })} />
     </PageShape>
   );
 }
