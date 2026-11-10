@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { viewer } from "./access";
 import { track } from "./analytics";
+import { BILLING_FROZEN } from "./billing";
 import { db } from "./db";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
@@ -51,6 +52,7 @@ export async function dig(repoId: string, options?: { fast?: boolean }): Promise
       no_plan: `${row.org.githubLogin} needs a plan before Sandchest can scan.`,
       out_of_credits: result.credits ? `Out of credits: this deep scan needs ${result.credits}.` : `${row.org.githubLogin} is out of credits. Top up to keep scanning.`,
       fast_unavailable: "Fast scans aren’t available for this account.",
+      frozen: BILLING_FROZEN,
     };
     return { error: messages[result.reason], topUp: result.reason === "no_plan" || result.reason === "out_of_credits" };
   }

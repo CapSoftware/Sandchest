@@ -817,6 +817,31 @@ export const creditClaims = pgTable("credit_claims", {
 });
 
 /**
+ * The one-time switch from a dollar credit to a cent credit, step by step: a row per billing customer (`customer`,
+ * the org id) as the provider command moves it, and one `database` row, written in the same transaction as the
+ * database's own conversion, so that runs at most once. `record` is what was read before anything changed and is
+ * never overwritten. Holds balances and plan ids only, never names or contact details.
+ */
+export const creditUnitSwitch = pgTable(
+  "credit_unit_switch",
+  {
+    kind: text("kind", { enum: ["customer", "database"] }).notNull(),
+    subject: text("subject").notNull(),
+    step: text("step").notNull(),
+    record: jsonb("record").notNull(),
+    /** What was verified at the end, or what the conversion changed. */
+    result: jsonb("result"),
+    /** Why the last run stopped here, until a later run moves it on. */
+    error: text("error"),
+    /** Each step reached, with when. */
+    log: jsonb("log").$type<Array<{ step: string; at: string }>>().notNull().default([]),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [primaryKey({ columns: [table.kind, table.subject] })],
+);
+
+/**
  * Org-wide emails already sent, by a stable key (an auto top-up's invoice, a
  * day's failed top-ups), so a retried webhook or step never sends one twice.
  */

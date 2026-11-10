@@ -11,6 +11,10 @@
  *   refreshed in the background once it is a minute old, so no page waits on
  *   Autumn except the first one an org ever shows.
  *
+ * - While SANDCHEST_BILLING_FREEZE is 1 (the credit unit switch), nothing that
+ *   moves money or credits starts and no new credits are held; the stored copy
+ *   is neither refreshed nor written (see `billingFrozen`).
+ *
  * Without AUTUMN_SECRET_KEY (self-hosted) billing is off: nothing is gated.
  * This module stays light: pages import it, and the workflow runtime is
  * loaded only when an org's first plan starts its recon.
@@ -84,6 +88,30 @@ export function billingEnabled(): boolean {
   return autumn() !== undefined;
 }
 
+/** What every billing surface says while billing is frozen. */
+export const BILLING_FROZEN = "Billing is being upgraded. Try again in a few minutes.";
+
+let frozenOverride: boolean | undefined;
+
+/** For tests: freeze billing, or (undefined) read SANDCHEST_BILLING_FREEZE again. */
+export function setBillingFrozen(frozen: boolean | undefined): void {
+  frozenOverride = frozen;
+}
+
+/**
+ * Whether billing is frozen for the credit unit switch (SANDCHEST_BILLING_FREEZE=1, with billing on). Then:
+ * - purchases, plan changes, auto top-up changes and free credit claims are refused, before anything reaches
+ *   Autumn, with BILLING_FROZEN;
+ * - a scan that would hold credits does not: a deep scan or a dashboard review is refused, and a scan already
+ *   queued waits (`beginScan`). Free scans run, and scans holding credits settle as usual;
+ * - `syncBilling` returns the stored copy, and no balance read from Autumn is stored, so the copy stays in the
+ *   unit the database conversion multiplies.
+ */
+export function billingFrozen(): boolean {
+  if (!billingEnabled()) return false;
+  return frozenOverride ?? config().SANDCHEST_BILLING_FREEZE === "1";
+}
+
 let stripeInstance: Stripe | null | undefined;
 
 /**
@@ -123,6 +151,7 @@ const syncing = new Map<string, Promise<OrgBillingRow>>();
  * the org first has a plan, recon starts on its repositories.
  */
 export function syncBilling(org: BillingOrg): Promise<OrgBillingRow> {
+  if (billingFrozen()) return frozenBilling(org);
   let pending = syncing.get(org.id);
   if (!pending) {
     pending = readAndStore(org).finally(() => syncing.delete(org.id));
@@ -147,6 +176,14 @@ async function readAndStore(org: BillingOrg): Promise<OrgBillingRow> {
   if (state.planId && row.credits > 0 && (firstActivation || !previousPlanId || creditsBack)) await startPendingRecon(org.id);
   await noticeCredits(org, row, seen).catch(logFailure("credits email"));
   return { orgId: org.id, ...row, activatedAt: previous?.activatedAt ?? (state.planId ? at : null), checkedAt: at, creditLevel: previous?.creditLevel ?? 0, creditLevelAt: previous?.creditLevelAt ?? null, creditLevelRev: previous?.creditLevelRev ?? 0 };
+}
+
+/** Frozen: the stored copy, or for an org never stored, Autumn's state as it is, not stored. Nothing re-matches auto top-up. */
+async function frozenBilling(org: BillingOrg): Promise<OrgBillingRow> {
+  const stored = await orgBillingRow(db(), org.id);
+  if (stored) return stored;
+  const state = await autumn()!.customer(org.id, org.githubLogin);
+  return { orgId: org.id, ...toRow(state), activatedAt: null, checkedAt: new Date(), creditLevel: 0, creditLevelAt: null, creditLevelRev: 0 };
 }
 
 function toRow(state: BillingState): OrgBillingInput {
@@ -292,7 +329,8 @@ export async function buyCredits(
 
 // ---- The scan gate -----------------------------------------------------------
 
-export type Gate = { ok: true } | { ok: false; reason: "no_plan" | "out_of_credits"; credits: number };
+/** `frozen`: billing is frozen, so no credits are held now (see `billingFrozen`). */
+export type Gate = { ok: true } | { ok: false; reason: "no_plan" | "out_of_credits" | "frozen"; credits: number };
 
 /**
  * What a scan holds: its tier price, or for a scan billed from its usage, the credits covering its ceiling times
@@ -311,13 +349,15 @@ export function usageHold(pricing: ScanPricing): number {
 
 /**
  * Lets a scan run: holds its credits in Autumn, or for a free scan checks the
- * org has a plan. Idempotent per scan, since the scan id is the lock id.
+ * org has a plan. Idempotent per scan, since the scan id is the lock id. While
+ * billing is frozen nothing is held: a paid scan gets `frozen`.
  * Records the hold on the scan unless `record` is false (the scan row does
  * not exist yet), with `pricing` in the same write.
  */
 export async function reserveScan(scanId: string, org: BillingOrg, credits: number, record = true, options: { evenWhenEmpty?: boolean; pricing?: ScanPricing } = {}): Promise<Gate> {
   const client = autumn();
   if (!client) return { ok: true };
+  if (credits > 0 && billingFrozen()) return { ok: false, reason: "frozen", credits };
   if (credits === 0) {
     if (!(await hasPlan(org))) return { ok: false, reason: "no_plan", credits };
     // Free, but only while there are credits: an org that has run out gets nothing until it buys more. Except
@@ -361,7 +401,8 @@ async function storeCredits(orgId: string, credits: number): Promise<OrgBillingR
 async function hasCredits(org: BillingOrg): Promise<boolean> {
   try {
     const result = await autumn()!.check(org.id, 1);
-    if (result.remaining !== null) await storeCredits(org.id, result.remaining);
+    // Frozen: the balance may be in either unit mid-switch, so it is not stored.
+    if (result.remaining !== null && !billingFrozen()) await storeCredits(org.id, result.remaining);
     return result.allowed;
   } catch (error) {
     await logFailure("credit check")(error);

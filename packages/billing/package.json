@@ -10,7 +10,8 @@
     "./webhooks": "./src/webhooks.ts",
     "./tax-ids": "./src/tax-ids.ts",
     "./usage": "./src/usage.ts",
-    "./units": "./src/units.ts"
+    "./units": "./src/units.ts",
+    "./unit-switch": "./src/unit-switch.ts"
   },
   "scripts": {
     "test": "bun test",

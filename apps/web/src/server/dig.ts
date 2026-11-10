@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { activeDeepScan, createScan, deleteUnstartedScan, type Org, type Repo } from "@sandchest/db";
 import { digState } from "@/lib/dig-state";
-import { autumn, heldCredits, reserveScan } from "./billing";
+import { autumn, billingFrozen, heldCredits, reserveScan } from "./billing";
 import { fastOffered, scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
@@ -11,7 +11,7 @@ import { startScan } from "./start";
 
 export type DigResult =
   | { ok: true; scanId: string; heldUpTo?: number }
-  | { ok: false; reason: "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "fast_unavailable"; scanId?: string; credits?: number };
+  | { ok: false; reason: "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "fast_unavailable" | "frozen"; scanId?: string; credits?: number };
 
 /**
  * Starts a deep scan of a repo the caller is allowed to scan. Its credits are
@@ -19,7 +19,7 @@ export type DigResult =
  * person hears about it at once. `headSha`: the default branch's commit when
  * the caller has just read it. `fast`: a person chose a fast scan, which is refused unless the account is offered
  * one (`fastOffered`); a scheduled scan is never fast. `heldUpTo` is set for a scan billed from its usage: the
- * credits it holds, the most it can be charged.
+ * credits it holds, the most it can be charged. While billing is frozen it is refused (`frozen`): it would hold credits.
  */
 export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" | "schedule" = "manual", options: { headSha?: string; fast?: boolean } = {}): Promise<DigResult> {
   if (options.fast && (trigger !== "manual" || !fastOffered(repo.org.githubLogin))) return { ok: false, reason: "fast_unavailable" };
@@ -28,6 +28,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   const state = digState({ loc: repo.loc, activeDeepScanId: active?.id ?? null });
   if (state.state === "running") return { ok: false, reason: "running", scanId: state.scanId };
   if (state.state === "too_large") return { ok: false, reason: "too_large" };
+  if (billingFrozen()) return { ok: false, reason: "frozen" };
 
   const headSha = options.headSha ?? (await githubApp().installation(repo.org.installationId).branchSha(repo.fullName, repo.defaultBranch));
 

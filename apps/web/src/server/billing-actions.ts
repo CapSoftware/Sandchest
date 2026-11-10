@@ -9,6 +9,9 @@
  * confirm page first, then charged at once. Each confirm page carries a
  * purchase id the charge is made under, so confirming it again (a second
  * tab, a retry after a timeout) never charges twice.
+ *
+ * While billing is frozen (the credit unit switch) every action here that
+ * would charge or change billing answers BILLING_FROZEN, before anything else.
  */
 import { DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, PLAN, PLANS, TOP_UP, type PlanId } from "@sandchest/billing";
 import { orgForAdmin, updateOrgSettings } from "@sandchest/db";
@@ -17,7 +20,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser, viewer } from "./access";
 import { track } from "./analytics";
-import { autumn, buyCredits, chargePurchase, saveAutoTopUpChoice, syncBilling } from "./billing";
+import { autumn, BILLING_FROZEN, billingFrozen, buyCredits, chargePurchase, saveAutoTopUpChoice, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
@@ -88,6 +91,7 @@ async function tracked<T extends BillingOutcome>(
 
 /** Picks or changes the plan, or buys credits. Without a card on file this opens Stripe Checkout. */
 export async function purchase(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const input = Purchase.safeParse(Object.fromEntries(form));
   if (!input.success) return tracked("purchase_started", {}, { error: "That isn’t something you can buy." }, "invalid");
   const row = await adminOrg(orgId);
@@ -120,6 +124,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
 
 /** Charges a purchase the admin confirmed. */
 export async function confirmPurchase(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const input = Purchase.safeParse(Object.fromEntries(form));
   if (!input.success) return tracked("purchase_confirmed", {}, { error: "That isn’t something you can buy." }, "invalid");
   const row = await adminOrg(orgId);
@@ -166,6 +171,7 @@ export type AddCreditsOutcome = { error?: string; added?: number; credits?: numb
  * without one (no plan, or free credits) it's joining the plan with them, on Stripe.
  */
 export async function quoteCredits(orgId: string, credits: number): Promise<CreditsQuote> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const amount = Credits.safeParse(credits);
   if (!amount.success) return { error: "That isn’t something you can buy." };
   const row = await adminOrg(orgId);
@@ -187,6 +193,7 @@ export async function quoteCredits(orgId: string, credits: number): Promise<Cred
  * one, Stripe Checkout joins the plan with them. A card that needs a check (3-D Secure) goes to Stripe too.
  */
 export async function addCredits(orgId: string, credits: number, purchaseId: string): Promise<AddCreditsOutcome> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const amount = Credits.safeParse(credits);
   const id = Id.safeParse(purchaseId);
   if (!amount.success || !id.success) return { error: "That isn’t something you can buy." };
@@ -234,6 +241,7 @@ const AutoTopUpForm = z.object({
 
 /** Turns auto top-up on or off: how many credits it buys, and the most it may spend in a month. */
 export async function saveAutoTopUp(orgId: string, _previous: BillingOutcome, form: FormData): Promise<BillingOutcome> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const parsed = AutoTopUpForm.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: "The monthly limit must be at least $1, or empty for no limit." };
   const row = await adminOrg(orgId);

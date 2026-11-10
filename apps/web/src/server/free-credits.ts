@@ -19,7 +19,7 @@ import { AutumnError, FREE_CREDITS, isTrial, TRIAL } from "@sandchest/billing";
 import { adminOrgs, creditClaimState, finishCreditClaim, orgBillingRow, orgForAdmin, startCreditClaim } from "@sandchest/db";
 import { cookies } from "next/headers";
 import { CLAIM_COOKIE, type ClaimClosed, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
-import { autumn, billingEnabled, syncBilling } from "./billing";
+import { autumn, billingEnabled, billingFrozen, syncBilling } from "./billing";
 import { config } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
@@ -92,7 +92,8 @@ export async function claimIntent(user: { id: string; githubUserId: number | nul
   return { credits: FREE_CREDITS.credits, offers: user ? await claimOffers(user) : {} };
 }
 
-export type ClaimResult = { ok: true } | ({ ok: false } & (ClaimClosed | { reason: "not_admin" | "no_github_id" | "failed" }));
+/** `frozen`: billing is frozen for the credit unit switch, and nothing was claimed. */
+export type ClaimResult = { ok: true } | ({ ok: false } & (ClaimClosed | { reason: "not_admin" | "no_github_id" | "failed" | "frozen" }));
 
 /**
  * Claims the free credits for an org this person administers: the claim row,
@@ -102,6 +103,7 @@ export type ClaimResult = { ok: true } | ({ ok: false } & (ClaimClosed | { reaso
 export async function claimFreeCredits(user: { id: string; githubUserId: number | null }, orgId: string): Promise<ClaimResult> {
   const client = autumn();
   if (!client) return { ok: false, reason: "failed" };
+  if (billingFrozen()) return { ok: false, reason: "frozen" };
   if (user.githubUserId === null) return { ok: false, reason: "no_github_id" };
   const row = await orgForAdmin(db(), user.id, orgId);
   if (!row) return { ok: false, reason: "not_admin" };

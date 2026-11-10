@@ -12,7 +12,7 @@ import { z } from "zod";
 import { closedMessage, type ClaimOffer } from "@/lib/free-credits";
 import { perCredit } from "@/lib/pricing";
 import { track } from "../../analytics";
-import { autumn, billingEnabled, saveAutoTopUpChoice, stripe, syncBilling } from "../../billing";
+import { autumn, BILLING_FROZEN, billingEnabled, billingFrozen, saveAutoTopUpChoice, stripe, syncBilling } from "../../billing";
 import { db } from "../../db";
 import { codeOffer, claimFreeCredits, claimOffers } from "../../free-credits";
 import { applyInvoiceDetails, InvoiceDetails } from "../../invoice-details";
@@ -37,6 +37,12 @@ const usdPerCredit = (packPrice: number) => Math.round(packPrice * 100) / (100 *
 
 function requireBilling(): void {
   if (!billingEnabled()) throw new ApiError(400, "billing_disabled", "Billing is off on this deployment (self-hosted): nothing is limited and there is nothing to buy.");
+}
+
+/** For anything that charges or changes billing: refused, before anything reaches billing, while it is frozen. */
+function requireUnfrozen(): void {
+  requireBilling();
+  if (billingFrozen()) throw new ApiError(503, "billing_frozen", BILLING_FROZEN);
 }
 
 /** Billing errors: logged without their message (it can quote customer details), reported, and answered generically. */
@@ -135,7 +141,7 @@ export const billingOps = [
     readOnly: true,
     openWorld: true,
     async run(context, input) {
-      requireBilling();
+      requireUnfrozen();
       const row = await resolveAdminAccount(context, input.account);
       const user = { id: context.principal.userId, githubUserId: context.principal.githubUserId };
       if (input.promotion_code) {
@@ -184,7 +190,7 @@ export const billingOps = [
     }),
     openWorld: true,
     async run(context, input) {
-      requireBilling();
+      requireUnfrozen();
       const row = await resolveAdminAccount(context, input.account);
       const user = { id: context.principal.userId, githubUserId: context.principal.githubUserId };
       if (input.promotion_code && (await codeOffer(user, row.org.id, input.promotion_code))) {
@@ -263,7 +269,7 @@ export const billingOps = [
     input: z.object({ account: AccountRef, code: PromotionCode.optional().describe("A free-credit code, if the person was given one.") }),
     openWorld: true,
     async run(context, input) {
-      requireBilling();
+      requireUnfrozen();
       const row = await resolveAdminAccount(context, input.account);
       const user = { id: context.principal.userId, githubUserId: context.principal.githubUserId };
       if (input.code && !(await codeOffer(user, row.org.id, input.code))) throw new ApiError(422, "invalid_code", "That isn't a free-credit code. If it's a promotion code, pass it to buy_credits.");
@@ -273,6 +279,8 @@ export const billingOps = [
         switch (result.reason) {
           case "not_admin":
             throw new ApiError(403, "not_admin", `Only an admin of ${row.org.githubLogin} can claim its free credits.`);
+          case "frozen":
+            throw new ApiError(503, "billing_frozen", BILLING_FROZEN);
           case "failed":
           case "no_github_id":
             throw new ApiError(502, "claim_failed", "The free credits couldn't be added just now, and nothing was charged. Try again in a minute.");
@@ -305,7 +313,7 @@ export const billingOps = [
     idempotent: true,
     openWorld: true,
     async run(context, input) {
-      requireBilling();
+      requireUnfrozen();
       const row = await resolveAdminAccount(context, input.account);
       const choiceIn = { enabled: input.enabled, quantity: input.credits, monthlyLimitUsd: input.monthly_limit_usd };
       let result: Awaited<ReturnType<typeof saveAutoTopUpChoice>>;

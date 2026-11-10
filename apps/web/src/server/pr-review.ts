@@ -8,7 +8,7 @@ import { prReviewCredits } from "@sandchest/billing";
 import { createScan, deleteUnstartedScan, prReviewStates, type Org, type Repo } from "@sandchest/db";
 import { changedLines, relevantChanges } from "@sandchest/engine/scan";
 import { parsePatch, type PullFile } from "@sandchest/github";
-import { autumn, billingEnabled, heldCredits, reserveScan } from "./billing";
+import { autumn, billingEnabled, billingFrozen, heldCredits, reserveScan } from "./billing";
 import { scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
@@ -17,7 +17,7 @@ import { startScan } from "./start";
 /** `upTo`: the review is billed from its usage, so `credits` is the most it can be charged. Absent otherwise. */
 export type PrReviewResult =
   | { ok: true; scanId: string; credits: number; upTo?: true }
-  | { ok: false; reason: "not_installed" | "reviews_off" | "not_open" | "reviewed" | "no_plan" | "out_of_credits"; scanId?: string; credits?: number };
+  | { ok: false; reason: "not_installed" | "reviews_off" | "not_open" | "reviewed" | "no_plan" | "out_of_credits" | "frozen"; scanId?: string; credits?: number };
 
 type InstalledRepo = Repo & { org: Org };
 
@@ -25,6 +25,7 @@ type InstalledRepo = Repo & { org: Org };
 export async function quotePrReview(repo: InstalledRepo, prNumber: number): Promise<PrReviewResult> {
   const checked = await reviewable(repo, prNumber);
   if (!checked.ok) return checked;
+  if (checked.credits > 0 && billingFrozen()) return { ok: false, reason: "frozen" };
   return { ok: true, scanId: "", credits: checked.credits, ...(upTo(checked) && { upTo: true as const }) };
 }
 
@@ -37,6 +38,8 @@ function upTo(checked: { credits: number; pricing: { mode: string } }): boolean 
 export async function startPrReview(repo: InstalledRepo, prNumber: number, confirmed: number): Promise<PrReviewResult | { ok: false; reason: "price_changed"; credits: number; upTo?: true }> {
   const checked = await reviewable(repo, prNumber);
   if (!checked.ok) return checked;
+  // It would hold credits, which nothing does while billing is frozen. A review that costs nothing goes ahead.
+  if (checked.credits > 0 && billingFrozen()) return { ok: false, reason: "frozen" };
   // With billing off nothing is priced, so there is nothing to confirm.
   if (billingEnabled() && checked.credits > confirmed) return { ok: false, reason: "price_changed", credits: checked.credits, ...(upTo(checked) && { upTo: true as const }) };
 

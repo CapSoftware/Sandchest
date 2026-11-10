@@ -19,7 +19,7 @@ import { z } from "zod";
 import type { Briefing } from "@/lib/briefing";
 import { viewer } from "./access";
 import { track } from "./analytics";
-import { autumn, billingEnabled, stripe, stripePublishableKey, syncBilling } from "./billing";
+import { autumn, BILLING_FROZEN, billingEnabled, billingFrozen, stripe, stripePublishableKey, syncBilling } from "./billing";
 import { purchase } from "./billing-actions";
 import { briefing } from "./briefing";
 import { config } from "./config";
@@ -91,9 +91,11 @@ const json = (value: FormDataEntryValue | null): unknown => {
 
 /** Saves the recruitment, then (unless paying on the page) joins the plan with the credits chosen, or goes to the dashboard. */
 export async function recruit(orgId: string, _previous: RecruitOutcome, form: FormData): Promise<RecruitOutcome> {
-  const user = await viewer();
   const claiming = billingEnabled() && form.get("claim") === "1";
   const order = Order.safeParse(json(form.get("order")));
+  // Claiming or joining moves credits or money: neither starts while billing is frozen.
+  if (billingFrozen() && (claiming || order.success)) return { error: BILLING_FROZEN };
+  const user = await viewer();
   const saved = await save(user.id, orgId, json(form.get("recruitment")));
   await track("recruit_submitted", {
     userId: user.id,
@@ -115,6 +117,8 @@ export async function recruit(orgId: string, _previous: RecruitOutcome, form: Fo
         case "failed":
         case "no_github_id":
           return { error: "The free credits couldn’t be added just now, and nothing was charged. Try again in a minute." };
+        case "frozen":
+          return { error: BILLING_FROZEN };
         default:
           return { error: `${closedMessage(result, org)} You can still join below.`, claimClosed: true };
       }
@@ -148,6 +152,8 @@ export type PaymentSetup = { error: string } | { clientSecret: string; publishab
  * SetupIntent on the Stripe customer Autumn bills.
  */
 export async function preparePayment(orgId: string, raw: RecruitInput): Promise<PaymentSetup> {
+  // No card form for a charge that would be refused.
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const user = await viewer();
   const client = stripe();
   const publishableKey = stripePublishableKey();
@@ -214,6 +220,7 @@ export type DiscountCheck = { error: string } | { code: string; discount: number
 
 /** Checks a promotion code against this purchase: what it takes off, and what's then due today. Nothing is charged. */
 export async function checkDiscount(orgId: string, rawCode: string, rawOrder: RecruitOrder): Promise<DiscountCheck> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const user = await viewer();
   const code = PromotionCode.safeParse(rawCode);
   const order = Order.safeParse(rawOrder);
@@ -254,6 +261,7 @@ export type PaymentOutcome = { error: string } | { next: string };
  * Then waits briefly for the plan to show and starts the first Dig.
  */
 export async function completePayment(orgId: string, rawOrder: RecruitOrder, setupIntentId: string, raw: RecruitInput, rawCode?: string): Promise<PaymentOutcome> {
+  if (billingFrozen()) return { error: BILLING_FROZEN };
   const user = await viewer();
   const client = stripe();
   const order = Order.safeParse(rawOrder);

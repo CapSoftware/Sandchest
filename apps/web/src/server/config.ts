@@ -123,6 +123,11 @@ const Schema = z.object({
   SANDCHEST_USAGE_MULTIPLIER: z.string().optional(),
   /** What one credit is worth: `dollar` (default) or `cent`. */
   NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: z.enum(["dollar", "cent"]).optional(),
+  /**
+   * `1` while the credit unit is being switched: nothing that moves money or credits starts, and no new credits
+   * are held (see `billingFrozen`). Unset or `0`: off.
+   */
+  SANDCHEST_BILLING_FREEZE: z.enum(["0", "1"]).optional(),
 });
 
 export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" | "boat" };

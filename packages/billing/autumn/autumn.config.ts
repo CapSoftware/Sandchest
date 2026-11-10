@@ -13,23 +13,16 @@
  */
 import { atmn, feature, plan, webhook } from "atmn";
 import { CREDITS, TOP_UP, type Plan } from "../src/plans";
-import { catalog, CREDIT_UNIT, type Catalog, type CreditUnit } from "../src/units";
+import { AUTUMN_VERSIONS, catalog, CREDIT_UNIT, type Catalog } from "../src/units";
 
 export const credits = feature({ featureId: CREDITS, name: "Credits", type: "metered", consumable: true });
 
 /**
- * Each plan's version in Autumn, by credit unit. Autumn versions plans, so a
- * plan whose credits change in the `cent` unit gets a new version, and the
- * `cent` config states the old one too, inactive: a push removes every version
- * it leaves out, and the customers on the old one keep it until they are moved.
- * The trial carries no credits or prices, so it keeps its version.
+ * Each plan's version in Autumn, by credit unit (`AUTUMN_VERSIONS`). The `cent` config states the dollar
+ * versions too, inactive: a push removes every version it leaves out, and the customers on the old one keep it
+ * until they are moved.
  */
-const VERSIONS: Record<CreditUnit, Record<Plan["id"] | typeof TOP_UP.id, string>> = {
-  // v2 of the current plan: credits with the volume discount. Credits on their own: v1 sold packs of 25 for $10; v2 was a flat $1 each.
-  dollar: { standard: "v2", trial: "v1", lockbox: "v1", chest: "v1", vault: "v1", top_up: "v3" },
-  // A credit is a cent: every amount of credits times 100, at the same prices.
-  cent: { standard: "v3", trial: "v1", lockbox: "v2", chest: "v2", vault: "v2", top_up: "v4" },
-};
+const VERSIONS = AUTUMN_VERSIONS;
 
 /** Sandchest's plans and the credits add-on in Autumn, for one unit's catalog. `active` is false for versions kept only for the customers still on them. */
 export function autumnPlans(c: Catalog, active = true) {

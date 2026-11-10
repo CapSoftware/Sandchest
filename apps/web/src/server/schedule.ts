@@ -5,6 +5,7 @@
  */
 import { claimScheduledRun, dueScheduledRepos, lastDeepScanHead, recordEvent, type DeepScanSchedule } from "@sandchest/db";
 import { nextRun } from "@/lib/schedule";
+import { billingFrozen } from "./billing";
 import { requestDeepScan } from "./dig";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
@@ -14,6 +15,8 @@ import { db, githubApp } from "./services";
 const PER_SWEEP = 25;
 
 export async function runSchedules(now = new Date()): Promise<{ due: number; started: number }> {
+  // A scheduled deep scan holds credits. While billing is frozen none is claimed, so each stays due and runs after.
+  if (billingFrozen()) return { due: 0, started: 0 };
   const due = await dueScheduledRepos(db(), now, PER_SWEEP);
   const outcomes = await Promise.all(due.map((repo) => runOne(repo, now)));
   return { due: due.length, started: outcomes.filter((outcome) => outcome === "ok").length };

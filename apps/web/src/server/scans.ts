@@ -111,7 +111,12 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
     const priced = scanPricing(scan, scan.repo.org.githubLogin);
     const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, heldCredits(priced, await scanCredits(scan)), true, { evenWhenEmpty: scan.kind === "fix_check", pricing: priced });
     if (!gate.ok) {
-      await refuse(scan, gate);
+      // Billing is being upgraded: nothing is held now. The workflow asks again every 10 s, and this goes ahead once it's done.
+      if (gate.reason === "frozen") {
+        await noteScanEvent(db(), scan.id, "queue", FROZEN_WAIT);
+        return { state: "queued" };
+      }
+      await refuse(scan, { reason: gate.reason, credits: gate.credits });
       return { state: "done" };
     }
     pricing = priced;
@@ -152,6 +157,9 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
   return { state: "running" };
 }
 
+/** The feed's line while billing is frozen: said once, however many times the scan asks again. */
+export const FROZEN_WAIT = "Waiting: billing is being upgraded. This starts by itself in a few minutes.";
+
 /** What a scan costs, before it runs. A PR review costs what the engine will report for the same files. */
 async function scanCredits(scan: LoadedScan): Promise<number> {
   // Not sized yet: hold the most a deep scan can cost; the charge is what it measures.
@@ -163,7 +171,7 @@ async function scanCredits(scan: LoadedScan): Promise<number> {
 }
 
 /** A scan billing would not let run: recorded as refused, and a PR gets a neutral Check that never blocks merging. */
-async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Promise<void> {
+async function refuse(scan: LoadedScan, gate: { reason: Exclude<Extract<Gate, { ok: false }>["reason"], "frozen">; credits: number }): Promise<void> {
   const message = gate.reason === "no_plan" ? "Not run: this account has no plan." : `Not run: out of credits (needs ${gate.credits}).`;
   // The Check first: once the scan is marked refused, a retried step would never post it.
   let checkRunId = scan.checkRunId;

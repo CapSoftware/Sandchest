@@ -118,3 +118,14 @@ export function catalog(unit: CreditUnit): Catalog {
 
 /** The unit this process runs in, read once. */
 export const CREDIT_UNIT: CreditUnit = resolveCreditUnit();
+
+/**
+ * Each plan's version slug in Autumn, by credit unit. Autumn versions plans, so a plan whose credits change in
+ * the `cent` unit has a version of its own. The trial carries no credits or prices, so it keeps its version.
+ */
+export const AUTUMN_VERSIONS: Record<CreditUnit, Record<Plan["id"] | "top_up", string>> = {
+  // v2 of the current plan: credits with the volume discount. Credits on their own: v1 sold packs of 25 for $10; v2 was a flat $1 each.
+  dollar: { standard: "v2", trial: "v1", lockbox: "v1", chest: "v1", vault: "v1", top_up: "v3" },
+  // A credit is a cent: every amount of credits times 100, at the same prices.
+  cent: { standard: "v3", trial: "v1", lockbox: "v2", chest: "v2", vault: "v2", top_up: "v4" },
+};
