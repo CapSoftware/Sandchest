@@ -253,6 +253,44 @@ describe("runSliceHunt", () => {
     expect(before.requests).toHaveLength(0);
   });
 
+  test("a packet's later passes start once its first has ended, well before the full delay", async () => {
+    const inner = fakeClient({ delay: () => 5 });
+    const seen = new Set<string>();
+    const ended = new Set<string>();
+    let early = 0;
+    // Every pass of a packet sends the same prompt, so the prompt names the packet.
+    const client: LlmClient = {
+      ...inner,
+      async chat(request) {
+        const packet = contentOf(request);
+        if (!isScore(request)) {
+          if (seen.has(packet) && !ended.has(packet)) early++;
+          seen.add(packet);
+        }
+        try {
+          return await inner.chat(request);
+        } finally {
+          if (!isScore(request)) ended.add(packet);
+        }
+      },
+    };
+    const started = Date.now();
+    const out = await runSliceHunt(repoOptions(client, { passDelayMs: 60_000 }));
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(early).toBe(0);
+    expect(hunts(inner)).toHaveLength(out.counts.packets * 3);
+    expect(out.counts.huntFailed).toBe(0);
+  });
+
+  test("later passes still run when a packet's first pass failed", async () => {
+    const client = fakeClient({ fail: (r, k) => (k === 0 && !isScore(r) ? new Error("upstream 500") : undefined) });
+    const started = Date.now();
+    const out = await runSliceHunt(repoOptions(client, { passDelayMs: 60_000 }));
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(out.counts.huntFailed).toBe(1);
+    expect(hunts(client)).toHaveLength(out.counts.packets * 3);
+  });
+
   test("an abort during the wait between passes stops the run", async () => {
     const controller = new AbortController();
     const client = fakeClient({ onChat: () => controller.abort(new Error("Interrupted")) });

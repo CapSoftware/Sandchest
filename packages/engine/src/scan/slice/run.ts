@@ -8,7 +8,7 @@ import type { LlmClient, Message, Role } from "../../llm";
 import { isFatal } from "../errors";
 import { Limiter, stageClients, type Pricing, type UsageSink } from "../metrics";
 import { findingsEntry, type FindingsEntry } from "./briefs";
-import { planBundle, type Bundle, type BundleMode, type PlanDeps } from "./bundle";
+import { planBundle, type Bundle, type BundleMode, type Packet, type PlanDeps } from "./bundle";
 import { cluster, dedupe, TOP_K, topK, type Candidate, type Cluster } from "./candidates";
 import { changeBundle, changeCandidates, changedServerPaths, changesFromDiff, type ChangedSource, type Range } from "./change";
 import { candidateDeviance, type DevDef, type DevianceDeps } from "./deviance";
@@ -20,10 +20,16 @@ export const SLICE_RUN = {
   passes: 3,
   huntMaxTokens: 3_000,
   scoreMaxTokens: 4_000,
-  /** Pass n of a packet waits n times this before it is queued, so the packet's code is cached when it arrives. */
+  /**
+   * A packet's later passes are queued once its first pass has ended, when the packet's code is cached, or
+   * after n times this for pass n, whichever comes first.
+   */
   passDelayMs: 6_000,
-  /** Model calls at once. */
-  concurrency: 6,
+  /**
+   * Model calls at once. A packet's later passes still follow its first, so the packet's code is cached for
+   * them however wide this is.
+   */
+  concurrency: 24,
   /** Findings-file titles are cut to this for a code change. */
   changeTitleMax: 100,
 };
@@ -31,7 +37,7 @@ export const SLICE_RUN = {
 export interface SliceRunOptions {
   client: LlmClient;
   signal?: AbortSignal;
-  /** Model calls at once. Default 6. */
+  /** Model calls at once. Default `SLICE_RUN.concurrency`. */
   concurrency?: number;
   onUsage?: UsageSink;
   pricing?: Pricing;
@@ -211,11 +217,20 @@ async function huntAndScore(options: SliceRunOptions & { readFile: (file: string
   };
 }
 
-/** Every pass of every packet. Rows come out pass by pass, packets in bundle order, whatever finishes first. */
+/**
+ * Every pass of every packet. Rows come out pass by pass, packets in bundle order, whatever finishes first.
+ * A packet's later passes wait for its first to end (however it ended), or for their delay if that is sooner.
+ */
 async function huntRows(calls: ModelCalls, bundle: Bundle, lines: LinesOf, mode: HuntMode, delayMs: number) {
   const jobs = Array.from({ length: SLICE_RUN.passes }, (_, pass) => bundle.packets.map((packet) => ({ packet, pass }))).flat();
+  // Pass 0 of every packet comes first in `jobs`, so a later pass always finds its packet's first.
+  const first = new Map<Packet, Promise<unknown>>();
   const replies = await calls.all(
-    jobs.map(({ packet, pass }) => calls.call("slice_hunt", "hunt", huntMessages(packet, bundle.spans, lines, mode, pass), SLICE_RUN.huntMaxTokens, pass * delayMs)),
+    jobs.map(({ packet, pass }) => {
+      const call = calls.call("slice_hunt", "hunt", huntMessages(packet, bundle.spans, lines, mode, pass), SLICE_RUN.huntMaxTokens, pass === 0 ? undefined : { delayMs: pass * delayMs, until: first.get(packet) });
+      if (pass === 0) first.set(packet, call);
+      return call;
+    }),
   );
   const rows: HuntRow[] = [];
   replies.forEach((text, k) => {
@@ -246,8 +261,11 @@ async function scoreClusters(calls: ModelCalls, bundle: Bundle, lines: LinesOf, 
 }
 
 interface ModelCalls {
-  /** One call's answer text, or undefined when it failed with an ordinary error. */
-  call(stage: string, role: Role, messages: Message[], maxTokens: number, delayMs?: number): Promise<string | undefined>;
+  /**
+   * One call's answer text, or undefined when it failed with an ordinary error. With `wait`, the call is queued
+   * after `delayMs`, or as soon as `until` settles if that is sooner.
+   */
+  call(stage: string, role: Role, messages: Message[], maxTokens: number, wait?: { delayMs: number; until?: Promise<unknown> }): Promise<string | undefined>;
   /** Waits for every call; then rethrows the first fatal error, if any. */
   all(calls: Array<Promise<string | undefined>>): Promise<Array<string | undefined>>;
 }
@@ -266,9 +284,9 @@ function modelCalls(options: SliceRunOptions): ModelCalls {
   };
 
   return {
-    async call(stage, role, messages, maxTokens, delayMs = 0) {
+    async call(stage, role, messages, maxTokens, wait) {
       try {
-        if (delayMs > 0) await sleep(delayMs, signal);
+        if (wait && wait.delayMs > 0) await pause(wait.delayMs, signal, wait.until);
         return await limiter.run(async () => {
           signal.throwIfAborted();
           try {
@@ -319,17 +337,21 @@ function once<T>(f: () => Promise<T>): () => Promise<T> {
   return () => (p ??= f());
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
+/** Resolves after `ms`, or when `sooner` settles if that comes first; rejects with the signal's reason when it aborts first. */
+function pause(ms: number, signal: AbortSignal, sooner?: Promise<unknown>): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
     const onAbort = () => {
       clearTimeout(timer);
       reject(signal.reason);
     };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
+    const timer = setTimeout(done, ms);
     signal.addEventListener("abort", onAbort, { once: true });
+    sooner?.then(done, done);
   });
 }
