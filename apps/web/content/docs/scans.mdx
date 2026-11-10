@@ -26,7 +26,7 @@ Recon runs when Sandchest is installed on a repository, or a repository is added
 - dangerous code: SQL, shell commands, file access, deserialization, outbound requests, templates and crypto
 - protections the framework already gives you
 
-The result is the repository's **threat model**: a structured summary, not a copy of your code. Every later scan of that repository starts from it. If a repository has no threat model yet, the next push to its default branch, pull request or deep scan builds one.
+The result is the repository's **threat model**: a structured summary, not a copy of your code. Fix checks start from it. If a repository has no threat model yet, the next push to its default branch builds one.
 
 ## PR reviews
 
@@ -47,7 +47,7 @@ Even on Every push, some aren't reviewed automatically:
 - pull requests on an account with no plan, or out of credits: these get a neutral Check instead, once per pull request until the account can pay again
 
 1. Sandchest posts a **Sandchest** Check straight away, showing "Scanning…".
-2. It reviews the change in the context of the threat model. A finding has to touch the lines the pull request changed: issues that were already there are left for deep scans.
+2. It hunts the server-side files the pull request changed, around the changed lines, and verifies the strongest candidates (see [below](#how-sandchest-finds-vulnerabilities)). A finding has to be on or near the lines the pull request changed: issues that were already there are left for deep scans.
 3. It completes the Check and writes its summary comment on the pull request. On private repositories, findings new to the pull request are also posted as review comments on the vulnerable lines.
 
 PR reviews never wait behind deep scans: each kind of scan has its own place in the account's queue.
@@ -99,8 +99,8 @@ Sandchest never opens GitHub issues.
 A deep scan hunts across the whole repository. It runs when someone presses **Deep scan** on the repository's page (open it from [Repos](/dashboard/repos)), or **Scan again** on a finished deep scan, or on the repository's schedule. Anyone who can push to the repository can start one. The button shows the most it can cost, and a second press confirms it.
 
 - One deep scan runs at a time per repository. Once it finishes you can start another whenever you like: each one is charged for what it uses, never more than the button showed.
-- A deep scan of a large repository typically takes 15 to 30 minutes, because every candidate is verified in a sandbox before it is reported.
-- The scan's page shows a live feed of what Sandchest is doing, and findings appear as they survive verification.
+- A deep scan of a large repository typically takes 15 to 30 minutes, because its strongest candidates are verified in a sandbox before anything is reported.
+- The scan's page shows a live feed of what Sandchest is doing, and findings appear once they are verified and written up.
 - When it finishes, people with access get an email with what it found, unless an admin has turned emails off.
 
 ### Scheduled deep scans
@@ -127,10 +127,10 @@ Fix checks are free, and run even when the account has no credits left.
 
 PR reviews and deep scans run the same pipeline:
 
-1. **Signal sweep.** A fast, deterministic pass finds leaked secrets, vulnerable dependencies that your code actually calls, and dangerous code reachable from an entry point. These are leads, not findings.
-2. **Hunt.** Several attacker agents work in parallel from the threat model and the leads. They think like outsiders, free-tier users, fraudsters and insiders, and trace untrusted input from entry points to dangerous code, chaining weaknesses together.
-3. **Evidence gate.** A candidate is kept only if it names the exact entry point, cites every step from input to impact by file and line (each citation is checked against your code), states who can exploit it, and includes a proof of concept and its impact in plain English.
-4. **Skeptic.** A separate reviewer reads the cited code and tries to disprove each finding: middleware, validation, framework defaults, unreachable code. It can only drop a finding by citing the code that disproves it. Each survivor gets a confidence: high, medium or low.
-5. **Write-up.** The finding is written up with a title, severity, fix guidance and a fix prompt. Code excerpts are read from your repository, never written by the model.
+1. **Selection.** Sandchest picks the code an attacker can reach: server-side source, leaving out tests, frontend code, docs, and vendored or generated files. A deep scan takes each entry point's handler with the guards and helpers that decide whether it can be exploited, plus whole files, riskiest first; a PR review takes the files the pull request changed.
+2. **Hunt.** The selected code is hunted in several independent passes, each asking whether an attacker (not signed in, any signed-in user, or a member acting beyond their role) can get something they shouldn't: other people's data, access beyond their role, an account, code execution, or paid work at your cost. What they report is grouped, scored and ranked. These are candidates, not findings, and only the strongest go on.
+3. **Verification.** An agent checks each candidate in a sandbox, with a read-only checkout of your code and no outside network. It reads code only: it never builds or runs your application. It searches the repository for anything that stops the attack (route guards, authorization checks, validation, framework defaults), works out who could exploit it and who is harmed, and rules each candidate real or false, citing the file and line that decide it.
+4. **Variants.** In a deep scan, the agent then takes the confirmed findings and checks sibling code written the same way for the same missing or wrong check. PR reviews skip this step.
+5. **Write-up.** Each confirmed finding is written up with a title, severity, attack path, fix guidance and a fix prompt. Every file and line it cites is checked against your code, and code excerpts are read from your repository, never written by the model.
 
-Repository content is treated as untrusted data. The model is told to ignore any text in code, comments or pull requests that tries to instruct it, and to report it as a prompt injection finding. That makes manipulation harder, but it isn't a guarantee.
+Repository content is treated as untrusted data: the verifying agent is told so, and what the agents write about your code reaches a model only marked as untrusted. That makes manipulation harder, but it isn't a guarantee.

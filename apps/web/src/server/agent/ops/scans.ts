@@ -2,7 +2,7 @@
 import { canSeeScan, dashboardRepos, dashboardScans, DEEP_SCAN_SCHEDULES, feedSince, PR_REVIEW_MODES, scanBill, scanForUser, scanStatusOnly, threatModel, updateRepoSettings } from "@sandchest/db";
 import { z } from "zod";
 import { track } from "../../analytics";
-import { BILLING_FROZEN } from "../../billing";
+import { BILLING_FROZEN, SCANS_PAUSED } from "../../billing";
 import { db } from "../../db";
 import { describeError } from "../../log";
 import { deepScanQuote, quotesByAccount } from "../../usage-quote";
@@ -176,6 +176,8 @@ export const scanOps = [
             throw new ApiError(402, "out_of_credits", `${login} doesn't have enough credits${result.credits ? `: this deep scan needs ${result.credits}` : ""}. Call buy_credits for ${login}.`, { account: login, credits_needed: result.credits ?? null });
           case "frozen":
             throw new ApiError(503, "billing_frozen", BILLING_FROZEN);
+          case "paused":
+            throw new ApiError(503, "scans_paused", SCANS_PAUSED);
           case "fast_unavailable":
             throw new ApiError(422, "fast_unavailable", `Fast deep scans aren't available for ${login}. Start it without fast.`, { account: login });
         }

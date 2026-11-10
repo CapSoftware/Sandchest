@@ -475,23 +475,27 @@ interface ScanSeed {
   /** Minutes ago it started, and how long it ran. */
   at: number;
   minutes: number;
+  /** What it was charged, in credits worth a cent (see `charged`). */
   credits: number;
   stats?: { checked?: number; fixed?: number };
 }
 
+/** A sample charge given in credits worth a cent, in the credit unit in use: rounded up to a whole credit. */
+const charged = (cents: number) => Math.ceil((cents * CREDIT_PACK) / 100);
+
 const SCANS: ScanSeed[] = [
-  { n: 303, kind: "pr_review", repo: "web", pr: 212, at: 2 * DAY, minutes: 2, credits: 1 },
-  { n: 302, kind: "pr_review", repo: "api", pr: 211, at: 26 * HOUR, minutes: 2, credits: 1 },
-  { n: 301, kind: "deep", repo: "api", at: 3 * DAY, minutes: 21, credits: 15 },
-  { n: 305, kind: "pr_review", repo: "billing", pr: 88, at: 3 * DAY + 4 * HOUR, minutes: 1, credits: 1 },
+  { n: 303, kind: "pr_review", repo: "web", pr: 212, at: 2 * DAY, minutes: 2, credits: 3 },
+  { n: 302, kind: "pr_review", repo: "api", pr: 211, at: 26 * HOUR, minutes: 2, credits: 2 },
+  { n: 301, kind: "deep", repo: "api", at: 3 * DAY, minutes: 21, credits: 41 },
+  { n: 305, kind: "pr_review", repo: "billing", pr: 88, at: 3 * DAY + 4 * HOUR, minutes: 1, credits: 4 },
   { n: 306, kind: "fix_check", repo: "api", at: 4 * DAY, minutes: 1, credits: 0, stats: { checked: 1, fixed: 1 } },
-  { n: 307, kind: "pr_review", repo: "worker", pr: 209, at: 5 * DAY, minutes: 1, credits: 1 },
-  { n: 304, kind: "pr_review", repo: "api", pr: 205, at: 6 * DAY, minutes: 2, credits: 1 },
+  { n: 307, kind: "pr_review", repo: "worker", pr: 209, at: 5 * DAY, minutes: 1, credits: 2 },
+  { n: 304, kind: "pr_review", repo: "api", pr: 205, at: 6 * DAY, minutes: 2, credits: 3 },
   { n: 308, kind: "recon", repo: "mobile", at: 7 * DAY, minutes: 1, credits: 0 },
   { n: 309, kind: "pr_review", repo: "mobile", pr: 41, at: 7 * DAY + 3 * HOUR, minutes: 1, credits: 1 },
-  { n: 310, kind: "deep", repo: "web", at: 9 * DAY, minutes: 26, credits: 30 },
+  { n: 310, kind: "deep", repo: "web", at: 9 * DAY, minutes: 26, credits: 57 },
   { n: 311, kind: "pr_review", repo: "docs", pr: 17, at: 10 * DAY, minutes: 1, credits: 1 },
-  { n: 320, kind: "deep", repo: "billing", at: 12 * DAY, minutes: 14, credits: 15 },
+  { n: 320, kind: "deep", repo: "billing", at: 12 * DAY, minutes: 14, credits: 29 },
 ];
 
 /** Findings a scan reported. */
@@ -510,7 +514,7 @@ function scanListItem(seed: ScanSeed): ScanListItem {
     createdAt: ago(seed.at),
     finishedAt: ago(seed.at - seed.minutes),
     durationMs: seed.minutes * 60_000,
-    credits: seed.credits * CREDIT_PACK,
+    credits: charged(seed.credits),
     found,
   };
 }
@@ -612,7 +616,7 @@ export function demoScan(scanId: string): ScanRow | undefined {
       ...scanBase(seed.n, seed.repo, seed.kind, "completed", started, ago(seed.at - seed.minutes)).scan,
       prNumber: seed.pr ?? null,
       headSha: seed.pr ? "9c41e0a2b7d3f6e18a5c0b4d2e7f9a1c3b5d7e9f" : "HEAD",
-      credits: seed.credits * CREDIT_PACK,
+      credits: charged(seed.credits),
       billing: seed.credits ? "charged" : "free",
       stats: seed.kind === "fix_check" ? seed.stats : { loc: seed.kind === "pr_review" ? 1_400 : repo.loc },
     },
@@ -713,8 +717,8 @@ export function demoOverview(days = 30): Overview {
   const open = none();
   for (const f of FINDINGS) if (f.status === "open") open[f.severity]++;
   return {
-    now: { pullRequests: 64, reviews: 71, deepScans: 3, found: 12, fixed: 7, credits: 96 * CREDIT_PACK },
-    before: { pullRequests: 52, reviews: 58, deepScans: 2, found: 9, fixed: 5, credits: 80 * CREDIT_PACK },
+    now: { pullRequests: 64, reviews: 71, deepScans: 3, found: 12, fixed: 7, credits: charged(305) },
+    before: { pullRequests: 52, reviews: 58, deepScans: 2, found: 9, fixed: 5, credits: charged(232) },
     open,
     days: Array.from({ length: days }, (_, i) => ({
       day: new Date(today - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10),

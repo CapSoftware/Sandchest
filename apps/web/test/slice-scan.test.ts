@@ -37,7 +37,7 @@ import { requestDeepScan } from "@/server/dig";
 import { verifyGatewayToken } from "@/server/gateway";
 import { stepOf, TRACKS } from "@/lib/scan-progress";
 import { quotePrReview, startPrReview } from "@/server/pr-review";
-import { beginScan, failScan, publishScan, ScanFinished, type BeginResult } from "@/server/scans";
+import { beginScan, failScan, PAUSED_WAIT, publishScan, ScanFinished, type BeginResult } from "@/server/scans";
 import { resetSentry } from "@/server/sentry";
 import { setServices } from "@/server/services";
 import { resetSliceLimit } from "@/server/slice-limit";
@@ -1960,11 +1960,11 @@ describe.skipIf(!available)("usage billing settlement", () => {
 describe.skipIf(!available)("the slice engine's daily limit", () => {
   const CLASSIC = { engine: "classic", mode: "tiered", unit: "cent" } as const;
 
-  /** Runs `fn` with usage billing on and the limit set, every read forgotten before and after. */
-  async function withLimit(limit: string, fn: () => Promise<void>): Promise<void> {
+  /** Runs `fn` with usage billing as `env` sets it (on unless given) and the limit set, every read forgotten before and after. */
+  async function withLimit(limit: string, fn: () => Promise<void>, env: Record<string, string> = USAGE_ENV): Promise<void> {
     resetSliceLimit();
     try {
-      await withSettings({ ...USAGE_ENV, SANDCHEST_SLICE_DAILY_LIMIT_USD: limit }, fn);
+      await withSettings({ ...env, SANDCHEST_SLICE_DAILY_LIMIT_USD: limit }, fn);
     } finally {
       resetSliceLimit();
     }
@@ -1975,49 +1975,118 @@ describe.skipIf(!available)("the slice engine's daily limit", () => {
     await insertUsage(database, await newScan("recon"), [{ kind: "model", stage: "recon", costUsd: "0.01", costSource: "provider" }]);
   }
 
-  it("reached: scans priced now get the classic engine at every reservation and in begin; scans already priced keep slice", async () => {
+  const reserves = () => autumn.calls.filter((call) => call === "reserve").length;
+
+  it("reached with usage billing off or in shadow: scans priced now get the classic engine at every reservation and in begin; scans already priced keep slice", async () => {
     setScanStarter(async () => {});
     try {
-      autumn.get(orgId).credits = 10_000;
-      // Priced on slice under the limit, before it is reached.
-      let priced = "";
-      await withLimit("999999", async () => {
-        priced = (await requestDeepScan({ ...(await newRepo()), loc: 50_000 }) as { scanId: string }).scanId;
-        expect((await scanById(database, priced))!.pricing).toMatchObject({ engine: "slice", mode: "usage" });
-      });
+      for (const [env, mode] of [[{}, "tiered"], [SHADOW_ENV, "shadow"]] as const) {
+        autumn.get(orgId).credits = 10_000;
+        // Priced on slice under the limit, before it is reached.
+        let priced = "";
+        await withLimit(
+          "999999",
+          async () => {
+            priced = ((await requestDeepScan({ ...(await newRepo()), loc: 50_000 })) as { scanId: string }).scanId;
+            expect((await scanById(database, priced))!.pricing).toMatchObject({ engine: "slice", mode });
+          },
+          env,
+        );
+        await spend();
+        await withLimit(
+          "0.000001",
+          async () => {
+            // Dig.
+            const dug = await requestDeepScan({ ...(await newRepo()), loc: 50_000 });
+            expect(dug).toMatchObject({ ok: true });
+            expect("heldUpTo" in dug).toBe(false);
+            const dugId = (dug as { scanId: string }).scanId;
+            expect((await scanById(database, dugId))!.pricing).toEqual(CLASSIC);
+
+            // A dashboard review: quoted and held as classic.
+            gh.files = [CHANGED, DOCS];
+            const repo = await newRepo();
+            const quoted = await quotePrReview(repo, 7);
+            expect(quoted).toMatchObject({ ok: true });
+            expect("upTo" in quoted).toBe(false);
+            const started = await startPrReview(repo, 7, (quoted as { credits: number }).credits);
+            expect(started).toMatchObject({ ok: true });
+            const reviewId = (started as { scanId: string }).scanId;
+            expect((await scanById(database, reviewId))!.pricing).toEqual(CLASSIC);
+
+            // Begin, for scans with no stored pricing: a deep scan and a review from a push.
+            const deep = await newScan();
+            expect(await beginScan(deep)).toEqual({ state: "running" });
+            expect((await scanById(database, deep))!.pricing).toEqual(CLASSIC);
+            const pushed = await newScan("pr_review");
+            expect(await beginScan(pushed)).toEqual({ state: "running" });
+            expect((await scanById(database, pushed))!.pricing).toEqual(CLASSIC);
+            // A scheduled deep scan: started and held as classic, as before.
+            const scheduled = await requestDeepScan({ ...(await newRepo()), loc: 50_000 }, "schedule", { headSha: "HEAD" });
+            expect(scheduled).toMatchObject({ ok: true });
+            const scheduledId = (scheduled as { scanId: string }).scanId;
+            expect((await scanById(database, scheduledId))!.pricing).toEqual(CLASSIC);
+            for (const id of [dugId, reviewId, deep, pushed, scheduledId]) await failScan(id, "test over");
+
+            // Priced before the limit was reached: it stays on slice, billed as it was priced.
+            expect(await beginScan(priced)).toEqual({ state: "running", engine: "slice", ...(mode === "shadow" && { pricing: "shadow" }) });
+            await failScan(priced, "test over");
+          },
+          env,
+        );
+      }
+    } finally {
+      setScanStarter(undefined);
+    }
+  });
+
+  it("reached under usage billing: a person's deep scan and dashboard review are refused, holding nothing and leaving nothing behind", async () => {
+    await spend();
+    autumn.get(orgId).credits = 10_000;
+    await withLimit("0.000001", async () => {
+      const before = reserves();
+      const repo = await newRepo();
+      expect(await requestDeepScan({ ...repo, loc: 50_000 })).toEqual({ ok: false, reason: "paused" });
+      gh.files = [CHANGED, DOCS];
+      expect(await quotePrReview(repo, 7)).toEqual({ ok: false, reason: "paused" });
+      expect(await startPrReview(repo, 7, 90)).toEqual({ ok: false, reason: "paused" });
+      // A review with nothing to review holds nothing, so it is quoted as before.
+      gh.files = [DOCS];
+      expect(await quotePrReview(repo, 8)).toEqual({ ok: true, scanId: "", credits: 0 });
+      expect(await database.$client`select id from scans where repo_id = ${repo.id}`).toHaveLength(0);
+      expect(reserves()).toBe(before);
+    });
+  });
+
+  it("reached under usage billing: a review from a push and a scheduled deep scan wait, queued with one note and holding nothing, then go ahead once it clears", async () => {
+    setScanStarter(async () => {});
+    try {
       await spend();
+      autumn.get(orgId).credits = 10_000;
+      gh.files = [CHANGED, DOCS];
+      const pushed = await newScan("pr_review");
+      let scheduled = "";
       await withLimit("0.000001", async () => {
-        // Dig.
-        const dug = await requestDeepScan({ ...(await newRepo()), loc: 50_000 });
-        expect(dug).toMatchObject({ ok: true });
-        expect("heldUpTo" in dug).toBe(false);
-        const dugId = (dug as { scanId: string }).scanId;
-        expect((await scanById(database, dugId))!.pricing).toEqual(CLASSIC);
-
-        // A dashboard review: quoted and held as classic.
-        gh.files = [CHANGED, DOCS];
-        const repo = await newRepo();
-        const quoted = await quotePrReview(repo, 7);
-        expect(quoted).toMatchObject({ ok: true });
-        expect("upTo" in quoted).toBe(false);
-        const started = await startPrReview(repo, 7, (quoted as { credits: number }).credits);
-        expect(started).toMatchObject({ ok: true });
-        const reviewId = (started as { scanId: string }).scanId;
-        expect((await scanById(database, reviewId))!.pricing).toEqual(CLASSIC);
-
-        // Begin, for scans with no stored pricing: a deep scan and a review from a push.
-        const deep = await newScan();
-        expect(await beginScan(deep)).toEqual({ state: "running" });
-        expect((await scanById(database, deep))!.pricing).toEqual(CLASSIC);
-        const pushed = await newScan("pr_review");
-        expect(await beginScan(pushed)).toEqual({ state: "running" });
-        expect((await scanById(database, pushed))!.pricing).toEqual(CLASSIC);
-        for (const id of [dugId, reviewId, deep, pushed]) await failScan(id, "test over");
-
-        // Priced before the limit was reached: it stays on slice, billed as it was priced.
-        expect(await beginScan(priced)).toEqual({ state: "running", engine: "slice", pricing: "usage" });
-        await failScan(priced, "test over");
+        const before = reserves();
+        const result = await requestDeepScan({ ...(await newRepo()), loc: 50_000 }, "schedule", { headSha: "HEAD" });
+        expect(result).toMatchObject({ ok: true });
+        expect("heldUpTo" in result).toBe(false);
+        scheduled = (result as { scanId: string }).scanId;
+        for (const id of [pushed, scheduled]) {
+          expect(await beginScan(id)).toEqual({ state: "queued" });
+          expect(await beginScan(id)).toEqual({ state: "queued" });
+          expect(await scanById(database, id)).toMatchObject({ status: "queued", billing: null, creditsReserved: null, pricing: null });
+          expect((await feedOf(id)).filter((message) => message === PAUSED_WAIT)).toHaveLength(1);
+        }
+        expect(reserves()).toBe(before);
       });
+      // The limit no longer reached: each goes ahead by itself, priced and held as any other.
+      await withLimit("999999", async () => {
+        for (const id of [pushed, scheduled]) expect(await beginScan(id)).toEqual({ state: "running", engine: "slice", pricing: "usage" });
+        expect(await scanById(database, pushed)).toMatchObject({ billing: "reserved", creditsReserved: 90, pricing: { engine: "slice", mode: "usage" } });
+        expect(await scanById(database, scheduled)).toMatchObject({ billing: "reserved", creditsReserved: 150, pricing: { engine: "slice", mode: "usage" } });
+      });
+      for (const id of [pushed, scheduled]) await failScan(id, "test over");
     } finally {
       setScanStarter(undefined);
     }

@@ -91,6 +91,9 @@ export function billingEnabled(): boolean {
 /** What every billing surface says while billing is frozen. */
 export const BILLING_FROZEN = "Billing is being upgraded. Try again in a few minutes.";
 
+/** What a person is told when a scan is not started past the slice engine's daily limit (see `slicePaused`). */
+export const SCANS_PAUSED = "Scans are paused for a moment. Nothing was charged. Try again in a little while.";
+
 let frozenOverride: boolean | undefined;
 
 /** For tests: freeze billing, or (undefined) read SANDCHEST_BILLING_FREEZE again. */

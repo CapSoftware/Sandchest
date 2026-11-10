@@ -30,6 +30,8 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ error: result.reason === "no_plan" ? "this account has no plan" : "out of credits", credits: result.credits }, { status: 402 });
     case "frozen":
       return Response.json({ error: "billing is being upgraded; try again in a few minutes" }, { status: 503 });
+    case "paused":
+      return Response.json({ error: "scans are paused for a moment; nothing was charged, try again in a little while" }, { status: 503 });
     case "fast_unavailable":
       // Not reached: this route never asks for a fast scan.
       return Response.json({ error: "fast scans are not available" }, { status: 422 });

@@ -65,7 +65,7 @@ import { billingEnabled, heldCredits, reserveScan, settleScan, syncBilling, type
 import { config, scanEngine, scanPricing, scanWorkspace, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
-import { sliceAllowedNow } from "./slice-limit";
+import { sliceAllowedNow, slicePaused } from "./slice-limit";
 import { noticeScanPaused } from "./notices";
 import { classifier, classifierPrice, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
@@ -112,7 +112,14 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
   const sliceAllowed = scan.status === "queued" && !pricing ? await sliceAllowedNow(scan.kind, scan.repo.org.githubLogin) : true;
   if (scan.status === "queued" && scan.billing === null && billingEnabled()) {
     const priced = scanPricing(scan, scan.repo.org.githubLogin, config(), sliceAllowed);
-    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, heldCredits(priced, await scanCredits(scan)), true, { evenWhenEmpty: scan.kind === "fix_check", pricing: priced });
+    const credits = await scanCredits(scan);
+    // Past the slice engine's daily limit under usage billing, a scan that would hold credits waits instead, holding
+    // nothing. The workflow asks again every 10 s, and this goes ahead once the limit clears.
+    if (!sliceAllowed && credits > 0 && slicePaused()) {
+      await noteScanEvent(db(), scan.id, "queue", PAUSED_WAIT);
+      return { state: "queued" };
+    }
+    const gate = await reserveScan(scan.id, { id: scan.orgId, githubLogin: scan.repo.org.githubLogin }, heldCredits(priced, credits), true, { evenWhenEmpty: scan.kind === "fix_check", pricing: priced });
     if (!gate.ok) {
       // Billing is being upgraded: nothing is held now. The workflow asks again every 10 s, and this goes ahead once it's done.
       if (gate.reason === "frozen") {
@@ -162,6 +169,9 @@ export async function beginScan(scanId: string): Promise<BeginResult> {
 
 /** The feed's line while billing is frozen: said once, however many times the scan asks again. */
 export const FROZEN_WAIT = "Waiting: billing is being upgraded. This starts by itself in a few minutes.";
+
+/** The feed's line while scans are paused (`slicePaused`): said once, however many times the scan asks again. */
+export const PAUSED_WAIT = "Waiting: scans are paused for a moment. Nothing is charged meanwhile, and this starts by itself.";
 
 /** What a scan costs, before it runs. A PR review costs what the engine will report for the same files. */
 async function scanCredits(scan: LoadedScan): Promise<number> {

@@ -1,7 +1,8 @@
 /**
  * What customers see of usage billing, against a real Postgres (local docker) with GitHub and Autumn faked: the
  * agent API's bill on a scan and its prices, the fast option only where it is offered (a forged request refused),
- * and quotes "up to" the hold for usage, the tier price in shadow, and exactly as before otherwise. Every
+ * and quotes "up to" the hold for usage, the tier price in shadow, and exactly as before otherwise; past the daily
+ * limit, deep scans refused under usage and started classic otherwise. Every
  * multiplier, ceiling and amount here is made up. Skips without Postgres.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -13,12 +14,14 @@ import { billView } from "@/lib/bill-view";
 import { issueKey } from "@/server/agent/tokens";
 import { handleRest } from "@/server/agent/rest";
 import { billApiView } from "@/server/agent/views";
-import { setAutumn } from "@/server/billing";
+import { POST as scansPost } from "@/app/api/scans/route";
+import { SCANS_PAUSED, setAutumn } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { requestDeepScan } from "@/server/dig";
 import { orgPlans } from "@/server/org-plans";
 import { quotePrReview } from "@/server/pr-review";
 import { setServices } from "@/server/services";
+import { resetSliceLimit } from "@/server/slice-limit";
 import { setScanStarter } from "@/server/start";
 import { FakeAutumn } from "./fake-autumn";
 
@@ -40,7 +43,7 @@ const FAST_ENV = { SANDCHEST_SLICE_CEILING_FAST_USD: "1.5", LLM_AGENT_FAST_MODEL
 /** A made-up multiplier of 3, credits worth a cent: a deep scan holds 150, a fast one 450, a review 75. */
 const USAGE_ENV = { SANDCHEST_USAGE_BILLING: "on", SANDCHEST_USAGE_MULTIPLIER: "3", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "cent" };
 const SHADOW_ENV = { SANDCHEST_USAGE_BILLING: "shadow", SANDCHEST_USAGE_MULTIPLIER: "3" };
-const SETTINGS = [...new Set([...Object.keys(BASE_ENV), ...Object.keys(SLICE_ENV), ...Object.keys(FAST_ENV), ...Object.keys(USAGE_ENV), "SANDCHEST_ENGINE_ORGS", "DATABASE_URL", "GITHUB_APP_SLUG"])];
+const SETTINGS = [...new Set([...Object.keys(BASE_ENV), ...Object.keys(SLICE_ENV), ...Object.keys(FAST_ENV), ...Object.keys(USAGE_ENV), "SANDCHEST_ENGINE_ORGS", "DATABASE_URL", "GITHUB_APP_SLUG", "SANDCHEST_SLICE_DAILY_LIMIT_USD", "SANDCHEST_ADMIN_TOKEN"])];
 
 let admin: postgres.Sql | undefined;
 let database: Db;
@@ -251,6 +254,77 @@ describe("prices before a scan", () => {
       const [repo] = await dashboardRepos(database, ids.user);
       expect((await orgPlans([repo!])).get(ids.org)).toMatchObject({ planId: "chest", usage: { hold: 150, fast: 450 } });
     });
+  });
+
+  it("get_billing: exactly as before priced by tier or in shadow; under usage, the most a deep scan and a review can cost instead of the tiers", async () => {
+    const billing = async () => (await api("GET", "/accounts/acme/billing")).body;
+    // The first read stores the plan, which closes the free credit offer: compare reads after it.
+    await withSettings({}, billing);
+    const before = await withSettings({}, billing);
+    expect(Object.keys(before.prices)).toEqual(["plan", "credit_usd_by_purchase_size", "deep_scan_credits_by_lines_of_code", "pr_review_credits_by_changed_lines", "free"]);
+    for (const env of [SLICE_ENV, { ...SLICE_ENV, ...FAST_ENV, ...SHADOW_ENV }]) {
+      expect(JSON.stringify(await withSettings(env, billing))).toBe(JSON.stringify(before));
+    }
+    await withSettings({ ...SLICE_ENV, ...FAST_ENV, ...USAGE_ENV }, async () => {
+      const { prices } = await billing();
+      expect(Object.keys(prices)).toEqual(["plan", "credit_usd_by_purchase_size", "deep_scan", "pr_review", "free"]);
+      expect(prices.deep_scan).toEqual({ charged: "usage", up_to_credits: 150 });
+      expect(prices.pr_review).toEqual({ charged: "usage", up_to_credits: 75 });
+      expect({ ...prices, deep_scan: undefined, pr_review: undefined }).toEqual({ ...before.prices, deep_scan_credits_by_lines_of_code: undefined, pr_review_credits_by_changed_lines: undefined });
+      expect(JSON.stringify([prices.deep_scan, prices.pr_review])).not.toMatch(/cost|multiplier|ceiling|micro|usd/i);
+    });
+    // An account the slice engine does not take is priced by tier, so it sees the tiers.
+    expect(JSON.stringify(await withSettings({ ...SLICE_ENV, ...USAGE_ENV, SANDCHEST_ENGINE_ORGS: "someone-else" }, billing))).toBe(JSON.stringify(before));
+  });
+});
+
+describe("the daily limit reached", () => {
+  const OPERATOR_TOKEN = "operator-token-0123456789abcdef";
+  const operator = () =>
+    scansPost(new Request(`${BASE}/api/scans`, { method: "POST", headers: { authorization: `Bearer ${OPERATOR_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ repo: "acme/app" }) }));
+
+  /** Runs `fn` with these settings and a made-up limit the day's spend is past. */
+  async function reached(env: Record<string, string>, fn: () => Promise<void>): Promise<void> {
+    resetSliceLimit(async () => "5");
+    try {
+      await withSettings({ ...env, SANDCHEST_SLICE_DAILY_LIMIT_USD: "1", SANDCHEST_ADMIN_TOKEN: OPERATOR_TOKEN }, fn);
+    } finally {
+      resetSliceLimit();
+    }
+  }
+
+  it("under usage: the agent API and the operator route refuse a deep scan with one message, holding nothing; quotes stay the hold", async () => {
+    await noScans();
+    await reached({ ...SLICE_ENV, ...USAGE_ENV }, async () => {
+      const reserves = autumn.calls.filter((call) => call === "reserve").length;
+      const refused = await api("POST", "/repos/acme/app/scans");
+      expect(refused.status).toBe(503);
+      expect(refused.body.error).toEqual({ code: "scans_paused", message: SCANS_PAUSED });
+      expect(SCANS_PAUSED).toBe("Scans are paused for a moment. Nothing was charged. Try again in a little while.");
+      const route = await operator();
+      expect(route.status).toBe(503);
+      expect(await route.json()).toEqual({ error: "scans are paused for a moment; nothing was charged, try again in a little while" });
+      expect(await database.$client`select id from scans where repo_id = ${ids.repo}`).toHaveLength(0);
+      expect(autumn.calls.filter((call) => call === "reserve").length).toBe(reserves);
+      // What a scan would hold once it starts is still the usage hold, not a tier price.
+      expect((await api("GET", "/repos/acme/app")).body.deep_scan).toMatchObject({ credits: null, up_to_credits: 150 });
+      expect((await api("GET", "/accounts/acme/billing")).body.prices).toMatchObject({ deep_scan: { charged: "usage", up_to_credits: 150 } });
+    });
+  });
+
+  it("priced by tier or in shadow: started on the classic engine at the tier price, as before", async () => {
+    for (const env of [SLICE_ENV, { ...SLICE_ENV, ...SHADOW_ENV }]) {
+      await noScans();
+      await reached(env, async () => {
+        const response = await api("POST", "/repos/acme/app/scans");
+        expect(response.status).toBe(202);
+        expect((await scanById(database, response.body.scan.id))!).toMatchObject({ creditsReserved: 500, pricing: { engine: "classic", mode: "tiered" } });
+        await noScans();
+        const route = await operator();
+        expect(route.status).toBe(202);
+      });
+    }
+    await noScans();
   });
 });
 

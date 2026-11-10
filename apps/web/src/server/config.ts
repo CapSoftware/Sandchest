@@ -110,7 +110,7 @@ const Schema = z.object({
   SANDCHEST_SLICE_CEILING_PR_USD: usd().optional(),
   /**
    * The most all scans together may spend in any 24 hours, in USD, before new scans are priced classic instead
-   * of slice (see `sliceAllowedNow`). Unset: no limit.
+   * of slice, or under usage billing wait (see `sliceAllowedNow`, `slicePaused`). Unset: no limit.
    */
   SANDCHEST_SLICE_DAILY_LIMIT_USD: usd().optional(),
   /** A JSON object of fields set on every model request of the slice engine's own calls (endpoint options). */

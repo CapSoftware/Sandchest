@@ -7,12 +7,12 @@ import { autumn, billingFrozen, heldCredits, reserveScan } from "./billing";
 import { config, fastOffered, scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
-import { sliceAllowedNow } from "./slice-limit";
+import { sliceAllowedNow, slicePaused } from "./slice-limit";
 import { startScan } from "./start";
 
 export type DigResult =
   | { ok: true; scanId: string; heldUpTo?: number }
-  | { ok: false; reason: "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "fast_unavailable" | "frozen"; scanId?: string; credits?: number };
+  | { ok: false; reason: "not_installed" | "running" | "too_large" | "no_plan" | "out_of_credits" | "fast_unavailable" | "frozen" | "paused"; scanId?: string; credits?: number };
 
 /**
  * Starts a deep scan of a repo the caller is allowed to scan. Its credits are
@@ -21,6 +21,7 @@ export type DigResult =
  * the caller has just read it. `fast`: a person chose a fast scan, which is refused unless the account is offered
  * one (`fastOffered`); a scheduled scan is never fast. `heldUpTo` is set for a scan billed from its usage: the
  * credits it holds, the most it can be charged. While billing is frozen it is refused (`frozen`): it would hold credits.
+ * Past the slice engine's daily limit under usage billing (`slicePaused`) a person's scan is refused (`paused`).
  */
 export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manual" | "schedule" = "manual", options: { headSha?: string; fast?: boolean } = {}): Promise<DigResult> {
   if (options.fast && (trigger !== "manual" || !fastOffered(repo.org.githubLogin))) return { ok: false, reason: "fast_unavailable" };
@@ -39,7 +40,7 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
   const { scan, created } = await createScan(db(), { id: randomUUID(), repoId: repo.id, orgId: repo.orgId, kind: "deep", trigger, headSha, ...(options.fast && { fast: true }) });
   if (!created) return { ok: false, reason: "running", scanId: scan.id };
 
-  let gate: Awaited<ReturnType<typeof reserveScan>>;
+  let gate: Awaited<ReturnType<typeof reserveScan>> | "paused";
   let credits = 0;
   let usage = false;
   try {
@@ -47,15 +48,29 @@ export async function requestDeepScan(repo: Repo & { org: Org }, trigger: "manua
     // measures (never more than it held). Inside the try: a failure here cleans up like any other, and never
     // leaves a scan to be charged later.
     // How the scan is priced is decided here, with its hold, and stored with it.
-    const pricing = scanPricing(scan, repo.org.githubLogin, config(), await sliceAllowedNow(scan.kind, repo.org.githubLogin));
-    credits = heldCredits(pricing, state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
-    usage = pricing.mode === "usage";
-    gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits, true, { pricing });
+    const sliceAllowed = await sliceAllowedNow(scan.kind, repo.org.githubLogin);
+    if (!sliceAllowed && slicePaused()) gate = "paused";
+    else {
+      const pricing = scanPricing(scan, repo.org.githubLogin, config(), sliceAllowed);
+      credits = heldCredits(pricing, state.credits ?? DEEP_SCAN_TIERS.at(-1)!.credits);
+      usage = pricing.mode === "usage";
+      gate = await reserveScan(scan.id, { id: repo.org.id, githubLogin: repo.org.githubLogin }, credits, true, { pricing });
+    }
   } catch (error) {
     // Give back anything Autumn may hold, and the slot.
     await autumn()?.finalize({ customerId: repo.org.id, lockId: scan.id, action: "release" }).catch(() => {});
     await deleteUnstartedScan(db(), scan.id);
     throw error;
+  }
+  if (gate === "paused") {
+    // Past the daily limit nothing is held. A person is told at once; a scheduled scan waits, queued, and its
+    // begin step holds its credits once the limit clears.
+    if (trigger === "manual") {
+      await deleteUnstartedScan(db(), scan.id);
+      return { ok: false, reason: "paused" };
+    }
+    await startScan(scan.id).catch((error: unknown) => console.error(`Starting deep scan ${scan.id} failed: ${describeError(error)}`));
+    return { ok: true, scanId: scan.id };
   }
   if (!gate.ok) {
     // Refused: the scan never started, so it leaves nothing behind.

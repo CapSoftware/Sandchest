@@ -384,6 +384,10 @@ describe.skipIf(!available)("REST API", () => {
 
     const billing = (await api(aliceKey, "GET", "/accounts/acme/billing")).body;
     expect(billing).toMatchObject({ plan: null, card_on_file: false, free_credits: { open: true, credits: 2_000 } });
+    // Not billed from usage here: the price list is the tiers, as it always was.
+    expect(Object.keys(billing.prices)).toEqual(["plan", "credit_usd_by_purchase_size", "deep_scan_credits_by_lines_of_code", "pr_review_credits_by_changed_lines", "free"]);
+    expect(billing.prices.deep_scan_credits_by_lines_of_code[0]).toEqual({ below_loc: expect.any(Number), credits: expect.any(Number) });
+    expect(billing.prices.pr_review_credits_by_changed_lines.at(-1)).toEqual({ up_to_lines: null, credits: expect.any(Number) });
     expect((await api(bobKey, "POST", "/accounts/acme/billing/claim")).body.error.code).toBe("not_admin");
     expect((await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true })).body.error.code).toBe("needs_paid_plan");
 

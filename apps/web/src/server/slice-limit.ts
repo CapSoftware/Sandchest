@@ -1,13 +1,14 @@
 /**
  * The slice engine's daily spend limit (SANDCHEST_SLICE_DAILY_LIMIT_USD). The model provider caps nothing, so once
  * what every scan recorded over the last 24 hours reaches the limit, scans priced from then on get the classic
- * engine. Scans already priced keep theirs. The spend is read at most once a minute per server instance. A failed
- * read counts as not reached and is reported: each scan's own ceiling still bounds it, and a database blip must
- * neither stop scans nor change their engine.
+ * engine, or under usage billing wait (`slicePaused`). Scans already priced keep theirs. The spend is read at most
+ * once a minute per server instance. A failed read counts as not reached and is reported: each scan's own ceiling
+ * still bounds it, and a database blip must neither stop scans nor change their engine.
  */
 import { usdToMicroUsd } from "@sandchest/billing/usage";
 import { spendSince } from "@sandchest/db";
-import { config, scanEngine, type Config } from "./config";
+import { billingEnabled } from "./billing";
+import { config, scanEngine, scanPricingMode, type Config } from "./config";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
 import { db } from "./services";
@@ -51,10 +52,20 @@ export async function sliceAllowedNow(kind: string, githubLogin: string, setting
   if (unreported && (reportedAt === undefined || now - reportedAt >= REPORT_EVERY_MS)) {
     unreported = false;
     reportedAt = now;
-    console.warn("The slice engine's daily limit is reached: scans priced from now on run on the classic engine.");
+    console.warn(`The slice engine's daily limit is reached: scans priced from now on ${slicePaused(settings) ? "wait" : "run on the classic engine"}.`);
     await captureException(Object.assign(new Error("The slice engine's daily limit is reached"), { name: "SliceDailyLimitReached" }), { source: "billing", tags: { action: "slice_daily_limit", outcome: "reached" }, handled: true });
   }
   return false;
+}
+
+/**
+ * Whether a scan `sliceAllowedNow` turns away waits instead of running classic: when slice scans are billed from
+ * their usage, as the classic engine's fixed prices would charge far more. Nothing is held or charged meanwhile:
+ * a scan a person asks for is refused with SCANS_PAUSED (`billing`), a queued one waits (`beginScan`). With
+ * billing off, or usage billing off or in shadow, it runs classic as before.
+ */
+export function slicePaused(settings: Config = config()): boolean {
+  return billingEnabled() && scanPricingMode("slice", settings) === "usage";
 }
 
 /**

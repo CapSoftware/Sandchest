@@ -12,13 +12,13 @@ import { autumn, billingEnabled, billingFrozen, heldCredits, reserveScan } from 
 import { config, scanPricing } from "./config";
 import { describeError } from "./log";
 import { db, githubApp } from "./services";
-import { sliceAllowedNow } from "./slice-limit";
+import { sliceAllowedNow, slicePaused } from "./slice-limit";
 import { startScan } from "./start";
 
 /** `upTo`: the review is billed from its usage, so `credits` is the most it can be charged. Absent otherwise. */
 export type PrReviewResult =
   | { ok: true; scanId: string; credits: number; upTo?: true }
-  | { ok: false; reason: "not_installed" | "reviews_off" | "not_open" | "reviewed" | "no_plan" | "out_of_credits" | "frozen"; scanId?: string; credits?: number };
+  | { ok: false; reason: "not_installed" | "reviews_off" | "not_open" | "reviewed" | "no_plan" | "out_of_credits" | "frozen" | "paused"; scanId?: string; credits?: number };
 
 type InstalledRepo = Repo & { org: Org };
 
@@ -85,9 +85,13 @@ async function reviewable(repo: InstalledRepo, prNumber: number) {
     return { ok: false as const, reason: "reviewed" as const, scanId: latest.scanId };
   }
   const files = await installation.pullFiles(repo.fullName, prNumber);
+  const credits = reviewCredits(files);
+  const sliceAllowed = await sliceAllowedNow("pr_review", repo.org.githubLogin);
+  // Past the daily limit under usage billing a review that would hold credits is not started. One that costs nothing goes ahead.
+  if (!sliceAllowed && credits > 0 && slicePaused()) return { ok: false as const, reason: "paused" as const };
   // What is quoted is what is held: a review billed from its usage holds enough for its ceiling.
-  const pricing = scanPricing({ kind: "pr_review", fast: false }, repo.org.githubLogin, config(), await sliceAllowedNow("pr_review", repo.org.githubLogin));
-  return { ok: true as const, pull, credits: heldCredits(pricing, reviewCredits(files)), pricing };
+  const pricing = scanPricing({ kind: "pr_review", fast: false }, repo.org.githubLogin, config(), sliceAllowed);
+  return { ok: true as const, pull, credits: heldCredits(pricing, credits), pricing };
 }
 
 /** What a review of these files costs: the engine's own measure of the change (SPEC §12). */

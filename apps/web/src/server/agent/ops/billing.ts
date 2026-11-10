@@ -19,6 +19,7 @@ import { applyInvoiceDetails, InvoiceDetails } from "../../invoice-details";
 import { describeError } from "../../log";
 import { PurchaseCredits } from "../../purchase-credits";
 import { captureException } from "../../sentry";
+import { deepScanQuote, prReviewQuote } from "../../usage-quote";
 import { ApiError } from "../errors";
 import { AccountRef, flag, int, operation, type Context } from "../operation";
 import { resolveAccount, resolveAdminAccount } from "../resolve";
@@ -58,6 +59,9 @@ const fromRow = (row: OrgBillingRow): State => ({ ...row, credits: row.credits, 
 
 function billingView(context: Context, org: { id: string; login: string; admin: boolean; autoTopUp?: { quantity?: number; monthlyLimitUsd: number | null; enabled: boolean } }, state: State | null, offer: { open: boolean; credits?: number; reason?: string } | null) {
   const paid = !!state?.planId && !isTrial(state.planId);
+  // Scans billed from their usage have no fixed price: the most one can cost (what it holds) instead of the tiers.
+  const deep = deepScanQuote(org.login);
+  const review = prReviewQuote(org.login);
   return {
     account: { id: org.id, login: org.login, admin: org.admin },
     plan: planView(state?.planId),
@@ -79,8 +83,12 @@ function billingView(context: Context, org: { id: string; login: string; admin: 
     prices: {
       plan: { id: PLAN.id, usd_per_month: PLAN.price },
       credit_usd_by_purchase_size: CREDIT_TIERS.map((tier) => ({ from_credits: tier.from, usd_per_credit: CREDIT_PACK === 1 ? tier.price : usdPerCredit(tier.price) })),
-      deep_scan_credits_by_lines_of_code: DEEP_SCAN_TIERS.map((tier) => ({ below_loc: Number.isFinite(tier.maxLoc) ? tier.maxLoc : null, credits: tier.credits })),
-      pr_review_credits_by_changed_lines: PR_REVIEW_TIERS.map((tier) => ({ up_to_lines: Number.isFinite(tier.maxLines) ? tier.maxLines : null, credits: tier.credits })),
+      ...(deep
+        ? { deep_scan: { charged: "usage", up_to_credits: deep.hold } }
+        : { deep_scan_credits_by_lines_of_code: DEEP_SCAN_TIERS.map((tier) => ({ below_loc: Number.isFinite(tier.maxLoc) ? tier.maxLoc : null, credits: tier.credits })) }),
+      ...(review !== undefined
+        ? { pr_review: { charged: "usage", up_to_credits: review } }
+        : { pr_review_credits_by_changed_lines: PR_REVIEW_TIERS.map((tier) => ({ up_to_lines: Number.isFinite(tier.maxLines) ? tier.maxLines : null, credits: tier.credits })) }),
       free: ["recon (mapping each repository)", "fix checks (pushes to the default branch)"],
     },
     links: { settings: `${context.appUrl}/dashboard/settings/billing` },
@@ -104,7 +112,7 @@ export const billingOps = [
     name: "get_billing",
     title: "Get billing",
     description:
-      "An account's plan, credits, auto top-up, whether a card is on file, free credits it can claim, and the price list (credits per deep scan and PR review). Read live from billing, so call it after the person pays to see the plan take effect.",
+      "An account's plan, credits, auto top-up, whether a card is on file, free credits it can claim, and the price list: credits per deep scan and PR review, or where they are charged for what they use (`charged: \"usage\"`), the most one can cost (`up_to_credits`). Read live from billing, so call it after the person pays to see the plan take effect.",
     method: "GET",
     path: "/accounts/{account}/billing",
     input: z.object({

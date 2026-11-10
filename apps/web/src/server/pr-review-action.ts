@@ -12,7 +12,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { viewer } from "./access";
 import { track } from "./analytics";
-import { BILLING_FROZEN } from "./billing";
+import { BILLING_FROZEN, SCANS_PAUSED } from "./billing";
 import { db } from "./db";
 import { describeError } from "./log";
 import { captureException } from "./sentry";
@@ -31,6 +31,7 @@ const MESSAGES = {
   no_plan: "This account needs a plan before Sandchest can review.",
   out_of_credits: "Out of credits for this review.",
   frozen: BILLING_FROZEN,
+  paused: SCANS_PAUSED,
 } as const;
 
 /** The price of reviewing the PR's latest commit, or why it can't be reviewed. */
