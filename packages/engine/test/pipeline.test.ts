@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { IndexerError, type IndexerClient } from "../src/indexer";
 import { LlmError, LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient, type ToolCall } from "../src/llm";
-import { priceUsage, runRecon, runScan, verifyFindings, type Candidate, type ScanEvent, type ThreatModel, type UsageEvent } from "../src/scan";
+import { loadClassifierPrice, meteredClassifier, priceUsage, runRecon, runScan, UnpricedCallError, verifyFindings, type Candidate, type ScanEvent, type ThreatModel, type UsageEvent } from "../src/scan";
 import { stageClients } from "../src/scan/metrics";
 import type { Classifier } from "../src/llm/classifier";
 
@@ -520,5 +520,167 @@ describe("usage sink", () => {
     await verifyFindings({ client, indexer: fakeIndexer(), threatModel, findings: [candidate as Candidate], investigateAuth: true, onUsage: (event) => verify.push(event) });
     expect(verify).toHaveLength(client.roles.length);
     expect(new Set(verify.map((e) => e.stage))).toEqual(new Set(["auth_model", "review"]));
+  });
+});
+
+describe("every call reaches the sink, and a required cost is enforced", () => {
+  const pricing = { input: 2, cachedInput: 0.5, output: 8 };
+  const request: ChatRequest = { role: "hunt", messages: [{ role: "user", content: "hi" }] };
+  const answering = (costUsd?: number): LlmClient => ({ config: { baseUrl: "http://fake", apiKey: "k", model: "m" }, chat: async () => ({ ...reply("ok"), ...(costUsd !== undefined && { costUsd }) }) });
+  const failing = (error: unknown): LlmClient => ({ config: { baseUrl: "http://fake", apiKey: "k", model: "m" }, chat: async () => Promise.reject(error) });
+  const none = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+
+  test("a call that fails is reported with no tokens and no cost, then rethrown as it was", async () => {
+    const events: UsageEvent[] = [];
+    const error = new LlmError("upstream exploded", { retryable: false, status: 500 });
+    await expect(stageClients(failing(error), (e) => events.push(e), pricing)("hunt").chat(request)).rejects.toBe(error);
+    expect(events).toEqual([{ role: "hunt", stage: "hunt", ...none, costUsd: 0, costSource: "provider", status: "failed" }]);
+  });
+
+  test("a call cut off by its signal is reported as aborted", async () => {
+    const events: UsageEvent[] = [];
+    const controller = new AbortController();
+    controller.abort(new Error("Interrupted"));
+    const client = failing(controller.signal.reason);
+    await expect(stageClients(client, (e) => events.push(e), pricing)().chat({ ...request, signal: controller.signal })).rejects.toThrow("Interrupted");
+    expect(events).toEqual([{ role: "hunt", ...none, costUsd: 0, costSource: "provider", status: "aborted" }]);
+  });
+
+  test("a sink that throws on a failed call never replaces its error", async () => {
+    const error = new Error("boom");
+    await expect(stageClients(failing(error), () => { throw new Error("sink down"); }, pricing)("hunt").chat(request)).rejects.toBe(error);
+  });
+
+  test("with a cost required, a call with none is reported as unpriced, then stops with UnpricedCallError", async () => {
+    const events: UsageEvent[] = [];
+    const run = stageClients(answering(), (e) => events.push(e), undefined, { requireCost: true })("hunt").chat(request);
+    await expect(run).rejects.toBeInstanceOf(UnpricedCallError);
+    await expect(run).rejects.toThrow("A model call finished with no cost reported");
+    expect(events).toEqual([{ role: "hunt", stage: "hunt", inputTokens: 100, cachedTokens: 80, outputTokens: 10, reasoningTokens: 0, costUsd: 0, costSource: "priced", status: "unpriced" }]);
+  });
+
+  test("with a cost required, a reported cost or a price lets the call through as ok", async () => {
+    const events: UsageEvent[] = [];
+    await stageClients(answering(0.0042), (e) => events.push(e), undefined, { requireCost: true })("hunt").chat(request);
+    await stageClients(answering(), (e) => events.push(e), pricing, { requireCost: true })("hunt").chat(request);
+    expect(events.map((e) => [e.status, e.costSource, e.costUsd])).toEqual([
+      ["ok", "provider", 0.0042],
+      ["ok", "priced", priceUsage(events[1]!, pricing)],
+    ]);
+  });
+
+  test("without a cost required, a call with none is ok at zero, as before", async () => {
+    const events: UsageEvent[] = [];
+    const result = await stageClients(answering(), (e) => events.push(e), undefined)("hunt").chat(request);
+    expect(result.content).toBe("ok");
+    expect(events).toMatchObject([{ costUsd: 0, costSource: "priced", status: "ok" }]);
+  });
+
+  test("a required cost wraps the client even with no sink", async () => {
+    const client = answering();
+    const clientFor = stageClients(client, undefined, undefined, { requireCost: true });
+    expect(clientFor("hunt")).not.toBe(client);
+    await expect(clientFor("hunt").chat(request)).rejects.toBeInstanceOf(UnpricedCallError);
+  });
+
+  test("an unpriced call stops the whole scan, and nothing retries it", async () => {
+    let calls = 0;
+    const base = fakeClient();
+    const client: LlmClient = { ...base, chat: (r) => (calls++, base.chat(r)) };
+    const events: UsageEvent[] = [];
+    await expect(runScan({ client, indexer: fakeIndexer(), limits: { maxHunters: 3 }, requireCost: true, onUsage: (e) => events.push(e) })).rejects.toBeInstanceOf(UnpricedCallError);
+    // Recon's first call is the only one made.
+    expect(calls).toBe(1);
+    expect(events.map((e) => [e.stage, e.status])).toEqual([["recon", "unpriced"]]);
+  });
+
+  test("with a cost required and a price set, the scan runs as it does without", async () => {
+    const plain = await runScan({ client: fakeClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing });
+    const required = await runScan({ client: fakeClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing, requireCost: true });
+    expect(required.usage).toEqual(plain.usage);
+    expect(required.findings.map((f) => f.fingerprint)).toEqual(plain.findings.map((f) => f.fingerprint));
+  });
+});
+
+describe("classifier usage", () => {
+  const answers = { answers: { q: { type: "noul" as const, noul: 0.9 } }, inputTokens: 2_000 };
+  const questions = { q: { type: "noul" as const, instructions: "?" } };
+
+  test("each ask is one classifier event, priced per million input tokens", async () => {
+    const events: UsageEvent[] = [];
+    const classifier = meteredClassifier({ model: "c", ask: async () => answers }, (e) => events.push(e), 0.5);
+    expect(await classifier.ask("code", questions)).toBe(answers);
+    expect(classifier.model).toBe("c");
+    expect(events).toEqual([{ role: "classifier", stage: "classify", inputTokens: 2_000, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0.001, costSource: "priced", status: "ok" }]);
+  });
+
+  test("with no price an ask costs zero", async () => {
+    const events: UsageEvent[] = [];
+    await meteredClassifier({ model: "c", ask: async () => answers }, (e) => events.push(e), undefined).ask("code", questions);
+    expect(events).toMatchObject([{ inputTokens: 2_000, costUsd: 0, status: "ok" }]);
+  });
+
+  test("a failed ask is reported and rethrown; a cut-off one as aborted; a broken sink fails nothing", async () => {
+    const events: UsageEvent[] = [];
+    const error = new Error("classifier 500: boom");
+    await expect(meteredClassifier({ model: "c", ask: async () => Promise.reject(error) }, (e) => events.push(e), 0.5).ask("code", questions)).rejects.toBe(error);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(meteredClassifier({ model: "c", ask: async () => Promise.reject(error) }, (e) => events.push(e), 0.5).ask("code", questions, controller.signal)).rejects.toBe(error);
+    expect(events.map((e) => [e.status, e.inputTokens, e.costUsd])).toEqual([
+      ["failed", 0, 0],
+      ["aborted", 0, 0],
+    ]);
+    const broken = meteredClassifier({ model: "c", ask: async () => answers }, () => { throw new Error("sink down"); }, 0.5);
+    expect(await broken.ask("code", questions)).toBe(answers);
+  });
+
+  test("its price setting: a non-negative number, else unset", () => {
+    expect(loadClassifierPrice({ LLM_CLASSIFIER_PRICE_INPUT: "0.25" })).toBe(0.25);
+    expect(loadClassifierPrice({ LLM_CLASSIFIER_PRICE_INPUT: "0" })).toBe(0);
+    for (const value of [undefined, "", " ", "-1", "abc", "Infinity", "NaN"]) expect(loadClassifierPrice({ LLM_CLASSIFIER_PRICE_INPUT: value })).toBeUndefined();
+  });
+
+  describe("in a scan", () => {
+    const definitions = () => ({ definitions: [{ name: "Admin.post", kind: "method", file: "src/admin.ts", line: 1, endLine: 4 }], total: 1 });
+    const pricing = { input: 2, cachedInput: 0.5, output: 8 };
+    function counted() {
+      const asked = { count: 0 };
+      const classifier: Classifier = {
+        model: "x",
+        ask: async () => {
+          asked.count++;
+          return { answers: { is_http_handler: { type: "noul", noul: 0.97 }, enforces_authz: { type: "noul", noul: 0.9 }, auth_level: { type: "choice", choice: "authenticated", confidence: 0.9, probabilities: {} } }, inputTokens: 10 };
+        },
+      };
+      return { classifier, asked };
+    }
+
+    test("with a cost required and no classifier price, the classifier is skipped with one warning", async () => {
+      const { classifier, asked } = counted();
+      const events: ScanEvent[] = [];
+      const report = await runScan({ client: fakeClient(), classifier, indexer: fakeIndexer({ definitions }), limits: { maxHunters: 3 }, pricing, requireCost: true, onEvent: (e) => events.push(e) });
+      expect(asked.count).toBe(0);
+      expect(events.filter((e) => e.type === "warning").map((e) => e.message)).toEqual(["Entry-point classifier skipped: its price is not set."]);
+      expect(report.warnings).toEqual(["Entry-point classifier skipped: its price is not set."]);
+      expect(report.findings).toHaveLength(1);
+    });
+
+    test("without a cost required, an unpriced classifier runs as before", async () => {
+      const { classifier, asked } = counted();
+      const report = await runScan({ client: fakeClient(), classifier, indexer: fakeIndexer({ definitions }), limits: { maxHunters: 3 }, pricing });
+      expect(asked.count).toBeGreaterThan(0);
+      expect(report.warnings).toEqual([]);
+    });
+
+    test("with a sink, each classifier ask is an event at its price", async () => {
+      const { classifier, asked } = counted();
+      const events: UsageEvent[] = [];
+      await runScan({ client: fakeClient(), classifier, classifierPrice: 0.5, indexer: fakeIndexer({ definitions }), limits: { maxHunters: 3 }, pricing, requireCost: true, onUsage: (e) => events.push(e) });
+      const classify = events.filter((e) => e.role === "classifier");
+      expect(classify).toHaveLength(asked.count);
+      expect(asked.count).toBeGreaterThan(0);
+      for (const event of classify) expect(event).toMatchObject({ stage: "classify", inputTokens: 10, costUsd: 0.000005, costSource: "priced", status: "ok" });
+    });
   });
 });

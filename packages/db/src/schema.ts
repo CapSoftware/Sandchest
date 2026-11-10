@@ -252,12 +252,16 @@ export const scanUsage = pgTable(
     costUsd: numeric("cost_usd", { precision: 18, scale: 10 }).notNull(),
     /** `provider`: the model endpoint reported it. `priced`: computed from the price settings. `sandbox`: the sandbox host's meter. */
     costSource: text("cost_source", { enum: USAGE_COST_SOURCES }).notNull(),
+    /** The unit of work that can be run again: a workflow step, or one launch of an in-sandbox agent. A bill counts, per step, only the rows of its latest attempt. */
+    step: text("step").notNull().default("execute"),
     /** Which run of its step wrote the row, so a step that is run again can be told from the run before it. */
     attempt: integer("attempt").notNull().default(0),
     status: text("status", { enum: USAGE_STATUSES }).notNull().default("ok"),
+    /** Set by a writer that may send a row twice (a write tried again): a second row with the same key is not stored. */
+    key: uuid("key"),
     createdAt: createdAt(),
   },
-  (table) => [index("scan_usage_scan_idx").on(table.scanId)],
+  (table) => [index("scan_usage_scan_idx").on(table.scanId), uniqueIndex("scan_usage_key_unique").on(table.key)],
 );
 
 export const findingStatus = pgEnum("finding_status", ["open", "fixed", "dismissed", "verified"]);

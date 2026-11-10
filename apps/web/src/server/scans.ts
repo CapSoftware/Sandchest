@@ -16,6 +16,7 @@ import {
   markFixed,
   markStale,
   newerPrReview,
+  nextUsageAttempt,
   noteScanEvent,
   notificationRecipients,
   openFindings,
@@ -49,6 +50,7 @@ import {
   ScanRefusedError,
   storableLeads,
   ThreatModelSchema,
+  UnpricedCallError,
   type ChangedFile,
   type Finding,
   type ScanEvent,
@@ -64,7 +66,7 @@ import { config, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
-import { classifier, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
+import { classifier, classifierPrice, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
 import { readSandboxUsage, UsageLedger } from "./usage-ledger";
 
@@ -170,7 +172,7 @@ async function refuse(scan: LoadedScan, gate: Exclude<Gate, { ok: true }>): Prom
 }
 
 /** Clones, indexes and runs the engine; persists findings and the feed as they happen. */
-export async function executeScan(scanId: string): Promise<{ findings: number }> {
+export async function executeScan(scanId: string, run: { /** How many times the workflow has run this step, when it says. */ attempt?: number } = {}): Promise<{ findings: number }> {
   const scan = await requireScan(scanId);
   if (scan.status !== "running") return { findings: 0 };
   const installationId = scan.repo.org.installationId;
@@ -181,8 +183,11 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
   const { findings: affected, changes } = scan.kind === "fix_check" ? await affectedFindings(scan, installation) : { findings: [], changes: [] };
   if (scan.kind === "fix_check" && affected.length === 0) return { findings: 0 };
   const events = new EventWriter(db(), scan.id);
-  // Every model call and the sandbox, with what each cost. Records only; a failed write is logged and dropped.
-  const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows) });
+  // Every model call and the sandbox, with what each cost. Records only; a failed write is tried again, and rows never written are reported.
+  // A step the workflow runs again records under the next attempt, so a bill can count the latest one alone.
+  // One past anything already recorded, and never under the workflow's own count: a run whose rows were not written yet still gets a number of its own.
+  const attempt = Math.max(await nextUsageAttempt(db(), scan.id, "execute"), run.attempt ?? 0);
+  const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows), step: "execute", attempt });
   // A stage's name travels with it ("stage:hunt"), so the page can light its step on the track.
   const onEvent = (event: ScanEvent) =>
     events.write(event.type === "stage" ? `stage:${event.stage}` : event.type, event.type === "finding" ? `Found: ${event.finding.title}` : event.message);
@@ -219,7 +224,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     inventory = scan.kind === "pr_review" ? undefined : captureFromScan(scan.repo.id, headSha, scan.headSha === "HEAD" ? new Date(started) : scan.createdAt, indexer);
     const model = parseThreatModel(memory?.threatModel);
     // Setup already spent part of the step's time.
-    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, onUsage: ledger.onUsage, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };
+    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), classifierPrice: classifierPrice(), onEvent, onUsage: ledger.onUsage, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };
 
     if (scan.kind === "recon") {
       const result = await runRecon(common);
@@ -284,6 +289,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       await noticeScanPaused(scan).catch((failure: unknown) => console.error(`Scan-paused email for scan ${scan.id} failed: ${describeError(failure)}`));
       throw new ScanFinished("The model provider refused for quota reasons; the scan is paused.");
     }
+    if (error instanceof UnpricedCallError) throw new ScanFinished("A model call reported no cost, so the scan was stopped.");
     throw error;
   } finally {
     // A setup that failed has already destroyed its own workspace. The inventory is read before the indexer goes.
@@ -296,7 +302,11 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
       events.flush(),
       prepared?.workspace.destroy(),
       inventory?.done,
-      ledger.close(),
+      ledger.close().then(async ({ unwritten }) => {
+        if (unwritten === 0) return;
+        console.error(`Usage ledger for scan ${scan.id}: ${unwritten} rows not written`);
+        await captureException(Object.assign(new Error("Usage ledger rows were not written"), { name: "UsageLedgerUnwritten" }), { source: "billing", tags: { scan_id: scan.id, rows: unwritten }, handled: true });
+      }),
       sandbox && setComputeCost(db(), scan.id, sandbox.usd).catch((error: unknown) => console.error(`Compute cost for scan ${scan.id} failed: ${describeError(error)}`)),
     ]);
   }

@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { createDb, createScan, finishUsageCall, insertUsage, scanUsageRows, startUsageCall, upsertInstallation, usageBudgetState, type Db, type UsageBudgetState, type UsageCallResult } from "@sandchest/db";
+import { createDb, createScan, finishUsageCall, insertUsage, nextUsageAttempt, scanUsageRows, startUsageCall, upsertInstallation, usageBudgetState, type Db, type UsageBudgetState, type UsageCallResult } from "@sandchest/db";
 import { migrate } from "@sandchest/db/migrate";
 import { POST as route } from "@/app/api/gateway/v1/messages/route";
 import { resetConfig } from "@/server/config";
@@ -667,6 +667,64 @@ describe("gateway: the ledger in Postgres", () => {
       [0, "ok", "0.2500000000"],
       [4, "failed", "0.0000000000"],
     ]);
+  });
+
+  test("a row's step: execute unless given, and a gateway call's stage unless given", async () => {
+    if (!available) return;
+    const scanId = await runningScan();
+    // Written without the column at all, as rows from before it were.
+    await database.$client`insert into scan_usage (scan_id, kind, stage, cost_usd, cost_source) values (${scanId}, 'model', 'hunt', 0, 'priced')`;
+    await insertUsage(database, scanId, [
+      { kind: "model", stage: "hunt", role: "hunt", costUsd: 0, costSource: "priced" },
+      { kind: "model", stage: "hunt", role: "hunt", costUsd: 0, costSource: "priced", step: "verify-agent", attempt: 1 },
+    ]);
+    await startUsageCall(database, scanId, { stage: "variants", attempt: 2 });
+    await startUsageCall(database, scanId, { stage: "variants", step: "variants-2", attempt: 0 });
+    const rows = await scanUsageRows(database, scanId);
+    expect(rows.map((row) => [row.step, row.attempt])).toEqual([
+      ["execute", 0],
+      ["execute", 0],
+      ["verify-agent", 1],
+      ["variants", 2],
+      ["variants-2", 0],
+    ]);
+  });
+
+  test("a batch that is sent again is stored once: rows with a key already in the ledger are skipped", async () => {
+    if (!available) return;
+    const scanId = await runningScan();
+    const batch = [
+      { kind: "model" as const, stage: "hunt", role: "hunt", costUsd: 0.25, costSource: "provider" as const, key: "6f1c2a34-9b0d-4e5f-8a7b-0c1d2e3f4a5b" },
+      { kind: "model" as const, stage: "hunt", role: "hunt", costUsd: 0.5, costSource: "provider" as const, key: "7a2d3b45-0c1e-4f60-9b8c-1d2e3f4a5b6c" },
+    ];
+    await insertUsage(database, scanId, batch);
+    // The whole batch again, as after a write whose answer was lost, with one row that is new.
+    await insertUsage(database, scanId, [...batch, { kind: "model", stage: "hunt", role: "hunt", costUsd: 1, costSource: "provider", key: "8b3e4c56-1d2f-4071-ac9d-2e3f4a5b6c7d" }]);
+    // Rows without a key are never taken for each other.
+    await insertUsage(database, scanId, [{ kind: "model", stage: "hunt", role: "hunt", costUsd: 2, costSource: "provider" }]);
+    await insertUsage(database, scanId, [{ kind: "model", stage: "hunt", role: "hunt", costUsd: 2, costSource: "provider" }]);
+    const rows = await scanUsageRows(database, scanId);
+    expect(rows.map((row) => row.costUsd)).toEqual(["0.2500000000", "0.5000000000", "1.0000000000", "2.0000000000", "2.0000000000"]);
+    expect((await usageBudgetState(database, scanId, STALE_CALL_SECONDS))!.spentUsd).toBe("5.7500000000");
+  });
+
+  test("the next attempt of a step: 0 at first, then one past the highest of that step in that scan", async () => {
+    if (!available) return;
+    const scanId = await runningScan();
+    const other = await runningScan();
+    expect(await nextUsageAttempt(database, scanId, "execute")).toBe(0);
+    await insertUsage(database, scanId, [
+      { kind: "model", stage: "hunt", role: "hunt", costUsd: 0, costSource: "priced" },
+      { kind: "model", stage: "hunt", role: "hunt", costUsd: 0, costSource: "priced", attempt: 2 },
+      { kind: "model", stage: "hunt", role: "hunt", costUsd: 0, costSource: "priced", attempt: 1 },
+      { kind: "model", stage: "verify", role: "agent", costUsd: 0, costSource: "provider", step: "verify", attempt: 5 },
+    ]);
+    await insertUsage(database, other, [{ kind: "model", stage: "hunt", role: "hunt", costUsd: 0, costSource: "priced", attempt: 9 }]);
+    expect(await nextUsageAttempt(database, scanId, "execute")).toBe(3);
+    expect(await nextUsageAttempt(database, scanId, "verify")).toBe(6);
+    expect(await nextUsageAttempt(database, scanId, "variants")).toBe(0);
+    expect(await nextUsageAttempt(database, other, "execute")).toBe(10);
+    expect(await nextUsageAttempt(database, other, "verify")).toBe(0);
   });
 
   test("the budget state of a scan: its status, exact spend and the calls that need care", async () => {

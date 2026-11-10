@@ -3,7 +3,7 @@ import type { Db } from "@sandchest/db";
 import type { Mailer } from "@sandchest/email";
 import { createClassifier, createLlmClient, loadClassifierConfig, loadLlmConfig, type Classifier, type LlmClient } from "@sandchest/engine/llm";
 import { createMavenRepository, createOsvCatalog, type MavenRepository, type OsvCatalog } from "@sandchest/engine/advisories";
-import { createOsvClient, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
+import { createOsvClient, loadClassifierPrice, loadPricing, type OsvClient, type Pricing } from "@sandchest/engine/scan";
 import type { GitHubApp } from "@sandchest/github";
 import { db, setDb } from "./db";
 import { githubApp, setGithubApp } from "./github-app";
@@ -20,6 +20,7 @@ interface Services {
   catalog: OsvCatalog;
   maven: MavenRepository;
   pricing: Pricing | undefined;
+  classifierPrice: number | undefined;
   mailer: Mailer;
 }
 
@@ -63,4 +64,10 @@ export function maven(): MavenRepository {
 export function pricing(): Pricing | undefined {
   if (!("pricing" in instances)) instances.pricing = loadPricing();
   return instances.pricing;
+}
+
+/** The classifier's price in USD per million input tokens, when set. */
+export function classifierPrice(): number | undefined {
+  if (!("classifierPrice" in instances)) instances.classifierPrice = loadClassifierPrice();
+  return instances.classifierPrice;
 }

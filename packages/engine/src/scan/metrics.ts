@@ -51,12 +51,22 @@ export class UsageMeter {
 
 /** One model call, as it is billed: its role, the pipeline stage that made it, its tokens and what it cost. */
 export interface UsageEvent extends Usage {
-  role: Role;
+  role: Role | "classifier";
   /** Short machine name of the stage that made the call (`recon`, `hunt`, `review`…). Absent when not known. */
   stage?: string;
   costUsd: number;
   /** `provider`: the endpoint reported the cost. `priced`: computed from `LLM_PRICE_*`, or 0 when they are not set. */
   costSource: "provider" | "priced";
+  /** How the call ended. `unpriced`: it finished with no cost reported and none could be computed. */
+  status: "ok" | "failed" | "aborted" | "unpriced";
+}
+
+/** A call finished with no cost reported while every call must have one. Stops the scan; never retried. */
+export class UnpricedCallError extends Error {
+  override readonly name = "UnpricedCallError";
+  constructor() {
+    super("A model call finished with no cost reported");
+  }
 }
 
 /** Receives every model call a scan makes, once each, as it finishes. */
@@ -79,16 +89,27 @@ export function usageEvent(role: Role, stage: string | undefined, usage: Usage, 
     reasoningTokens: usage.reasoningTokens,
     costUsd: provider ? providerCostUsd : pricing ? priceUsage(usage, pricing) : 0,
     costSource: provider ? "provider" : "priced",
+    status: "ok",
   };
 }
 
 /**
- * Clients that report every call they finish to `onUsage`, tagged with a stage. With no sink, the
- * client itself for every stage, so a scan without one runs exactly as before. A sink that throws
- * never fails the call.
+ * Clients that report every call they make to `onUsage`, tagged with a stage, including calls that
+ * fail. With `requireCost`, a call that finishes with no cost reported and no price set is reported as
+ * `unpriced` and then throws `UnpricedCallError`. With neither a sink nor `requireCost`, the client
+ * itself for every stage, so a scan without them runs exactly as before. A sink that throws never
+ * fails the call.
  */
-export function stageClients(client: LlmClient, onUsage: UsageSink | undefined, pricing: Pricing | undefined): (stage?: string) => LlmClient {
-  if (!onUsage) return () => client;
+export function stageClients(client: LlmClient, onUsage: UsageSink | undefined, pricing: Pricing | undefined, options: { requireCost?: boolean } = {}): (stage?: string) => LlmClient {
+  const requireCost = options.requireCost === true;
+  if (!onUsage && !requireCost) return () => client;
+  const report = (event: UsageEvent) => {
+    try {
+      onUsage?.(event);
+    } catch {
+      // Recording usage never costs the scan a model call.
+    }
+  };
   const clients = new Map<string | undefined, LlmClient>();
   return (stage) => {
     let staged = clients.get(stage);
@@ -96,12 +117,20 @@ export function stageClients(client: LlmClient, onUsage: UsageSink | undefined, 
       staged = {
         config: client.config,
         async chat(request, onDelta) {
-          const result = await client.chat(request, onDelta);
+          let result: Awaited<ReturnType<LlmClient["chat"]>>;
           try {
-            onUsage(usageEvent(request.role, stage, result.usage, result.costUsd, pricing));
-          } catch {
-            // Recording usage never costs the scan a model call.
+            result = await client.chat(request, onDelta);
+          } catch (error) {
+            const none = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+            report({ role: request.role, ...(stage !== undefined && { stage }), ...none, costUsd: 0, costSource: "provider", status: request.signal?.aborted ? "aborted" : "failed" });
+            throw error;
           }
+          const event = usageEvent(request.role, stage, result.usage, result.costUsd, pricing);
+          if (requireCost && result.costUsd === undefined && !pricing) {
+            report({ ...event, status: "unpriced" });
+            throw new UnpricedCallError();
+          }
+          report(event);
           return result;
         },
       };

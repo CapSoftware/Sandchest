@@ -1,7 +1,9 @@
 /**
  * Writes a scan's usage ledger: every model call and its sandbox, with what
- * each cost. Records only. A write that fails is logged by error name and
- * dropped: the ledger never fails or holds up a scan.
+ * each cost. Records only. A write that fails is tried again, logged by error
+ * name, and kept for the next flush; every row carries a key, so a row sent
+ * twice is stored once. The scan's last flush reports how many rows were never
+ * written. The ledger never fails or holds up a scan.
  */
 import type { UsageInput } from "@sandchest/db";
 import type { UsageEvent } from "@sandchest/engine/scan";
@@ -17,21 +19,34 @@ export interface UsageLedgerOptions {
   batchSize?: number;
   /** Longest a row waits to be written while the scan runs. Default 5 s. */
   delayMs?: number;
+  /** The unit of work that can be run again, set on every row. Default `execute`. */
+  step?: string;
+  /** Which run of that step this is, set on every row. Default 0. */
+  attempt?: number;
   log?: (line: string) => void;
+  /** Waits between tries of a write. For tests. */
+  wait?: (ms: number) => Promise<void>;
 }
+
+/** Waits before the second and third try of a write within one flush. */
+const RETRY_DELAYS_MS = [100, 400];
 
 export class UsageLedger {
   private queue: UsageInput[] = [];
+  /** Batches taken from the queue and not yet written, oldest first. */
+  private batches: UsageInput[][] = [];
   private writing: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly batchSize: number;
   private readonly delayMs: number;
   private readonly log: (line: string) => void;
+  private readonly wait: (ms: number) => Promise<void>;
 
   constructor(private readonly options: UsageLedgerOptions) {
     this.batchSize = options.batchSize ?? 50;
     this.delayMs = options.delayMs ?? 5_000;
     this.log = options.log ?? ((line) => console.error(line));
+    this.wait = options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /** The engine's sink: one model call. */
@@ -46,6 +61,7 @@ export class UsageLedger {
       reasoningTokens: event.reasoningTokens,
       costUsd: event.costUsd,
       costSource: event.costSource,
+      status: event.status,
       createdAt: new Date(),
     });
   };
@@ -55,25 +71,28 @@ export class UsageLedger {
     this.add({ kind: "sandbox", stage: "sandbox", role: null, seconds: usage.seconds, costUsd: usage.usd, costSource: "sandbox", createdAt: new Date() });
   }
 
-  /** Writes everything queued so far, after any write already under way. Never rejects. */
+  /**
+   * Writes everything queued so far, after any write already under way. A batch that still fails
+   * after its retries goes back to the front of the queue, with any batch behind it, in order, for
+   * the next flush. Never rejects.
+   */
   flush(): Promise<void> {
     clearTimeout(this.timer);
     this.timer = undefined;
     const batch = this.queue;
     this.queue = [];
     if (batch.length === 0) return this.writing;
-    this.writing = this.writing.then(async () => {
-      try {
-        await this.options.write(batch);
-      } catch (error) {
-        this.log(`Usage ledger write for scan ${this.options.scanId} failed: ${describeError(error)}`);
-      }
-    });
+    this.batches.push(batch);
+    this.writing = this.writing.then(() => this.drain());
     return this.writing;
   }
 
-  /** The scan's last flush: waits at most `timeoutMs` for the writes, so a stuck database never holds the scan up. */
-  async close(timeoutMs = 10_000): Promise<void> {
+  /**
+   * The scan's last flush: waits at most `timeoutMs` for the writes, so a stuck database never holds
+   * the scan up. Resolves to the rows still not written, including any whose write was still under
+   * way at the limit. Never rejects.
+   */
+  async close(timeoutMs = 10_000): Promise<{ unwritten: number }> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<"timeout">((resolve) => (timer = setTimeout(() => resolve("timeout"), timeoutMs)));
     try {
@@ -81,10 +100,37 @@ export class UsageLedger {
     } finally {
       clearTimeout(timer);
     }
+    return { unwritten: this.queue.length + this.batches.reduce((sum, batch) => sum + batch.length, 0) };
+  }
+
+  /** Writes the waiting batches in order. On a failure, it and every batch behind it go back to the front of the queue. */
+  private async drain(): Promise<void> {
+    while (this.batches.length > 0) {
+      const batch = this.batches[0]!;
+      let failure: { error: unknown } | undefined;
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+        if (attempt > 0) await this.wait(RETRY_DELAYS_MS[attempt - 1]!);
+        try {
+          await this.options.write(batch);
+          failure = undefined;
+          break;
+        } catch (error) {
+          failure = { error };
+        }
+      }
+      if (failure) {
+        this.log(`Usage ledger write for scan ${this.options.scanId} failed: ${describeError(failure.error)}`);
+        this.queue = [...this.batches.flat(), ...this.queue];
+        this.batches = [];
+        return;
+      }
+      this.batches.shift();
+    }
   }
 
   private add(row: UsageInput): void {
-    this.queue.push(row);
+    // The key makes a write that is sent again harmless: a batch the database took before the connection failed is not stored twice.
+    this.queue.push({ ...row, step: this.options.step ?? "execute", attempt: this.options.attempt ?? 0, key: crypto.randomUUID() });
     if (this.queue.length >= this.batchSize) void this.flush();
     else this.timer ??= setTimeout(() => void this.flush(), this.delayMs);
   }

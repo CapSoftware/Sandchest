@@ -22,6 +22,7 @@ import { capChanges, changedLines, changeTool, relevantChanges, touchesChange, t
 import { planAssignments, planCoverage, planPrAssignments, planRoaming, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
 import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
 import { Limiter, UsageMeter, stageClients, type Pricing, type RoleUsage, type UsageSink } from "./metrics";
+import { meteredClassifier } from "./classifier-usage";
 import type { OsvClient } from "./osv";
 import { DEPENDENCY_CHECKS, renderAuthModel, renderHistoryForHunt, renderHistoryForSkeptic, renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
@@ -53,6 +54,8 @@ export interface ScanOptions {
   onEvent?: (event: ScanEvent) => void;
   /** Called once for every model call that finishes, with its role, stage, tokens and cost. Optional. */
   onUsage?: UsageSink;
+  /** Every model call must report a cost: one that does not stops the scan with `UnpricedCallError`. Default off. */
+  requireCost?: boolean;
   signal?: AbortSignal;
   /**
    * Opt-in dynamic validation: boot the app in the workspace and reproduce
@@ -69,6 +72,8 @@ export interface ScanOptions {
    * Absent: the stage is skipped and the scan runs on deterministic facts only.
    */
   classifier?: Classifier;
+  /** The classifier's price in USD per million input tokens, for its usage events. */
+  classifierPrice?: number;
   /**
    * The team's verdicts on this repository's earlier findings. Real ones point hunters at
    * variants; false-positive verdicts ground the skeptic. Omit for a first scan.
@@ -187,8 +192,12 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   // handler's authorization, so recon/proof/consistency work on frameworks the route detector can't
   // see. Best-effort — a classifier failure leaves the deterministic facts untouched. PR reviews skip it.
   let classifiedHandlers: Array<{ name: string; at: string; authz: number; authLevel?: string }> = [];
-  if (!change && options.classifier) {
-    const recovery = await classifyEntryPoints(indexer, options.classifier, routes, {
+  // When every call must report a cost, a classifier with no price is skipped: its calls could not be billed.
+  const unpricedClassifier = !change && !!options.classifier && options.requireCost === true && options.classifierPrice === undefined;
+  if (unpricedClassifier) emit({ type: "warning", message: "Entry-point classifier skipped: its price is not set." });
+  if (!change && options.classifier && !unpricedClassifier) {
+    const classifier = options.onUsage ? meteredClassifier(options.classifier, options.onUsage, options.classifierPrice) : options.classifier;
+    const recovery = await classifyEntryPoints(indexer, classifier, routes, {
       signal,
       onProgress: (message) => emit({ type: "progress", message }),
     }).catch((error) => {
@@ -244,7 +253,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const wrap = createWrap(tag);
   const read = new Set<string>();
   // Each stage's calls are reported under its name. Without a sink this is the client itself, everywhere.
-  const clientFor = stageClients(options.client, options.onUsage, options.pricing);
+  const clientFor = stageClients(options.client, options.onUsage, options.pricing, { requireCost: options.requireCost });
   const staged = <T extends { client: LlmClient }>(context: T, stage: string): T => (options.onUsage ? { ...context, client: clientFor(stage) } : context);
   const base: Omit<ScanContext, "threatModelText"> = {
     client: clientFor(),
@@ -530,7 +539,7 @@ export async function runRecon(options: Omit<ScanOptions, "threatModel" | "pullR
   emit({ type: "stage", stage: "recon", message: "Mapping the attack surface…" });
   const threatModel = await recon(
     {
-      client: stageClients(options.client, options.onUsage, options.pricing)("recon"),
+      client: stageClients(options.client, options.onUsage, options.pricing, { requireCost: options.requireCost })("recon"),
       indexer,
       tools: repoTools({ indexer, wrap, signals }),
       limiter: new Limiter(limits.concurrency),
@@ -614,6 +623,8 @@ export interface VerifyOptions {
   rechecks?: Array<string | undefined>;
   /** Called once for every model call that finishes (see `ScanOptions.onUsage`). Optional. */
   onUsage?: UsageSink;
+  /** See `ScanOptions.requireCost`. */
+  requireCost?: boolean;
 }
 
 export interface Verification {
@@ -634,7 +645,7 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
   const tag = `repo-data-${randomBytes(6).toString("hex")}`;
   const wrap = createWrap(tag);
   const signal = options.signal;
-  const clientFor = stageClients(options.client, options.onUsage, options.pricing);
+  const clientFor = stageClients(options.client, options.onUsage, options.pricing, { requireCost: options.requireCost });
   const ctx: ScanContext = {
     client: clientFor(),
     indexer: options.indexer,

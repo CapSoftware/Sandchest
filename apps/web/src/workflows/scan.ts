@@ -3,7 +3,7 @@
  * one step under the function time limit, so conversations — which contain
  * code — never enter workflow storage. Steps take and return ids only.
  */
-import { FatalError, sleep } from "workflow";
+import { FatalError, getStepMetadata, sleep } from "workflow";
 import { beginScan as begin, executeScan as execute, failScan as fail, publishScan as publish, ScanFinished } from "@/server/scans";
 import { captureException } from "@/server/sentry";
 
@@ -41,7 +41,8 @@ async function beginStep(scanId: string) {
 
 async function executeStep(scanId: string) {
   "use step";
-  return finishing("execute", scanId, () => execute(scanId));
+  // The run's number goes on its usage rows, so a bill can tell a run from the one before it.
+  return finishing("execute", scanId, () => execute(scanId, { attempt: getStepMetadata().attempt }));
 }
 // A scan that fails twice is unlikely to pass a third time, and each attempt costs a scan's worth of model calls.
 executeStep.maxRetries = 1;

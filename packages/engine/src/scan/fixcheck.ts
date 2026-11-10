@@ -31,6 +31,8 @@ export interface FixCheckOptions {
   signal?: AbortSignal;
   /** Called once for every model call that finishes (see `ScanOptions.onUsage`). Optional. */
   onUsage?: UsageSink;
+  /** See `ScanOptions.requireCost`. */
+  requireCost?: boolean;
 }
 
 export interface FixCheckResult {
@@ -78,6 +80,7 @@ export async function checkFixes(options: FixCheckOptions): Promise<{ results: F
       pricing: options.pricing,
       signal: options.signal,
       onUsage: options.onUsage,
+      requireCost: options.requireCost,
     });
   const first = await verify(located);
   const verdicts = [...first.results];

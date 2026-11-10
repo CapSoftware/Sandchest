@@ -1,13 +1,15 @@
 import { isIndexerDown } from "../indexer/client";
 import { LlmQuotaError } from "../llm";
+import { UnpricedCallError } from "./metrics";
 
 /**
  * Errors that end the whole scan: it was cancelled, the model endpoint
- * refused for billing or quota reasons, or the indexer is gone. Anything
- * else is contained to the agent or candidate it happened in.
+ * refused for billing or quota reasons, a call came back with no cost when
+ * one is required, or the indexer is gone. Anything else is contained to the
+ * agent or candidate it happened in.
  */
 export function isFatal(error: unknown, signal?: AbortSignal): boolean {
-  return signal?.aborted === true || error instanceof LlmQuotaError || isIndexerDown(error);
+  return signal?.aborted === true || error instanceof LlmQuotaError || error instanceof UnpricedCallError || isIndexerDown(error);
 }
 
 export function errorMessage(error: unknown): string {

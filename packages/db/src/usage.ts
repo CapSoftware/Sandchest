@@ -22,10 +22,14 @@ export interface UsageInput {
   /** USD. A number is stored to the column's 10 decimal places. */
   costUsd: number | string;
   costSource: UsageCostSource;
+  /** The unit of work that can be run again. Default `execute`. */
+  step?: string;
   /** Which run of its step made the call. Default 0. */
   attempt?: number;
   /** How the call ended. Default `ok`. */
   status?: UsageStatus;
+  /** A UUID naming this row. A row whose key is already stored is skipped, so a batch can be sent again safely. */
+  key?: string;
   /** When the call finished. Defaults to the time of the insert. */
   createdAt?: Date;
 }
@@ -33,7 +37,7 @@ export interface UsageInput {
 /** Rows per insert, well under Postgres's parameter limit. */
 const INSERT_BATCH = 500;
 
-/** Appends rows to a scan's ledger. */
+/** Appends rows to a scan's ledger. Rows with a `key` already in the ledger are skipped. */
 export async function insertUsage(database: Db, scanId: string, rows: UsageInput[]): Promise<void> {
   for (let i = 0; i < rows.length; i += INSERT_BATCH) {
     await database.insert(scanUsage).values(
@@ -49,11 +53,13 @@ export async function insertUsage(database: Db, scanId: string, rows: UsageInput
         seconds: row.seconds == null ? null : typeof row.seconds === "number" ? row.seconds.toFixed(3) : row.seconds,
         costUsd: typeof row.costUsd === "number" ? row.costUsd.toFixed(10) : row.costUsd,
         costSource: row.costSource,
+        step: row.step ?? "execute",
         attempt: row.attempt ?? 0,
         status: row.status ?? "ok",
+        key: row.key ?? null,
         ...(row.createdAt && { createdAt: row.createdAt }),
       })),
-    );
+    ).onConflictDoNothing({ target: scanUsage.key });
   }
 }
 
@@ -106,14 +112,24 @@ export async function setComputeCost(database: Db, scanId: string, usd: number):
 /**
  * Opens the row of a model call that is about to be made, as `started` with no cost, and returns its
  * id. `finishUsageCall` closes it. A row that stays `started` is a call whose outcome was never seen.
+ * Its step defaults to its stage: one agent launch per stage.
  */
-export async function startUsageCall(database: Db, scanId: string, call: { stage: string; role?: string | null; attempt?: number }): Promise<number> {
+export async function startUsageCall(database: Db, scanId: string, call: { stage: string; role?: string | null; step?: string; attempt?: number }): Promise<number> {
   const [row] = await database
     .insert(scanUsage)
-    .values({ scanId, kind: "model", stage: call.stage, role: call.role ?? null, attempt: call.attempt ?? 0, status: "started", costUsd: "0", costSource: "provider" })
+    .values({ scanId, kind: "model", stage: call.stage, role: call.role ?? null, step: call.step ?? call.stage, attempt: call.attempt ?? 0, status: "started", costUsd: "0", costSource: "provider" })
     .returning({ id: scanUsage.id });
   if (!row) throw new Error("The usage row was not written");
   return row.id;
+}
+
+/** The attempt a new run of `step` records under: 0 when the scan has no rows for it, otherwise one past the highest so far. One query. */
+export async function nextUsageAttempt(database: Db, scanId: string, step: string): Promise<number> {
+  const [row] = await database
+    .select({ next: sql<number>`coalesce(max(${scanUsage.attempt}) + 1, 0)::int` })
+    .from(scanUsage)
+    .where(and(eq(scanUsage.scanId, scanId), eq(scanUsage.step, step)));
+  return row?.next ?? 0;
 }
 
 export interface UsageCallResult {

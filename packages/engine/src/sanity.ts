@@ -19,6 +19,7 @@ import {
   type Message,
   type Tool,
 } from "./llm";
+import { loadPricing, stageClients, type UsageEvent } from "./scan/metrics";
 
 type Status = "pass" | "warn" | "fail";
 
@@ -171,7 +172,13 @@ const checks: Check[] = [
 ];
 
 async function main() {
-  const client = createLlmClient(loadLlmConfig(), { maxAttempts: 3 });
+  // Every call is counted, failed ones included, with what it cost.
+  const spent = { calls: 0, usd: 0 };
+  const sink = (event: UsageEvent) => {
+    spent.calls++;
+    spent.usd += event.costUsd;
+  };
+  const client = stageClients(createLlmClient(loadLlmConfig(), { maxAttempts: 3 }), sink, loadPricing())();
 
   let failed = false;
   for (const check of checks) {
@@ -186,6 +193,7 @@ async function main() {
     console.log(`${icon(outcome.status)} ${check.name.padEnd(15)} ${ms(performance.now() - started).padStart(7)}  ${outcome.note}`);
   }
 
+  console.log(`\n${spent.calls} model calls, $${spent.usd.toFixed(6)}`);
   console.log(failed ? "\nNo-go: a check failed." : "\nGo: all checks passed.");
   process.exit(failed ? 1 : 0);
 }
