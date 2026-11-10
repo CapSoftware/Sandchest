@@ -124,6 +124,50 @@ describe("diff", () => {
 
   test("handles files without a patch", () => {
     expect(parsePatch("logo.png", undefined).hunks).toEqual([]);
+    expect(parsePatch("logo.png", undefined).changed).toEqual([]);
+  });
+
+  test("changed ranges are the added lines only, as a zero-context diff shows them", () => {
+    const patch = "@@ -10,4 +10,5 @@ function a() {\n context\n-removed\n+added one\n+added two\n context\n@@ -40 +41,2 @@\n+tail\n end\n";
+    expect(parsePatch("a.ts", patch).changed).toEqual([[11, 12], [41, 41]]);
+    // A replacement is one run; context splits runs; a pure deletion and the no-newline marker add none.
+    const mixed = ["@@ -1,9 +1,9 @@", "-old a", "+new a", "-old b", "+new b", " same", "+inserted", " same", "-gone", " same", "\\ No newline at end of file", "@@ -20,3 +20,2 @@", " keep", "-drop", " keep"].join("\n");
+    expect(parsePatch("b.ts", mixed).changed).toEqual([[1, 2], [4, 4]]);
+    // A new file is one run.
+    expect(parsePatch("c.ts", "@@ -0,0 +1,3 @@\n+a\n+b\n+c").changed).toEqual([[1, 3]]);
+  });
+});
+
+describe("file contents", () => {
+  const later = () => new Date(Date.now() + 60 * 60_000).toISOString();
+  const encoded = (text: string) => Buffer.from(text).toString("base64").replace(/(.{60})/g, "$1\n");
+
+  test("reads a file's text at a commit, by path and ref, with the installation's token", async () => {
+    const text = "export const a = 1;\n// ünïcode\n".repeat(20);
+    const { fetch, requests } = scripted(json({ token: "inst", expires_at: later() }), json({ type: "file", size: Buffer.byteLength(text), encoding: "base64", content: encoded(text) }));
+    const installation = new GitHubApp(config, { fetch, ...quick }).installation(7);
+    expect(await installation.fileAt("acme/app", "src/api/a b#.ts", "abc123")).toBe(text);
+    expect(requests[1]!.url).toBe("https://api.github.com/repos/acme/app/contents/src/api/a%20b%23.ts?ref=abc123");
+    expect((requests[1]!.init.headers as Record<string, string>).authorization).toBe("Bearer inst");
+  });
+
+  test("no file, a directory, a link, a file over 1 MiB: undefined; anything else is thrown", async () => {
+    const { fetch } = scripted(
+      json({ token: "inst", expires_at: later() }),
+      json({ message: "Not Found" }, { status: 404 }),
+      json([{ type: "file", name: "a.ts" }]),
+      json({ type: "symlink", size: 10, target: "../x" }),
+      json({ type: "file", size: 1024 * 1024 + 1, encoding: "none", content: "" }),
+      json({ type: "file", size: 1024 * 1024, encoding: "base64", content: encoded("x") }),
+      json({ message: "Forbidden" }, { status: 403 }),
+    );
+    const installation = new GitHubApp(config, { fetch, ...quick }).installation(7);
+    expect(await installation.fileAt("acme/app", "gone.ts", "abc")).toBeUndefined();
+    expect(await installation.fileAt("acme/app", "src", "abc")).toBeUndefined();
+    expect(await installation.fileAt("acme/app", "link.ts", "abc")).toBeUndefined();
+    expect(await installation.fileAt("acme/app", "big.ts", "abc")).toBeUndefined();
+    expect(await installation.fileAt("acme/app", "edge.ts", "abc")).toBe("x");
+    await expect(installation.fileAt("acme/app", "secret.ts", "abc")).rejects.toThrow("403");
   });
 });
 

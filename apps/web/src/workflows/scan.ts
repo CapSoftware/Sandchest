@@ -2,7 +2,7 @@
  * One workflow per scan, in coarse steps (SPEC §10): the whole scan fits in
  * one step under the function time limit, so conversations — which contain
  * code — never enter workflow storage. Steps take and return ids only.
- * A deep scan on the slice engine outlives one step, so it runs as several
+ * A deep scan or PR review on the slice engine outlives one step, so it runs as several
  * (see `@/server/slice-scan`), each taking and returning ids and counts only.
  */
 import { FatalError, getStepMetadata, sleep } from "workflow";
@@ -61,7 +61,7 @@ async function publishStep(scanId: string) {
 }
 publishStep.maxRetries = 5;
 
-// ---- The slice engine (deep scans only) ---------------------------------------
+// ---- The slice engine (deep scans and PR reviews) -----------------------------
 
 /** Polls of a sandbox session, 20 s apart: 40 minutes, after which it is stopped and what it wrote is collected. */
 const SESSION_POLLS = 120;
@@ -69,8 +69,9 @@ const SESSION_POLLS = 120;
 /** Hunt, verify, variants, write-up, publish. On a failure the sandbox is cleaned up, then the error goes on to the fail step. */
 async function sliceSteps(scanId: string): Promise<void> {
   try {
-    const { selected } = await sliceHuntStep(scanId);
-    if (selected > 0 && (await sliceSession(scanId, "verify")) > 0) await sliceSession(scanId, "variants");
+    // A pull request has no variants session. A hunt result recorded by older code has no `variants`: a deep scan's.
+    const { selected, variants } = await sliceHuntStep(scanId);
+    if (selected > 0 && (await sliceSession(scanId, "verify")) > 0 && variants !== false) await sliceSession(scanId, "variants");
     await sliceWriteUpStep(scanId);
     await slicePublishStep(scanId);
   } catch (error) {

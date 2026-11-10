@@ -11,10 +11,12 @@ export interface FileDiff {
   commentable: Set<number>;
   /** Hunk ranges in the new file, `[start, end]` inclusive. */
   hunks: Array<[number, number]>;
+  /** Runs of added lines in the new file, `[start, end]` inclusive: the hunks a zero-context diff would show, pure deletions left out. */
+  changed: Array<[number, number]>;
 }
 
 export function parsePatch(path: string, patch: string | undefined): FileDiff {
-  const diff: FileDiff = { path, added: new Set(), commentable: new Set(), hunks: [] };
+  const diff: FileDiff = { path, added: new Set(), commentable: new Set(), hunks: [], changed: [] };
   if (!patch) return diff;
   let line = 0;
   let hunk: [number, number] | undefined;
@@ -29,6 +31,10 @@ export function parsePatch(path: string, patch: string | undefined): FileDiff {
     }
     if (!hunk) continue;
     if (text.startsWith("+")) {
+      // Removed lines take no new-file number, so a replacement's added lines stay one run.
+      const run = diff.changed.at(-1);
+      if (run && run[1] === line - 1) run[1] = line;
+      else diff.changed.push([line, line]);
       diff.added.add(line);
       diff.commentable.add(line);
       line++;

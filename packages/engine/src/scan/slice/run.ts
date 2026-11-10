@@ -10,7 +10,7 @@ import { Limiter, stageClients, type Pricing, type UsageSink } from "../metrics"
 import { findingsEntry, type FindingsEntry } from "./briefs";
 import { planBundle, type Bundle, type BundleMode, type PlanDeps } from "./bundle";
 import { cluster, dedupe, TOP_K, topK, type Candidate, type Cluster } from "./candidates";
-import { changeBundle, changeCandidates, changedServerPaths, parseDiffHunks, parseNumstat, type Range } from "./change";
+import { changeBundle, changeCandidates, changedServerPaths, changesFromDiff, type ChangedSource, type Range } from "./change";
 import { candidateDeviance, type DevDef, type DevianceDeps } from "./deviance";
 import { answerText, huntMessages, loadLines, parseHuntReply, type HuntMode, type HuntRow, type LinesOf } from "./hunt";
 import { addVotes, parseScoreReply, retryBatches, SCORE_SAMPLES, scoreBatches, scoreMessages, toScoreVotes, type ScoreBatch, type ScoreVotes } from "./score";
@@ -48,14 +48,19 @@ export type SlicePhase = "select" | "hunt" | "score";
 
 export interface SliceHuntOptions extends SliceRunOptions, PlanDeps {}
 
-export interface ChangeHuntOptions extends SliceRunOptions {
-  /** `git diff --numstat` of the change. */
-  numstat: string;
-  /** `git diff -U0` of the change. */
-  diff: string;
+/** The change as diff text, or already parsed (the same result for the same change). */
+export type ChangeHuntOptions = SliceRunOptions & {
   /** File text at the changed commit, or undefined when it cannot be read. */
   readFile: (file: string) => Promise<string | undefined>;
-}
+} & (
+    | {
+        /** `git diff --numstat` of the change. */
+        numstat: string;
+        /** `git diff -U0` of the change. */
+        diff: string;
+      }
+    | { changes: ChangedSource[] }
+  );
 
 export interface SliceHuntCounts {
   packets: number;
@@ -109,13 +114,12 @@ export function runChangeHunt(options: ChangeHuntOptions): Promise<SliceHuntResu
 
 async function changeHunt(options: ChangeHuntOptions, phases: PhaseClock): Promise<SliceHuntResult> {
   phases.start("select");
-  const hunks = parseDiffHunks(options.diff);
+  const changes = "changes" in options ? options.changes : changesFromDiff(options.numstat, options.diff);
   const files: Array<{ file: string; text: string; hunks: Range[] }> = [];
-  for (const file of changedServerPaths(parseNumstat(options.numstat))) {
-    const raw = hunks.get(file);
-    if (!raw?.length) continue;
-    const text = await options.readFile(file).catch(() => undefined);
-    if (text !== undefined) files.push({ file, text, hunks: raw });
+  for (const change of changes) {
+    if (!changedServerPaths([change]).length || !change.ranges.length) continue;
+    const text = await options.readFile(change.path).catch(() => undefined);
+    if (text !== undefined) files.push({ file: change.path, text, hunks: change.ranges });
   }
   options.signal?.throwIfAborted();
   const change = changeBundle(files);

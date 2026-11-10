@@ -570,7 +570,7 @@ function parseThreatModel(value: unknown): ThreatModel | undefined {
   return parsed.success && parsed.data.summary !== undefined ? (parsed.data as ThreatModel) : undefined;
 }
 
-function toChangedFile(file: PullFile): ChangedFile {
+export function toChangedFile(file: PullFile): ChangedFile {
   const status = file.status === "changed" || file.status === "unchanged" ? "modified" : file.status;
   return { path: file.filename, status, additions: file.additions, deletions: file.deletions, hunks: parsePatch(file.filename, file.patch).hunks, patch: file.patch };
 }

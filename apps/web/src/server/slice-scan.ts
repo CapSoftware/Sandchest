@@ -4,12 +4,15 @@
  * run by an agent inside the sandbox (started by one step, polled and collected by later ones), then the
  * write-up, persisted as a classic deep scan is.
  *
+ * A pull request review runs the same steps: its hunt reads the change from GitHub and opens a sandbox
+ * only for candidates to verify, it has no variants session, and it is persisted as a classic review is.
+ *
  * Steps take and return ids, enums and counts only. Between steps, the scan row's `stats.slice` holds ids
  * and numbers; the hunt result, the verdicts and the confirmed findings stay inside the sandbox, in a
  * directory only its own user can enter, so no code or finding text reaches workflow storage.
  */
 import { createHash } from "node:crypto";
-import { deepScanCredits } from "@sandchest/billing";
+import { deepScanCredits, prReviewCredits } from "@sandchest/billing";
 import { usdToMicroUsd } from "@sandchest/billing/usage";
 import {
   endStage,
@@ -31,7 +34,8 @@ import {
   type StageOutcome,
 } from "@sandchest/db";
 import { LlmQuotaError } from "@sandchest/engine/llm";
-import { adoptKnownFingerprints, DEFAULT_LIMITS, ScanRefusedError, slice, UnpricedCallError, type Finding, type ScanEvent, type UsageSink } from "@sandchest/engine/scan";
+import { adoptKnownFingerprints, changedLines, DEFAULT_LIMITS, relevantChanges, ScanRefusedError, slice, UnpricedCallError, type Finding, type ScanEvent, type ScanReport, type UsageSink } from "@sandchest/engine/scan";
+import { parsePatch, type Installation } from "@sandchest/github";
 import type { IndexerBinary, IndexerHandle } from "@sandchest/workspace";
 import { agentSandboxSetupScript, bulkReadFiles } from "@sandchest/workspace/boat";
 import { config } from "./config";
@@ -39,7 +43,7 @@ import { captureFromScan } from "./cves";
 import { gatewayEndpoint, mintGatewayToken, STALE_CALL_SECONDS } from "./gateway";
 import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
-import { indexerBinary, isEmptyRepoError, prepareWorkspace, publishScan, requireScan, ScanFinished, toFindingInput, type LoadedScan } from "./scans";
+import { indexerBinary, isEmptyRepoError, prepareWorkspace, publishScan, requireScan, ScanFinished, toChangedFile, toFindingInput, type LoadedScan } from "./scans";
 import { captureException } from "./sentry";
 import { db, githubApp, sliceClient, sliceRuntime } from "./services";
 import { SandboxGone, type SliceSandbox } from "./slice-runtime";
@@ -53,6 +57,8 @@ export const RELAY_PORT = 4100;
 const SESSION_TOKEN_TTL_SECONDS = 60 * 60;
 /** The hunt step stops spending after this long, under the function's 800 s limit. */
 const HUNT_BUDGET_MS = 12 * 60_000;
+/** A pull request's hunt is shorter: the sandbox opens after it, in the same step. */
+const CHANGE_HUNT_BUDGET_MS = 8 * 60_000;
 /** Write-ups still running this long into the write-up step are dropped, leaving time to persist. */
 const WRITEUP_BUDGET_MS = 10 * 60_000;
 const CLONE_TIMEOUT_MS = 4 * 60_000;
@@ -78,6 +84,8 @@ export interface SliceState {
   huntAttempt?: number;
   loc?: number;
   selected?: number;
+  /** A pull request's changed server files left out of the hunt: no patch, or no readable text. */
+  skipped?: number;
   sessions?: Partial<Record<SessionKind, SessionState>>;
   /** Findings written by the write-up; set once they are persisted. */
   findings?: number;
@@ -98,15 +106,17 @@ const CEILING_MESSAGE = "The scan reached its spending ceiling, so it was stoppe
 
 /**
  * Opens the sandbox (clone, indexer, agent CLI), runs the slice hunt and keeps its result in the sandbox.
- * A run of this step that is retried first deletes the sandbox the earlier run left. Returns how many
- * candidates were selected for verification.
+ * A pull request is hunted from its change on GitHub first, and gets a sandbox only when something was
+ * selected. A run of this step that is retried first deletes the sandbox the earlier run left. Returns how
+ * many candidates were selected for verification, and whether a variants session follows it.
  */
-export async function huntSlice(scanId: string, run: { attempt?: number; /** For tests. Default the engine's. */ passDelayMs?: number } = {}): Promise<{ selected: number }> {
+export async function huntSlice(scanId: string, run: { attempt?: number; /** For tests. Default the engine's. */ passDelayMs?: number } = {}): Promise<{ selected: number; variants: boolean }> {
   const scan = await requireScan(scanId);
-  if (scan.status !== "running") return { selected: 0 };
+  // A pull request is verified, never searched for variants.
+  const variants = scan.kind !== "pr_review";
+  if (scan.status !== "running") return { selected: 0, variants };
   const installationId = scan.repo.org.installationId;
   if (!installationId || !scan.repo.enabled) throw new ScanFinished("Repository is no longer installed");
-  const settings = config();
   const runtime = sliceRuntime();
   const installation = githubApp().installation(installationId);
 
@@ -118,42 +128,14 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
 
   const events = new EventWriter(db(), scan.id);
   const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows), step: "hunt", attempt });
-  const guard = await spendGuard(scan.id, ledger);
+  const guard = await spendGuard(scan, ledger);
   const started = Date.now();
   let inventory: ReturnType<typeof captureFromScan> | undefined;
   try {
     if (guard.signal.aborted) throw guard.signal.reason;
-    stages.start("sandbox", attempt);
+    if (scan.kind === "pr_review") return { selected: await huntChange({ scan, installation, attempt, stages, events, guard, passDelayMs: run.passDelayMs }), variants };
     events.write("stage:setup", "Starting a fresh sandbox and fetching the code…");
-    const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`;
-    let prepared: { sandbox: SliceSandbox; headSha: string; handle: IndexerHandle };
-    try {
-      let opened: SliceSandbox | undefined;
-      const ready = await prepareWorkspace({
-        open: async () => {
-          opened = await runtime.open({ ttlSeconds: SLICE_TTL_SECONDS, setupScript: agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [RELAY_PORT], dns: false }) });
-          // Recorded before anything else, so a later step can always find it and delete it.
-          try {
-            await saveSlice(scan.id, { sandboxId: opened.id, huntAttempt: attempt }, { replace: true });
-          } catch (error) {
-            await opened.destroy().catch(() => {});
-            throw error;
-          }
-          return opened;
-        },
-        clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
-        binary: indexerBinary(settings.workspace),
-        started,
-        onRetry: (message) => events.write("progress", message),
-      });
-      prepared = { sandbox: ready.workspace as SliceSandbox, headSha: ready.headSha, handle: ready.handle };
-      await runtime.prepareAgentSandbox(prepared.sandbox);
-      stages.end("sandbox", attempt, "ok");
-    } catch (error) {
-      stages.end("sandbox", attempt, "failed");
-      throw error;
-    }
-    const { sandbox, headSha, handle } = prepared;
+    const { sandbox, headSha, handle } = await openSandbox({ scan, installation, attempt, stages, events, started });
     const indexer = runtime.indexer(handle);
 
     // Lines of code as the classic engine measures them, for the charge and the size limit.
@@ -185,12 +167,146 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
     const selected = result.findings.length;
     await saveSlice(scan.id, { loc, selected });
     events.write("progress", selected === 0 ? "Nothing worth verifying turned up." : `${selected} ${selected === 1 ? "candidate goes" : "candidates go"} to verification.`);
-    return { selected };
+    return { selected, variants };
   } catch (error) {
     return await stopped(scan, error, guard.signal);
   } finally {
     await inventory?.read;
     await Promise.allSettled([events.flush(), inventory?.done, closeLedger(scan.id, ledger), stages.flush()]);
+  }
+}
+
+/**
+ * A pull request's hunt: its changed server files and their changed lines from GitHub, the file text at the
+ * head commit, the change-review hunt. With candidates, the sandbox is opened (as for a deep scan, at the
+ * head commit) and keeps the result; with none, no sandbox is made. The review that sets the charge goes
+ * in `stats.review`, built as the classic engine builds it.
+ */
+async function huntChange(input: {
+  scan: LoadedScan;
+  installation: Installation;
+  attempt: number;
+  stages: StageRecorder;
+  events: EventWriter;
+  guard: { onUsage: UsageSink; signal: AbortSignal };
+  passDelayMs?: number;
+}): Promise<number> {
+  const { scan, installation, attempt, stages, events, guard } = input;
+  if (!scan.prNumber) throw new ScanFinished("The review has no pull request");
+  // No sandbox from an earlier run is left to find.
+  await saveSlice(scan.id, { huntAttempt: attempt }, { replace: true });
+  events.write("stage:setup", "Reading the change…");
+  const signal = AbortSignal.any([guard.signal, AbortSignal.timeout(CHANGE_HUNT_BUDGET_MS)]);
+  const fetched = Date.now();
+  const pullFiles = await installation.pullFiles(scan.repo.fullName, scan.prNumber, signal);
+  const relevant = relevantChanges(pullFiles.map(toChangedFile));
+  const changes = pullFiles.map((file) => ({ path: file.filename, additions: file.additions, ranges: parsePatch(file.filename, file.patch).changed }));
+  // The files the hunt takes. One whose patch GitHub left out (too large) has no changed lines, and is not hunted.
+  const server = slice.changedServerPaths(changes);
+  const hunted = changes.filter((change) => change.ranges.length > 0 && server.includes(change.path)).map((change) => change.path);
+  const noPatch = server.filter((file) => !hunted.includes(file));
+  const texts = readChangedFiles(hunted, (file) => installation.fileAt(scan.repo.fullName, file, scan.headSha, signal));
+  if (server.length === 0) events.write("progress", "No server-side changes to review.");
+
+  const result = await slice.runChangeHunt({
+    client: sliceClient(),
+    changes,
+    readFile: (file) => texts.get(file) ?? Promise.resolve(undefined),
+    signal,
+    onUsage: guard.onUsage,
+    requireCost: true,
+    passDelayMs: input.passDelayMs,
+    onProgress: (message) => events.write("progress", message),
+    onPhase: (phase, startedAt, endedAt, ok) => {
+      // Reading the change from GitHub is part of choosing what to hunt.
+      stages.record(phase, attempt, new Date(phase === "select" ? Math.min(startedAt, fetched) : startedAt), new Date(endedAt), ok ? "ok" : "failed");
+      if (phase === "select" && ok && server.length > 0) events.write("stage:hunt", "Hunting through the changed code…");
+    },
+  });
+  if (guard.signal.aborted) throw guard.signal.reason;
+  const unread = (await Promise.all(hunted.map(async (file) => ((await texts.get(file)) === undefined ? file : undefined)))).filter((file) => file !== undefined);
+  const skippedFiles = [...noPatch, ...unread];
+  if (skippedFiles.length > 0) events.write("progress", `${skippedFiles.length} changed ${skippedFiles.length === 1 ? "file was" : "files were"} too large or could not be read, and ${skippedFiles.length === 1 ? "was" : "were"} left out.`);
+  // `files` and `changedLines` as the classic engine reports them, so the charge is the one `scanCredits` reserved.
+  const review: PrReview = { files: relevant.length, changedLines: changedLines(relevant), reviewedFiles: hunted.filter((file) => !unread.includes(file)), skippedFiles };
+  await saveStats(scan.id, { review });
+
+  const selected = result.findings.length;
+  if (selected === 0) {
+    await saveSlice(scan.id, { selected: 0, skipped: skippedFiles.length });
+    events.write("progress", "Nothing worth verifying turned up.");
+    return 0;
+  }
+  events.write("progress", `${selected} ${selected === 1 ? "candidate goes" : "candidates go"} to verification. Starting a sandbox…`);
+  const { sandbox } = await openSandbox({ scan, installation, attempt, stages, events, started: Date.now() });
+  await sandbox.writePrivateFiles([{ name: FILES.hunt, content: JSON.stringify({ findings: result.findings, candidates: result.candidates }) }]);
+  await saveSlice(scan.id, { selected, skipped: skippedFiles.length });
+  return selected;
+}
+
+/** Every changed file's text at the head commit, a few at a time; one that cannot be read is undefined. */
+function readChangedFiles(files: string[], read: (file: string) => Promise<string | undefined>, concurrency = 8): Map<string, Promise<string | undefined>> {
+  const texts = new Map<string, Promise<string | undefined>>();
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  for (const file of files) {
+    texts.set(
+      file,
+      (async () => {
+        if (active >= concurrency) await new Promise<void>((resolve) => waiting.push(resolve));
+        else active++;
+        try {
+          return await read(file);
+        } catch (error) {
+          console.error(`A changed file could not be read: ${describeError(error)}`);
+          return undefined;
+        } finally {
+          const next = waiting.shift();
+          if (next) next();
+          else active--;
+        }
+      })(),
+    );
+  }
+  return texts;
+}
+
+/**
+ * A fresh sandbox with the scan's commit checked out, the indexer running and the agent CLI installed,
+ * timed as the `sandbox` stage. Recorded in `stats.slice` the moment it exists.
+ */
+async function openSandbox(input: { scan: LoadedScan; installation: Installation; attempt: number; stages: StageRecorder; events: EventWriter; started: number }): Promise<{ sandbox: SliceSandbox; headSha: string; handle: IndexerHandle }> {
+  const { scan, installation, attempt, stages, events } = input;
+  const settings = config();
+  const runtime = sliceRuntime();
+  stages.start("sandbox", attempt);
+  const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`;
+  try {
+    let opened: SliceSandbox | undefined;
+    const ready = await prepareWorkspace({
+      open: async () => {
+        opened = await runtime.open({ ttlSeconds: SLICE_TTL_SECONDS, setupScript: agentSandboxSetupScript({ allowHosts: [], loopbackPorts: [RELAY_PORT], dns: false }) });
+        // Recorded before anything else, so a later step can always find it and delete it.
+        try {
+          await saveSlice(scan.id, { sandboxId: opened.id, huntAttempt: attempt }, { replace: true });
+        } catch (error) {
+          await opened.destroy().catch(() => {});
+          throw error;
+        }
+        return opened;
+      },
+      clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
+      binary: indexerBinary(settings.workspace),
+      started: input.started,
+      onRetry: (message) => events.write("progress", message),
+    });
+    const prepared = { sandbox: ready.workspace as SliceSandbox, headSha: ready.headSha, handle: ready.handle };
+    await runtime.prepareAgentSandbox(prepared.sandbox);
+    stages.end("sandbox", attempt, "ok");
+    return prepared;
+  } catch (error) {
+    stages.end("sandbox", attempt, "failed");
+    throw error;
   }
 }
 
@@ -210,7 +326,7 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
   const events = new EventWriter(db(), scan.id);
   let attempt: number | undefined;
   try {
-    const { ceilingMicroUsd, secret } = sliceLimits();
+    const { ceilingMicroUsd, secret } = sliceLimits(scan.kind);
     const budget = await usageBudgetState(db(), scan.id, STALE_CALL_SECONDS);
     if (budget && usdToMicroUsd(budget.spentUsd) >= ceilingMicroUsd) throw new SpendCeilingReached();
     const sandbox = await sliceRuntime().attach(requireSandboxId(state));
@@ -335,8 +451,9 @@ export async function collectSliceSession(scanId: string, kind: SessionKind, opt
 // ---- Write-up -----------------------------------------------------------------
 
 /**
- * Writes up what the agent confirmed, persists it as a classic deep scan does, records the sandbox's cost
- * and deletes the sandbox. With nothing confirmed, the scan completes with no findings the same way.
+ * Writes up what the agent confirmed, persists it as a classic deep scan or PR review does, records the
+ * sandbox's cost and deletes the sandbox. With nothing confirmed, the scan completes with no findings the
+ * same way. A pull request whose hunt selected nothing has no sandbox.
  */
 export async function writeUpSlice(scanId: string, run: { attempt?: number } = {}): Promise<{ findings: number }> {
   const scan = await requireScan(scanId);
@@ -350,17 +467,18 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
   const stages = new StageRecorder(scan.id);
   const events = new EventWriter(db(), scan.id);
   const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows), step: "writeup", attempt });
-  const guard = await spendGuard(scan.id, ledger);
+  const guard = await spendGuard(scan, ledger);
   const started = Date.now();
   stages.start("writeup", attempt, new Date(started));
   try {
     if (guard.signal.aborted) throw guard.signal.reason;
-    if (state.loc === undefined) throw new Error("The scan has no measured size");
+    const review = scan.kind === "pr_review" ? (scan.stats as { review?: PrReview } | null)?.review : undefined;
+    if (scan.kind === "pr_review" ? review === undefined : state.loc === undefined) throw new Error("The scan has no measured size");
     const runtime = sliceRuntime();
-    const sandbox = await runtime.attach(requireSandboxId(state));
+    const sandbox = scan.kind === "pr_review" && !state.sandboxId ? undefined : await runtime.attach(requireSandboxId(state));
     const sessions = state.sessions ?? {};
     let findings: Finding[] = [];
-    if ((sessions.verify?.real ?? 0) > 0) {
+    if (sandbox && (sessions.verify?.real ?? 0) > 0) {
       const hunt = await readHunt(sandbox);
       const verdicts = parseJson<slice.Verdict[]>(await sandbox.readPrivateFile(FILES.verify)) ?? [];
       const variants = sessions.variants?.collected
@@ -389,10 +507,10 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
       stages.end("writeup", attempt, "skipped");
     }
 
-    // As `executeScan` persists a deep scan.
+    // As `executeScan` persists a deep scan or a PR review.
     const recognised = adoptKnownFingerprints(findings, await knownFindings(db(), scan.repo.id));
     const { ids, newIds } = await upsertFindings(db(), scan.repo.id, scan, recognised.map(toFindingInput));
-    const credits = deepScanCredits(state.loc) ?? 0;
+    const credits = review ? (review.files ? prReviewCredits(review.changedLines) : 0) : (deepScanCredits(state.loc!) ?? 0);
     await closeLedger(scan.id, ledger);
     const model = (await scanUsageTotals(db(), scan.id)).filter((total) => total.kind === "model");
     await recordMetrics(db(), scan.id, {
@@ -406,8 +524,12 @@ export async function writeUpSlice(scanId: string, run: { attempt?: number } = {
       survivors: ids.length,
     });
     const written: SliceState = { ...state, findings: ids.length, written: true };
-    await updateScan(db(), scan.id, { credits, stats: { findingIds: ids, newFindingIds: newIds, loc: state.loc, slice: written } });
-    await markDeepScanned(db(), scan.repo.id, new Date(), state.loc);
+    if (review) {
+      await updateScan(db(), scan.id, { credits, stats: { findingIds: ids, newFindingIds: newIds, review, slice: written } });
+    } else {
+      await updateScan(db(), scan.id, { credits, stats: { findingIds: ids, newFindingIds: newIds, loc: state.loc, slice: written } });
+      await markDeepScanned(db(), scan.repo.id, new Date(), state.loc!);
+    }
     events.write("stage:done", summary(findings));
     // The scan's result is stored: a sandbox that will not go now is reported and left to its time-to-live, never a reason to fail the scan.
     await releaseSandbox(scan.id, written, sandbox).catch(async (error: unknown) => {
@@ -474,18 +596,21 @@ async function stopped(scan: LoadedScan, error: unknown, signal?: AbortSignal): 
   throw error;
 }
 
-function sliceLimits(): { ceilingMicroUsd: number; secret: string } {
+/** The scan's ceiling (a pull request's own, or a deep scan's) and the gateway secret. */
+function sliceLimits(kind: string): { ceilingMicroUsd: number; secret: string } {
   const settings = config();
-  if (!settings.SANDCHEST_SLICE_CEILING_USD || !settings.SANDCHEST_GATEWAY_SECRET) throw new ScanFinished("The slice engine is no longer configured.");
-  return { ceilingMicroUsd: usdToMicroUsd(settings.SANDCHEST_SLICE_CEILING_USD), secret: settings.SANDCHEST_GATEWAY_SECRET };
+  const ceiling = kind === "pr_review" ? settings.SANDCHEST_SLICE_CEILING_PR_USD : settings.SANDCHEST_SLICE_CEILING_USD;
+  if (!ceiling || !settings.SANDCHEST_GATEWAY_SECRET) throw new ScanFinished("The slice engine is no longer configured.");
+  return { ceilingMicroUsd: usdToMicroUsd(ceiling), secret: settings.SANDCHEST_GATEWAY_SECRET };
 }
 
 /**
  * The ledger's sink, adding each call's cost to what the scan had spent when the step began. At the
  * ceiling it aborts the returned signal, which the engine is given: no further call starts.
  */
-async function spendGuard(scanId: string, ledger: UsageLedger): Promise<{ onUsage: UsageSink; signal: AbortSignal }> {
-  const { ceilingMicroUsd } = sliceLimits();
+async function spendGuard(scan: { id: string; kind: string }, ledger: UsageLedger): Promise<{ onUsage: UsageSink; signal: AbortSignal }> {
+  const scanId = scan.id;
+  const { ceilingMicroUsd } = sliceLimits(scan.kind);
   const budget = await usageBudgetState(db(), scanId, STALE_CALL_SECONDS);
   let spent = budget ? usdToMicroUsd(budget.spentUsd) : 0;
   const controller = new AbortController();
@@ -642,6 +767,15 @@ function requireSandboxId(state: SliceState): string {
 export function sliceState(scan: { stats: unknown }): SliceState {
   const stats = scan.stats as { slice?: SliceState } | null;
   return stats?.slice ?? {};
+}
+
+/** A pull request's review, as the classic path stores it. */
+type PrReview = NonNullable<ScanReport["review"]>;
+
+/** Merges into the top level of `stats`. */
+async function saveStats(scanId: string, patch: Record<string, unknown>): Promise<void> {
+  const scan = await scanById(db(), scanId);
+  await updateScan(db(), scanId, { stats: { ...((scan?.stats ?? {}) as Record<string, unknown>), ...patch } });
 }
 
 /** Merges into `stats.slice` (or replaces it), keeping the rest of `stats`. One step writes at a time. */

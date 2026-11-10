@@ -35,6 +35,20 @@ export function parseNumstat(text: string): Array<{ path: string; additions: num
   return out;
 }
 
+/** A changed file, already parsed: what `parseNumstat` and `parseDiffHunks` give for it. */
+export interface ChangedSource {
+  path: string;
+  additions: number;
+  /** New-side ranges of the added or changed lines, never context lines. */
+  ranges: Range[];
+}
+
+/** The same files from `git diff --numstat` and `git diff -U0` text. */
+export function changesFromDiff(numstat: string, diff: string): ChangedSource[] {
+  const hunks = parseDiffHunks(diff);
+  return parseNumstat(numstat).map((f) => ({ path: f.path, additions: f.additions, ranges: hunks.get(f.path) ?? [] }));
+}
+
 /** Changed server files that add lines, in the given order (a .tsx/.jsx outside the Next.js server shapes never counts). */
 export const changedServerPaths = (files: Array<{ path: string; additions: number }>) => files.filter((f) => isServerFile(f.path) && f.additions > 0).map((f) => f.path);
 

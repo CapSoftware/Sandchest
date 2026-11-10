@@ -22,7 +22,7 @@ export { answerText, CHANGE_TASK, HUNT_LENSES, HUNT_TASK, huntMessages, huntTask
 export { addVotes, candidateLine, parseScoreReply, retryBatches, SCORE_CHUNK, SCORE_SAMPLES, SCORE_TASK, scoreBatches, scoreMessages, toScoreVotes, type ScoreBatch, type ScoreVotes } from "./score";
 export { cluster, dedupe, mergeInOrder, normKind, orderBy, spots, TOP_K, topK, votesOf, type Candidate, type Cluster, type DevianceInput } from "./candidates";
 export { candidateDeviance, devianceOf, topLevel, type DevDef, type DevianceDeps, type DevianceFeatures } from "./deviance";
-export { CHANGE_LIMITS, changeBundle, changeCandidates, changedServerPaths, changeRegions, inDiff, parseDiffHunks, parseNumstat, type ChangeBundle, type ChangeCandidate, type Range } from "./change";
+export { CHANGE_LIMITS, changeBundle, changeCandidates, changedServerPaths, changeRegions, changesFromDiff, inDiff, parseDiffHunks, parseNumstat, type ChangeBundle, type ChangeCandidate, type ChangedSource, type Range } from "./change";
 export { runChangeHunt, runSliceHunt, SLICE_RUN, type ChangeHuntOptions, type SliceHuntCounts, type SliceHuntOptions, type SliceHuntResult, type SlicePhase, type SliceRunOptions } from "./run";
 export { AGENT_PATHS, ATTACKER_NAMES, correctionText, findingsEntry, parseVerdicts, REFUTE_AGENT_PROMPT, REFUTE_BRIEF, sessionTexts, VARIANT_AGENT_PROMPT, VARIANT_BRIEF, type AgentSessionKind, type ConfirmedEntry, type FindingsEntry, type Verdict, type VerdictKind } from "./briefs";
 export { AGENT_CLI_VERSION, AGENT_MAX_TURNS, AGENT_PLACEHOLDER_TOKEN, AGENT_PROMPT_FLAG, agentCliArgs, agentCliEnv, agentCliInstall, agentCliPath, parseAgentStream, type AgentStreamSummary, type AgentStreamUsage } from "./agent-cli";

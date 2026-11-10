@@ -4,6 +4,14 @@
  */
 import { z } from "zod";
 
+/** A positive amount in USD, at most six digits each side of the point. */
+function usd() {
+  return z
+    .string()
+    .regex(/^\d{1,6}(\.\d{1,6})?$/, "a positive decimal amount in USD")
+    .refine((value) => Number(value) > 0, "a positive decimal amount in USD");
+}
+
 const Schema = z.object({
   DATABASE_URL: z.string().min(1),
   /**
@@ -85,14 +93,12 @@ const Schema = z.object({
   SANDCHEST_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   /** Which engine runs deep scans. Default `classic`. `slice` needs the boat workspace, the gateway and a ceiling. */
   SANDCHEST_ENGINE: z.enum(["classic", "slice"]).optional(),
-  /** GitHub account logins, comma-separated, any case. When set, only these accounts' deep scans use the slice engine. */
+  /** GitHub account logins, comma-separated, any case. When set, only these accounts' deep scans and PR reviews use the slice engine. */
   SANDCHEST_ENGINE_ORGS: z.string().max(2_000).optional(),
-  /** The most one slice scan may cost in model and sandbox spend, in USD. Required for the slice engine. */
-  SANDCHEST_SLICE_CEILING_USD: z
-    .string()
-    .regex(/^\d{1,6}(\.\d{1,6})?$/, "a positive decimal amount in USD")
-    .refine((value) => Number(value) > 0, "a positive decimal amount in USD")
-    .optional(),
+  /** The most one slice deep scan may cost in model and sandbox spend, in USD. Required for the slice engine. */
+  SANDCHEST_SLICE_CEILING_USD: usd().optional(),
+  /** The same for one slice pull request review. Required for the slice engine. */
+  SANDCHEST_SLICE_CEILING_PR_USD: usd().optional(),
   /** A JSON object of fields set on every model request of the slice engine's own calls (endpoint options). */
   LLM_SLICE_BODY: z.string().optional(),
 });
@@ -124,6 +130,7 @@ export function config(env: Record<string, string | undefined> = process.env): C
     if (workspace !== "boat") problems.push("SANDCHEST_WORKSPACE: the slice engine needs boat");
     if (!parsed.data.SANDCHEST_GATEWAY_SECRET) problems.push("SANDCHEST_GATEWAY_SECRET: is required by the slice engine");
     if (!parsed.data.SANDCHEST_SLICE_CEILING_USD) problems.push("SANDCHEST_SLICE_CEILING_USD: is required by the slice engine");
+    if (!parsed.data.SANDCHEST_SLICE_CEILING_PR_USD) problems.push("SANDCHEST_SLICE_CEILING_PR_USD: is required by the slice engine");
     const body = sliceBody(parsed.data.LLM_SLICE_BODY);
     if ("problem" in body) problems.push(`LLM_SLICE_BODY: ${body.problem}`);
     if (problems.length > 0) throw new Error(`Invalid server configuration:\n  ${problems.join("\n  ")}`);
@@ -134,11 +141,11 @@ export function config(env: Record<string, string | undefined> = process.env): C
 }
 
 /**
- * Which engine runs a scan. The slice engine runs deep scans only, when SANDCHEST_ENGINE is `slice`
- * and, if SANDCHEST_ENGINE_ORGS is set, only for the accounts it names. Everything else is classic.
+ * Which engine runs a scan. The slice engine runs deep scans and PR reviews only, when SANDCHEST_ENGINE
+ * is `slice` and, if SANDCHEST_ENGINE_ORGS is set, only for the accounts it names. Everything else is classic.
  */
 export function scanEngine(kind: string, githubLogin: string, settings: Config = config()): "classic" | "slice" {
-  if (settings.SANDCHEST_ENGINE !== "slice" || kind !== "deep") return "classic";
+  if (settings.SANDCHEST_ENGINE !== "slice" || (kind !== "deep" && kind !== "pr_review")) return "classic";
   if (settings.SANDCHEST_ENGINE_ORGS !== undefined) {
     const logins = settings.SANDCHEST_ENGINE_ORGS.split(",").map((login) => login.trim().toLowerCase());
     if (!logins.includes(githubLogin.toLowerCase())) return "classic";

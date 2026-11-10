@@ -94,6 +94,9 @@ export interface AccountProfile {
   avatar_url: string;
 }
 
+/** Larger files are not read through the contents API. */
+const MAX_FILE_BYTES = 1024 * 1024;
+
 export interface PullFile {
   filename: string;
   status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
@@ -164,6 +167,22 @@ export class Installation {
   /** Changed files with their patches. GitHub returns at most 3,000. */
   pullFiles(repo: string, number: number, signal?: AbortSignal): Promise<PullFile[]> {
     return githubPaginate(this.auth, `/repos/${repo}/pulls/${number}/files`, (page: PullFile[]) => page, { limit: 3_000, signal }, this.http);
+  }
+
+  /**
+   * A file's text at a commit, or undefined when there is no file at that path (a directory, a link and a
+   * submodule included) or it is over 1 MiB, the most the contents API returns inline.
+   */
+  async fileAt(repo: string, path: string, ref: string, signal?: AbortSignal): Promise<string | undefined> {
+    const url = `/repos/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`;
+    try {
+      const file = await githubRequest<{ type?: string; size?: number; encoding?: string; content?: string }>(this.auth, url, { signal }, this.http);
+      if (Array.isArray(file) || file.type !== "file" || file.encoding !== "base64" || (file.size ?? 0) > MAX_FILE_BYTES || file.content === undefined) return undefined;
+      return Buffer.from(file.content, "base64").toString("utf8");
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return undefined;
+      throw error;
+    }
   }
 
   /** Files changed between two commits (at most 300, GitHub's limit). */

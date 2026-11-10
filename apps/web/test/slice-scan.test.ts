@@ -22,9 +22,10 @@ import {
 import { migrate } from "@sandchest/db/migrate";
 import type { IndexerClient } from "@sandchest/engine/indexer";
 import type { ChatRequest, ChatResult, LlmClient } from "@sandchest/engine/llm";
+import { prReviewCredits } from "@sandchest/billing";
 import { slice } from "@sandchest/engine/scan";
-import type { GitHubApp } from "@sandchest/github";
-import type { ExecResult } from "@sandchest/workspace";
+import { GitHubError, type CheckConclusion, type CheckOutput, type GitHubApp, type PullFile, type ReviewComment } from "@sandchest/github";
+import type { ExecResult, RepoRef } from "@sandchest/workspace";
 import { setAutumn } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { verifyGatewayToken } from "@/server/gateway";
@@ -49,6 +50,7 @@ const ENV: Record<string, string> = {
   SANDCHEST_ENGINE: "slice",
   SANDCHEST_GATEWAY_SECRET: SECRET,
   SANDCHEST_SLICE_CEILING_USD: "0.5",
+  SANDCHEST_SLICE_CEILING_PR_USD: "0.3",
 };
 
 let admin: postgres.Sql | undefined;
@@ -237,6 +239,8 @@ class FakeSandbox implements SliceSandbox {
   gone = false;
   indexerStarts = 0;
   ttl: number[] = [];
+  /** The commit each clone checked out. */
+  cloned: Array<string | undefined> = [];
   /** When the current session's CLI ended, as its exit marker's time. */
   markerAt: number | undefined;
 
@@ -245,8 +249,9 @@ class FakeSandbox implements SliceSandbox {
   private check(): void {
     if (this.gone || this.destroyed) throw new Error("sandbox is gone");
   }
-  async clone(): Promise<void> {
+  async clone(source: RepoRef): Promise<void> {
     this.check();
+    this.cloned.push(source.ref);
   }
   async exec(cmd: string[]): Promise<ExecResult> {
     this.check();
@@ -379,12 +384,48 @@ const runtime: SliceRuntime = {
 
 // ---- Fake GitHub --------------------------------------------------------------
 
+/** A pull request's files, the text GitHub returns for each at a commit, and what was posted. */
+const gh = {
+  files: [] as PullFile[],
+  contents: { ...REPO } as Record<string, string | undefined>,
+  /** Reading these fails as GitHub failing would. */
+  failing: new Set<string>(),
+  reads: [] as string[],
+  checks: [] as Array<{ conclusion: CheckConclusion; output: CheckOutput }>,
+  reviews: [] as Array<{ commitId: string; comments: ReviewComment[] }>,
+  comments: [] as string[],
+  reset() {
+    this.files = [];
+    this.contents = { ...REPO };
+    this.failing = new Set();
+    this.reads = [];
+    this.checks = [];
+    this.reviews = [];
+    this.comments = [];
+  },
+};
+
 const fakeGithub = {
   installation: () => ({
     cloneToken: async () => "token",
-    pullFiles: async () => [],
+    pullFiles: async () => gh.files,
+    fileAt: async (_repo: string, path: string, ref: string) => {
+      gh.reads.push(`${path}@${ref}`);
+      if (gh.failing.has(path)) throw new GitHubError("GitHub 502: Bad Gateway", 502, true);
+      return gh.contents[path];
+    },
     createCheckRun: async () => 1,
-    completeCheckRun: async () => {},
+    completeCheckRun: async (_repo: string, _id: number, conclusion: CheckConclusion, output: CheckOutput) => {
+      gh.checks.push({ conclusion, output });
+    },
+    createReview: async (_repo: string, _number: number, input: { commitId: string; comments: ReviewComment[] }) => {
+      gh.reviews.push(input);
+    },
+    comment: async (_repo: string, _number: number, body: string) => {
+      gh.comments.push(body);
+      return 1000 + gh.comments.length;
+    },
+    editComment: async () => {},
   }),
 } as unknown as GitHubApp;
 
@@ -436,6 +477,7 @@ const it = (name: string, fn: () => Promise<void>) =>
     async () => {
       if (!available) return console.warn(`skipped (no Postgres): ${name}`);
       host.reset();
+      gh.reset();
       model.costUsd = 0.001;
       model.empty = false;
       model.requests = [];
@@ -465,8 +507,8 @@ async function session(scanId: string, kind: SessionKind): Promise<number> {
 async function runSlice(scanId: string): Promise<Error | undefined> {
   expect(await beginScan(scanId)).toEqual({ state: "running", engine: "slice" });
   try {
-    const { selected } = await huntSlice(scanId, { passDelayMs: 0 });
-    if (selected > 0 && (await session(scanId, "verify")) > 0) await session(scanId, "variants");
+    const { selected, variants } = await huntSlice(scanId, { passDelayMs: 0 });
+    if (selected > 0 && (await session(scanId, "verify")) > 0 && variants !== false) await session(scanId, "variants");
     await writeUpSlice(scanId);
     await publishSlice(scanId);
     return undefined;
@@ -727,6 +769,213 @@ describe.skipIf(!available)("slice engine, step by step", () => {
   });
 });
 
+// ---- Pull request reviews -------------------------------------------------------
+
+/** `getProject` rewritten: new lines 2-3 added, 1 and 4 context. */
+const PATCH = ["@@ -1,3 +1,4 @@", " export async function getProject(req) {", "-  return db.projects.find(req.params.id);", "+  const id = req.params.id;", "+  return db.projects.find(id);", " }"].join("\n");
+const pullFile = (filename: string, additions: number, deletions: number, patch?: string): PullFile => ({ filename, status: "modified", additions, deletions, ...(patch !== undefined && { patch }) });
+const CHANGED = pullFile(PATH, 2, 1, PATCH);
+const DOCS = pullFile("README.md", 1, 0, "@@ -1 +1 @@\n-acme\n+acme/app");
+
+/** The review the classic engine would report for these files: security-relevant files and their lines. */
+const classicReview = (files: PullFile[], reviewedFiles: string[], skippedFiles: string[] = []) => {
+  const relevant = files.filter((f) => f.filename !== "README.md");
+  return { files: relevant.length, changedLines: relevant.reduce((n, f) => n + f.additions + f.deletions, 0), reviewedFiles, skippedFiles };
+};
+const sandboxCount = () => host.sandboxes.size;
+
+describe.skipIf(!available)("pull request reviews on the slice engine", () => {
+  it("a change with no server-side code: no model call, no sandbox, charged and stored as the classic review", async () => {
+    gh.files = [DOCS, pullFile("src/components/Button.tsx", 4, 1, "@@ -1 +1,4 @@\n-a\n+b\n+c\n+d\n+e")];
+    const scanId = await newScan("pr_review");
+    const credits = autumn.get(orgId).credits;
+    const sandboxes = sandboxCount();
+    expect(await runSlice(scanId)).toBeUndefined();
+
+    const scan = (await scanById(database, scanId))!;
+    expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: prReviewCredits(5) });
+    expect(autumn.get(orgId).credits).toBe(credits - prReviewCredits(5));
+    const stats = scan.stats as Record<string, unknown>;
+    expect(stats).toMatchObject({ findingIds: [], newFindingIds: [], review: classicReview(gh.files, []) });
+    expect(model.requests).toHaveLength(0);
+    expect(gh.reads).toEqual([]);
+    expect(sandboxCount()).toBe(sandboxes);
+    expect(gh.checks.at(-1)!.conclusion).toBe("success");
+    expect(gh.comments).toHaveLength(1);
+    expect((await stagesOf(scanId)).map((s) => [s.stage, s.outcome])).toEqual([
+      ["queue", "ok"],
+      ["select", "ok"],
+      ["hunt", "ok"],
+      ["score", "ok"],
+      ["writeup", "skipped"],
+      ["publish", "ok"],
+    ]);
+  });
+
+  it("a hunt that selects nothing opens no sandbox, and completes the Check through the existing publish", async () => {
+    model.empty = true;
+    gh.files = [CHANGED, DOCS];
+    const scanId = await newScan("pr_review");
+    const sandboxes = sandboxCount();
+    expect(await runSlice(scanId)).toBeUndefined();
+
+    expect(sandboxCount()).toBe(sandboxes);
+    expect(host.started).toEqual([]);
+    const scan = (await scanById(database, scanId))!;
+    expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: prReviewCredits(3) });
+    expect(scan.credits).toBe(scan.creditsReserved!);
+    const stats = scan.stats as { findingIds: string[]; newFindingIds: string[]; review: unknown; slice: Record<string, unknown> };
+    expect(stats.findingIds).toEqual([]);
+    expect(stats.newFindingIds).toEqual([]);
+    expect(stats.review).toEqual(classicReview(gh.files, [PATH]));
+    expect(stats.slice).toMatchObject({ selected: 0, skipped: 0, written: true, findings: 0 });
+    expect(stats.slice.sandboxId).toBeUndefined();
+    // Only the changed server file was read, at the PR's head commit, and hunted with the change-review task.
+    expect(gh.reads).toEqual([`${PATH}@${scan.headSha}`]);
+    expect(model.requests.filter((r) => contentOf(r).includes(slice.CHANGE_TASK))).toHaveLength(3);
+    const rows = await usage(scanId);
+    expect(rows.every((r) => r.kind === "model" && r.step === "hunt")).toBe(true);
+    expect(gh.checks.at(-1)!.conclusion).toBe("success");
+    expect(gh.reviews).toEqual([]);
+    const stages = await stagesOf(scanId);
+    expect(stages.map((s) => [s.stage, s.outcome])).toEqual([
+      ["queue", "ok"],
+      ["select", "ok"],
+      ["hunt", "ok"],
+      ["score", "ok"],
+      ["writeup", "skipped"],
+      ["publish", "ok"],
+    ]);
+    expect((await database.query.scanMetrics.findFirst({ where: (m, { eq }) => eq(m.scanId, scanId) }))!).toMatchObject({ candidates: 0, survivors: 0 });
+  });
+
+  it("a confirmed finding: one sandbox at the head commit, verified, written up, posted inline; no variants", async () => {
+    gh.files = [CHANGED, DOCS];
+    const scanId = await newScan("pr_review");
+    const credits = autumn.get(orgId).credits;
+    const sandboxes = sandboxCount();
+    expect(await runSlice(scanId)).toBeUndefined();
+
+    expect(sandboxCount()).toBe(sandboxes + 1);
+    const scan = (await scanById(database, scanId))!;
+    expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: prReviewCredits(3) });
+    expect(autumn.get(orgId).credits).toBe(credits - prReviewCredits(3));
+    const stats = scan.stats as { findingIds: string[]; newFindingIds: string[]; review: unknown; inline: number; slice: Record<string, unknown> };
+    expect(stats.review).toEqual(classicReview(gh.files, [PATH]));
+    // Only the candidate on a changed line was selected (line 17 is outside the change).
+    expect(stats.slice).toMatchObject({ selected: 1, written: true, findings: 1 });
+    expect(stats.findingIds).toHaveLength(1);
+    expect(stats.newFindingIds).toEqual(stats.findingIds);
+    const [finding] = await database.query.findings.findMany({ where: (f, { inArray }) => inArray(f.id, stats.findingIds) });
+    expect((finding!.attackPath as Array<{ file: string; line: number }>).at(-1)).toMatchObject({ file: PATH, line: 3 });
+
+    const sandbox = await sandboxOf(scanId);
+    expect(sandbox.cloned).toEqual([scan.headSha]);
+    expect(sandbox.destroyed).toBe(true);
+    expect(host.started.map((s) => s.kind)).toEqual(["refute"]);
+    // The verification's token carries the PR's own ceiling.
+    const [verify] = [...host.sessions.values()].filter((s) => s.kind === "refute").slice(-1);
+    expect(verifyGatewayToken(verify!.token, SECRET)).toMatchObject({ scanId, stage: "verify", ceilingMicroUsd: 300_000 });
+
+    // Inline on the changed line, and the Check completed.
+    expect(stats.inline).toBe(1);
+    expect(gh.reviews).toHaveLength(1);
+    expect(gh.reviews[0]!.commitId).toBe(scan.headSha);
+    expect(gh.reviews[0]!.comments.map((c) => [c.path, c.line, c.side])).toEqual([[PATH, 3, "RIGHT"]]);
+    expect(gh.checks.at(-1)!.conclusion).not.toBe("neutral");
+    expect(gh.comments).toHaveLength(1);
+
+    const rows = await usage(scanId);
+    const by = (step: string) => rows.filter((r) => r.step === step);
+    expect(by("hunt").filter((r) => r.kind === "model").every((r) => r.attempt === 0 && ["slice_hunt", "slice_score"].includes(r.stage))).toBe(true);
+    expect(by("verify").map((r) => [r.role, r.attempt])).toEqual([["agent", 0]]);
+    expect(by("variants")).toEqual([]);
+    expect(by("writeup").length).toBeGreaterThan(0);
+    expect(rows.filter((r) => r.kind === "sandbox").map((r) => [r.step, r.attempt, r.key])).toEqual([["hunt", 0, sandboxKey(sandbox.id)]]);
+    expect((await database.query.scanMetrics.findFirst({ where: (m, { eq }) => eq(m.scanId, scanId) }))!).toMatchObject({ candidates: 1, survivors: 1, computeCostUsd: "0.250000" });
+
+    const stages = await stagesOf(scanId);
+    expect(stages.map((s) => [s.stage, s.attempt, s.ended, s.outcome])).toEqual([
+      ["queue", 0, true, "ok"],
+      ["select", 0, true, "ok"],
+      ["hunt", 0, true, "ok"],
+      ["score", 0, true, "ok"],
+      ["sandbox", 0, true, "ok"],
+      ["verify", 0, true, "ok"],
+      ["writeup", 0, true, "ok"],
+      ["publish", 0, true, "ok"],
+    ]);
+    // The feed names steps the PR track knows, and no code.
+    const feed = await eventsSince(database, scanId, 0, 500);
+    const known = new Set(TRACKS.pr_review!.map((s) => s.key));
+    for (const event of feed.filter((e) => e.type.startsWith("stage:"))) expect(known.has(stepOf(event.type)!)).toBe(true);
+    for (const event of feed) expect(event.message).not.toContain("req.params");
+  });
+
+  it("a verification that fails fails the review: neutral Check, nothing charged, sandbox deleted", async () => {
+    host.outcome.refute = "fail";
+    gh.files = [CHANGED];
+    const scanId = await newScan("pr_review");
+    const credits = autumn.get(orgId).credits;
+    const error = await runSlice(scanId);
+    expect(error?.message).toContain("verification in the sandbox stopped");
+    expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+    expect(autumn.get(orgId).credits).toBe(credits);
+    expect(gh.checks.at(-1)!.conclusion).toBe("neutral");
+    expect((await sandboxOf(scanId)).destroyed).toBe(true);
+    expect((await usage(scanId)).filter((r) => r.kind === "sandbox")).toHaveLength(1);
+    const stages = await stagesOf(scanId);
+    expect(stages.find((s) => s.stage === "verify")).toMatchObject({ ended: true, outcome: "failed" });
+    expect(stages.every((s) => s.ended)).toBe(true);
+  });
+
+  it("the PR's own ceiling stops the hunt where a deep scan's would not", async () => {
+    // Three hunt calls: under the deep ceiling, over the PR's.
+    model.costUsd = 0.15;
+    gh.files = [CHANGED];
+    const scanId = await newScan("pr_review");
+    const sandboxes = sandboxCount();
+    const error = await runSlice(scanId);
+    expect(error).toBeInstanceOf(ScanFinished);
+    expect(error!.message).toContain("spending ceiling");
+    expect(model.requests.filter((r) => contentOf(r).includes(slice.SCORE_TASK))).toHaveLength(0);
+    expect(sandboxCount()).toBe(sandboxes);
+    expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+    expect(gh.checks.at(-1)!.conclusion).toBe("neutral");
+    // Cleaning up a review that never made a sandbox does nothing more.
+    await cleanUpSlice(scanId);
+    expect((await usage(scanId)).filter((r) => r.kind === "sandbox")).toHaveLength(0);
+
+    // What it spent is past the PR's ceiling and short of the deep scan's.
+    const spent = (await usage(scanId)).reduce((sum, r) => sum + Number(r.costUsd), 0);
+    expect(spent).toBeGreaterThanOrEqual(0.3);
+    expect(spent).toBeLessThan(0.5);
+  });
+
+  it("a file GitHub gave no patch for, or whose text cannot be read, is left out and counted", async () => {
+    model.empty = true;
+    gh.contents["src/api/flaky.ts"] = "export const a = 1;\n";
+    gh.failing.add("src/api/flaky.ts");
+    gh.files = [CHANGED, pullFile("src/api/big.ts", 900, 10), pullFile("src/api/flaky.ts", 1, 0, "@@ -0,0 +1 @@\n+x"), pullFile("src/api/gone.ts", 1, 0, "@@ -0,0 +1 @@\n+y")];
+    const scanId = await newScan("pr_review");
+    expect(await runSlice(scanId)).toBeUndefined();
+
+    const scan = (await scanById(database, scanId))!;
+    // The charge counts every security-relevant line, as the classic review does, the files left out included.
+    expect(scan).toMatchObject({ status: "completed", credits: prReviewCredits(914) });
+    expect(scan.credits).toBe(2);
+    expect(scan.credits).toBe(scan.creditsReserved!);
+    const stats = scan.stats as { review: unknown; slice: Record<string, unknown> };
+    expect(stats.review).toEqual(classicReview(gh.files, [PATH], ["src/api/big.ts", "src/api/flaky.ts", "src/api/gone.ts"]));
+    expect(stats.slice).toMatchObject({ skipped: 3, selected: 0 });
+    expect(gh.reads.map((r) => r.split("@")[0]).sort()).toEqual(["src/api/flaky.ts", "src/api/gone.ts", PATH]);
+    for (const r of model.requests) for (const file of ["big.ts", "flaky.ts", "gone.ts"]) expect(contentOf(r)).not.toContain(file);
+    expect(model.requests.length).toBeGreaterThan(0);
+    const feed = await eventsSince(database, scanId, 0, 500);
+    expect(feed.some((e) => e.message === "3 changed files were too large or could not be read, and were left out.")).toBe(true);
+  });
+});
+
 describe.skipIf(!available)("which engine a scan runs on", () => {
   const settle = (scanId: string) => failScan(scanId, "test over");
 
@@ -737,20 +986,26 @@ describe.skipIf(!available)("which engine a scan runs on", () => {
       const scanId = await newScan();
       expect(await beginScan(scanId)).toEqual({ state: "running" });
       await settle(scanId);
+      const review = await newScan("pr_review");
+      expect(await beginScan(review)).toEqual({ state: "running" });
+      await settle(review);
     } finally {
       process.env.SANDCHEST_ENGINE = "slice";
       resetConfig();
     }
   });
 
-  it("classic for every kind but deep", async () => {
-    for (const kind of ["pr_review", "recon", "fix_check"] as const) {
+  it("classic for every kind but deep scans and PR reviews", async () => {
+    for (const kind of ["recon", "fix_check"] as const) {
       const scanId = await newScan(kind);
       const begun = await beginScan(scanId);
       expect(begun).toEqual({ state: begun.state });
       expect(begun.engine).toBeUndefined();
       await settle(scanId);
     }
+    const review = await newScan("pr_review");
+    expect(await beginScan(review)).toEqual({ state: "running", engine: "slice" });
+    await settle(review);
   });
 
   it("classic for accounts SANDCHEST_ENGINE_ORGS does not name", async () => {
@@ -760,11 +1015,17 @@ describe.skipIf(!available)("which engine a scan runs on", () => {
       const outside = await newScan();
       expect(await beginScan(outside)).toEqual({ state: "running" });
       await settle(outside);
+      const outsideReview = await newScan("pr_review");
+      expect(await beginScan(outsideReview)).toEqual({ state: "running" });
+      await settle(outsideReview);
       process.env.SANDCHEST_ENGINE_ORGS = "Example-Org,ACME";
       resetConfig();
       const inside = await newScan();
       expect(await beginScan(inside)).toEqual({ state: "running", engine: "slice" });
       await settle(inside);
+      const insideReview = await newScan("pr_review");
+      expect(await beginScan(insideReview)).toEqual({ state: "running", engine: "slice" });
+      await settle(insideReview);
     } finally {
       delete process.env.SANDCHEST_ENGINE_ORGS;
       resetConfig();

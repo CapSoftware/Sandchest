@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { LlmError, LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient } from "../src/llm";
 import { UnpricedCallError, type UsageEvent } from "../src/scan/metrics";
-import { CHANGE_TASK, HUNT_TASK, runChangeHunt, runSliceHunt, SCORE_TASK, type DevDef, type SliceHuntOptions } from "../src/scan/slice";
+import { CHANGE_TASK, changesFromDiff, HUNT_TASK, runChangeHunt, runSliceHunt, SCORE_TASK, type DevDef, type SliceHuntOptions } from "../src/scan/slice";
 
 const fill = (n: number, line: (i: number) => string) => Array.from({ length: n }, (_, i) => line(i + 1)).join("\n") + "\n";
 
@@ -343,6 +343,32 @@ describe("runChangeHunt", () => {
     ]);
     expect(out.findings[0]!.title).toHaveLength(100);
     expect(out.candidates[0]!.merged).toHaveLength(2);
+  });
+
+  test("already-parsed changes give the same result, with the same calls, as the diff text", async () => {
+    const textOf = async (f: string) => (f === FILE ? text : undefined);
+    const fromDiff = fakeClient({ hunt, scores });
+    const viaDiff = await runChangeHunt({ client: fromDiff, numstat, diff, readFile: textOf, passDelayMs: 0 });
+    const parsed = fakeClient({ hunt, scores });
+    const reads: string[] = [];
+    const changes = [
+      { path: FILE, additions: 12, ranges: [[10, 21]] as Array<[number, number]> },
+      { path: "web/components/Button.tsx", additions: 5, ranges: [[1, 5]] as Array<[number, number]> },
+      { path: "src/api/old.ts", additions: 0, ranges: [] },
+    ];
+    const viaChanges = await runChangeHunt({ client: parsed, changes, readFile: async (f) => (reads.push(f), textOf(f)), passDelayMs: 0 });
+    expect(viaChanges).toEqual(viaDiff);
+    expect(viaChanges.counts.selected).toBe(1);
+    expect(parsed.requests.map(contentOf)).toEqual(fromDiff.requests.map(contentOf));
+    expect(new Set(reads)).toEqual(new Set([FILE]));
+    // The diff text parses to the same changes, binary files left out.
+    expect(changesFromDiff(numstat, diff)).toEqual([changes[0]!, { ...changes[1]!, ranges: [] }, changes[2]!]);
+
+    // A server file with no changed ranges, or whose text cannot be read, is left out as it is from diff text.
+    const none = fakeClient({ hunt, scores });
+    const out = await runChangeHunt({ client: none, changes: [{ path: FILE, additions: 3, ranges: [] }, { path: "src/api/gone.ts", additions: 2, ranges: [[1, 2]] }], readFile: textOf, passDelayMs: 0 });
+    expect(none.requests).toHaveLength(0);
+    expect(out.bundle).toEqual({ files: 0, lines: 0, mode: "change" });
   });
 
   test("a change with no server code makes no call", async () => {
