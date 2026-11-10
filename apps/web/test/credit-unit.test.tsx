@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CREDIT_UNIT } from "@sandchest/billing";
 import { money, usd } from "@/lib/format";
-import { fundsFor, lastScanCost, notEnoughBalance, perCredit, PR_REVIEW_COST, PR_REVIEW_PRICE, PRICE_NOTE, PRICES, sizePrice, usagePrice } from "@/lib/pricing";
+import { fundsFor, notEnoughBalance, perCredit, PR_REVIEW_COST, PR_REVIEW_PRICE, PRICE_NOTE, PRICES, sizePrice, usageCost, usageHold } from "@/lib/pricing";
 import { resetConfig } from "@/server/config";
 
 const cent = CREDIT_UNIT === "cent";
@@ -66,10 +66,11 @@ describe("the price list in words", () => {
 
   test("what a scan costs, before it starts and when the balance is short", () => {
     const hold = cent ? 300 : 3;
-    expect(usagePrice(hold)).toBe("You pay for what the scan uses, never more than $3.00.");
+    expect(usageCost()).toBe("A deep scan usually costs well under $1.");
+    expect(usageCost(cent ? 55 : 1)).toBe(cent ? "The last scan of this repository cost $0.55." : "The last scan of this repository cost $1.00.");
+    expect(usageHold(hold)).toBe("You pay for what it uses. $3.00 of your balance is set aside while it runs.");
     expect(sizePrice(cent ? 500 : 5, false)).toBe("This scan costs $5.00.");
-    expect(sizePrice(cent ? 2_500 : 25, true)).toBe("You pay by the repository’s size, never more than $25.00.");
-    expect(lastScanCost(cent ? 48 : 1)).toBe(says("The last scan of this repository cost $1.00.", "The last scan of this repository cost $0.48."));
+    expect(sizePrice(cent ? 2_500 : 25, true)).toBe("Priced by the repository’s size once it is measured. $25.00 of your balance is set aside until then.");
     expect(notEnoughBalance("scan", hold, "acme", cent ? 200 : 2)).toBe("Not enough balance: this scan needs $3.00 available, acme has $2.00.");
     // What the account holds is said only when it is known and really is less.
     expect(notEnoughBalance("review", hold, "acme")).toBe("Not enough balance: this review needs $3.00 available.");

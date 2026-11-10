@@ -1,5 +1,5 @@
 /**
- * What a scan billed from its usage is quoted before it starts (the most it holds, as "never more than"), the fast option
+ * What a scan billed from its usage is quoted before it starts (what it usually costs or last cost, and what is set aside while it runs), the fast option
  * offered only where everything it needs is true, and every other account quoted exactly as before.
  */
 import { describe, expect, test } from "bun:test";
@@ -144,20 +144,20 @@ describe("quoted before a scan", () => {
     // Not sized yet: the top tier is held, and said as the most it can cost.
     expect((Dig({ repo: { ...repo, loc: null }, plan: { planId: "standard", credits: 5_000 } }) as ReactElement<Record<string, unknown>>).props).toMatchObject({
       confirm: "Start scan",
-      note: `You pay by the repository’s size, never more than ${money(2_500)}.`,
+      note: `Priced by the repository’s size once it is measured. ${money(2_500)} of your balance is set aside until then.`,
     });
 
     const billed = props({ planId: "standard", credits: 1_000, usage: { hold: 150 } });
     expect(billed).toMatchObject({ confirm: "Start scan", need: 150 });
-    expect(billed.note).toBe(`You pay for what the scan uses, never more than ${money(150)}.`);
+    expect(billed.note).toBe(`A deep scan usually costs well under $1. You pay for what it uses. ${money(150)} of your balance is set aside while it runs.`);
     expect("fast" in billed).toBe(false);
     // What its last scan was charged, when that is known.
-    expect(props({ planId: "standard", credits: 1_000, usage: { hold: 150 } }, 48).note).toBe(`You pay for what the scan uses, never more than ${money(150)}. The last scan of this repository cost ${money(48)}.`);
+    expect(props({ planId: "standard", credits: 1_000, usage: { hold: 150 } }, 48).note).toBe(`The last scan of this repository cost ${money(48)}. You pay for what it uses. ${money(150)} of your balance is set aside while it runs.`);
     // The old wording is gone: no credits, no "up to".
     for (const said of [tiered, billed]) expect(`${String(said.confirm)} ${String(said.note)}`).not.toMatch(/credit|up to/i);
 
     const withFast = props({ planId: "standard", credits: 1_000, usage: { hold: 150, fast: 450 } });
-    expect(withFast.fast).toEqual({ confirm: "Start fast scan", need: 450, note: `You pay for what the scan uses, never more than ${money(450)}.` });
+    expect(withFast.fast).toEqual({ confirm: "Start fast scan", need: 450, note: `You pay for what it uses. ${money(450)} of your balance is set aside while it runs.` });
 
     // Not enough for the hold: the key adds funds first, whatever the repository's size.
     const short = props({ planId: "standard", credits: 100, usage: { hold: 150 } });

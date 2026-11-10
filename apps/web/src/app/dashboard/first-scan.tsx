@@ -9,7 +9,7 @@ import { linesLabel } from "@/lib/briefing";
 import { money } from "@/lib/format";
 import type { FirstScan as FirstScanData, FirstScanRepo } from "@/lib/first-scan";
 import { PHOSPHORS, swatch } from "@/lib/hacker";
-import { lastScanCost, notEnoughBalance, sizePrice, usagePrice } from "@/lib/pricing";
+import { notEnoughBalance, sizePrice, usageCost, usageHold } from "@/lib/pricing";
 import { dig, type DigOutcome } from "@/server/dig-action";
 import "./first-scan.css";
 
@@ -208,8 +208,8 @@ export function ScanChooser({ data, first = false, onClose, onBusy }: { data: Fi
                 </>
               ) : (
                 <>
-                  {repo.usage ? usagePrice(repo.credits) : sizePrice(repo.credits, repo.unsized)}
-                  {repo.lastCost !== undefined && <span className="first-scan-fine">{lastScanCost(repo.lastCost)}</span>}
+                  {repo.usage ? usageCost(repo.lastCost) : sizePrice(repo.credits, repo.unsized)}
+                  {repo.usage && <span className="first-scan-fine">{usageHold(repo.credits)}</span>}
                   {many && <span className="first-scan-fine">Paid from {org.login}’s balance.</span>}
                 </>
               )}
