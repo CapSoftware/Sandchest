@@ -223,3 +223,21 @@ fn counts_rust_and_ruby_as_languages() {
     let languages: Vec<&str> = overview["languages"].as_array().unwrap().iter().map(|l| l["language"].as_str().unwrap()).collect();
     assert!(languages.contains(&"rust") && languages.contains(&"ruby"), "{languages:?}");
 }
+
+#[test]
+fn next_routes_exported_as_values_and_middleware() {
+    let mut next = routes_of("nextjs");
+    next.sort();
+    assert_eq!(
+        next,
+        [
+            ("ANY", "/* (middleware)", "proxy"),
+            ("GET", "/api/auth/[...nextauth]", "handler"),
+            ("GET", "/api/items", "GET"),
+            ("GET", "/api/v1/[...route]", "handler"),
+            ("POST", "/api/auth/[...nextauth]", "handler"),
+            ("POST", "/api/v1/[...route]", "handler"),
+        ]
+        .map(|(m, p, h)| (m.to_owned(), p.to_owned(), h.to_owned()))
+    );
+}

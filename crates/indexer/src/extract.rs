@@ -746,6 +746,18 @@ impl<'a> Extractor<'a> {
                 let directive = start.starts_with("\"use server\"") || start.starts_with("'use server'");
                 let app_route = stem == "route" && (path.starts_with("app/") || path.contains("/app/"));
                 let pages_api = path.contains("pages/api/");
+                // Next.js middleware (`proxy` from Next 16): runs before every matched request.
+                let middleware = matches!(stem, "middleware" | "proxy")
+                    && !path.contains("node_modules")
+                    && (self.src.contains("NextResponse") || self.src.contains("matcher"));
+                if middleware {
+                    let line = ["export default", "export async function", "export function", "export const config"]
+                        .iter()
+                        .filter_map(|needle| self.src.find(needle))
+                        .min()
+                        .map_or(1, |offset| self.src[..offset].bytes().filter(|&b| b == b'\n').count() as u32 + 1);
+                    self.facts.routes.push(Route { method: "ANY".to_owned(), path: "/* (middleware)".to_owned(), line, handlers: vec![stem.to_owned()], framework: "nextjs" });
+                }
                 if !(directive || app_route || pages_api) {
                     return;
                 }
@@ -774,6 +786,18 @@ impl<'a> Extractor<'a> {
                             handlers: vec![symbol.name.clone()],
                             framework,
                         });
+                    }
+                }
+                // Route methods exported as values, not functions: `export const GET = handler`,
+                // `export { handler as GET, handler as POST }`, `export const { GET, POST } = handlers`.
+                // Common with catch-all routes that hand every method to one framework app or auth library.
+                if app_route {
+                    let seen: Vec<String> = self.facts.routes.iter().filter(|r| r.framework == "nextjs").map(|r| r.method.clone()).collect();
+                    for (method, line, local) in exported_route_methods(self.src) {
+                        if seen.contains(&method) {
+                            continue;
+                        }
+                        self.facts.routes.push(Route { method, path: next_route_path(path, "app/"), line, handlers: vec![local], framework: "nextjs" });
                     }
                 }
             }
@@ -1149,6 +1173,44 @@ fn join_route(prefix: &str, path: &str) -> String {
 }
 
 /// `src/app/(shop)/invoices/[id]/route.ts` → `/invoices/[id]`.
+static HTTP_METHOD_EXPORTS: std::sync::LazyLock<[regex::Regex; 3]> = std::sync::LazyLock::new(|| {
+    [
+        regex::Regex::new(r"(?m)^[ \t]*export\s+(?:const|let|var)\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b(?:\s*(?::[^=]*)?=\s*([A-Za-z_$][\w$]*)\s*;?\s*$)?").unwrap(),
+        regex::Regex::new(r"(?m)^[ \t]*export\s+(?:const|let|var)\s*\{([^}]*)\}\s*=").unwrap(),
+        regex::Regex::new(r"(?m)^[ \t]*export\s*\{([^}]*)\}").unwrap(),
+    ]
+});
+
+/// HTTP methods a Next.js route file exports as values: (method, line of the export, local name it is
+/// bound to, so the handler resolves to that definition).
+fn exported_route_methods(src: &str) -> Vec<(String, u32, String)> {
+    const METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+    let line_of = |offset: usize| src[..offset].bytes().filter(|&b| b == b'\n').count() as u32 + 1;
+    let mut out: Vec<(String, u32, String)> = Vec::new();
+    let mut add = |name: &str, line: u32, local: &str| {
+        if METHODS.contains(&name) && !out.iter().any(|(m, _, _)| m == name) {
+            out.push((name.to_owned(), line, local.to_owned()));
+        }
+    };
+    for cap in HTTP_METHOD_EXPORTS[0].captures_iter(src) {
+        let m = cap.get(1).unwrap();
+        // `export const GET = handler` resolves to `handler`; an inline function is its own definition.
+        add(m.as_str(), line_of(m.start()), cap.get(2).map_or(m.as_str(), |l| l.as_str()));
+    }
+    for re in &HTTP_METHOD_EXPORTS[1..] {
+        for cap in re.captures_iter(src) {
+            let list = cap.get(1).unwrap();
+            for item in list.as_str().split(',') {
+                // `handler as GET` exports GET; in destructuring the bound name is last: `{ handlers: { GET, POST } }`.
+                let name = item.rsplit(" as ").next().unwrap_or(item).rsplit(':').next().unwrap_or("").trim().trim_start_matches('{').trim();
+                let local = item.split(" as ").next().unwrap_or(item).trim();
+                add(name, line_of(list.start()), if item.contains(" as ") { local } else { name });
+            }
+        }
+    }
+    out
+}
+
 fn next_route_path(path: &str, root: &str) -> String {
     let start = path.find(root).map_or(0, |i| i + root.len());
     let without_root = &path[start..];
