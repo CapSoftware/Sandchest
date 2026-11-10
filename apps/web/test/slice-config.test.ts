@@ -1,6 +1,6 @@
 /** The slice engine's settings: off unless chosen, and then only with everything it needs. */
 import { describe, expect, test } from "bun:test";
-import { config, fastModeAvailable, fastRunAllowed, scanEngine, sliceBody } from "@/server/config";
+import { config, fastModeAvailable, fastRunAllowed, scanEngine, sliceBody, scanWorkspace } from "@/server/config";
 
 const base = {
   DATABASE_URL: "postgres://sandchest@postgres/sandchest",
@@ -63,6 +63,21 @@ describe("slice engine settings", () => {
     // Classic scans keep their own workspace: the slice engine opens Boat sandboxes itself.
     for (const workspace of ["sandbox", "local", "boat"]) expect(config({ ...slice, SANDCHEST_WORKSPACE: workspace })).toMatchObject({ SANDCHEST_ENGINE: "slice", workspace });
     expect(config({ ...slice, SANDCHEST_WORKSPACE: undefined, VERCEL: "1" }).workspace).toBe("sandbox");
+  });
+
+  test("an account on the slice engine runs all its work on Boat; every other account stays on the configured workspace", () => {
+    // Unset or classic: the configured workspace for everyone, as today.
+    for (const workspace of ["sandbox", "local", "boat"] as const) {
+      expect(scanWorkspace("acme", config({ ...base, ...boat, SANDCHEST_WORKSPACE: workspace }))).toBe(workspace);
+      expect(scanWorkspace("acme", config({ ...base, ...boat, SANDCHEST_WORKSPACE: workspace, SANDCHEST_ENGINE: "classic" }))).toBe(workspace);
+    }
+    // Slice for a list of accounts: Boat for them only, whatever the kind of work.
+    const listed = config({ ...slice, SANDCHEST_WORKSPACE: "sandbox", SANDCHEST_ENGINE_ORGS: "Acme, other" });
+    expect(scanWorkspace("acme", listed)).toBe("boat");
+    expect(scanWorkspace("OTHER", listed)).toBe("boat");
+    expect(scanWorkspace("someone-else", listed)).toBe("sandbox");
+    // Slice for everyone: Boat for everyone.
+    expect(scanWorkspace("someone-else", config({ ...slice, SANDCHEST_WORKSPACE: "sandbox" }))).toBe("boat");
   });
 
   test("each ceiling is a positive decimal", () => {

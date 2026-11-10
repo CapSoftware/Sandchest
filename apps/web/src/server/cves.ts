@@ -42,7 +42,7 @@ import { createIndexerClient, type IndexerClient } from "@sandchest/engine/index
 import { GitHubError } from "@sandchest/github";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
-import { config } from "./config";
+import { config, scanWorkspace } from "./config";
 import { describeError } from "./log";
 import { indexerBinary, openBoatWorkspace, prepareWorkspace } from "./scans";
 import { catalog, db, githubApp, maven } from "./services";
@@ -152,15 +152,17 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
     const settings = config();
     const startedAt = new Date();
     const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${repo.fullName}.git`;
+    // The configured workspace, or Boat for an account the slice engine is on.
+    const where = scanWorkspace(repo.org.githubLogin, settings);
     const { workspace, headSha, handle } = await prepareWorkspace({
       open: () =>
-        settings.workspace === "sandbox"
+        where === "sandbox"
           ? SandboxWorkspace.create({ timeoutMs: REFRESH_BUDGET_MS })
-          : settings.workspace === "boat"
+          : where === "boat"
             ? openBoatWorkspace(REFRESH_BUDGET_MS)
             : LocalWorkspace.create(),
       clone: async (ready) => ready.clone({ url, ref: "HEAD" }, { depth: 1, token, timeoutMs: 4 * 60_000 }),
-      binary: indexerBinary(settings.workspace),
+      binary: indexerBinary(where),
       started: startedAt.getTime(),
       onRetry: () => {},
     });

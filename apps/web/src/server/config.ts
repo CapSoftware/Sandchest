@@ -160,12 +160,24 @@ export function config(env: Record<string, string | undefined> = process.env): C
  * is `slice` and, if SANDCHEST_ENGINE_ORGS is set, only for the accounts it names. Everything else is classic.
  */
 export function scanEngine(kind: string, githubLogin: string, settings: Config = config()): "classic" | "slice" {
-  if (settings.SANDCHEST_ENGINE !== "slice" || (kind !== "deep" && kind !== "pr_review")) return "classic";
-  if (settings.SANDCHEST_ENGINE_ORGS !== undefined) {
-    const logins = settings.SANDCHEST_ENGINE_ORGS.split(",").map((login) => login.trim().toLowerCase());
-    if (!logins.includes(githubLogin.toLowerCase())) return "classic";
-  }
+  if ((kind !== "deep" && kind !== "pr_review") || !onSliceEngine(githubLogin, settings)) return "classic";
   return "slice";
+}
+
+/** Whether the slice engine is on for an account: SANDCHEST_ENGINE is `slice` and, if SANDCHEST_ENGINE_ORGS is set, it names the account. */
+function onSliceEngine(githubLogin: string, settings: Config): boolean {
+  if (settings.SANDCHEST_ENGINE !== "slice") return false;
+  if (settings.SANDCHEST_ENGINE_ORGS === undefined) return true;
+  return settings.SANDCHEST_ENGINE_ORGS.split(",").map((login) => login.trim().toLowerCase()).includes(githubLogin.toLowerCase());
+}
+
+/**
+ * Where an account's classic work runs (recon, fix checks, CVE reads, and scans the slice engine does not
+ * take): Boat for an account the slice engine is on, so everything of that account is on one sandbox host;
+ * the configured workspace for every other account.
+ */
+export function scanWorkspace(githubLogin: string, settings: Config = config()): Config["workspace"] {
+  return onSliceEngine(githubLogin, settings) ? "boat" : settings.workspace;
 }
 
 /**

@@ -62,7 +62,7 @@ import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { BoatWorkspace } from "@sandchest/workspace/boat";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
-import { config, scanEngine, type Config } from "./config";
+import { config, scanEngine, scanWorkspace, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
@@ -198,15 +198,17 @@ export async function executeScan(scanId: string, run: { /** How many times the 
   const started = Date.now();
   const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`;
   // "HEAD" is the remote's default branch as it is now, so a renamed default branch still clones.
+  // The configured workspace, or Boat for an account the slice engine is on.
+  const where = scanWorkspace(scan.repo.org.githubLogin, settings);
   const preparing = prepareWorkspace({
     open: () =>
-      settings.workspace === "sandbox"
+      where === "sandbox"
         ? SandboxWorkspace.create({ timeoutMs: SCAN_BUDGET_MS + 5 * 60_000 })
-        : settings.workspace === "boat"
+        : where === "boat"
           ? openBoatWorkspace(SCAN_BUDGET_MS + 5 * 60_000)
           : LocalWorkspace.create(),
     clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
-    binary: indexerBinary(settings.workspace),
+    binary: indexerBinary(where),
     started,
     onRetry: (message) => onEvent({ type: "progress", message }),
   });
