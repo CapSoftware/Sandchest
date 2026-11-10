@@ -56,8 +56,9 @@ import { checkResult, GitHubError, notReviewed, parsePatch, prSummary, prSummary
 import type { IndexerBinary, IndexerHandle, Workspace } from "@sandchest/workspace";
 import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
+import { BoatWorkspace } from "@sandchest/workspace/boat";
 import { billingEnabled, reserveScan, settleScan, syncBilling, type Gate } from "./billing";
-import { config } from "./config";
+import { config, type Config } from "./config";
 import { describeError } from "./log";
 import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
@@ -186,7 +187,12 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
   const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${scan.repo.fullName}.git`;
   // "HEAD" is the remote's default branch as it is now, so a renamed default branch still clones.
   const preparing = prepareWorkspace({
-    open: () => (settings.workspace === "sandbox" ? SandboxWorkspace.create({ timeoutMs: SCAN_BUDGET_MS + 5 * 60_000 }) : LocalWorkspace.create()),
+    open: () =>
+      settings.workspace === "sandbox"
+        ? SandboxWorkspace.create({ timeoutMs: SCAN_BUDGET_MS + 5 * 60_000 })
+        : settings.workspace === "boat"
+          ? openBoatWorkspace(SCAN_BUDGET_MS + 5 * 60_000)
+          : LocalWorkspace.create(),
     clone: async (workspace) => workspace.clone({ url, ref: scan.headSha }, { depth: 1, token: await installation.cloneToken(scan.repo.githubRepoId), timeoutMs: CLONE_TIMEOUT_MS }),
     binary: indexerBinary(settings.workspace),
     started,
@@ -515,7 +521,17 @@ async function postSummary(scan: LoadedScan, installation: Installation, body: s
   }
 }
 
-export function indexerBinary(workspace: "sandbox" | "local"): IndexerBinary {
+/** A Boat sandbox that stops itself after `budgetMs`, unless SANDCHEST_BOAT_TTL_SECONDS says otherwise. */
+export function openBoatWorkspace(budgetMs: number): Promise<BoatWorkspace> {
+  const settings = config();
+  return BoatWorkspace.create({
+    apiKey: settings.SANDCHEST_BOAT_API_KEY!,
+    type: settings.SANDCHEST_BOAT_TYPE,
+    ttlSeconds: settings.SANDCHEST_BOAT_TTL_SECONDS ?? Math.ceil(budgetMs / 1000),
+  });
+}
+
+export function indexerBinary(workspace: Config["workspace"]): IndexerBinary {
   const settings = config();
   if (workspace === "local") return { path: settings.SANDCHEST_INDEXER_BIN ?? "sandchest-index" };
   if (settings.SANDCHEST_INDEXER_LINUX_BIN) return { path: settings.SANDCHEST_INDEXER_LINUX_BIN };

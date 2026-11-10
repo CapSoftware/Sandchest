@@ -59,8 +59,14 @@ const Schema = z.object({
    * no codes; the /claim page works either way.
    */
   SANDCHEST_FREE_CREDIT_CODES: z.string().max(2_000).optional(),
-  /** Where scans run: a Vercel Sandbox per scan, or a temporary directory on this host. */
-  SANDCHEST_WORKSPACE: z.enum(["sandbox", "local"]).optional(),
+  /** Where scans run: a Vercel Sandbox per scan, a Boat sandbox per scan, or a temporary directory on this host. */
+  SANDCHEST_WORKSPACE: z.enum(["sandbox", "local", "boat"]).optional(),
+  /** Boat (boat.dev) API key. Required, and only read, when SANDCHEST_WORKSPACE=boat. */
+  SANDCHEST_BOAT_API_KEY: z.string().min(1).optional(),
+  /** Boat machine size. Default "default" (4 vCPU, 8 GB). */
+  SANDCHEST_BOAT_TYPE: z.enum(["small", "default", "large", "xlarge"]).optional(),
+  /** Seconds before a Boat sandbox stops itself if a scan never deletes it. Default: the scan's own budget. */
+  SANDCHEST_BOAT_TTL_SECONDS: z.coerce.number().int().min(60).max(2_592_000).optional(),
   /** GitHub's REST API. Default https://api.github.com; tests point it at a fake. */
   GITHUB_API_URL: z.url({ protocol: /^https?$/ }).optional(),
   /** Where repositories are cloned from. Default https://github.com. */
@@ -74,7 +80,7 @@ const Schema = z.object({
   SANDCHEST_INDEXER_LINUX_SHA256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
-export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" };
+export type Config = z.infer<typeof Schema> & { workspace: "sandbox" | "local" | "boat" };
 
 let cached: Config | undefined;
 
@@ -92,9 +98,10 @@ export function config(env: Record<string, string | undefined> = process.env): C
   }
   // On Vercel scans get a sandbox; self-hosted installs scan on the host.
   const workspace = parsed.data.SANDCHEST_WORKSPACE ?? (env.VERCEL ? "sandbox" : "local");
-  if (workspace === "sandbox" && !parsed.data.SANDCHEST_INDEXER_LINUX_BIN && !(parsed.data.SANDCHEST_INDEXER_LINUX_URL && parsed.data.SANDCHEST_INDEXER_LINUX_SHA256)) {
+  if (workspace !== "local" && !parsed.data.SANDCHEST_INDEXER_LINUX_BIN && !(parsed.data.SANDCHEST_INDEXER_LINUX_URL && parsed.data.SANDCHEST_INDEXER_LINUX_SHA256)) {
     throw new Error("Sandbox scans need SANDCHEST_INDEXER_LINUX_BIN, or SANDCHEST_INDEXER_LINUX_URL with SANDCHEST_INDEXER_LINUX_SHA256.");
   }
+  if (workspace === "boat" && !parsed.data.SANDCHEST_BOAT_API_KEY) throw new Error("Boat scans need SANDCHEST_BOAT_API_KEY.");
   const result = { ...parsed.data, workspace };
   if (env === process.env) cached = result;
   return result;

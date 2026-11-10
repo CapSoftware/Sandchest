@@ -44,7 +44,7 @@ import { LocalWorkspace } from "@sandchest/workspace/local";
 import { SandboxWorkspace } from "@sandchest/workspace/sandbox";
 import { config } from "./config";
 import { describeError } from "./log";
-import { indexerBinary, prepareWorkspace } from "./scans";
+import { indexerBinary, openBoatWorkspace, prepareWorkspace } from "./scans";
 import { catalog, db, githubApp, maven } from "./services";
 
 /** The feed is re-read this far behind its cursor: OSV can publish a record stamped a little earlier than one already read. */
@@ -153,7 +153,12 @@ export async function refreshInventory(repoId: string): Promise<{ state: "busy" 
     const startedAt = new Date();
     const url = `${(settings.SANDCHEST_GIT_HOST ?? "https://github.com").replace(/\/$/, "")}/${repo.fullName}.git`;
     const { workspace, headSha, handle } = await prepareWorkspace({
-      open: () => (settings.workspace === "sandbox" ? SandboxWorkspace.create({ timeoutMs: REFRESH_BUDGET_MS }) : LocalWorkspace.create()),
+      open: () =>
+        settings.workspace === "sandbox"
+          ? SandboxWorkspace.create({ timeoutMs: REFRESH_BUDGET_MS })
+          : settings.workspace === "boat"
+            ? openBoatWorkspace(REFRESH_BUDGET_MS)
+            : LocalWorkspace.create(),
       clone: async (ready) => ready.clone({ url, ref: "HEAD" }, { depth: 1, token, timeoutMs: 4 * 60_000 }),
       binary: indexerBinary(settings.workspace),
       started: startedAt.getTime(),

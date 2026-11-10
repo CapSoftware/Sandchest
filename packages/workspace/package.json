@@ -7,11 +7,13 @@
     ".": "./src/index.ts",
     "./local": "./src/local.ts",
     "./sandbox": "./src/sandbox.ts",
+    "./boat": "./src/boat.ts",
     "./indexer": "./src/indexer.ts"
   },
   "scripts": {
     "test": "bun test",
     "test:sandbox": "bun --env-file=../../.env.local test test/sandbox.test.ts",
+    "test:boat": "bun --env-file=../../.env.local test test/boat-sandbox.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

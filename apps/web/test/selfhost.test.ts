@@ -519,6 +519,27 @@ describe("configuration", () => {
     expect(settings.workspace).toBe("local");
     expect(() => config({ DATABASE_URL: "postgres://x", GITHUB_APP_ID: "", SANDCHEST_APP_URL: "https://x.test" })).toThrow("GITHUB_APP_ID");
   });
+
+  test("Boat runs scans only when chosen, and then needs its key and a Linux indexer", () => {
+    const base = {
+      DATABASE_URL: "postgres://sandchest@postgres/sandchest",
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_PRIVATE_KEY: "key",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      SANDCHEST_APP_URL: "https://sandchest.example.com",
+    };
+    const indexer = { SANDCHEST_INDEXER_LINUX_BIN: "/opt/sandchest-index" };
+    // A key alone selects nothing.
+    expect(config({ ...base, SANDCHEST_BOAT_API_KEY: "boat_test" }).workspace).toBe("local");
+    expect(config({ ...base, ...indexer, VERCEL: "1", SANDCHEST_BOAT_API_KEY: "boat_test" }).workspace).toBe("sandbox");
+
+    const boat = config({ ...base, ...indexer, SANDCHEST_WORKSPACE: "boat", SANDCHEST_BOAT_API_KEY: "boat_test", SANDCHEST_BOAT_TYPE: "small", SANDCHEST_BOAT_TTL_SECONDS: "1200" });
+    expect(boat).toMatchObject({ workspace: "boat", SANDCHEST_BOAT_TYPE: "small", SANDCHEST_BOAT_TTL_SECONDS: 1200 });
+    expect(() => config({ ...base, ...indexer, SANDCHEST_WORKSPACE: "boat" })).toThrow("SANDCHEST_BOAT_API_KEY");
+    expect(() => config({ ...base, SANDCHEST_WORKSPACE: "boat", SANDCHEST_BOAT_API_KEY: "boat_test" })).toThrow("SANDCHEST_INDEXER_LINUX_BIN");
+    expect(() => config({ ...base, ...indexer, SANDCHEST_WORKSPACE: "boat", SANDCHEST_BOAT_API_KEY: "boat_test", SANDCHEST_BOAT_TYPE: "huge" })).toThrow("SANDCHEST_BOAT_TYPE");
+    expect(() => config({ ...base, ...indexer, SANDCHEST_WORKSPACE: "boat", SANDCHEST_BOAT_API_KEY: "boat_test", SANDCHEST_BOAT_TTL_SECONDS: "soon" })).toThrow("SANDCHEST_BOAT_TTL_SECONDS");
+  });
 });
 
 // ---- Migrations -----------------------------------------------------------
