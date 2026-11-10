@@ -575,7 +575,7 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     const findings = await database.query.findings.findMany({ where: (f, { inArray }) => inArray(f.id, stats.findingIds) });
     // It lands where the confirmed finding does, and lists the variant's place, stored with it.
     expect(findings.map((f) => (f.attackPath as Array<{ line: number }>).at(-1)!.line)).toEqual([3]);
-    const place = { title: "Missing ownership check (V1)", category: "broken_access_control", at: `${PATH}:23`, entry: `${PATH}:23`, variant: true };
+    const place = { title: "Missing ownership check (V1)", category: "broken_access_control", at: `${PATH}:23`, entry: `${PATH}:23`, variant: true, text: "return db.projects.archive(req.params.id);" };
     expect(findings[0]!.alsoReported).toEqual([place]);
     expect(findings[0]!.fixPrompt).toContain(`## Also affects\nThe same flaw is at 1 other place. The fix is needed at each one, and the regression test should cover every one:\n- \`${PATH}:23\`: Missing ownership check (V1)\n`);
     expect(await database.query.findings.findMany({ where: (f, { eq }) => eq(f.repoId, scan.repoId) })).toHaveLength(1);

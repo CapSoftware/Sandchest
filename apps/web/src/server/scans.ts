@@ -12,7 +12,9 @@ import {
   claimNotification,
   claimScanSlot,
   EventWriter,
+  findingPlaces,
   foldedReports,
+  placeLocation,
   knownFindings,
   markDeepScanned,
   markFixed,
@@ -693,8 +695,10 @@ async function affectedFindings(scan: LoadedScan, installation: Installation): P
   return { findings: open.filter((f) => citedFiles(f).some((file) => changed.has(file)) || (manifests && f.category === "vulnerable_dependency")), changes };
 }
 
+/** Files a finding cites: its entry point and path, and every other place it affects, so a push to any of them is checked. */
 function citedFiles(finding: FindingRow): string[] {
-  return [finding.entryPoint as { file: string }, ...(finding.attackPath as Array<{ file: string }>)].map((step) => step.file);
+  const places = findingPlaces(finding.alsoReported).flatMap((place) => [placeLocation(place.at)?.file, placeLocation(place.entry)?.file]).filter((file): file is string => !!file);
+  return [...[finding.entryPoint as { file: string }, ...(finding.attackPath as Array<{ file: string }>)].map((step) => step.file), ...places];
 }
 
 async function findingsById(ids: string[]): Promise<FindingRow[]> {

@@ -7,6 +7,7 @@
 import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
 import { accounts, sessions, findingEvents, findings, orgAdmins, orgBilling, orgs, permissionCache, repos, scanEvents, scanMetrics, scans, users, type DeepScanSchedule, type OrgSettings, type PrReviewMode } from "./schema";
+import { placesWithoutCode } from "./queries";
 import { grantMemberships, lockUser } from "./team";
 
 type Severity = "critical" | "high" | "medium" | "low";
@@ -394,6 +395,7 @@ export type FindingAction = { type: "dismiss"; reason: "false_positive" | "accep
 /** Code excerpts go once a finding is resolved (SPEC §6); so does the prompt that quotes them. */
 const RESOLVED = {
   attackPath: sql`(select coalesce(jsonb_agg(step - 'excerpt'), '[]'::jsonb) from jsonb_array_elements(${findings.attackPath}) step)`,
+  alsoReported: placesWithoutCode(sql`${findings.alsoReported}`),
   fixPrompt: "",
 };
 

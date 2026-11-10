@@ -396,8 +396,8 @@ describe("writeUpVerdicts", () => {
     const f = result.findings[0]!;
     // Each variant's sink and entry point, in the order the variants session ruled them.
     expect(f.alsoReportedAs).toEqual([
-      { title: "Write-up of V1", category: "broken_access_control", at: `${PATH}:29`, entry: `${PATH}:28`, variant: true },
-      { title: "Write-up of V2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:8`, variant: true },
+      { title: "Write-up of V1", category: "broken_access_control", at: `${PATH}:29`, entry: `${PATH}:28`, variant: true, text: "return db.projects.archive(req.params.id);" },
+      { title: "Write-up of V2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:8`, variant: true, text: "return db.projects.delete(id);" },
     ]);
     // The finding is still the confirmed one: its identity, its own path and write-up, at the worst severity of the group.
     expect(f.fingerprint).toBe(alone.findings[0]!.fingerprint);
@@ -450,7 +450,7 @@ describe("writeUpVerdicts", () => {
     const failed = await writeUpVerdicts({ client: fakeClient({ invalidFor: ["F1"] }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed }, onEvent: (e) => events.push(e) });
     expect(failed.findings.map((f) => f.title)).toEqual(["Write-up of V1"]);
     expect(failed.findings[0]!.attackPath.at(-1)!.line).toBe(29);
-    expect(failed.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of V2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:10`, variant: true }]);
+    expect(failed.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of V2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:10`, variant: true, text: "return db.projects.delete(id);" }]);
     expect(failed.findings[0]!.fixPrompt).toContain(`- \`${PATH}:10\`: Write-up of V2`);
     // The finding's identity is the kept variant's, and the folded one is recorded under it.
     expect(failed.merged.map((m) => [m.into, m.finding.title])).toEqual([[failed.findings[0]!.fingerprint, "Write-up of V2"]]);
@@ -595,7 +595,7 @@ describe("writeUpVerdicts", () => {
       [28, "archiveProject", [28, 29]],
     ]);
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of V1", category: "broken_access_control", at: `${PATH}:29`, entry: `${PATH}:28`, variant: true }]);
+    expect(result.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of V1", category: "broken_access_control", at: `${PATH}:29`, entry: `${PATH}:28`, variant: true, text: "return db.projects.archive(req.params.id);" }]);
   });
 
   test("a finding is filed under the category its write-up's weakness names, with that category's fingerprint", async () => {

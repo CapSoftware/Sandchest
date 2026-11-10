@@ -204,9 +204,10 @@ export interface Finding {
    * Other reports folded into this finding, with where they pointed (`file:line` of the sink and the entry).
    * Two kinds. A repeat report of the same broken code, merged by `consolidate.ts`: one change fixes it and the
    * finding. And, marked `variant`, another place the same flaw was confirmed (see `slice/writeup.ts`): a copy
-   * of the mistake that needs the fix too. Only the second kind is another place the finding affects.
+   * of the mistake that needs the fix too. Only the second kind is another place the finding affects. `text` is
+   * the code on that place's cited line, so a fix check can find the line again after the code has moved.
    */
-  alsoReportedAs?: Array<{ title: string; category: Category; at: string; entry: string; variant?: boolean }>;
+  alsoReportedAs?: Array<{ title: string; category: Category; at: string; entry: string; variant?: boolean; text?: string }>;
 }
 
 /** A finding from an earlier scan of the same repository, with the team's verdict on it. */

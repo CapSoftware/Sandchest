@@ -19,6 +19,7 @@ import { consolidateFindings, mergeInto, type MergedFinding } from "../consolida
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent } from "../context";
 import { isFatal, untilDeadline } from "../errors";
 import { fixPrompt } from "../fix-prompt";
+import { excerptLine } from "../fixcheck";
 import { CandidateRegistry, checkEvidence, fingerprint, normalizePath, type GatedCandidate } from "../gate";
 import { Limiter, stageClients, UsageMeter, type Pricing, type UsageSink } from "../metrics";
 import { CATEGORIES, type Attacker, type Candidate as ScanCandidate, type Category, type Confidence, type Finding, type Severity } from "../schema";
@@ -351,7 +352,16 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
     if (rest.length) {
       const folded = mergeInto(kept.finding, rest);
       // Each one is another place that needs the fix, not a second report of the same code: marked, so readers can tell.
-      findings.push({ ...folded, alsoReportedAs: folded.alsoReportedAs!.map((place) => ({ ...place, variant: true })) });
+      // `mergeInto` lists one place per folded finding, in order: each keeps the code on its cited line, so a fix
+      // check can find that line again.
+      findings.push({
+        ...folded,
+        alsoReportedAs: folded.alsoReportedAs!.map((place, k) => {
+          const sink = rest[k]?.attackPath.at(-1);
+          const text = sink ? excerptLine(sink.excerpt, sink.line) : undefined;
+          return { ...place, variant: true, ...(text !== undefined && { text }) };
+        }),
+      });
     } else findings.push(kept.finding);
     for (const finding of rest) merged.push({ into: kept.finding.fingerprint, finding, reason: VARIANT_REASON });
   }

@@ -403,6 +403,8 @@ export interface FindingPlace {
   at: string;
   entry: string;
   variant?: boolean;
+  /** The code on the cited line, for a fix check to find it again. */
+  text?: string;
 }
 
 export const findings = pgTable(

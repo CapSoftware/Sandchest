@@ -2,7 +2,7 @@
  * Every write the GitHub App and the scan workflows make. Each is idempotent
  * or guarded, because webhooks and workflow steps are retried.
  */
-import { and, desc, eq, gt, inArray, isNull, like, lt, ne, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, like, lt, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
 import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries, type FindingPlace, type PrReviewMode } from "./schema";
 
@@ -69,6 +69,14 @@ export async function upsertRepos(database: Db, orgId: string, repoList: RepoInp
 }
 
 /**
+ * A finding's other places without the line of code each one keeps (`text`): the same value when it is not a list.
+ * Where and what each place is stays; only the quoted code goes, as an attack path loses its excerpts.
+ */
+export function placesWithoutCode(places: SQL): SQL {
+  return sql`case when jsonb_typeof(${places}) = 'array' then (select coalesce(jsonb_agg(case when jsonb_typeof(place) = 'object' then place - 'text' else place end), '[]'::jsonb) from jsonb_array_elements(${places}) place) else ${places} end`;
+}
+
+/**
  * Deletes the code a repo's findings quote (attack-path excerpts and the fix
  * prompt built from them) once Sandchest may no longer read that repo
  * (SPEC §6, §16). The findings themselves stay, so history and counts
@@ -76,6 +84,7 @@ export async function upsertRepos(database: Db, orgId: string, repoList: RepoInp
  */
 const forgetCode = {
   attackPath: sql`(select coalesce(jsonb_agg(step - 'excerpt'), '[]'::jsonb) from jsonb_array_elements(${findings.attackPath}) step)`,
+  alsoReported: placesWithoutCode(sql`${findings.alsoReported}`),
   fixPrompt: "",
 };
 
@@ -454,7 +463,7 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
     const [org] = await tx.execute<{ installed: boolean }>(sql`select installation_id is not null as installed from ${orgs} where id = (select org_id from ${repos} where id = ${repoId}) for share`);
     const [repo] = await tx.execute<{ enabled: boolean }>(sql`select enabled from ${repos} where id = ${repoId} for share`);
     const readable = org?.installed === true && repo?.enabled === true;
-    const stored = readable ? list : list.map((finding) => ({ ...finding, attackPath: withoutExcerpts(finding.attackPath), fixPrompt: "" }));
+    const stored = readable ? list : list.map((finding) => ({ ...finding, attackPath: withoutExcerpts(finding.attackPath), alsoReported: withoutPlaceCode(finding.alsoReported), fixPrompt: "" }));
     const rows = await tx
       .insert(findings)
       .values(stored.map((finding) => ({ ...finding, repoId, sourceScanId: scan.id, sourceKind: scan.kind, prNumber: scan.prNumber })))
@@ -479,8 +488,8 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
           mitigations: sql`excluded.mitigations`,
           trust: sql`excluded.trust`,
           validation: sql`excluded.validation`,
-          // The places the latest scan says it covers, replacing what was stored. File and line only, no code, so a dismissed finding keeps them.
-          alsoReported: sql`excluded.also_reported`,
+          // The places the latest scan says it covers, replacing what was stored. A dismissed finding keeps where they are, never their code.
+          alsoReported: sql`case when ${findings.status} = 'dismissed' then ${placesWithoutCode(sql`excluded.also_reported`)} else excluded.also_reported end`,
           // Every signal that has ever raised this finding, so outcomes credit all of them.
           sources: sql`array(select distinct unnest(${findings.sources} || excluded.sources) order by 1)`,
         },
@@ -490,6 +499,10 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
     await tx.insert(findingEvents).values(rows.map((row) => ({ findingId: row.id, type: "seen" as const, scanId: scan.id })));
     return { newIds: rows.filter((r) => r.inserted).map((r) => r.id), ids: rows.map((r) => r.id) };
   });
+}
+
+function withoutPlaceCode<T>(places: T): T {
+  return (Array.isArray(places) ? places.map((place) => (place && typeof place === "object" ? Object.fromEntries(Object.entries(place).filter(([key]) => key !== "text")) : place)) : places) as T;
 }
 
 function withoutExcerpts(path: unknown): unknown {
@@ -591,6 +604,7 @@ export async function markFixed(database: Db, ids: string[], scanId: string): Pr
         status: "fixed",
         fixedAt: new Date(),
         attackPath: sql`(select coalesce(jsonb_agg(step - 'excerpt'), '[]'::jsonb) from jsonb_array_elements(${findings.attackPath}) step)`,
+        alsoReported: placesWithoutCode(sql`${findings.alsoReported}`),
         // The prompt quotes the same code.
         fixPrompt: "",
       })

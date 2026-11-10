@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import {
+  type FindingPlace,
+  applyFindingAction,
   adminOrgs,
   linesScanned,
   orgRepos,
@@ -536,6 +538,37 @@ describe("findings", () => {
     expect(findingPlaces([{ title: "t", category: "c", at: "a.ts:1", entry: "a.ts:1", variant: "yes" }, { title: "no location", variant: true }])).toEqual([]);
     expect(placeLocation("src/a.ts:12")).toEqual({ file: "src/a.ts", line: 12 });
     expect([placeLocation("src/a.ts"), placeLocation("src/a.ts:0"), placeLocation("src/a.ts:x"), placeLocation(":3")]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("drops the code each other place quotes whenever the finding's own code is dropped, and keeps where the place is", async () => {
+    const { org, repos } = await upsertInstallation(database, 9061, { ...account, githubAccountId: 161 }, [repo(161), repo(162)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const [user] = await database.insert(schema.users).values({ name: "Places code", email: "places-code@example.com", login: "places-code" }).returning();
+    await database.insert(schema.permissionCache).values({ userId: user!.id, repoId, permission: "write" });
+    const bare = { title: "Same flaw in handler 1", category: "sql_injection", at: "src/h1.ts:10", entry: "src/h1.ts:1", variant: true };
+    const quoted = { ...bare, text: "return db.query(sql + input);" };
+    const stored = async (fingerprint: string) => (await database.$client<Array<{ also_reported: unknown }>>`select also_reported from findings where repo_id = ${repoId} and fingerprint = ${fingerprint}`)[0]!.also_reported;
+    const { ids } = await upsertFindings(database, repoId, scan, ["c-fixed", "c-dismissed", "c-open", "c-none"].map((print) => ({ ...finding(print), alsoReported: print === "c-none" ? null : ([quoted, "not a place"] as unknown as FindingPlace[]) })));
+    expect(await stored("c-open")).toEqual([quoted, "not a place"]);
+
+    // Fixed by a fix check, and resolved by a person: the place stays, its code goes. Anything else in the list is left as it is.
+    await markFixed(database, [ids[0]!], scan.id);
+    expect(await stored("c-fixed")).toEqual([bare, "not a place"]);
+    expect(await applyFindingAction(database, user!.id, ids[1]!, { type: "dismiss", reason: "accepted_risk" })).toBe(true);
+    expect(await stored("c-dismissed")).toEqual([bare, "not a place"]);
+    // A dismissed finding seen again never gets the code back; an open one keeps the latest.
+    await upsertFindings(database, repoId, scan, ["c-dismissed", "c-open"].map((print) => ({ ...finding(print), alsoReported: [quoted] })));
+    expect(await stored("c-dismissed")).toEqual([bare]);
+    expect(await stored("c-open")).toEqual([quoted]);
+    expect(await stored("c-none")).toBeNull();
+
+    // The repository leaves the installation: no code of it is kept, and none is stored for it afterwards.
+    await disableRepos(database, [161]);
+    expect(await stored("c-open")).toEqual([bare]);
+    expect(await stored("c-none")).toBeNull();
+    await upsertFindings(database, repoId, scan, [{ ...finding("c-late"), alsoReported: [quoted] }]);
+    expect(await stored("c-late")).toEqual([bare]);
   });
 
   it("returns a repo's resolved findings with the team's verdict, and nothing open", async () => {

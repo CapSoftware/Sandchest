@@ -6,6 +6,9 @@
  * itself, so a finding whose sink line is gone is re-checked from the rest of
  * its path; only one with nothing left to anchor to is stale, never silently
  * closed.
+ *
+ * A finding that lists other places with the same flaw is checked at each of
+ * them, and is fixed only when it is fixed at every one.
  */
 import type { IndexerClient } from "../indexer/client";
 import type { LlmClient } from "../llm";
@@ -58,16 +61,22 @@ export async function checkFixes(options: FixCheckOptions): Promise<{ results: F
   // A dependency advisory the sweep matched by version is settled by the version now installed, not by a review.
   const swept = options.findings.filter((f) => sweptDependency(f));
   const results: FixCheckResult[] = swept.length ? await checkDependencies(swept, options) : [];
-  const reviewed = options.findings.filter((f) => !sweptDependency(f));
-  if (reviewed.length === 0) return { results };
+  const whole = options.findings.filter((f) => !sweptDependency(f));
+  if (whole.length === 0) return { results };
+  // A finding with other places is checked as itself and once per place. `foldPlaces` turns those back into one result.
+  const units = whole.flatMap((finding) => [finding, ...placeChecks(finding)]);
+  const reviewed = units.filter((unit): unit is Finding & { id: string } => "attackPath" in unit);
+  const unlocated = units.filter((unit): unit is Unlocated => !("attackPath" in unit));
+  const settle = (checked: FixCheckResult[]) => [...results, ...foldPlaces(whole, [...checked, ...unlocated.map(({ id }) => ({ id, outcome: "stale" as const, reason: "This place has no stored code to find it by." }))])];
+  const part: FixCheckResult[] = [];
 
   const anchored = await Promise.all(reviewed.map(async (finding) => ({ finding, moved: (await reanchor(finding, lines)) ?? (await withoutSink(finding, lines)) })));
-  results.push(...anchored
+  part.push(...anchored
     .filter(({ moved }) => !moved)
     .map(({ finding }) => ({ id: finding.id, outcome: "stale" as const, reason: "The cited code no longer exists where it was or nearby." })));
 
   const located = anchored.filter((entry): entry is { finding: Finding & { id: string }; moved: Finding } => !!entry.moved);
-  if (located.length === 0) return { results };
+  if (located.length === 0) return { results: settle(part) };
 
   const verify = (entries: typeof located) =>
     verifyFindings({
@@ -99,13 +108,74 @@ export async function checkFixes(options: FixCheckOptions): Promise<{ results: F
     // Only code that now blocks the attack closes it. A ruling that it was never a vulnerability is a judgement
     // on the original report, not evidence of a fix, so it stays open for the team to dismiss.
     if (result.review?.verdict.verdict === "disproved") {
-      results.push({ id, outcome: "fixed", reason: result.review.verdict.reasoning });
+      part.push({ id, outcome: "fixed", reason: result.review.verdict.reasoning });
     } else {
       const reason = result.error ?? result.rejected?.join("; ") ?? result.review?.verdict.reasoning ?? "Still exploitable.";
-      results.push({ id, outcome: "open", reason });
+      part.push({ id, outcome: "open", reason });
     }
   });
-  return { results, usage, costUsd };
+  return { results: settle(part), usage, costUsd };
+}
+
+/** Separates a finding's id from the place of it a check is about. Never part of a finding's own id (a UUID). */
+const PLACE = "#place:";
+
+/** A place that cannot be checked: it has no stored code, or names no location. */
+export interface Unlocated {
+  id: string;
+}
+
+/**
+ * One check per other place a finding lists (the same flaw, confirmed there too): the finding's own write-up,
+ * pointed at that place. A place stored without its line's code cannot be found again, and is reported as such.
+ */
+export function placeChecks(finding: Finding & { id: string }): Array<(Finding & { id: string }) | Unlocated> {
+  return (finding.alsoReportedAs ?? [])
+    .filter((place) => place.variant === true)
+    .map((place, k) => {
+      const id = `${finding.id}${PLACE}${k}`;
+      const at = locationOf(place.at);
+      if (!at || !place.text) return { id };
+      const entry = locationOf(place.entry) ?? at;
+      const { alsoReportedAs: _places, ...own } = finding;
+      return {
+        ...own,
+        id,
+        title: place.title,
+        entryPoint: { ...entry, description: place.title },
+        attackPath: [{ ...at, note: `The same flaw as “${finding.title}”, at this place.`, excerpt: `${at.line}| ${place.text}` }],
+      };
+    });
+}
+
+function locationOf(at: string): { file: string; line: number } | undefined {
+  const colon = at.lastIndexOf(":");
+  const line = Number(at.slice(colon + 1));
+  return colon > 0 && Number.isInteger(line) && line > 0 ? { file: at.slice(0, colon), line } : undefined;
+}
+
+/**
+ * One result per finding from the results of its checks. A finding with no other places keeps its own result
+ * exactly. One with other places is fixed only when it and every place are fixed, stale only when all of them
+ * are, and open otherwise, saying where.
+ */
+export function foldPlaces(findings: Array<Finding & { id: string }>, checked: FixCheckResult[]): FixCheckResult[] {
+  const byId = new Map(checked.map((result) => [result.id, result]));
+  return findings.flatMap((finding): FixCheckResult[] => {
+    const own = byId.get(finding.id);
+    if (!own) return [];
+    const places = (finding.alsoReportedAs ?? []).filter((place) => place.variant === true);
+    if (places.length === 0) return [own];
+    const others = places.map((place, k) => ({ place, result: byId.get(`${finding.id}${PLACE}${k}`) }));
+    const all = [own, ...others.map(({ result }) => result)];
+    if (all.every((result) => result?.outcome === "fixed")) return [own];
+    if (all.every((result) => result?.outcome === "stale")) return [own];
+    const where = [
+      ...(own.outcome === "open" ? [`${finding.attackPath.at(-1)!.file}:${finding.attackPath.at(-1)!.line}: ${own.reason}`] : []),
+      ...others.flatMap(({ place, result }) => (result?.outcome === "fixed" ? [] : [`${place.at}: ${result?.outcome === "open" ? result.reason : "could not be re-checked on the new code."}`])),
+    ];
+    return [{ id: finding.id, outcome: "open", reason: `Not fixed at every place it affects. ${where.join(" ")}`.slice(0, 2_000) }];
+  });
 }
 
 function sumUsage(a: RoleUsage, b: RoleUsage): RoleUsage {
