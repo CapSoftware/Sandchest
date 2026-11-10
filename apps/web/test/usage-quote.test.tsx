@@ -1,5 +1,5 @@
 /**
- * What a scan billed from its usage is quoted before it starts (what it usually costs or last cost, and what is set aside while it runs), the fast option
+ * What a scan billed from its usage is quoted before it starts (what it usually costs, or what the last one did), the fast option
  * offered only where everything it needs is true, and every other account quoted exactly as before.
  */
 import { describe, expect, test } from "bun:test";
@@ -149,15 +149,15 @@ describe("quoted before a scan", () => {
 
     const billed = props({ planId: "standard", credits: 1_000, usage: { hold: 150 } });
     expect(billed).toMatchObject({ confirm: "Start scan", need: 150 });
-    expect(billed.note).toBe(`A deep scan usually costs well under $1. You pay for what it uses. ${money(150)} of your balance is set aside while it runs.`);
+    expect(billed.note).toBe("Usually well under $1. You pay only for what it uses.");
     expect("fast" in billed).toBe(false);
     // What its last scan was charged, when that is known.
-    expect(props({ planId: "standard", credits: 1_000, usage: { hold: 150 } }, 48).note).toBe(`The last scan of this repository cost ${money(48)}. You pay for what it uses. ${money(150)} of your balance is set aside while it runs.`);
+    expect(props({ planId: "standard", credits: 1_000, usage: { hold: 150 } }, 48).note).toBe(`The last scan here cost ${money(48)}. You pay only for what it uses.`);
     // The old wording is gone: no credits, no "up to".
     for (const said of [tiered, billed]) expect(`${String(said.confirm)} ${String(said.note)}`).not.toMatch(/credit|up to/i);
 
     const withFast = props({ planId: "standard", credits: 1_000, usage: { hold: 150, fast: 450 } });
-    expect(withFast.fast).toEqual({ confirm: "Start fast scan", need: 450, note: `You pay for what it uses. ${money(450)} of your balance is set aside while it runs.` });
+    expect(withFast.fast).toEqual({ confirm: "Start fast scan", need: 450, note: "You pay only for what it uses." });
 
     // Not enough for the hold: the key adds funds first, whatever the repository's size.
     const short = props({ planId: "standard", credits: 100, usage: { hold: 150 } });

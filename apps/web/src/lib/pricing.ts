@@ -48,15 +48,13 @@ export function fundsFor(credits: number, price = creditsPrice(credits)): string
 
 /**
  * What a scan billed from its usage says about cost before it starts: what this repository's last one was
- * charged, from its bill, or what one usually comes to.
+ * charged, from its bill, or what one usually comes to; then that it is charged for what it uses. `fast`: a
+ * fast scan, whose cost neither figure describes.
  */
-export function usageCost(last?: number): string {
-  return last === undefined ? `A deep scan usually costs well under ${usd(creditsWorth(CREDIT_PACK))}.` : `The last scan of this repository cost ${money(last)}.`;
-}
-
-/** The small print beside it: the scan is charged what it uses, and the most it can be charged is set aside meanwhile. */
-export function usageHold(hold: number): string {
-  return `You pay for what it uses. ${money(hold)} of your balance is set aside while it runs.`;
+export function usageCost(last?: number, fast = false): string {
+  const pays = "You pay only for what it uses.";
+  if (fast) return pays;
+  return `${last === undefined ? `Usually well under ${usd(creditsWorth(CREDIT_PACK))}.` : `The last scan here cost ${money(last)}.`} ${pays}`;
 }
 
 /** What a scan priced by the repository's size says before it starts. `unsized`: not measured yet, so the most it can be is set aside. */

@@ -1,7 +1,7 @@
 import type { DashboardRepo } from "@sandchest/db";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { digState } from "@/lib/dig-state";
-import { notEnoughBalance, sizePrice, usageCost, usageHold } from "@/lib/pricing";
+import { notEnoughBalance, sizePrice, usageCost } from "@/lib/pricing";
 import type { OrgPlan } from "@/server/org-plans";
 import { DigButton } from "./dig-button";
 import { HoverLink } from "./hover-link";
@@ -53,11 +53,11 @@ export function Dig({ repo, plan, lastCost }: { repo: DashboardRepo; plan: OrgPl
           <DigButton
             repoId={repo.id}
             label={label}
-            note={`${usageCost(lastCost)} ${usageHold(hold)}`}
+            note={usageCost(lastCost)}
             confirm="Start scan"
             account={account}
             need={hold}
-            {...(fast !== undefined && { fast: { confirm: "Start fast scan", need: fast, note: usageHold(fast) } })}
+            {...(fast !== undefined && { fast: { confirm: "Start fast scan", need: fast, note: usageCost(undefined, true) } })}
           />
         );
       }
