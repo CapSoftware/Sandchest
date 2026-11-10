@@ -561,8 +561,8 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     expect(await runSlice(scanId)).toBeUndefined();
 
     const scan = (await scanById(database, scanId))!;
-    expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 5 });
-    expect(autumn.get(orgId).credits).toBe(credits - 5);
+    expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
+    expect(autumn.get(orgId).credits).toBe(credits - 500);
     const stats = scan.stats as { findingIds: string[]; newFindingIds: string[]; loc: number; slice: Record<string, unknown> };
     expect(stats.findingIds).toHaveLength(2);
     expect(stats.newFindingIds).toHaveLength(2);
@@ -640,7 +640,7 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     const scanId = await newScan();
     expect(await runSlice(scanId)).toBeUndefined();
     const scan = (await scanById(database, scanId))!;
-    expect(scan).toMatchObject({ status: "completed", credits: 5 });
+    expect(scan).toMatchObject({ status: "completed", credits: 500 });
     expect((scan.stats as { findingIds: string[] }).findingIds).toEqual([]);
     expect(host.started).toEqual([]);
     expect((await usage(scanId)).filter((r) => r.kind === "sandbox")).toHaveLength(1);
@@ -715,7 +715,7 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     await session(scanId, "variants");
     await writeUpSlice(scanId);
     await publishSlice(scanId);
-    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", credits: 5 });
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", credits: 500 });
     const sandboxes = (await usage(scanId)).filter((r) => r.kind === "sandbox");
     expect(sandboxes.map((r) => [r.attempt, r.key])).toEqual([
       [0, sandboxKey(first.id)],
@@ -992,7 +992,7 @@ describe.skipIf(!available)("pull request reviews on the slice engine", () => {
     const scan = (await scanById(database, scanId))!;
     // The charge counts every security-relevant line, as the classic review does, the files left out included.
     expect(scan).toMatchObject({ status: "completed", credits: prReviewCredits(914) });
-    expect(scan.credits).toBe(2);
+    expect(scan.credits).toBe(200);
     expect(scan.credits).toBe(scan.creditsReserved!);
     const stats = scan.stats as { review: unknown; slice: Record<string, unknown> };
     expect(stats.review).toEqual(classicReview(gh.files, [PATH], ["src/api/big.ts", "src/api/flaky.ts", "src/api/gone.ts"]));
@@ -1039,8 +1039,8 @@ describe.skipIf(!available)("fast deep scans", () => {
       expect(await runSlice(scanId)).toBeUndefined();
 
       const scan = (await scanById(database, scanId))!;
-      expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 5, fast: true });
-      expect(autumn.get(orgId).credits).toBe(credits - 5);
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 500, fast: true });
+      expect(autumn.get(orgId).credits).toBe(credits - 500);
       expect((scan.stats as { findingIds: string[] }).findingIds).toHaveLength(2);
       expect(sliceState(scan)).toMatchObject({ fast: true, written: true, findings: 2 });
       // Hunt, scoring and write-up all went through the fast client.
@@ -1121,7 +1121,7 @@ describe.skipIf(!available)("fast deep scans", () => {
     const scanId = await newScan("deep", { fast: true });
     expect(await runSlice(scanId)).toBeUndefined();
     const scan = (await scanById(database, scanId))!;
-    expect(scan).toMatchObject({ status: "completed", credits: 5, fast: true });
+    expect(scan).toMatchObject({ status: "completed", credits: 500, fast: true });
     expect(sliceState(scan).fast).toBe(false);
     expect(model.requests.length).toBeGreaterThan(0);
     expect(model.fastRequests).toEqual([]);
@@ -1139,7 +1139,7 @@ describe.skipIf(!available)("fast deep scans", () => {
       const scanId = await newScan();
       expect(await runSlice(scanId)).toBeUndefined();
       const scan = (await scanById(database, scanId))!;
-      expect(scan).toMatchObject({ status: "completed", credits: 5, fast: false });
+      expect(scan).toMatchObject({ status: "completed", credits: 500, fast: false });
       expect("fast" in sliceState(scan)).toBe(false);
       expect(model.fastRequests).toEqual([]);
       const tokens = tokensOf(scanId);
@@ -1230,7 +1230,7 @@ describe.skipIf(!available)("which engine a scan runs on", () => {
 const SHADOW_ENV = { SANDCHEST_USAGE_BILLING: "shadow", SANDCHEST_USAGE_MULTIPLIER: "3" };
 const USAGE_ENV = { SANDCHEST_USAGE_BILLING: "on", SANDCHEST_USAGE_MULTIPLIER: "3", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "cent" };
 const USAGE_KEYS = ["SANDCHEST_USAGE_BILLING", "SANDCHEST_USAGE_MULTIPLIER", "NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT"];
-const TIERED = { engine: "slice", mode: "tiered", unit: "dollar" } as const;
+const TIERED = { engine: "slice", mode: "tiered", unit: "cent" } as const;
 
 /** Runs `fn` with usage billing unset, then `env` on top (blank means unset), then puts every setting back. */
 async function withSettings(env: Record<string, string>, fn: () => Promise<void>): Promise<void> {
@@ -1314,15 +1314,15 @@ async function withSentry(fn: () => Promise<void>): Promise<Array<Record<string,
 describe.skipIf(!available)("usage billing off", () => {
   it("slice deep scans and PR reviews reserve, charge and run exactly as before; the row also says how they were priced", async () => {
     await withSettings({}, async () => {
-      autumn.get(orgId).credits = 1_000;
+      autumn.get(orgId).credits = 100_000;
       const deep = await newScan();
       const calls = autumn.calls.length;
       expect(await runSlice(deep)).toBeUndefined();
       const scan = (await scanById(database, deep))!;
       // Not sized yet: the top tier is held, and the tier of what the hunt measured is charged.
-      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 25, credits: 5 });
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 2_500, credits: 500 });
       expect(scan.pricing).toEqual(TIERED);
-      expect(autumn.get(orgId).credits).toBe(995);
+      expect(autumn.get(orgId).credits).toBe(99_500);
       expect(autumn.calls.slice(calls).filter((c) => c === "reserve" || c === "finalize")).toEqual(["reserve", "finalize"]);
       expect(await scanBill(database, deep)).toBeUndefined();
       expect("unwritten" in sliceState(scan)).toBe(false);
@@ -1333,7 +1333,7 @@ describe.skipIf(!available)("usage billing off", () => {
       const reviewed = (await scanById(database, review))!;
       expect(reviewed).toMatchObject({ status: "completed", billing: "charged", creditsReserved: prReviewCredits(3), credits: prReviewCredits(3) });
       expect(reviewed.pricing).toEqual(TIERED);
-      expect(autumn.get(orgId).credits).toBe(995 - prReviewCredits(3));
+      expect(autumn.get(orgId).credits).toBe(99_500 - prReviewCredits(3));
       expect(await scanBill(database, review)).toBeUndefined();
       expect(await orgCarry(database, orgId)).toBe(0);
     });
@@ -1341,25 +1341,25 @@ describe.skipIf(!available)("usage billing off", () => {
 
   it("classic deep scans and PR reviews reserve and charge as before, priced classic", async () => {
     await withSettings({ SANDCHEST_ENGINE: "" }, async () => {
-      autumn.get(orgId).credits = 1_000;
+      autumn.get(orgId).credits = 100_000;
       // Not sized yet: the top tier is held, and what the engine measured is charged.
       const deep = await newScan();
       expect(await beginScan(deep)).toEqual({ state: "running" });
-      expect(await scanById(database, deep)).toMatchObject({ billing: "reserved", creditsReserved: 25, pricing: { engine: "classic", mode: "tiered", unit: "dollar" } });
-      expect(autumn.get(orgId).credits).toBe(975);
-      await database.$client`update scans set credits = 5, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${deep}`;
+      expect(await scanById(database, deep)).toMatchObject({ billing: "reserved", creditsReserved: 2_500, pricing: { engine: "classic", mode: "tiered", unit: "cent" } });
+      expect(autumn.get(orgId).credits).toBe(97_500);
+      await database.$client`update scans set credits = 500, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${deep}`;
       await publishScan(deep);
-      expect(await scanById(database, deep)).toMatchObject({ status: "completed", billing: "charged", credits: 5 });
-      expect(autumn.get(orgId).credits).toBe(995);
+      expect(await scanById(database, deep)).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
+      expect(autumn.get(orgId).credits).toBe(99_500);
 
       gh.files = [CHANGED, DOCS];
       const review = await newScan("pr_review");
       expect(await beginScan(review)).toEqual({ state: "running" });
-      expect(await scanById(database, review)).toMatchObject({ billing: "reserved", creditsReserved: prReviewCredits(3), pricing: { engine: "classic", mode: "tiered", unit: "dollar" } });
+      expect(await scanById(database, review)).toMatchObject({ billing: "reserved", creditsReserved: prReviewCredits(3), pricing: { engine: "classic", mode: "tiered", unit: "cent" } });
       await database.$client`update scans set credits = ${prReviewCredits(3)}, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${review}`;
       await publishScan(review);
       expect(await scanById(database, review)).toMatchObject({ status: "completed", billing: "charged", credits: prReviewCredits(3) });
-      expect(autumn.get(orgId).credits).toBe(995 - prReviewCredits(3));
+      expect(autumn.get(orgId).credits).toBe(99_500 - prReviewCredits(3));
     });
   });
 
@@ -1367,11 +1367,11 @@ describe.skipIf(!available)("usage billing off", () => {
     setScanStarter(async () => {});
     try {
       await withSettings({}, async () => {
-        autumn.get(orgId).credits = 1_000;
+        autumn.get(orgId).credits = 100_000;
         const dug = await requestDeepScan({ ...(await newRepo()), loc: 50_000 });
         expect(dug.ok).toBe(true);
         const dugId = (dug as { scanId: string }).scanId;
-        expect(await scanById(database, dugId)).toMatchObject({ billing: "reserved", creditsReserved: 5, pricing: TIERED });
+        expect(await scanById(database, dugId)).toMatchObject({ billing: "reserved", creditsReserved: 500, pricing: TIERED });
 
         gh.files = [CHANGED, DOCS];
         const repo = await newRepo();
@@ -1380,10 +1380,10 @@ describe.skipIf(!available)("usage billing off", () => {
         expect(started).toMatchObject({ ok: true, credits: prReviewCredits(3) });
         const reviewId = (started as { scanId: string }).scanId;
         expect(await scanById(database, reviewId)).toMatchObject({ billing: "reserved", creditsReserved: prReviewCredits(3), pricing: TIERED });
-        expect(autumn.get(orgId).credits).toBe(1_000 - 5 - prReviewCredits(3));
+        expect(autumn.get(orgId).credits).toBe(100_000 - 500 - prReviewCredits(3));
         await failScan(dugId, "test over");
         await failScan(reviewId, "test over");
-        expect(autumn.get(orgId).credits).toBe(1_000);
+        expect(autumn.get(orgId).credits).toBe(100_000);
       });
     } finally {
       setScanStarter(undefined);
@@ -1393,7 +1393,7 @@ describe.skipIf(!available)("usage billing off", () => {
   it("a scan keeps the engine it was reserved under when the setting changes before it starts", async () => {
     setScanStarter(async () => {});
     try {
-      autumn.get(orgId).credits = 1_000;
+      autumn.get(orgId).credits = 100_000;
       let onSlice = "";
       await withSettings({}, async () => {
         onSlice = (await requestDeepScan({ ...(await newRepo()), loc: 50_000 }) as { scanId: string }).scanId;
@@ -1420,24 +1420,24 @@ describe.skipIf(!available)("usage billing off", () => {
 describe.skipIf(!available)("usage billing in shadow", () => {
   it("the tier price is reserved and charged as today; a shadow bill is stored beside it, from no carry, and the carry is untouched", async () => {
     await withSettings(SHADOW_ENV, async () => {
-      autumn.get(orgId).credits = 1_000;
+      autumn.get(orgId).credits = 100_000;
       await resetCarry();
       await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 7_000 });
       const scanId = await newScan();
       await runBilled(scanId, { state: "running", engine: "slice", pricing: "shadow" });
 
       const scan = (await scanById(database, scanId))!;
-      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 25, credits: 5 });
-      expect(scan.pricing).toEqual({ engine: "slice", mode: "shadow", unit: "dollar", multiplierThousandths: 3000, ceilingMicroUsd: 500_000, fast: false });
-      expect(autumn.get(orgId).credits).toBe(995);
+      expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 2_500, credits: 500 });
+      expect(scan.pricing).toEqual({ engine: "slice", mode: "shadow", unit: "cent", multiplierThousandths: 3000, ceilingMicroUsd: 500_000, fast: false });
+      expect(autumn.get(orgId).credits).toBe(99_500);
 
       // Every ledger row is billable here: one attempt of each step, all priced.
       const cost = await ledgerMicroUsd(scanId);
       const bill = (await scanBill(database, scanId))!;
-      expect(bill).toMatchObject({ status: "shadow", reason: null, engine: "slice", fast: false, multiplierThousandths: 3000, creditMicroUsd: 1_000_000, costMicroUsd: cost, dueMicroUsd: cost * 3, carryInMicroUsd: 0 });
-      // The cap a usage scan would have held: the ceiling times the multiplier, in whole credits.
-      expect(bill.reservedCredits).toBe(2);
-      expect(bill.credits * 1_000_000 + bill.carryOutMicroUsd).toBe(bill.dueMicroUsd);
+      expect(bill).toMatchObject({ status: "shadow", reason: null, engine: "slice", fast: false, multiplierThousandths: 3000, creditMicroUsd: 10_000, costMicroUsd: cost, dueMicroUsd: cost * 3, carryInMicroUsd: 0 });
+      // The cap a usage scan would have held: the ceiling times the multiplier, in whole credits: 0.5 USD × 3 in credits of a cent.
+      expect(bill.reservedCredits).toBe(150);
+      expect(bill.credits * 10_000 + bill.carryOutMicroUsd).toBe(bill.dueMicroUsd);
       expect(bill.lines.map((line) => line.kind).sort()).toContain("sandbox");
       expect(bill.lines.reduce((sum, line) => sum + line.costMicroUsd, 0)).toBe(cost);
       expect(await orgCarry(database, orgId)).toBe(7_000);
@@ -1900,7 +1900,7 @@ describe.skipIf(!available)("usage billing settlement", () => {
       ({ scanId, bill: open } = await billedScan());
     });
     // Usage billing off and credits of a dollar: the scan's pricing still says usage, its bill is in cents.
-    await withSettings({}, async () => {
+    await withSettings({ NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar" }, async () => {
       let calls: Finalize[] = [];
       const reports = await withSentry(async () => {
         calls = await finalizes(async () => {
@@ -1936,7 +1936,7 @@ describe.skipIf(!available)("usage billing settlement", () => {
 
   it("a shadow bill is never settled, voided or charged, and the carry is untouched", async () => {
     await withSettings(SHADOW_ENV, async () => {
-      autumn.get(orgId).credits = 1_000;
+      autumn.get(orgId).credits = 100_000;
       await resetCarry();
       await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 7_000 });
       const published = await newScan();
@@ -1950,7 +1950,7 @@ describe.skipIf(!available)("usage billing settlement", () => {
       await failScan(failed, "test over");
       expect(await scanBill(database, failed)).toEqual(stored);
       expect(await scanById(database, failed)).toMatchObject({ status: "failed", billing: "released" });
-      expect(autumn.get(orgId).credits).toBe(995);
+      expect(autumn.get(orgId).credits).toBe(99_500);
       expect(await orgCarry(database, orgId)).toBe(7_000);
       await resetCarry();
     });

@@ -94,7 +94,7 @@ describe("quoted before a scan", () => {
   });
 
   test("the agent API's price: unchanged for a tiered account; up to the hold, with fast, for a usage one", () => {
-    expect(deepScanPrice({ loc: null })).toEqual({ credits: null, held_until_sized: 25, too_large: false });
+    expect(deepScanPrice({ loc: null })).toEqual({ credits: null, held_until_sized: 2_500, too_large: false });
     expect(Object.keys(deepScanPrice({ loc: 50_000 }))).toEqual(["credits", "held_until_sized", "too_large"]);
     expect(deepScanPrice({ loc: 50_000 }, { hold: 150 })).toEqual({ credits: null, held_until_sized: null, too_large: false, up_to_credits: 150, fast: { available: false } });
     expect(deepScanPrice({ loc: null }, { hold: 150, fast: 450 })).toEqual({ credits: null, held_until_sized: null, too_large: false, up_to_credits: 150, fast: { available: true, up_to_credits: 450 } });
@@ -106,7 +106,7 @@ describe("quoted before a scan", () => {
     const props = (plan: Parameters<typeof Dig>[0]["plan"]) => (Dig({ repo, plan }) as ReactElement<Record<string, unknown>>).props;
 
     const tiered = props({ planId: "standard", credits: 1_000 });
-    expect(tiered.confirm).toBe(`Scan for ${creditsText(5)}`);
+    expect(tiered.confirm).toBe(`Scan for ${creditsText(500)}`);
     expect("fast" in tiered).toBe(false);
 
     const billed = props({ planId: "standard", credits: 1_000, usage: { hold: 150 } });

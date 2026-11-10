@@ -1,13 +1,13 @@
 /**
- * Every price and credit amount the app says, in the credit unit it runs in. Today's text is the dollar
- * unit's, word for word; the cent unit's says the same prices with every amount of credits times 100.
+ * Every price and credit amount the app says, in the credit unit it runs in. The cent unit is the default; in the
+ * dollar unit every price is the same and every amount of credits from the catalog is 100 times smaller.
  * Each test checks the unit this process was built for (NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT).
  */
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CREDIT_UNIT } from "@sandchest/billing";
 import { creditCount, creditsText } from "@/lib/format";
-import { perCredit, PR_REVIEW_RANGE, PRICE_NOTE, PRICES } from "@/lib/pricing";
+import { perCredit, PR_REVIEW_COST, PRICE_NOTE, PRICES } from "@/lib/pricing";
 import { resetConfig } from "@/server/config";
 
 const cent = CREDIT_UNIT === "cent";
@@ -41,12 +41,15 @@ describe("the price list in words", () => {
         "Credits are $1 each; 25 or more at once are $0.90 each, 50 or more $0.85, and 100 or more $0.80.",
         "Credits are $1 per 100; 2,500 or more at once are $0.90 per 100, 5,000 or more $0.85, and 10,000 or more $0.80.",
       ),
-      review: says("A pull request review is usually 1 credit; very large ones are 2 or 3.", "A pull request review is usually 100 credits; very large ones are 200 or 300."),
-      dig: says("A deep scan of a whole repository is 5, 10 or 25 credits, by its size.", "A deep scan of a whole repository is 500, 1,000 or 2,500 credits, by its size."),
+      review: "A pull request review is charged for what it uses: usually a few credits or less, and nothing when it changes nothing security-relevant.",
+      dig: says(
+        "A deep scan of a whole repository usually costs well under 1 credit, and shows the most it can cost before it starts.",
+        "A deep scan of a whole repository usually costs well under 100 credits, and shows the most it can cost before it starts.",
+      ),
       free: "Recon and fix checks are free while there are credits left.",
     });
     expect(PRICE_NOTE).toBe(`${PRICES.review} ${PRICES.dig} ${PRICES.free}`);
-    expect(PR_REVIEW_RANGE).toBe(says("1 to 3 credits", "100 to 300 credits"));
+    expect(PR_REVIEW_COST).toBe("charged for what it uses, usually a few credits or less");
     expect(perCredit(0.9)).toBe(says("$0.90 each", "$0.90 per 100"));
   });
 
@@ -61,17 +64,17 @@ describe("pages and forms", () => {
     const { HowItWorks } = await import("@/components/how-it-works");
     const { FindingStrip } = await import("@/components/finding-strip");
     const how = text(renderToStaticMarkup(<HowItWorks />));
-    expect(how).toContain(says("|From 5 credits|", "|From 500 credits|"));
-    expect(how).toContain(says("|1 credit|", "|100 credits|"));
-    expect(text(renderToStaticMarkup(<FindingStrip />))).toContain(says("|Reviewed · 2 credits|", "|Reviewed · 200 credits|"));
+    expect(how).toContain(says("|Usually well under 1 credit|", "|Usually well under 100 credits|"));
+    expect(how).toContain("|2 credits|");
+    expect(text(renderToStaticMarkup(<FindingStrip />))).toContain("|Reviewed · 2 credits|");
   });
 
   test("review settings", async () => {
     const { OrgReviewsForm } = await import("@/components/app/org-reviews");
     const { RepoSettingsForm } = await import("@/components/app/repo-settings");
-    expect(renderToStaticMarkup(<OrgReviewsForm orgId="o" mode="auto" admin />)).toContain(`Every push to a pull request is reviewed, for ${says("1 to 3", "100 to 300")} credits by the size of the change.`);
+    expect(renderToStaticMarkup(<OrgReviewsForm orgId="o" mode="auto" admin />)).toContain("Every push to a pull request is reviewed. A review is charged for what it uses, usually a few credits or less.");
     expect(renderToStaticMarkup(<RepoSettingsForm repoId="r" branch="main" prReviews="auto" schedule="off" nextDeepScanAt={null} price={null} />)).toContain(
-      `Each push to an open pull request is reviewed, for ${says("1 to 3", "100 to 300")} credits by the size of the change.`,
+      "Each push to an open pull request is reviewed. A review is charged for what it uses, usually a few credits or less.",
     );
   });
 
@@ -97,11 +100,11 @@ describe("pages and forms", () => {
     for (const line of [
       "Claim $20 of free credits.",
       says("Claim 20 free credits", "Claim 2,000 free credits"),
-      says("What 20 credits get you", "What 2,000 credits get you"),
-      says("Most reviews cost 1 credit.", "Most reviews cost 100 credits."),
-      says("every file: 5 to 25 credits by size.", "every file: 500 to 2,500 credits by size."),
-      "|20|pull request reviews|",
-      "|4|deep scans|",
+      says("What 20 credits usually get you", "What 2,000 credits usually get you"),
+      "Most reviews cost a few credits or less.",
+      says("every file, and usually costs well under 1 credit.", "every file, and usually costs well under 100 credits."),
+      "|200+|pull request reviews|",
+      "|20+|deep scans|",
     ])
       expect(page).toContain(line);
   });
@@ -118,8 +121,8 @@ describe("pages and forms", () => {
     paint(kit as never, 0);
     paint(kit as never, 100);
     expect(lines).toContain(says("$1 a month. Credits $1 each, 25 to start.", "$1 a month. Credits $1 per 100, 2,500 to start."));
-    expect(lines).toContain(says("A pull request review: 1 credit, most of the time.", "A pull request review: 100 credits, most of the time."));
-    expect(lines).toContain(says("A deep scan of a whole repository: 5 to 25 by size.", "A deep scan of a whole repository: 500 to 2,500 by size."));
+    expect(lines).toContain("A pull request review: a few credits or less, most of the time.");
+    expect(lines).toContain(says("A deep scan of a whole repository: usually well under 1 credit.", "A deep scan of a whole repository: usually well under 100 credits."));
     expect(lines).toContain(says("25 more whenever fewer than 5 are left.", "2,500 more whenever fewer than 500 are left."));
   });
 });
@@ -138,7 +141,7 @@ describe("the agent API", () => {
       ),
     });
     expect(props("/api/v1/accounts/{account}/billing/auto-top-up", "put").credits!.description).toBe(`How many credits each top-up buys. Default: the last choice, else ${says("10", "1000")}.`);
-    expect(paths["/api/v1/repos/{repo}"]!.patch!.description).toContain(`reviews every push to a pull request (${says("1 to 3", "100 to 300")} credits each)`);
+    expect(paths["/api/v1/repos/{repo}"]!.patch!.description).toContain("reviews every push to a pull request (each charged for what it uses, usually a few credits or less)");
     expect(paths["/api/v1/accounts/{account}/billing/claim"]!.post!.description).toStartWith(`Claims ${says("20", "2000")} free credits for an account`);
   });
 

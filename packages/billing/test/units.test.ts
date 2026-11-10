@@ -177,10 +177,10 @@ test("the exports are the catalog of the unit the environment names", () => {
   expect(billing.purchasable(c.pack * 2.5)).toBe(false);
 });
 
-test("the unit setting: blank means dollar, anything but dollar or cent is refused", () => {
-  expect(parseCreditUnit(undefined)).toBe("dollar");
-  expect(parseCreditUnit("")).toBe("dollar");
-  expect(parseCreditUnit(" ")).toBe("dollar");
+test("the unit setting: blank means cent, dollar can still be chosen, anything but dollar or cent is refused", () => {
+  expect(parseCreditUnit(undefined)).toBe("cent");
+  expect(parseCreditUnit("")).toBe("cent");
+  expect(parseCreditUnit(" ")).toBe("cent");
   expect(parseCreditUnit("dollar")).toBe("dollar");
   expect(parseCreditUnit("cent")).toBe("cent");
   expect(() => parseCreditUnit("euro")).toThrow("NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT");

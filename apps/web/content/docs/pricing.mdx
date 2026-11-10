@@ -1,68 +1,85 @@
 ---
 title: Pricing & credits
-description: One plan at $1 a month, credits at $1 each or less in bulk, and exactly what each scan costs.
+description: One plan at $1 a month, credits at 100 for $1, and scans charged for what they use.
 ---
 
-Sandchest has one plan: $1 a month, and credits at $1 each, less when you buy more at once. Paid scans draw from the account's credits, and most pull request reviews cost 1. There are no per-seat prices and no repository limits: credits are the only limit.
+Sandchest has one plan: $1 a month, and credits bought ahead at 100 for $1, less when you buy more at once. Pull request reviews and deep scans are charged for what they use, and you see the most a scan can cost before it starts. There are no per-seat prices and no repository limits: credits are the only limit.
 
 ## Plans
 
-| Plan | Per month | Credits | Per credit |
+| Plan | Per month | Credits | Price |
 | --- | --- | --- | --- |
-| Standard | $1 | Bought as you need them | $1, down to $0.80 in bulk |
+| Standard | $1 | Bought as you need them | $1 per 100, down to $0.80 per 100 in bulk |
 
 - Credits are bought ahead and never expire. Buy them when you join, from **Settings → Billing** at any time, or let auto top-up buy them when you run low.
 - The customer is the GitHub account Sandchest is installed on, not a person. Everyone with access to that account's repositories shares its credits.
 - Prices are in US dollars. Stripe may show the amount in your local currency at checkout.
-- Accounts on an earlier plan (Lockbox, Chest or Vault) keep it, and its monthly credits, until they switch.
+- Balances were multiplied by 100 when a credit changed from $1 to 1 cent, so nobody's balance lost value.
+
+### Earlier plans
+
+Accounts on an earlier plan keep it, at the same price, until they switch. Its monthly credits are 100 times what they were.
+
+| Plan | Per month | Credits each month |
+| --- | --- | --- |
+| Lockbox | $20 | 6,000 |
+| Chest | $100 | 35,000 |
+| Vault | $250 | 100,000 |
 
 ## What scans cost
 
 | Scan | When it runs | Credits |
 | --- | --- | --- |
 | Recon | When a repository is added | Free |
-| PR review | A pull request is opened or updated | 1 to 3, by size |
-| Deep scan | When you press **Deep scan** | 5, 10 or 25, by repository size |
+| PR review | A pull request is opened or updated | What it uses |
+| Deep scan | When you press **Deep scan** | What it uses |
 | Fix check | Pushes to the default branch | Free |
 
 Recon and fix checks are free. Both need the account to be on a plan. Recon also needs at least one credit left: with none, it waits until the account buys more and then starts on its own. Fix checks run even with no credits left, so a bug you fixed is never left open waiting on a top-up.
 
-### PR reviews
+### Charged for what it uses
 
-A review costs credits by the number of security-relevant lines the pull request changes: lines added plus lines removed, not counting lockfiles, generated or vendored code, docs, tests and assets. Most pull requests are 1 credit.
+A pull request review or a deep scan is charged for the work it does: the model's reading and reasoning, and the time it spends in a sandbox.
 
-| Changed lines | Credits |
-| --- | --- |
-| Up to 500 | 1 |
-| Up to 2,000 | 2 |
-| Over 2,000 | 3 |
+- Before a scan starts, Sandchest shows the most it can cost, as "up to" a number of credits, and holds that amount.
+- When the scan finishes, it is charged what it used and the rest of the hold goes back to your balance. It is never charged more than the amount shown.
+- A scan that fails or is refused is not charged, and the whole hold goes back.
 
-Above 5,000 changed lines the review covers the most security-relevant files first (those with the most entry points and dangerous code) up to 5,000 lines. A pull request that only touches docs, tests, lockfiles or generated files costs nothing.
+### What to expect
 
-### Deep scans
+These are typical amounts, not promises. The exact maximum for each scan is shown before it starts.
 
-A deep scan costs credits by the repository's size in lines of code, not counting vendored or generated code. Recon measures it, and from then on the **Deep scan** button shows the price and asks you to confirm it before the scan starts. You can scan a repository again as soon as its last deep scan has finished; each one costs its price again. Before recon has measured a repository (about a minute after you install or join), you confirm "Scan for up to 25 credits": it holds 25, and charges the tier the scan measures. With fewer than 25 credits, the button waits for recon to size the repository and says so.
+- Most pull request reviews cost a few credits or less. A pull request that changes nothing security-relevant, such as one that only touches docs, tests, lockfiles or generated files, costs nothing.
+- A deep scan usually costs well under 100 credits.
+- Large repositories cost more, because there is more code to read.
 
-| Repository size | Credits |
-| --- | --- |
-| Under 100,000 lines | 5 |
-| Under 300,000 lines | 10 |
-| Under 1,000,000 lines | 25 |
-| 1,000,000 lines or more | Not scanned. Get in touch. |
+### The bill
 
-Repositories of a million lines or more aren't scanned at all, by recon, reviews or deep scans.
+Every charged scan has an itemised bill on its page: what it spent hunting, scoring, verifying in a sandbox, looking for variants and writing up, and its sandbox time, each in credits. **Settings → Billing** lists recent usage across the account.
 
-## How credits are charged
+Charges are in whole credits. A fraction of a credit left over is carried to the account's next scan, so nothing is rounded away in either direction.
 
-- When a paid scan starts, its credits are held. When it finishes, it is charged what it cost, and never more than the price you were shown.
-- If a scan fails, is refused or never starts, nothing is charged and the held credits go back to your balance.
+### Fast scans
+
+Where the option is shown, a deep scan can be started as **Fast**. It uses a faster model and costs about 3x as much on average. Its maximum is shown before it starts, like any other scan.
+
+### How long scans take
+
+A deep scan of a large repository typically takes 15 to 30 minutes, because every candidate is verified in a sandbox before it is reported. You can follow it live on the scan's page.
+
+### Large repositories
+
+Repositories of a million lines or more aren't scanned at all, by recon, reviews or deep scans. Get in touch if you need one scanned.
+
+## When credits run out
+
 - A pull request that arrives when the account is out of credits isn't reviewed. Its Check is **neutral** ("Out of credits"), so it never blocks a merge, and it links to where you can top up. The same happens, with "Not reviewed: no plan", before the account has a plan. Later pushes to that pull request aren't reviewed either, and get no new Check, until the account can pay again; the next push after that is reviewed.
-- When there aren't enough credits for a deep scan, the repository shows how many it needs, with a link to top up, instead of the **Deep scan** button.
-- With auto top-up off, the account's admins get an email when credits run low (below 5) and when they run out. With it on, they get an email for each top-up, and one if a top-up fails.
+- When there aren't enough credits to cover a deep scan's maximum, the repository shows how many it needs, with a link to top up, instead of the **Deep scan** button.
+- With auto top-up off, the account's admins get an email when credits run low (below 500) and when they run out. With it on, they get an email for each top-up, and one if a top-up fails.
 
 ## Free credits
 
-Testers can claim 20 free credits from [sandchest.com/claim](/claim), or by typing a tester's code into **Have a code?** at checkout, with no card. They work like bought credits: reviews and deep scans both draw on them.
+Testers can claim 2,000 free credits from [sandchest.com/claim](/claim), or by typing a tester's code into **Have a code?** at checkout, with no card. They work like bought credits: reviews and deep scans both draw on them.
 
 - One claim per GitHub account, and one per person, for an account that has never had a plan. Only an admin of the account can claim.
 - The account is on **Free credits** until it joins Standard. Nothing can be charged on it: there are no top-ups or auto top-up.
@@ -70,18 +87,18 @@ Testers can claim 20 free credits from [sandchest.com/claim](/claim), or by typi
 
 ## Buying credits
 
-Credits are $1 each and never expire. Buy 10, 25, 50 or 100 when you join, and up to 1,000 at once from **Settings → Billing** after that. Buying more at once costs less per credit: 25 or more are $0.90 each, 50 or more $0.85, and 100 or more $0.80. The whole purchase is priced at the rate its size reaches, and auto top-ups get the same discount.
+Credits are 100 for $1 and never expire. They come in packs of 100, so the smallest purchase is 100 credits. Buy 1,000, 2,500, 5,000 or 10,000 when you join, and up to 100,000 at once after that. Buying more at once costs less: 2,500 or more are $0.90 per 100, 5,000 or more $0.85, and 10,000 or more $0.80. The whole purchase is priced at the rate its size reaches, and auto top-ups get the same discount.
 
-| Credits bought at once | Per credit | For example |
+| Credits bought at once | Per 100 credits | For example |
 | --- | --- | --- |
-| 1 to 24 | $1.00 | 10 for $10 |
-| 25 to 49 | $0.90 | 25 for $22.50, saving $2.50 |
-| 50 to 99 | $0.85 | 50 for $42.50, saving $7.50 |
-| 100 or more | $0.80 | 100 for $80, saving $20 |
+| 100 to 2,499 | $1.00 | 1,000 for $10 |
+| 2,500 to 4,999 | $0.90 | 2,500 for $22.50, saving $2.50 |
+| 5,000 to 9,999 | $0.85 | 5,000 for $42.50, saving $7.50 |
+| 10,000 or more | $0.80 | 10,000 for $80, saving $20 |
 
 ### Auto top-up
 
-Auto top-up buys credits for you when fewer than 5 are left, so pull requests keep getting reviewed. You choose how many it buys each time (the same amount you started with, unless you change it). It spends at most $500 a month unless you change that in **Settings → Billing**, where you can raise the limit, lower it or remove it. Once it has spent the limit in a month, it stops until the next, and the account's admins get an email. It's on when you join unless you turn it off, and you can change or turn it off in Settings. Auto top-up charges your card directly, without a confirm page.
+Auto top-up buys credits for you when fewer than 500 are left, so pull requests keep getting reviewed. You choose how many it buys each time (the same amount you started with, unless you change it). It spends at most $500 a month unless you change that in **Settings → Billing**, where you can raise the limit, lower it or remove it. Once it has spent the limit in a month, it stops until the next, and the account's admins get an email. It's on when you join unless you turn it off, and you can change or turn it off in Settings. Auto top-up charges your card directly, without a confirm page.
 
 ## Managing billing
 

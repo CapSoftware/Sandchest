@@ -30,7 +30,7 @@
  * 3. Catalog. `NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT=cent bun run autumn:push --prod` in packages/billing (a preview),
  *    then again with --yes. It adds the cent version of every plan and makes it the one sold, and keeps the dollar
  *    versions, inactive, for the customers still on them. Only while frozen: from here anything bought buys cent
- *    credits. Undo: push the dollar config (`bun run autumn:push --prod --yes` without the unit), which takes the
+ *    credits. Undo: push the dollar config (`NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT=dollar bun run autumn:push --prod --yes`), which takes the
  *    cent versions away again; only once no customer is on them (step 4 undone first).
  * 4. Provider. `switch` (a dry run: read it whole), then `switch --confirm-switch-credits-to-cents --live`. Per
  *    customer: record, auto top-up off, move to the cent plan version, every bucket times 100, verify. It stops at
@@ -41,8 +41,9 @@
  *    convert` (a dry run), then with --confirm-convert-credits-to-cents. One transaction: every amount of credits
  *    times 100, every usage carry to 0; refused until step 4 has verified every customer with a plan or credits.
  *    Undo: `revert --confirm-revert-credits-to-dollars`, only before step 7.
- * 6. Unit. Deploy with NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT=cent (a build setting: it needs a new build) and
- *    SANDCHEST_BILLING_FREEZE=1 still. Undo: deploy without the unit (then steps 5, 4 and 3 in that order).
+ * 6. Unit. Deploy with NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT=cent, or unset from the commit that makes cent the default
+ *    (a build setting: it needs a new build), and SANDCHEST_BILLING_FREEZE=1 still. Undo: deploy with
+ *    NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT=dollar (then steps 5, 4 and 3 in that order).
  * 7. Top-ups. `top-ups` (a dry run), then `top-ups --confirm-restore-top-ups --live`: each customer's recorded auto
  *    top-up, buying 100 times its recorded quantity when fewer than the cent line (500) are left, with the same
  *    monthly limit. Undo: `undo` for the customers concerned puts their dollar top-up back (with steps 6 to 3).

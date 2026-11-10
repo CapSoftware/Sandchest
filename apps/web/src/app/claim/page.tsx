@@ -1,5 +1,4 @@
-import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
-import { creditsWorth, FREE_CREDITS, PLAN } from "@sandchest/billing/plans";
+import { CREDIT_PACK, creditsWorth, FREE_CREDITS, PLAN } from "@sandchest/billing/plans";
 import type { Metadata } from "next";
 import { ChestStage } from "@/components/chest-stage";
 import { FindingStrip } from "@/components/finding-strip";
@@ -30,8 +29,10 @@ export const metadata: Metadata = {
  * `server/free-credits.ts`).
  */
 export default function ClaimPage() {
-  const reviews = Math.floor(FREE_CREDITS.credits / PR_REVIEW_TIERS[0]!.credits);
-  const deepScans = Math.floor(FREE_CREDITS.credits / DEEP_SCAN_TIERS[0]!.credits);
+  // What is typical, never a promise: scans are charged for what they use. Most reviews cost a few credits or less
+  // (well under a tenth of a pack), and a deep scan usually well under a pack.
+  const reviews = Math.floor(FREE_CREDITS.credits / (CREDIT_PACK / 10));
+  const deepScans = Math.floor(FREE_CREDITS.credits / CREDIT_PACK);
   return (
     <div className="page">
       <SiteHeader visitor="signed-out" />
@@ -60,19 +61,19 @@ export default function ClaimPage() {
 
         <section className="section" aria-labelledby="perks-title">
           <h2 id="perks-title" className="section-title">
-            What {CREDITS} credits get you
+            What {CREDITS} credits usually get you
           </h2>
           <ul className="claim-perks">
             <li className="claim-perk">
-              <span className="claim-perk-n">{reviews}</span>
+              <span className="claim-perk-n">{creditCount(reviews)}+</span>
               <span className="claim-perk-name">pull request reviews</span>
-              <span className="claim-perk-note">Most reviews cost {creditsText(PR_REVIEW_TIERS[0]!.credits)}. Each one reads the change the way an attacker would.</span>
+              <span className="claim-perk-note">Most reviews cost a few credits or less. Each one reads the change the way an attacker would.</span>
             </li>
             <li className="claim-perk">
-              <span className="claim-perk-n">{deepScans}</span>
+              <span className="claim-perk-n">{creditCount(deepScans)}+</span>
               <span className="claim-perk-name">deep scans</span>
               <span className="claim-perk-note">
-                Each reads a whole repository, every file: {creditCount(DEEP_SCAN_TIERS[0]!.credits)} to {creditCount(DEEP_SCAN_TIERS.at(-1)!.credits)} credits by size.
+                Each reads a whole repository, every file, and usually costs well under {creditsText(CREDIT_PACK)}.
               </span>
             </li>
             <li className="claim-perk">

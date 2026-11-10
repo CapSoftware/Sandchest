@@ -1,3 +1,4 @@
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { DEMO_LIVE_SCAN_ID, demoRepo, demoScan, LIVE_ENDS_AT, LIVE_REST, LIVE_SCRIPT } from "@/lib/demo";
@@ -19,7 +20,7 @@ export default async function DemoScanPage({ params }: Params) {
   return (
     <ScanView
       row={row}
-      again={repo && { repo, plan: { planId: "standard", credits: 120 } }}
+      again={repo && { repo, plan: { planId: "standard", credits: 120 * CREDIT_PACK } }}
       loop={id === DEMO_LIVE_SCAN_ID ? { script: LIVE_SCRIPT, endsAt: LIVE_ENDS_AT, rest: LIVE_REST, joinAt: 4 } : undefined}
     />
   );

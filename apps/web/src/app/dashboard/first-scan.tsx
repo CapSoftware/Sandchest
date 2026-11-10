@@ -64,7 +64,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
         <h2 id="first-scan-title" className="first-scan-title">
           Where should {name} dig first?
         </h2>
-        <p className="first-scan-lede">A deep scan reads one repository end to end, every file, and reports only what an attacker could actually exploit. It takes a few minutes, and you can watch.</p>
+        <p className="first-scan-lede">A deep scan reads one repository end to end, every file, and reports only what an attacker could actually exploit. On a large repository it takes 15 to 30 minutes, and you can watch.</p>
 
         <form action={action} className="first-scan-form">
           {data.repos.length > FILTER_FROM && (

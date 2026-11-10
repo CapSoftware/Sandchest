@@ -1,3 +1,4 @@
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PullRows } from "@/components/app/pull-rows";
@@ -17,7 +18,7 @@ export default async function DemoRepoPage({ params }: Params) {
   return (
     <RepoView
       repo={repo}
-      plan={{ planId: "standard", credits: 120 }}
+      plan={{ planId: "standard", credits: 120 * CREDIT_PACK }}
       findings={demoFindings({ repoId: repo.id }, 8)}
       history={demoScans({ repoId: repo.id }, HISTORY)}
       pulls={<PullRows repoId={repo.id} pulls={demoPulls(repo.id)} mode={repo.prReviews} priced />}

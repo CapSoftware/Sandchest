@@ -28,10 +28,11 @@ test("Standard and credits on their own sell with the volume discount, as tiers 
       tierBehavior: "volume",
       billingMethod: "prepaid",
       interval: "one_off",
+      billingUnits: 100,
       tiers: [
-        { to: 24, amount: 1 },
-        { to: 49, amount: 0.9 },
-        { to: 99, amount: 0.85 },
+        { to: 2_400, amount: 1 },
+        { to: 4_900, amount: 0.9 },
+        { to: 9_900, amount: 0.85 },
         { to: "inf", amount: 0.8 },
       ],
     });

@@ -215,8 +215,8 @@ describe.skipIf(!available)("free credits", () => {
   test("free credits pay for work like bought ones", async () => {
     const scanId = (await handleWebhook(deps(), "pull_request", "pr-1", prEvent(1))).scans![0]!;
     expect((await beginScan(scanId)).state).toBe("running");
-    expect(await scanById(database, scanId)).toMatchObject({ billing: "reserved", creditsReserved: 1 });
-    expect(autumn.get(acme.id).credits).toBe(FREE_CREDITS.credits - 1);
+    expect(await scanById(database, scanId)).toMatchObject({ billing: "reserved", creditsReserved: 100 });
+    expect(autumn.get(acme.id).credits).toBe(FREE_CREDITS.credits - 100);
   });
 
   test("once they're spent, nothing runs: no reviews, no recon, no fix checks, no Digs, not even the free one", async () => {

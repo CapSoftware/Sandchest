@@ -319,7 +319,7 @@ describe.skipIf(!available)("REST API", () => {
     expect(repo.status).toBe(200);
     expect(repo.body.open_findings).toEqual({ critical: 1, high: 1, medium: 1, low: 0 });
     // Not sized yet: the price isn't known, and the most a deep scan can cost is held.
-    expect(repo.body.deep_scan).toEqual({ credits: null, held_until_sized: 25, too_large: false });
+    expect(repo.body.deep_scan).toEqual({ credits: null, held_until_sized: 2_500, too_large: false });
     expect((await api(aliceKey, "GET", `/repos/${ids.api}`)).body.full_name).toBe("acme/api");
     expect((await api(aliceKey, "GET", "/repos/ACME%2FAPI")).body.full_name).toBe("acme/api");
     expect((await api(bobKey, "GET", "/repos/acme/secret")).body.error.code).toBe("repo_not_found");
@@ -383,14 +383,14 @@ describe.skipIf(!available)("REST API", () => {
     expect(refused.body.error.code).toBe("no_plan");
 
     const billing = (await api(aliceKey, "GET", "/accounts/acme/billing")).body;
-    expect(billing).toMatchObject({ plan: null, card_on_file: false, free_credits: { open: true, credits: 20 } });
+    expect(billing).toMatchObject({ plan: null, card_on_file: false, free_credits: { open: true, credits: 2_000 } });
     expect((await api(bobKey, "POST", "/accounts/acme/billing/claim")).body.error.code).toBe("not_admin");
     expect((await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true })).body.error.code).toBe("needs_paid_plan");
 
     const claimed = await api(aliceKey, "POST", "/accounts/acme/billing/claim");
-    expect(claimed.body).toMatchObject({ status: "claimed", credits: 20, plan: { id: "trial" } });
+    expect(claimed.body).toMatchObject({ status: "claimed", credits: 2_000, plan: { id: "trial" } });
     // Claiming again (a retry) is harmless: still claimed, nothing granted twice.
-    expect((await api(aliceKey, "POST", "/accounts/acme/billing/claim")).body).toMatchObject({ status: "claimed", credits: 20 });
+    expect((await api(aliceKey, "POST", "/accounts/acme/billing/claim")).body).toMatchObject({ status: "claimed", credits: 2_000 });
 
     // Before recon sizes it, a deep scan holds the most one can cost, more than the free credits.
     expect((await api(aliceKey, "POST", "/repos/acme/api/scans")).body.error.code).toBe("out_of_credits");
@@ -414,22 +414,22 @@ describe.skipIf(!available)("REST API", () => {
     expect((await api(aliceKey, "GET", "/scans?kind=deep")).body.scans[0].id).toBe(scan.body.scan.id);
 
     // On free credits, buying joins the plan through Stripe Checkout.
-    const quote = (await api(aliceKey, "POST", "/accounts/acme/billing/quote", { credits: 25 })).body;
+    const quote = (await api(aliceKey, "POST", "/accounts/acme/billing/quote", { credits: 2_500 })).body;
     expect(quote.payment).toBe("checkout");
-    const tooDear = await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 25, max_usd: 1 });
+    const tooDear = await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 2_500, max_usd: 1 });
     expect(tooDear.body.error.code).toBe("over_max_usd");
-    const checkout = (await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 25 })).body;
+    const checkout = (await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 2_500 })).body;
     expect(checkout).toMatchObject({ status: "checkout_required", checkout_url: expect.stringContaining("checkout.test") });
     // Joining turns auto top-up on unless asked not to, and says so.
     expect(checkout.message).toContain("Auto top-up is on");
     const [joined] = await database.$client<Array<{ choice: unknown }>>`select settings->'autoTopUp' as choice from orgs where id = ${ids.acme}`;
-    expect(joined!.choice).toEqual({ enabled: true, quantity: 25, monthlyLimitUsd: 500 });
+    expect(joined!.choice).toEqual({ enabled: true, quantity: 2_500, monthlyLimitUsd: 500 });
 
     // With the card on file, credits are charged at once.
-    const charged = (await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 10 })).body;
+    const charged = (await api(aliceKey, "POST", "/accounts/acme/billing/purchase", { credits: 1_000 })).body;
     expect(charged.status).toBe("charged");
-    const auto = (await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true, credits: 10, monthly_limit_usd: 60 })).body;
-    expect(auto.auto_top_up).toMatchObject({ enabled: true, credits: 10, monthly_limit_usd: 60 });
+    const auto = (await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true, credits: 1_000, monthly_limit_usd: 60 })).body;
+    expect(auto.auto_top_up).toMatchObject({ enabled: true, credits: 1_000, monthly_limit_usd: 60 });
     // Left out, the limit stays; null removes it.
     expect((await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true })).body.auto_top_up).toMatchObject({ monthly_limit_usd: 60 });
     expect((await api(aliceKey, "PUT", "/accounts/acme/billing/auto-top-up", { enabled: true, monthly_limit_usd: null })).body.auto_top_up).toMatchObject({ monthly_limit_usd: null });

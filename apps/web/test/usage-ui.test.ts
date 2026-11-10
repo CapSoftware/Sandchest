@@ -222,9 +222,9 @@ describe("prices before a scan", () => {
   it("tiered: the repo's price is exactly as before", async () => {
     await withSettings(SLICE_ENV, async () => {
       const repo = (await api("GET", "/repos/acme/app")).body;
-      expect(repo.deep_scan).toEqual({ credits: 5, held_until_sized: null, too_large: false });
+      expect(repo.deep_scan).toEqual({ credits: 500, held_until_sized: null, too_large: false });
       const listed = (await api("GET", "/repos")).body.repos[0];
-      expect(listed.deep_scan).toEqual({ credits: 5, held_until_sized: null, too_large: false });
+      expect(listed.deep_scan).toEqual({ credits: 500, held_until_sized: null, too_large: false });
       const [row] = await dashboardRepos(database, ids.user);
       expect((await orgPlans([row!])).get(ids.org)).toEqual({ planId: "chest", credits: expect.any(Number) });
     });
@@ -232,11 +232,11 @@ describe("prices before a scan", () => {
 
   it("shadow: quoted the tier price, which is what is charged", async () => {
     await withSettings({ ...SLICE_ENV, ...FAST_ENV, ...SHADOW_ENV }, async () => {
-      expect((await api("GET", "/repos/acme/app")).body.deep_scan).toEqual({ credits: 5, held_until_sized: null, too_large: false });
+      expect((await api("GET", "/repos/acme/app")).body.deep_scan).toEqual({ credits: 500, held_until_sized: null, too_large: false });
       const [row] = await dashboardRepos(database, ids.user);
       expect("usage" in (await orgPlans([row!])).get(ids.org)!).toBe(false);
       const quote = await quotePrReview({ ...(await repoForUser(database, ids.user, ids.repo))!.repo, org: (await repoForUser(database, ids.user, ids.repo))!.org }, 7);
-      expect(quote).toEqual({ ok: true, scanId: "", credits: 1 });
+      expect(quote).toEqual({ ok: true, scanId: "", credits: 100 });
     });
   });
 
@@ -262,7 +262,7 @@ describe("start_deep_scan and fast", () => {
       expect(response.status).toBe(202);
       expect(response.body.message).toBe("Started. Call get_scan with wait=50 to follow it until it's done.");
       const scan = (await scanById(database, response.body.scan.id))!;
-      expect(scan).toMatchObject({ fast: false, creditsReserved: 5, pricing: { engine: "slice", mode: "tiered" } });
+      expect(scan).toMatchObject({ fast: false, creditsReserved: 500, pricing: { engine: "slice", mode: "tiered" } });
     });
   });
 
@@ -274,7 +274,7 @@ describe("start_deep_scan and fast", () => {
       expect(refused.body.error.code).toBe("fast_unavailable");
       const response = await api("POST", "/repos/acme/app/scans");
       expect(response.body.message).toBe("Started. Call get_scan with wait=50 to follow it until it's done.");
-      expect((await scanById(database, response.body.scan.id))!).toMatchObject({ fast: false, creditsReserved: 5, pricing: { mode: "shadow" } });
+      expect((await scanById(database, response.body.scan.id))!).toMatchObject({ fast: false, creditsReserved: 500, pricing: { mode: "shadow" } });
     });
   });
 

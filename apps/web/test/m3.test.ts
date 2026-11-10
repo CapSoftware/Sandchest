@@ -483,7 +483,7 @@ describe("notifications", () => {
 
 describe("dig", () => {
   test("costs credits by size, runs one at a time, refuses huge repos", () => {
-    expect(digState({ loc: 48_000, activeDeepScanId: null })).toEqual({ state: "ready", credits: 5 });
+    expect(digState({ loc: 48_000, activeDeepScanId: null })).toEqual({ state: "ready", credits: 500 });
     expect(digState({ loc: null, activeDeepScanId: null })).toEqual({ state: "ready", credits: undefined });
     expect(digState({ loc: 2_000_000, activeDeepScanId: null })).toEqual({ state: "too_large" });
     expect(digState({ loc: 10, activeDeepScanId: "s1" })).toEqual({ state: "running", scanId: "s1" });

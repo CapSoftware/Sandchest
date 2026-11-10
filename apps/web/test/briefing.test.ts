@@ -3,7 +3,7 @@ import { digAllCredits, linesLabel, websiteUrl } from "../src/lib/briefing";
 
 describe("briefing", () => {
   test("a dig of everything counts unmeasured repositories at the top tier", () => {
-    expect(digAllCredits([{ loc: 50_000 }, { loc: 200_000 }, { loc: null }])).toBe(5 + 10 + 25);
+    expect(digAllCredits([{ loc: 50_000 }, { loc: 200_000 }, { loc: null }])).toBe(500 + 1_000 + 2_500);
     expect(digAllCredits([])).toBe(0);
   });
 

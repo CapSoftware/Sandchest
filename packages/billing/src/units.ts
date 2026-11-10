@@ -1,20 +1,21 @@
 /**
  * What one credit is worth, and every price-bearing value in credits for it.
- * Today a credit is a dollar. In the `cent` unit every amount of credits is
- * 100 times as many and every US dollar price stays the same: credits are
- * sold in packs of 100 at today's price for one.
+ * A credit is a cent. In the `cent` unit every amount of credits is 100 times
+ * the `dollar` unit's and every US dollar price is the same: credits are sold
+ * in packs of 100 at the price one dollar credit had.
  *
- * The unit comes from NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT (`dollar`, the
- * default, or `cent`). `plans.ts` and `costs.ts` export the resolved unit's
- * catalog, so every surface and the Autumn config read the same numbers.
+ * The unit comes from NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT (`cent`, the default,
+ * or `dollar`, which only rolls the switch back). `plans.ts` and `costs.ts`
+ * export the resolved unit's catalog, so every surface and the Autumn config
+ * read the same numbers.
  */
 import type { Plan } from "./plans";
 
 export type CreditUnit = "dollar" | "cent";
 
-/** A setting's value as a unit: blank means unset, which is `dollar`. Anything else is refused, as the app's config refuses it. */
+/** A setting's value as a unit: blank means unset, which is `cent`. Anything else is refused, as the app's config refuses it. */
 export function parseCreditUnit(value: string | undefined): CreditUnit {
-  if (value === undefined || value.trim() === "") return "dollar";
+  if (value === undefined || value.trim() === "") return "cent";
   if (value === "dollar" || value === "cent") return value;
   throw new Error("NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: must be dollar or cent");
 }

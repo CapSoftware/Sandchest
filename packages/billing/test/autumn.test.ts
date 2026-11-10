@@ -103,12 +103,12 @@ test("billing state: active plan, cancellation, scheduled downgrade, auto top-up
 
 test("auto top-up: the monthly limit becomes whole top-ups; under one is off; none means no limit", () => {
   const standard = planById("standard")!;
-  expect(autoTopUpControl(standard, { enabled: true, quantity: 10, monthlyLimitUsd: null })).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: null });
-  expect(autoTopUpControl(standard, { enabled: true, quantity: 10, monthlyLimitUsd: 50 })).toEqual({ enabled: true, threshold: 5, quantity: 10, perMonth: 5 });
-  expect(autoTopUpControl(standard, { enabled: true, quantity: 25, monthlyLimitUsd: 60 })).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 2 });
-  expect(autoTopUpControl(standard, { enabled: true, quantity: 25, monthlyLimitUsd: 20 }).enabled).toBe(false);
-  // Older plans sell credits in packs of 25 for $10: a top-up rounds up to whole packs.
-  expect(autoTopUpControl(planById("chest")!, { enabled: true, quantity: 10, monthlyLimitUsd: 40 })).toEqual({ enabled: true, threshold: 5, quantity: 25, perMonth: 4 });
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 1_000, monthlyLimitUsd: null })).toEqual({ enabled: true, threshold: 500, quantity: 1_000, perMonth: null });
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 1_000, monthlyLimitUsd: 50 })).toEqual({ enabled: true, threshold: 500, quantity: 1_000, perMonth: 5 });
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 2_500, monthlyLimitUsd: 60 })).toEqual({ enabled: true, threshold: 500, quantity: 2_500, perMonth: 2 });
+  expect(autoTopUpControl(standard, { enabled: true, quantity: 2_500, monthlyLimitUsd: 20 }).enabled).toBe(false);
+  // Older plans sell credits in packs of 2,500 for $10: a top-up rounds up to whole packs.
+  expect(autoTopUpControl(planById("chest")!, { enabled: true, quantity: 1_000, monthlyLimitUsd: 40 })).toEqual({ enabled: true, threshold: 500, quantity: 2_500, perMonth: 4 });
 });
 
 test("auto top-up without a monthly limit sends no purchase limit, which clears one set before", async () => {

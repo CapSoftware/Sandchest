@@ -137,7 +137,7 @@ describe.skipIf(!available)("the first deep scan", () => {
     expect(offered?.repos.map((repo) => repo.fullName).sort()).toEqual(["acme/api", "acme/web"]);
     expect(offered?.suggested).toBe(repoIds[1]);
     // Unmeasured, a repository holds the most a deep scan can cost, and says so.
-    expect(offered?.repos.every((repo) => repo.unsized && repo.credits === 25)).toBe(true);
+    expect(offered?.repos.every((repo) => repo.unsized && repo.credits === 2_500)).toBe(true);
     await deepScanned(repoIds[0]!, new Date());
     expect(await offer()).toBeUndefined();
   });

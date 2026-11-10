@@ -33,7 +33,9 @@ describe("usage billing settings", () => {
     expect(config({ ...base, ...blank })).toEqual({ ...base, workspace: "local" });
     expect(config({ ...slice, ...blank })).toEqual({ ...slice, workspace: "boat" });
     expect(usageMultiplierThousandths(config(base))).toBeUndefined();
-    expect(creditUnit(config(base))).toBe("dollar");
+    expect(creditUnit(config(base))).toBe("cent");
+    // The dollar unit can still be chosen: it rolls the credit unit switch back.
+    expect(creditUnit(config({ ...base, NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar" }))).toBe("dollar");
     expect(scanPricingMode("slice", config(slice))).toBe("tiered");
   });
 
@@ -62,14 +64,15 @@ describe("usage billing settings", () => {
 
     const on = problems({ ...base, SANDCHEST_USAGE_BILLING: "on", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar" });
     for (const name of ["SANDCHEST_USAGE_MULTIPLIER", "SANDCHEST_ENGINE", "NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT"]) expect(on).toContain(name);
-    // The default unit is a dollar, so on alone with nothing else names the unit too.
-    expect(problems({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "on" })).toBe("Invalid server configuration:\n  NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: must be cent when usage billing is on");
+    // The default unit is a cent, so on alone needs nothing more; with the dollar unit chosen, only the unit is named.
+    expect(problems({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "on" })).toBe("");
+    expect(problems({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "on", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar" })).toBe("Invalid server configuration:\n  NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: must be cent when usage billing is on");
     // Classic named explicitly is not slice.
     expect(problems({ ...base, ...multiplier, SANDCHEST_ENGINE: "classic", SANDCHEST_USAGE_BILLING: "shadow" })).toContain("SANDCHEST_ENGINE: must be slice for usage billing");
 
     // One error with the slice engine's problems and usage billing's together.
     const { SANDCHEST_GATEWAY_SECRET: _secret, ...noSecret } = slice;
-    const both = problems({ ...noSecret, SANDCHEST_USAGE_BILLING: "on", SANDCHEST_USAGE_MULTIPLIER: "0" });
+    const both = problems({ ...noSecret, SANDCHEST_USAGE_BILLING: "on", SANDCHEST_USAGE_MULTIPLIER: "0", NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar" });
     for (const name of ["SANDCHEST_GATEWAY_SECRET", "SANDCHEST_USAGE_MULTIPLIER", "NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT"]) expect(both).toContain(name);
     expect(both.match(/Invalid server configuration/g)).toHaveLength(1);
   });
@@ -109,21 +112,22 @@ describe("how a scan is priced at reservation", () => {
   const fastly = (ceiling: string) => ({ ...usage, SANDCHEST_SLICE_CEILING_FAST_USD: ceiling, LLM_AGENT_FAST_MODEL: "fast-model", LLM_SLICE_FAST_BODY: '{"serving":"fast"}' });
 
   test("usage billing off: engine, tiered, the unit; nothing else, and the tier price is held", () => {
-    expect(scanPricing(deep, "acme", config(slice))).toEqual({ engine: "slice", mode: "tiered", unit: "dollar" });
-    expect(scanPricing(review, "acme", config(base))).toEqual({ engine: "classic", mode: "tiered", unit: "dollar" });
+    expect(scanPricing(deep, "acme", config(slice))).toEqual({ engine: "slice", mode: "tiered", unit: "cent" });
+    expect(scanPricing(review, "acme", config(base))).toEqual({ engine: "classic", mode: "tiered", unit: "cent" });
+    expect(scanPricing(review, "acme", config({ ...base, NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: "dollar" }))).toEqual({ engine: "classic", mode: "tiered", unit: "dollar" });
     expect(scanPricing({ kind: "recon", fast: false }, "acme", config(usage))).toEqual({ engine: "classic", mode: "tiered", unit: "cent" });
-    expect(heldCredits(scanPricing(deep, "acme", config(slice)), 25)).toBe(25);
+    expect(heldCredits(scanPricing(deep, "acme", config(slice)), 2_500)).toBe(2_500);
     // Shadow holds the tier price too.
-    expect(heldCredits(scanPricing(deep, "acme", config({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "shadow" })), 25)).toBe(25);
+    expect(heldCredits(scanPricing(deep, "acme", config({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "shadow" })), 2_500)).toBe(2_500);
   });
 
   test("usage and shadow: the multiplier and the ceiling of the kind; usage holds credits covering their product", () => {
     expect(scanPricing(deep, "acme", config(usage))).toEqual({ engine: "slice", mode: "usage", unit: "cent", multiplierThousandths: 2500, ceilingMicroUsd: 500_000, fast: false });
     expect(scanPricing(review, "acme", config(usage))).toMatchObject({ ceilingMicroUsd: 250_000 });
-    expect(scanPricing(deep, "acme", config({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "shadow" }))).toMatchObject({ mode: "shadow", unit: "dollar", ceilingMicroUsd: 500_000 });
+    expect(scanPricing(deep, "acme", config({ ...slice, ...multiplier, SANDCHEST_USAGE_BILLING: "shadow" }))).toMatchObject({ mode: "shadow", unit: "cent", ceilingMicroUsd: 500_000 });
     // 0.5 × 2.5 = 1.25 USD: 125 cents. 0.25 × 2.5 = 0.625 USD: 63 cents, rounded up.
-    expect(heldCredits(scanPricing(deep, "acme", config(usage)), 25)).toBe(125);
-    expect(heldCredits(scanPricing(review, "acme", config(usage)), 1)).toBe(63);
+    expect(heldCredits(scanPricing(deep, "acme", config(usage)), 2_500)).toBe(125);
+    expect(heldCredits(scanPricing(review, "acme", config(usage)), 100)).toBe(63);
     // A review with nothing to review holds nothing.
     expect(heldCredits(scanPricing(review, "acme", config(usage)), 0)).toBe(0);
     expect(usageHold({ engine: "slice", mode: "usage", unit: "dollar", multiplierThousandths: 1000, ceilingMicroUsd: 1_000_001 })).toBe(2);

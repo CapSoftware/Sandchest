@@ -287,9 +287,9 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     expect(review.comments[0]!.body).toContain("Fix prompt for your coding agent");
     expect(recorded.completed.at(-1)).toMatchObject({ repo: "acme/private-app", conclusion: "failure" });
     const scan = await scanById(database, scanId!);
-    expect(scan).toMatchObject({ status: "completed", credits: 1, billing: "charged", creditsReserved: 1 });
-    // 350 a month on Chest, less this review.
-    expect(autumn.get(scan!.orgId).credits).toBe(349);
+    expect(scan).toMatchObject({ status: "completed", credits: 100, billing: "charged", creditsReserved: 100 });
+    // 35,000 a month on Chest, less this review.
+    expect(autumn.get(scan!.orgId).credits).toBe(34_900);
     expect(autumn.get(scan!.orgId).locks.size).toBe(0);
     expect(await openFindings(database, scan!.repoId)).toHaveLength(1);
     // One summary comment, with the finding in full: the repo is private.

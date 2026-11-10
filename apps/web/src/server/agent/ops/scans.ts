@@ -7,7 +7,7 @@ import { db } from "../../db";
 import { describeError } from "../../log";
 import { deepScanQuote, quotesByAccount } from "../../usage-quote";
 import { billView } from "@/lib/bill-view";
-import { PR_REVIEW_RANGE } from "@/lib/pricing";
+import { PR_REVIEW_COST } from "@/lib/pricing";
 import { firstRun } from "@/lib/schedule";
 import { captureException } from "../../sentry";
 import { ApiError, notFound } from "../errors";
@@ -98,7 +98,7 @@ export const scanOps = [
     name: "update_repo",
     title: "Change a repository's review settings",
     description:
-      `Changes how a repository is reviewed (anyone who can push to it). pr_reviews: "auto" reviews every push to a pull request (${PR_REVIEW_RANGE} each), "command" only when someone comments /sandchest review, "off" never. deep_scan_schedule: "off", "daily", "weekly" or "monthly" deep scans, each paid like a manual one and skipped when nothing changed.`,
+      `Changes how a repository is reviewed (anyone who can push to it). pr_reviews: "auto" reviews every push to a pull request (each ${PR_REVIEW_COST}), "command" only when someone comments /sandchest review, "off" never. deep_scan_schedule: "off", "daily", "weekly" or "monthly" deep scans, each paid like a manual one and skipped when nothing changed.`,
     method: "PATCH",
     path: "/repos/{repo}",
     input: z.object({
@@ -132,7 +132,7 @@ export const scanOps = [
     name: "start_deep_scan",
     title: "Start a deep scan",
     description:
-      "Starts a deep scan of a whole repository: the hacker reads it end to end for exploitable vulnerabilities (a few minutes). Credits are held now and only what the scan measures is charged. One at a time per repository. Then call get_scan with wait to follow it. Pass fast=true for a faster run where list_repos says deep_scan.fast is available (it costs more); it is refused anywhere else.",
+      "Starts a deep scan of a whole repository: the hacker reads it end to end for exploitable vulnerabilities (usually 15 to 30 minutes for a large repository). The most it can cost is held now, and it is charged what it uses, never more. One at a time per repository. Then call get_scan with wait to follow it. Pass fast=true for a faster run where list_repos says deep_scan.fast is available (it costs more); it is refused anywhere else.",
     method: "POST",
     path: "/repos/{repo}/scans",
     status: 202,
@@ -215,7 +215,7 @@ export const scanOps = [
     name: "get_scan",
     title: "Get a scan",
     description:
-      "A scan's status and the findings it reported. Pass wait (seconds, up to 50) to hold the request until the scan finishes or the time is up, then call again while done is false. Deep scans take a few minutes. A scan billed by what it used also has bill: what each part used and came to in credits (lines), its usage, what was carried in from earlier scans, charged, and carried to the next scan, whether it was capped at the credits held, whether it ran fast, and the credits held.",
+      "A scan's status and the findings it reported. Pass wait (seconds, up to 50) to hold the request until the scan finishes or the time is up, then call again while done is false. A deep scan of a large repository usually takes 15 to 30 minutes. A scan billed by what it used also has bill: what each part used and came to in credits (lines), its usage, what was carried in from earlier scans, charged, and carried to the next scan, whether it was capped at the credits held, whether it ran fast, and the credits held.",
     method: "GET",
     path: "/scans/{id}",
     input: z.object({ id: Uuid("scan"), wait: int(0, MAX_WAIT_S).optional().describe(`Seconds to wait for the scan to finish (0-${MAX_WAIT_S}).`) }),

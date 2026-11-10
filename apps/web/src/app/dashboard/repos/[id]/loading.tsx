@@ -1,3 +1,4 @@
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import { PageSkeleton } from "@/components/app/skeleton";
 import { PullRows } from "@/components/app/pull-rows";
 import { sampleFindings, samplePulls, sampleRepos, sampleScans } from "@/lib/samples";
@@ -11,7 +12,7 @@ export default function Loading() {
     <PageSkeleton id="repo" label="Loading repository">
       <RepoView
         repo={repo}
-        plan={billingEnabled() ? { planId: "standard", credits: 120 } : undefined}
+        plan={billingEnabled() ? { planId: "standard", credits: 120 * CREDIT_PACK } : undefined}
         findings={sampleFindings(4)}
         history={sampleScans()}
         pulls={<PullRows repoId={repo.id} pulls={samplePulls(3)} mode={repo.prReviews} priced={billingEnabled()} />}

@@ -1,3 +1,4 @@
+import { CREDIT_PACK } from "@sandchest/billing/plans";
 import { PageSkeleton } from "@/components/app/skeleton";
 import { sampleBill, sampleRepos, sampleScan } from "@/lib/samples";
 import { billingEnabled } from "@/server/billing";
@@ -11,7 +12,7 @@ import { ScanView } from "./scan-view";
 export default function Loading() {
   return (
     <PageSkeleton id="scan" label="Loading scan">
-      <ScanView row={sampleScan()} again={{ repo: sampleRepos()[0]!, plan: billingEnabled() ? { planId: "standard", credits: 120 } : undefined }} bill={scanPricingMode("slice") === "usage" ? sampleBill() : undefined} />
+      <ScanView row={sampleScan()} again={{ repo: sampleRepos()[0]!, plan: billingEnabled() ? { planId: "standard", credits: 120 * CREDIT_PACK } : undefined }} bill={scanPricingMode("slice") === "usage" ? sampleBill() : undefined} />
     </PageSkeleton>
   );
 }

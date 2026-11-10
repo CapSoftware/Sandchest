@@ -5,8 +5,7 @@
  * `neofetch` while you customize their kit, and the terms as a man page they
  * sign.
  */
-import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
-import { CREDIT_PRICE, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_PACK, CREDIT_PRICE, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { linesLabel, type BriefingRepo } from "@/lib/briefing";
 import { creditCount, creditsText } from "@/lib/format";
 import { perCredit } from "@/lib/pricing";
@@ -204,10 +203,10 @@ function neofetch(kit: Kit, t: number, since: number, m: RecruitModel) {
   kit.cursor(end + 4, kit.H - PAD, t, PX);
 }
 
-/** What the work costs, as the terms put it. */
+/** What the work usually costs, as the terms put it: each scan is charged for what it uses. */
 const RATES = [
-  `A pull request review: ${creditsText(PR_REVIEW_TIERS[0]!.credits)}, most of the time.`,
-  `A deep scan of a whole repository: ${creditCount(DEEP_SCAN_TIERS[0]!.credits)} to ${creditCount(DEEP_SCAN_TIERS.at(-1)!.credits)} by size.`,
+  "A pull request review: a few credits or less, most of the time.",
+  `A deep scan of a whole repository: usually well under ${creditsText(CREDIT_PACK)}.`,
 ];
 
 /** The terms as a man page, signed at the bottom once they're hired. */

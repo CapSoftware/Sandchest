@@ -16,7 +16,7 @@ describe("recruiting drafts", () => {
       step: "plan",
       hacker: { ...DEFAULT_HACKER, handle: "Dry Run", shell: "gunmetal" },
       company: { name: "Acme", email: "billing@example.com" },
-      credits: 50,
+      credits: 5_000,
       autoTopUp: false,
     };
     expect(readDraft(JSON.stringify(left))).toEqual(left);

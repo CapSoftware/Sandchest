@@ -42,8 +42,8 @@ describe("frozen, every surface that moves money or credits refuses before reach
 
   test("the dashboard's purchases, the add-credits dialog and auto top-up", async () => {
     setBillingFrozen(true);
-    expect(await purchase(ORG, {}, form({ kind: "top_up", credits: "25" }))).toEqual({ error: BILLING_FROZEN });
-    expect(await confirmPurchase(ORG, {}, form({ kind: "top_up", credits: "25", purchase: crypto.randomUUID() }))).toEqual({ error: BILLING_FROZEN });
+    expect(await purchase(ORG, {}, form({ kind: "top_up", credits: "2500" }))).toEqual({ error: BILLING_FROZEN });
+    expect(await confirmPurchase(ORG, {}, form({ kind: "top_up", credits: "2500", purchase: crypto.randomUUID() }))).toEqual({ error: BILLING_FROZEN });
     expect(await quoteCredits(ORG, 25)).toEqual({ error: BILLING_FROZEN });
     expect(await addCredits(ORG, 25, crypto.randomUUID())).toEqual({ error: BILLING_FROZEN });
     expect(await saveAutoTopUp(ORG, {}, form({ enabled: "on", quantity: "10" }))).toEqual({ error: BILLING_FROZEN });
@@ -53,10 +53,10 @@ describe("frozen, every surface that moves money or credits refuses before reach
   test("joining while recruiting, paying on the page, codes, and free credits", async () => {
     setBillingFrozen(true);
     expect(await recruit(ORG, {}, form({ claim: "1" }))).toEqual({ error: BILLING_FROZEN });
-    expect(await recruit(ORG, {}, form({ order: JSON.stringify({ credits: 10, autoTopUp: true }) }))).toEqual({ error: BILLING_FROZEN });
+    expect(await recruit(ORG, {}, form({ order: JSON.stringify({ credits: 1_000, autoTopUp: true }) }))).toEqual({ error: BILLING_FROZEN });
     expect(await preparePayment(ORG, {} as never)).toEqual({ error: BILLING_FROZEN });
-    expect(await checkDiscount(ORG, "SPRING", { credits: 10, autoTopUp: true })).toEqual({ error: BILLING_FROZEN });
-    expect(await completePayment(ORG, { credits: 10, autoTopUp: true }, "seti_1", {} as never)).toEqual({ error: BILLING_FROZEN });
+    expect(await checkDiscount(ORG, "SPRING", { credits: 1_000, autoTopUp: true })).toEqual({ error: BILLING_FROZEN });
+    expect(await completePayment(ORG, { credits: 1_000, autoTopUp: true }, "seti_1", {} as never)).toEqual({ error: BILLING_FROZEN });
     expect(await claimFreeCredits({ id: crypto.randomUUID(), githubUserId: 1 }, ORG)).toEqual({ ok: false, reason: "frozen" });
     expect(autumn.calls).toEqual([]);
   });
@@ -65,8 +65,8 @@ describe("frozen, every surface that moves money or credits refuses before reach
     setBillingFrozen(true);
     const op = (name: string) => billingOps.find((o) => o.name === name)!;
     const inputs: Record<string, unknown> = {
-      buy_credits: { account: "acme", credits: 10 },
-      quote_credits: { account: "acme", credits: 10 },
+      buy_credits: { account: "acme", credits: 1_000 },
+      quote_credits: { account: "acme", credits: 1_000 },
       claim_free_credits: { account: "acme" },
       set_auto_top_up: { account: "acme", enabled: true },
     };
@@ -80,7 +80,7 @@ describe("frozen, every surface that moves money or credits refuses before reach
 
   test("no credits are held, and nothing is held for a scan that costs nothing either", async () => {
     setBillingFrozen(true);
-    expect(await reserveScan("00000000-0000-4000-8000-0000000000a1", { id: ORG, githubLogin: "acme" }, 5, false)).toEqual({ ok: false, reason: "frozen", credits: 5 });
+    expect(await reserveScan("00000000-0000-4000-8000-0000000000a1", { id: ORG, githubLogin: "acme" }, 500, false)).toEqual({ ok: false, reason: "frozen", credits: 500 });
     expect(autumn.calls).toEqual([]);
   });
 
@@ -166,14 +166,14 @@ describe("frozen scans and billing, against Postgres", () => {
   const feed = async (scanId: string) => (await database.$client<Array<{ message: string }>>`select message from scan_events where scan_id = ${scanId} order by seq`).map((e) => e.message);
   const repo = async () => (await database.query.repos.findFirst({ where: (r, { eq }) => eq(r.orgId, acme.id), with: { org: true } }))!;
 
-  it("set up: an org on Standard with 40 credits", async () => {
+  it("set up: an org on Standard with 4,000 credits", async () => {
     setAutumn(autumn);
     const { org } = await upsertInstallation(database, 601, { githubAccountId: 600, githubLogin: "acme", type: "Organization" }, [{ githubRepoId: 61, fullName: "acme/api", private: true, defaultBranch: "main" }]);
     acme = { id: org.id, githubLogin: "acme" };
     await autumn.attach({ customerId: acme.id, planId: "standard", successUrl: "" });
-    autumn.get(acme.id).credits = 40;
+    autumn.get(acme.id).credits = 4_000;
     await syncBilling(acme);
-    expect((await orgBillingRow(database, acme.id))?.credits).toBe(40);
+    expect((await orgBillingRow(database, acme.id))?.credits).toBe(4_000);
   });
 
   it("a webhook PR review waits with one note, holding nothing, and goes ahead by itself once thawed", async () => {
@@ -190,16 +190,16 @@ describe("frozen scans and billing, against Postgres", () => {
 
     setBillingFrozen(false);
     expect((await beginScan(scanId)).state).toBe("running");
-    expect(await scanById(database, scanId)).toMatchObject({ billing: "reserved", creditsReserved: 1 });
-    expect(autumn.get(acme.id).credits).toBe(39);
+    expect(await scanById(database, scanId)).toMatchObject({ billing: "reserved", creditsReserved: 100 });
+    expect(autumn.get(acme.id).credits).toBe(3_900);
   });
 
   it("a scan already holding credits settles as usual while frozen, and a free review runs", async () => {
     const held = (await database.query.scans.findFirst({ where: (s, { eq }) => eq(s.billing, "reserved") }))!;
     setBillingFrozen(true);
-    await database.$client`update scans set credits = 1, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${held.id}`;
+    await database.$client`update scans set credits = 100, stats = ${JSON.stringify({ findingIds: [] })}::jsonb where id = ${held.id}`;
     await publishScan(held.id);
-    expect(await scanById(database, held.id)).toMatchObject({ status: "completed", billing: "charged", credits: 1 });
+    expect(await scanById(database, held.id)).toMatchObject({ status: "completed", billing: "charged", credits: 100 });
     expect(autumn.get(acme.id).locks.size).toBe(0);
     expect(await heldCreditScans(database)).toBe(0);
 
@@ -229,19 +229,19 @@ describe("frozen scans and billing, against Postgres", () => {
 
     // Thawed, the same requests go through.
     setBillingFrozen(false);
-    expect(await quotePrReview(await repo(), 3)).toMatchObject({ ok: true, credits: 1 });
+    expect(await quotePrReview(await repo(), 3)).toMatchObject({ ok: true, credits: 100 });
     expect(await requestDeepScan({ ...(await repo()), loc: 50_000 })).toMatchObject({ ok: true });
   });
 
   it("the stored billing copy is neither refreshed nor written while frozen", async () => {
     const stored = (await orgBillingRow(database, acme.id))!;
-    autumn.get(acme.id).credits = 7_000;
+    autumn.get(acme.id).credits = 700_000;
     setBillingFrozen(true);
     expect((await syncBilling(acme)).credits).toBe(stored.credits);
     // A free scan's credit check reads Autumn but stores nothing.
     expect(await reserveScan("00000000-0000-4000-8000-0000000000a2", acme, 0, false)).toEqual({ ok: true });
     expect((await orgBillingRow(database, acme.id))!.credits).toBe(stored.credits);
     setBillingFrozen(false);
-    expect((await syncBilling(acme)).credits).toBe(7_000);
+    expect((await syncBilling(acme)).credits).toBe(700_000);
   });
 });

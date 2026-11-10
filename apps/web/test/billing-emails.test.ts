@@ -112,7 +112,7 @@ beforeAll(async () => {
   // Push access, but not an admin.
   await database.insert(schema.permissionCache).values({ userId: dave.id, repoId, permission: "write" });
 
-  // Acme buys Lockbox: 60 credits, nothing to say yet.
+  // Acme buys Lockbox: 6,000 credits, nothing to say yet.
   await autumn.attach({ customerId: acme.id, planId: "lockbox", successUrl: "" });
   await syncBilling(acme);
 });
@@ -188,14 +188,14 @@ const toppedUp = (invoice: string, balanceAfter: number, customer = acme.id) => 
   type: "billing.auto_topup_succeeded",
   id: `evt_auto_topup_${invoice}`,
   occurred_at: Date.now(),
-  data: { customer_id: customer, feature_id: "credits", quantity_granted: 25, threshold: 15, balance_after: balanceAfter, invoice_mode: false, invoice: { stripe_id: invoice, status: "paid", total: 1000, currency: "usd", hosted_invoice_url: null } },
+  data: { customer_id: customer, feature_id: "credits", quantity_granted: 2_500, threshold: 1_500, balance_after: balanceAfter, invoice_mode: false, invoice: { stripe_id: invoice, status: "paid", total: 1000, currency: "usd", hosted_invoice_url: null } },
 });
 
-const topUpFailed = (reason: string, balance: number | null = 8) => ({
+const topUpFailed = (reason: string, balance: number | null = 800) => ({
   type: "billing.auto_topup_failed",
   id: `evt_auto_topup_failed_${crypto.randomUUID()}`,
   occurred_at: Date.now(),
-  data: { customer_id: acme.id, feature_id: "credits", reason, quantity: 25, threshold: 15, balance, invoice_mode: false, error: { code: "card_declined", message: "Your card was declined.", type: "card_error", decline_code: "generic_decline" } },
+  data: { customer_id: acme.id, feature_id: "credits", reason, quantity: 2_500, threshold: 1_500, balance, invoice_mode: false, error: { code: "card_declined", message: "Your card was declined.", type: "card_error", decline_code: "generic_decline" } },
 });
 
 describe.skipIf(!available)("billing emails", () => {
@@ -205,24 +205,24 @@ describe.skipIf(!available)("billing emails", () => {
       ["alice@example.com", true],
       ["carol@example.com", false],
     ]);
-    await noticeCredits(acme, { planId: "lockbox", credits: 3, creditsResetAt: null, autoTopUp: null }, now());
+    await noticeCredits(acme, { planId: "lockbox", credits: 300, creditsResetAt: null, autoTopUp: null }, now());
     expect(sent.map((email) => email.to)).toEqual([ADMINS]);
     expect(githubAsked).toEqual([]);
     drain();
-    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, now());
+    await noticeCredits(acme, { planId: "lockbox", credits: 6_000, creditsResetAt: null, autoTopUp: null }, now());
     expect(await level()).toBe(0);
   });
 
   test("low: once when credits cross below the plan's line, not again while they stay low", async () => {
-    autumn.get(acme.id).credits = 6;
-    await reserve(1); // 5: the low line, still fine
+    autumn.get(acme.id).credits = 600;
+    await reserve(100); // 500: the low line, still fine
     expect(sent).toHaveLength(0);
-    await reserve(1); // 4
-    expect(subjects()).toEqual(["4 credits left on acme"]);
+    await reserve(100); // 400
+    expect(subjects()).toEqual(["400 credits left on acme"]);
     expect([...sent[0]!.to].sort()).toEqual(ADMINS);
     expect(sent[0]!.html).toContain("https://sandchest.test/dashboard/settings/billing?utm_source=email&amp;utm_medium=credits_low");
     expect(sent[0]!.text).toContain("come back on 1 Jan 2030");
-    await reserve(1);
+    await reserve(100);
     await sync();
     expect(sent).toHaveLength(1);
     expect(await level()).toBe(1);
@@ -230,11 +230,11 @@ describe.skipIf(!available)("billing emails", () => {
   });
 
   test("exhausted: once when nothing is left, not again on refusals or reads", async () => {
-    autumn.get(acme.id).credits = 2;
-    await reserve(2);
+    autumn.get(acme.id).credits = 200;
+    await reserve(200);
     expect(subjects()).toEqual(["Out of credits on acme"]);
     expect(sent[0]!.text).toContain("Top up to keep scanning");
-    expect(await reserve(1)).toMatchObject({ ok: false, reason: "out_of_credits" });
+    expect(await reserve(100)).toMatchObject({ ok: false, reason: "out_of_credits" });
     await sync();
     expect(sent).toHaveLength(1);
     expect(await level()).toBe(2);
@@ -243,24 +243,24 @@ describe.skipIf(!available)("billing emails", () => {
 
   test("credits coming back re-arm exhausted; low re-arms only once they are healthy again", async () => {
     // A few credits back (a released hold): exhausted can fire again, low can't.
-    autumn.get(acme.id).credits = 3;
+    autumn.get(acme.id).credits = 300;
     await sync();
     expect(await level()).toBe(1);
-    await reserve(3);
+    await reserve(300);
     expect(subjects()).toEqual(["Out of credits on acme"]);
     drain();
 
     // A top-up: back above the line, so both re-arm.
-    await autumn.attach({ customerId: acme.id, planId: "top_up", credits: 25, successUrl: "" });
+    await autumn.attach({ customerId: acme.id, planId: "top_up", credits: 2_500, successUrl: "" });
     await sync();
     expect(await level()).toBe(0);
     expect(sent).toHaveLength(0);
-    await reserve(21); // 4
-    expect(subjects()).toEqual(["4 credits left on acme"]);
+    await reserve(2_100); // 400
+    expect(subjects()).toEqual(["400 credits left on acme"]);
     drain();
 
-    // The plan renews: 60 again, and re-armed.
-    autumn.get(acme.id).credits = 60;
+    // The plan renews: 6,000 again, and re-armed.
+    autumn.get(acme.id).credits = 6_000;
     await sync();
     expect(await level()).toBe(0);
     expect(sent).toHaveLength(0);
@@ -272,63 +272,63 @@ describe.skipIf(!available)("billing emails", () => {
     expect(subjects()).toEqual(["Out of credits on acme"]);
     drain();
     // Two observers read the row at level 2. The healthy one records the recovery first...
-    await noticeCredits(acme, { ...lockbox, credits: 60 }, now());
+    await noticeCredits(acme, { ...lockbox, credits: 6_000 }, now());
     expect(await level()).toBe(0);
     // ...then the newer low one arrives still carrying level 2 from its earlier read. It is a real crossing.
-    const carriesStaleLevel = { ...lockbox, credits: 3, creditLevel: 2 };
+    const carriesStaleLevel = { ...lockbox, credits: 300, creditLevel: 2 };
     await noticeCredits(acme, carriesStaleLevel, now());
-    expect(subjects()).toEqual(["3 credits left on acme"]);
+    expect(subjects()).toEqual(["300 credits left on acme"]);
     drain();
-    await noticeCredits(acme, { ...lockbox, credits: 60 }, now());
+    await noticeCredits(acme, { ...lockbox, credits: 6_000 }, now());
   });
 
   test("an answer asked for before a newer one counted changes nothing, in either direction", async () => {
     const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
     const earlier = { from: new Date(Date.now() - 2_000), to: new Date(Date.now() - 1_000) };
     // A healthy read leaves the level at ok, but still counts as the newest.
-    await noticeCredits(acme, { ...lockbox, credits: 60 }, now());
+    await noticeCredits(acme, { ...lockbox, credits: 6_000 }, now());
     // A read of 0 that left before it and arrived late: no false "out of credits".
     await noticeCredits(acme, { ...lockbox, credits: 0 }, earlier);
     expect(sent).toHaveLength(0);
     expect(await level()).toBe(0);
 
     // The other way: a crossing is announced, then a late healthy answer must not re-arm it.
-    await noticeCredits(acme, { ...lockbox, credits: 3 }, now());
-    expect(subjects()).toEqual(["3 credits left on acme"]);
+    await noticeCredits(acme, { ...lockbox, credits: 300 }, now());
+    expect(subjects()).toEqual(["300 credits left on acme"]);
     drain();
-    await noticeCredits(acme, { ...lockbox, credits: 40 }, earlier);
+    await noticeCredits(acme, { ...lockbox, credits: 4_000 }, earlier);
     expect(await level()).toBe(1);
-    await noticeCredits(acme, { ...lockbox, credits: 2 }, now());
+    await noticeCredits(acme, { ...lockbox, credits: 200 }, now());
     expect(sent).toHaveLength(0);
     // A newer healthy answer does re-arm.
-    await noticeCredits(acme, { ...lockbox, credits: 40 }, now());
+    await noticeCredits(acme, { ...lockbox, credits: 4_000 }, now());
     expect(await level()).toBe(0);
   });
 
   test("concurrent observers announce a crossing once", async () => {
-    const snapshot = { planId: "lockbox", credits: 3, creditsResetAt: null, autoTopUp: null };
+    const snapshot = { planId: "lockbox", credits: 300, creditsResetAt: null, autoTopUp: null };
     const seen = now();
     await Promise.all(Array.from({ length: 12 }, () => noticeCredits(acme, snapshot, seen)));
-    expect(subjects()).toEqual(["3 credits left on acme"]);
+    expect(subjects()).toEqual(["300 credits left on acme"]);
     drain();
-    await noticeCredits(acme, { ...snapshot, credits: 60 }, now());
+    await noticeCredits(acme, { ...snapshot, credits: 6_000 }, now());
 
     // Concurrent scans reserving across the line: at most one email, even when answers overlap.
-    autumn.get(acme.id).credits = 54;
+    autumn.get(acme.id).credits = 5_400;
     await sync();
     autumn.latencyMs = 20;
     try {
-      await Promise.all(Array.from({ length: 10 }, () => reserve(5)));
+      await Promise.all(Array.from({ length: 10 }, () => reserve(500)));
     } finally {
       autumn.latencyMs = 0;
     }
-    expect(autumn.get(acme.id).credits).toBe(4);
+    expect(autumn.get(acme.id).credits).toBe(400);
     expect(sent.length).toBeLessThanOrEqual(1);
     // Whatever overlapped, the scan's charge reads Autumn afterwards, and that announces it if nothing did.
     await sync();
-    expect(subjects()).toEqual(["4 credits left on acme"]);
+    expect(subjects()).toEqual(["400 credits left on acme"]);
     drain();
-    autumn.get(acme.id).credits = 60;
+    autumn.get(acme.id).credits = 6_000;
     await sync();
   });
 
@@ -337,13 +337,13 @@ describe.skipIf(!available)("billing emails", () => {
     await noticeCredits(acme, { planId: "lockbox", credits: 0, creditsResetAt: null, autoTopUp: null }, now());
     expect(subjects()).toEqual(["Out of credits on acme"]);
     drain();
-    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, now());
+    await noticeCredits(acme, { planId: "lockbox", credits: 6_000, creditsResetAt: null, autoTopUp: null }, now());
 
     await applyAutoTopUp(acme.id, "lockbox", { enabled: true, monthlyLimitUsd: 40 });
     await sync();
-    const on = { planId: "lockbox", creditsResetAt: null, autoTopUp: { enabled: true, threshold: 15, quantity: 25, perMonth: 4 } };
+    const on = { planId: "lockbox", creditsResetAt: null, autoTopUp: { enabled: true, threshold: 1_500, quantity: 2_500, perMonth: 4 } };
     // A reservation, a refusal's read, a page refresh: all in the seconds before the top-up lands.
-    await noticeCredits(acme, { ...on, credits: 10 }, now());
+    await noticeCredits(acme, { ...on, credits: 1_000 }, now());
     await noticeCredits(acme, { ...on, credits: 0 }, now());
     autumn.get(acme.id).credits = 0;
     await sync();
@@ -352,20 +352,20 @@ describe.skipIf(!available)("billing emails", () => {
 
     // The level can still fall, re-arming the emails for when auto top-up is turned off.
     await database.$client`update org_billing set credit_level = 2 where org_id = ${acme.id}`;
-    await noticeCredits(acme, { ...on, credits: 3 }, now());
+    await noticeCredits(acme, { ...on, credits: 300 }, now());
     expect(await level()).toBe(1);
     expect(sent).toHaveLength(0);
 
     await applyAutoTopUp(acme.id, "lockbox", { enabled: false, monthlyLimitUsd: 40 });
-    autumn.get(acme.id).credits = 60;
+    autumn.get(acme.id).credits = 6_000;
     await sync();
     expect(await level()).toBe(0);
   });
 
   test("the email toggle doesn't silence billing emails; without a mailer a crossing waits for one", async () => {
     await setSettings({ checkThreshold: "high", emailNotifications: false });
-    await noticeCredits(acme, { planId: "lockbox", credits: 3, creditsResetAt: null, autoTopUp: null }, now());
-    expect(subjects()).toEqual(["3 credits left on acme"]);
+    await noticeCredits(acme, { planId: "lockbox", credits: 300, creditsResetAt: null, autoTopUp: null }, now());
+    expect(subjects()).toEqual(["300 credits left on acme"]);
     drain();
 
     setMailer({ enabled: false, send: async () => void sent.push({ to: [], subject: "should not send", html: "", text: "" }) });
@@ -379,20 +379,20 @@ describe.skipIf(!available)("billing emails", () => {
     await noticeCredits(acme, { planId: "lockbox", credits: 0, creditsResetAt: null, autoTopUp: null }, now());
     expect(subjects()).toEqual(["Out of credits on acme"]);
     drain();
-    await noticeCredits(acme, { planId: "lockbox", credits: 60, creditsResetAt: null, autoTopUp: null }, now());
+    await noticeCredits(acme, { planId: "lockbox", credits: 6_000, creditsResetAt: null, autoTopUp: null }, now());
     expect(await level()).toBe(0);
   });
 
   test("with no admin to tell, nothing is reserved, so the email goes out once there is one", async () => {
     const { org } = await upsertInstallation(database, 603, { githubAccountId: 6300, githubLogin: "lonely", type: "Organization" }, []);
     const lonely = { id: org.id, githubLogin: "lonely" };
-    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 3, creditsResetAt: null, autoTopUp: null });
+    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 300, creditsResetAt: null, autoTopUp: null });
     const warned: string[] = [];
     const original = console.warn;
     console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
     try {
-      await noticeCredits(lonely, { planId: "lockbox", credits: 3, creditsResetAt: null, autoTopUp: null }, now());
-      expect(await noticeAutoTopUp(lonely, { invoiceId: "in_lonely", added: 25, charged: "$10.00", credits: 34 })).toBe("skipped");
+      await noticeCredits(lonely, { planId: "lockbox", credits: 300, creditsResetAt: null, autoTopUp: null }, now());
+      expect(await noticeAutoTopUp(lonely, { invoiceId: "in_lonely", added: 2_500, charged: "$10.00", credits: 3_400 })).toBe("skipped");
     } finally {
       console.warn = original;
     }
@@ -402,11 +402,11 @@ describe.skipIf(!available)("billing emails", () => {
 
     const [admin] = await database.insert(schema.users).values({ name: "erin", email: "erin@example.com", login: "erin" }).returning();
     await database.insert(schema.orgAdmins).values({ userId: admin!.id, orgId: org.id });
-    await noticeCredits(lonely, { planId: "lockbox", credits: 2, creditsResetAt: null, autoTopUp: null }, now());
-    expect(await noticeAutoTopUp(lonely, { invoiceId: "in_lonely", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
+    await noticeCredits(lonely, { planId: "lockbox", credits: 200, creditsResetAt: null, autoTopUp: null }, now());
+    expect(await noticeAutoTopUp(lonely, { invoiceId: "in_lonely", added: 2_500, charged: "$10.00", credits: 3_400 })).toBe("sent");
     expect(sent.map((email) => [email.to, email.subject])).toEqual([
-      [["erin@example.com"], "2 credits left on lonely"],
-      [["erin@example.com"], "Auto top-up: 25 credits added to lonely"],
+      [["erin@example.com"], "200 credits left on lonely"],
+      [["erin@example.com"], "Auto top-up: 2,500 credits added to lonely"],
     ]);
     drain();
   });
@@ -423,7 +423,7 @@ describe.skipIf(!available)("Autumn webhooks", () => {
     delete process.env.AUTUMN_WEBHOOK_SECRET;
     resetConfig();
     try {
-      expect((await autumnWebhook(delivery(toppedUp("in_off", 40)))).status).toBe(404);
+      expect((await autumnWebhook(delivery(toppedUp("in_off", 4_000)))).status).toBe(404);
     } finally {
       process.env.AUTUMN_WEBHOOK_SECRET = WEBHOOK_SECRET;
       resetConfig();
@@ -431,12 +431,12 @@ describe.skipIf(!available)("Autumn webhooks", () => {
   });
 
   test("unsigned, mis-signed, altered and stale deliveries are refused", async () => {
-    const payload = toppedUp("in_forged", 40);
+    const payload = toppedUp("in_forged", 4_000);
     const unsigned = new Request("https://sandchest.test/api/autumn/webhooks", { method: "POST", body: JSON.stringify(payload) });
     expect((await autumnWebhook(unsigned)).status).toBe(401);
     expect((await autumnWebhook(delivery(payload, { secret: `whsec_${Buffer.from("not-the-secret").toString("base64")}` }))).status).toBe(401);
     const signed = delivery(payload);
-    const altered = new Request(signed.url, { method: "POST", headers: signed.headers, body: JSON.stringify({ ...payload, data: { ...payload.data, quantity_granted: 2500 } }) });
+    const altered = new Request(signed.url, { method: "POST", headers: signed.headers, body: JSON.stringify({ ...payload, data: { ...payload.data, quantity_granted: 250_000 } }) });
     expect((await autumnWebhook(altered)).status).toBe(401);
     // A captured delivery replayed six minutes later.
     expect((await autumnWebhook(delivery(payload, { at: Date.now() - 6 * 60_000 }))).status).toBe(401);
@@ -446,41 +446,41 @@ describe.skipIf(!available)("Autumn webhooks", () => {
 
   test("auto top-up succeeded: one email per invoice, and only a first delivery re-reads the balance", async () => {
     const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
-    await noticeCredits(acme, { ...lockbox, credits: 3 }, now());
+    await noticeCredits(acme, { ...lockbox, credits: 300 }, now());
     drain();
     // The top-up landed in Autumn.
-    autumn.get(acme.id).credits = 34;
+    autumn.get(acme.id).credits = 3_400;
     const reads = autumn.calls.filter((call) => call === "customer").length;
     tick();
-    const response = await autumnWebhook(delivery(toppedUp("in_1", 34)));
+    const response = await autumnWebhook(delivery(toppedUp("in_1", 3_400)));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ handled: "billing.auto_topup_succeeded" });
-    expect(subjects()).toEqual(["Auto top-up: 25 credits added to acme"]);
+    expect(subjects()).toEqual(["Auto top-up: 2,500 credits added to acme"]);
     expect([...sent[0]!.to].sort()).toEqual(ADMINS);
-    expect(sent[0]!.text).toContain("bought 25 credits for $10.00");
-    expect(sent[0]!.html).toContain(">34<");
+    expect(sent[0]!.text).toContain("bought 2,500 credits for $10.00");
+    expect(sent[0]!.html).toContain(">3,400<");
     // Read from Autumn again: low re-armed from the balance as it is now.
     expect(autumn.calls.filter((call) => call === "customer").length).toBe(reads + 1);
-    expect(await orgBillingRow(database, acme.id)).toMatchObject({ creditLevel: 0, credits: 34 });
+    expect(await orgBillingRow(database, acme.id)).toMatchObject({ creditLevel: 0, credits: 3_400 });
     drain();
 
     // Credits run low again; then Svix redelivers the old invoice, carrying its old balance. Nothing changes.
-    autumn.get(acme.id).credits = 2;
+    autumn.get(acme.id).credits = 200;
     await sync();
-    expect(subjects()).toEqual(["2 credits left on acme"]);
+    expect(subjects()).toEqual(["200 credits left on acme"]);
     drain();
     const before = autumn.calls.length;
-    expect(await (await autumnWebhook(delivery(toppedUp("in_1", 34)))).json()).toEqual({ handled: "billing.auto_topup_succeeded (already sent)" });
+    expect(await (await autumnWebhook(delivery(toppedUp("in_1", 3_400)))).json()).toEqual({ handled: "billing.auto_topup_succeeded (already sent)" });
     expect(autumn.calls.length).toBe(before);
     expect(await level()).toBe(1);
 
-    // A new invoice's payload balance is not trusted either: Autumn says 8, so it is still low.
+    // A new invoice's payload balance is not trusted either: Autumn says 800, so it is still low.
     tick();
-    await Promise.all(Array.from({ length: 5 }, () => autumnWebhook(delivery(toppedUp("in_2", 59)))));
-    expect(subjects()).toEqual(["Auto top-up: 25 credits added to acme"]);
+    await Promise.all(Array.from({ length: 5 }, () => autumnWebhook(delivery(toppedUp("in_2", 5_900)))));
+    expect(subjects()).toEqual(["Auto top-up: 2,500 credits added to acme"]);
     expect(await level()).toBe(1);
     drain();
-    autumn.get(acme.id).credits = 60;
+    autumn.get(acme.id).credits = 6_000;
     await sync();
   });
 
@@ -492,7 +492,7 @@ describe.skipIf(!available)("Autumn webhooks", () => {
     const ignored = await autumnWebhook(delivery(topUpFailed("lock_contention")));
     expect(await ignored.json()).toEqual({ ignored: "auto top-up failed: lock_contention" });
     expect(subjects()).toEqual(["Auto top-up failed for acme", "Auto top-up hit its monthly limit on acme"]);
-    expect(sent[0]!.text).toContain("acme is down to 8 credits, and auto top-up couldn’t charge the card on file.");
+    expect(sent[0]!.text).toContain("acme is down to 800 credits, and auto top-up couldn’t charge the card on file.");
     expect(sent[1]!.text).toContain("acme is low on credits");
     // Nothing from Stripe's error reaches the email.
     expect(sent[0]!.text).not.toContain("declined");
@@ -518,14 +518,14 @@ describe.skipIf(!available)("Autumn webhooks", () => {
     console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
     setMailer({ enabled: true, send: async () => Promise.reject(new Error("550 rejected <alice@example.com>")) });
     try {
-      expect((await autumnWebhook(delivery(toppedUp("in_outage", 40)))).status).toBe(200);
+      expect((await autumnWebhook(delivery(toppedUp("in_outage", 4_000)))).status).toBe(200);
     } finally {
       setMailer(recordingMailer);
       console.error = original;
     }
     expect(logged).toEqual([`Email to the admins of org ${acme.id} failed: Error`]);
     // Reserved all the same: at most once.
-    expect(await (await autumnWebhook(delivery(toppedUp("in_outage", 40)))).json()).toEqual({ handled: "billing.auto_topup_succeeded (already sent)" });
+    expect(await (await autumnWebhook(delivery(toppedUp("in_outage", 4_000)))).json()).toEqual({ handled: "billing.auto_topup_succeeded (already sent)" });
 
     setAutumn(undefined);
     try {
@@ -539,9 +539,9 @@ describe.skipIf(!available)("Autumn webhooks", () => {
   test("unknown customers, other features and other events are acknowledged without effect", async () => {
     const answers = await Promise.all(
       [
-        toppedUp("in_stranger", 40, "00000000-0000-4000-8000-000000000999"),
-        toppedUp("in_not_uuid", 40, "user_123"),
-        { ...toppedUp("in_tokens", 40), data: { ...toppedUp("in_tokens", 40).data, feature_id: "tokens" } },
+        toppedUp("in_stranger", 4_000, "00000000-0000-4000-8000-000000000999"),
+        toppedUp("in_not_uuid", 4_000, "user_123"),
+        { ...toppedUp("in_tokens", 4_000), data: { ...toppedUp("in_tokens", 4_000).data, feature_id: "tokens" } },
         { type: "balances.limit_reached", data: { customer_id: acme.id, feature_id: "credits", limit_type: "included" } },
         { type: "invoice.finalized", data: {} },
         [],
@@ -659,20 +659,20 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     githubMembers.set("driftco/kim", { userId: 202_202, role: "admin" });
     const before = await adminRows(org.id);
     githubAsked.length = 0;
-    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_1", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_1", added: 2_500, charged: "$10.00", credits: 3_400 })).toBe("sent");
     expect(sent.map((email) => email.to)).toEqual([["grace@example.com"]]);
     expect(githubAsked.sort()).toEqual(["605:driftco/grace", "605:driftco/heidi", "605:driftco/kim"]);
     // Dashboard access is signing in's business only: no row removed or refreshed.
     expect(await adminRows(org.id)).toEqual(before);
     drain();
     // Within a minute, the next email reuses GitHub's answer...
-    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_2", added: 25, charged: "$10.00", credits: 59 })).toBe("sent");
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_2", added: 2_500, charged: "$10.00", credits: 5_900 })).toBe("sent");
     expect(githubAsked).toHaveLength(3);
     expect(sent.map((email) => email.to)).toEqual([["grace@example.com"]]);
     drain();
     // ...and after it, asks again.
     forgetAdminChecks();
-    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_3", added: 25, charged: "$10.00", credits: 59 })).toBe("sent");
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_drift_3", added: 2_500, charged: "$10.00", credits: 5_900 })).toBe("sent");
     expect(githubAsked).toHaveLength(6);
     drain();
   });
@@ -682,7 +682,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     expect(accountId).toBe(60_600);
     const before = await adminRows(org.id);
     githubAsked.length = 0;
-    expect(await noticeAutoTopUp(org, { invoiceId: "in_pat", added: 25, charged: "$10.00", credits: 34 })).toBe("sent");
+    expect(await noticeAutoTopUp(org, { invoiceId: "in_pat", added: 2_500, charged: "$10.00", credits: 3_400 })).toBe("sent");
     expect(sent.map((email) => email.to)).toEqual([["pat@example.com"]]);
     expect(githubAsked).toEqual([]);
     expect(await adminRows(org.id)).toEqual(before);
@@ -694,7 +694,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     const before = await adminRows(org.id);
     githubDown = true;
     try {
-      const { result, warned } = await withWarnings(() => noticeAutoTopUpFailed(org, { reason: "card", credits: 3 }));
+      const { result, warned } = await withWarnings(() => noticeAutoTopUpFailed(org, { reason: "card", credits: 300 }));
       expect(result).toBe("sent");
       expect(warned).toEqual([`Couldn't check the admins of org ${org.id} with GitHub (Error): emailing the last known ones`]);
     } finally {
@@ -707,7 +707,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     const ids = Object.fromEntries((await orgAdminContacts(database, org.id)).map((admin) => [admin.login, admin.githubUserId]));
     githubMembers.set("downco/judy", { userId: ids.judy!, role: "admin" });
     githubAsked.length = 0;
-    expect(await noticeAutoTopUpFailed(org, { reason: "limit", credits: 3 })).toBe("sent");
+    expect(await noticeAutoTopUpFailed(org, { reason: "limit", credits: 300 })).toBe("sent");
     expect(githubAsked).toHaveLength(2);
     expect(sent.map((email) => email.to)).toEqual([["judy@example.com"]]);
     drain();
@@ -716,21 +716,21 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
   test("a balance that went stale while its recipients were found changes nothing", async () => {
     const { org, ids } = await staleOrg(608, "raceco", "Organization", [{ login: "lena" }]);
     githubMembers.set("raceco/lena", { userId: ids.lena!, role: "admin" });
-    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 60, creditsResetAt: null, autoTopUp: null });
+    await saveOrgBilling(database, org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 6_000, creditsResetAt: null, autoTopUp: null });
     const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
     const earlier = { from: new Date(Date.now() - 2_000), to: new Date(Date.now() - 1_000) };
     // While GitHub is asked about the low balance, a newer healthy balance counts. No lock is held across
     // the call (it would deadlock here), and the older balance is then stale: nothing recorded or sent.
     whileAsking = async () => {
       whileAsking = undefined;
-      await noticeCredits(org, { ...lockbox, credits: 60 }, now());
+      await noticeCredits(org, { ...lockbox, credits: 6_000 }, now());
     };
-    await noticeCredits(org, { ...lockbox, credits: 3 }, earlier);
+    await noticeCredits(org, { ...lockbox, credits: 300 }, earlier);
     expect(sent).toHaveLength(0);
     expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
     // A later low balance announces it.
-    await noticeCredits(org, { ...lockbox, credits: 2 }, now());
-    expect(sent.map((email) => [email.to, email.subject])).toEqual([[["lena@example.com"], "2 credits left on raceco"]]);
+    await noticeCredits(org, { ...lockbox, credits: 200 }, now());
+    expect(sent.map((email) => [email.to, email.subject])).toEqual([[["lena@example.com"], "200 credits left on raceco"]]);
     drain();
   });
 
@@ -748,7 +748,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
   async function orgWithBilling(installationId: number, login: string, admin: string) {
     const made = await staleOrg(installationId, login, "Organization", [{ login: admin }]);
     githubMembers.set(`${login}/${admin}`, { userId: made.ids[admin]!, role: "admin" });
-    await saveOrgBilling(database, made.org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 60, creditsResetAt: null, autoTopUp: null });
+    await saveOrgBilling(database, made.org.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 6_000, creditsResetAt: null, autoTopUp: null });
     return made.org;
   }
   const lockbox = { planId: "lockbox", creditsResetAt: null, autoTopUp: null };
@@ -760,7 +760,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     const emptySeen = { from: new Date(t - 1_000), to: new Date(t) };
     const gate = holdGithub();
     // Both find a crossing from level 0, then wait on GitHub for who to tell.
-    const low = noticeCredits(org, { ...lockbox, credits: 3 }, lowSeen);
+    const low = noticeCredits(org, { ...lockbox, credits: 300 }, lowSeen);
     await gate.until(1);
     const empty = noticeCredits(org, { ...lockbox, credits: 0 }, emptySeen);
     await gate.until(2);
@@ -770,7 +770,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     await low;
     gate.held[1]!();
     await empty;
-    expect(subjects()).toEqual(["3 credits left on waveco", "Out of credits on waveco"]);
+    expect(subjects()).toEqual(["300 credits left on waveco", "Out of credits on waveco"]);
     expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(2);
     drain();
   });
@@ -779,34 +779,34 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     const org = await orgWithBilling(610, "abaco", "olga");
     const T = new Date();
     const same = { from: T, to: T };
-    await noticeCredits(org, { ...lockbox, credits: 3 }, same);
-    expect(subjects()).toEqual(["3 credits left on abaco"]);
+    await noticeCredits(org, { ...lockbox, credits: 300 }, same);
+    expect(subjects()).toEqual(["300 credits left on abaco"]);
     // A healthy balance and a delayed low one, both from the same millisecond: neither counts.
-    await noticeCredits(org, { ...lockbox, credits: 60 }, same);
-    await noticeCredits(org, { ...lockbox, credits: 3 }, same);
-    expect(subjects()).toEqual(["3 credits left on abaco"]);
+    await noticeCredits(org, { ...lockbox, credits: 6_000 }, same);
+    await noticeCredits(org, { ...lockbox, credits: 300 }, same);
+    expect(subjects()).toEqual(["300 credits left on abaco"]);
     expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(1);
     // Concurrently, too.
-    await Promise.all([60, 9, 60, 9].map((credits) => noticeCredits(org, { ...lockbox, credits }, same)));
+    await Promise.all([6_000, 900, 6_000, 900].map((credits) => noticeCredits(org, { ...lockbox, credits }, same)));
     expect(sent).toHaveLength(1);
     drain();
     // The next balance counts.
-    await noticeCredits(org, { ...lockbox, credits: 60 }, now());
+    await noticeCredits(org, { ...lockbox, credits: 6_000 }, now());
     expect((await orgBillingRow(database, org.id))!.creditLevel).toBe(0);
   });
 
   test("a crossing dropped as a tie is announced by the next balance, and never twice", async () => {
     const org = await orgWithBilling(612, "tieco", "quinn");
     const T = new Date();
-    await noticeCredits(org, { ...lockbox, credits: 3 }, { from: T, to: T });
-    expect(subjects()).toEqual(["3 credits left on tieco"]);
+    await noticeCredits(org, { ...lockbox, credits: 300 }, { from: T, to: T });
+    expect(subjects()).toEqual(["300 credits left on tieco"]);
     // Exhausted, asked for in the millisecond the low answer arrived: a tie, so dropped.
     await noticeCredits(org, { ...lockbox, credits: 0 }, { from: T, to: T });
     expect(sent).toHaveLength(1);
     // The next balance announces it, once.
     await noticeCredits(org, { ...lockbox, credits: 0 }, now());
     await noticeCredits(org, { ...lockbox, credits: 0 }, now());
-    expect(subjects()).toEqual(["3 credits left on tieco", "Out of credits on tieco"]);
+    expect(subjects()).toEqual(["300 credits left on tieco", "Out of credits on tieco"]);
     drain();
   });
 
@@ -815,7 +815,7 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
     const base = Date.now() + 10;
     // Five healthy answers whose windows overlap, arriving in any order.
     await Promise.all(
-      [3, 1, 4, 0, 2].map((i) => noticeCredits(org, { ...lockbox, credits: 60 }, { from: new Date(base + i), to: new Date(base + 5 + i) })),
+      [3, 1, 4, 0, 2].map((i) => noticeCredits(org, { ...lockbox, credits: 6_000 }, { from: new Date(base + i), to: new Date(base + 5 + i) })),
     );
     expect(sent).toHaveLength(0);
     await noticeCredits(org, { ...lockbox, credits: 0 }, { from: new Date(base + 20), to: new Date(base + 21) });
@@ -825,9 +825,9 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
 
   test("each crossing finds its recipients afresh: an admin who changed in between is not reused", async () => {
     const { org: made, ids } = await staleOrg(614, "swapco", "Organization", [{ login: "sam" }]);
-    await saveOrgBilling(database, made.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 60, creditsResetAt: null, autoTopUp: null });
+    await saveOrgBilling(database, made.id, { planId: "lockbox", pastDue: false, endsAt: null, renewsAt: null, nextPlanId: null, credits: 6_000, creditsResetAt: null, autoTopUp: null });
     githubMembers.set("swapco/sam", { userId: ids.sam!, role: "admin" });
-    await noticeCredits(made, { ...lockbox, credits: 3 }, now());
+    await noticeCredits(made, { ...lockbox, credits: 300 }, now());
     expect(sent.map((email) => email.to)).toEqual([["sam@example.com"]]);
     drain();
     // Sam is demoted on GitHub, and Tess becomes an admin who signs in.
@@ -842,10 +842,10 @@ describe.skipIf(!available)("admins nobody has confirmed lately", () => {
   test("waves of 100 concurrent observers: one email per crossing, none for recoveries", async () => {
     const org = await orgWithBilling(611, "crowdco", "pia");
     githubAsked.length = 0;
-    for (const credits of [3, 60, 0, 60, 4, 0]) {
+    for (const credits of [300, 6_000, 0, 6_000, 400, 0]) {
       await Promise.all(Array.from({ length: 100 }, () => noticeCredits(org, { ...lockbox, credits }, now())));
     }
-    expect(subjects()).toEqual(["3 credits left on crowdco", "Out of credits on crowdco", "4 credits left on crowdco", "Out of credits on crowdco"]);
+    expect(subjects()).toEqual(["300 credits left on crowdco", "Out of credits on crowdco", "400 credits left on crowdco", "Out of credits on crowdco"]);
     drain();
   });
 });

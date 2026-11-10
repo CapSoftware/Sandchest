@@ -126,7 +126,7 @@ const Schema = z.object({
   SANDCHEST_USAGE_BILLING: z.enum(["off", "shadow", "on"]).optional(),
   /** The multiplier on cost for usage bills: a decimal from 1 to 100, up to three places. Read with `usageMultiplierThousandths`; never logged. */
   SANDCHEST_USAGE_MULTIPLIER: z.string().optional(),
-  /** What one credit is worth: `dollar` (default) or `cent`. */
+  /** What one credit is worth: `cent` (default) or `dollar` (only to roll the switch back). */
   NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: z.enum(["dollar", "cent"]).optional(),
   /**
    * `1` while the credit unit is being switched: nothing that moves money or credits starts, and no new credits
@@ -255,7 +255,7 @@ function usageBillingProblems(settings: z.infer<typeof Schema>): string[] {
   if (billing === "off") return problems;
   if (multiplier === undefined) problems.push("SANDCHEST_USAGE_MULTIPLIER: is required by usage billing");
   if (settings.SANDCHEST_ENGINE !== "slice") problems.push("SANDCHEST_ENGINE: must be slice for usage billing");
-  if (billing === "on" && settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT !== "cent") problems.push("NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: must be cent when usage billing is on");
+  if (billing === "on" && (settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT ?? "cent") !== "cent") problems.push("NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT: must be cent when usage billing is on");
   return problems;
 }
 
@@ -265,9 +265,9 @@ export function usageMultiplierThousandths(settings: Config = config()): number 
   return text === undefined ? undefined : parseMultiplier(text);
 }
 
-/** What one credit is worth. Default `dollar`. */
+/** What one credit is worth. Default `cent`. */
 export function creditUnit(settings: Config = config()): "dollar" | "cent" {
-  return settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT ?? "dollar";
+  return settings.NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT ?? "cent";
 }
 
 /** One credit in micro-dollars. */

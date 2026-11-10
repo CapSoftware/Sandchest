@@ -49,5 +49,5 @@ test("rejects a replay outside five minutes, either way", () => {
 });
 
 test("credit levels: low below the price of the smallest Dig, exhausted at nothing", () => {
-  expect([60, 5, 4, 1, 0, -2].map(creditLevel)).toEqual(["ok", "ok", "low", "low", "exhausted", "exhausted"]);
+  expect([6_000, 500, 400, 100, 0, -200].map(creditLevel)).toEqual(["ok", "ok", "low", "low", "exhausted", "exhausted"]);
 });

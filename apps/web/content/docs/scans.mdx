@@ -8,8 +8,8 @@ Sandchest runs four kinds of scan. All of them read your code in a temporary wor
 | Scan | Runs when | What it does | Cost |
 | --- | --- | --- | --- |
 | Recon | A repository is added | Builds the repository's threat model | Free |
-| PR review | A pull request is opened or updated | Reviews the change for vulnerabilities | 1 to 3 credits, usually 1 |
-| Deep scan | You press **Deep scan** | Hunts across the whole repository | 5, 10 or 25 credits |
+| PR review | A pull request is opened or updated | Reviews the change for vulnerabilities | What it uses, usually a few credits or less |
+| Deep scan | You press **Deep scan** | Hunts across the whole repository | What it uses, usually well under 100 credits |
 | Fix check | You push to the default branch | Re-checks open findings whose cited files the push changed | Free |
 
 An account runs at most two scans at a time, and recon has two slots of its own, so a deep scan or a review never waits behind it. Others wait in a queue: each checks for a free slot every 10 seconds, says on its page that it is waiting, and gives up as failed after waiting two hours.
@@ -38,7 +38,7 @@ A pull request is reviewed when it is opened, gets new commits, is reopened, or 
 | When asked | Only when someone with write access comments `/sandchest review` on the pull request, or presses **Review** on it in the repository's **Pull requests** list |
 | Off | Nothing, and `/sandchest review` is ignored |
 
-The repository's page lists its open pull requests with Sandchest's latest review of each. Press **Review** on one whose latest commit hasn't been reviewed: the button names the price, and a second press starts it. A commit whose review failed or ran out of credits can be reviewed again the same way, or with `/sandchest review`.
+The repository's page lists its open pull requests with Sandchest's latest review of each. Press **Review** on one whose latest commit hasn't been reviewed: the button names the most it can cost, and a second press starts it. A commit whose review failed or ran out of credits can be reviewed again the same way, or with `/sandchest review`.
 
 Even on Every push, some aren't reviewed automatically:
 
@@ -52,7 +52,7 @@ Even on Every push, some aren't reviewed automatically:
 
 PR reviews never wait behind deep scans: each kind of scan has its own place in the account's queue.
 
-Each commit is reviewed once. Reviews are priced by the number of security-relevant changed lines; see [Pricing & credits](/docs/pricing#pr-reviews).
+Each commit is reviewed once. A review is charged for what it uses; see [Pricing & credits](/docs/pricing#charged-for-what-it-uses).
 
 ### The Check
 
@@ -96,9 +96,10 @@ Sandchest never opens GitHub issues.
 
 ## Deep scans
 
-A deep scan hunts across the whole repository. It runs when someone presses **Deep scan** on the repository's page (open it from [Repos](/dashboard/repos)), or **Scan again** on a finished deep scan, or on the repository's schedule. Anyone who can push to the repository can start one. The button shows the cost, and a second press confirms it.
+A deep scan hunts across the whole repository. It runs when someone presses **Deep scan** on the repository's page (open it from [Repos](/dashboard/repos)), or **Scan again** on a finished deep scan, or on the repository's schedule. Anyone who can push to the repository can start one. The button shows the most it can cost, and a second press confirms it.
 
-- One deep scan runs at a time per repository. Once it finishes you can start another whenever you like: each one costs credits, shown on the button before you confirm.
+- One deep scan runs at a time per repository. Once it finishes you can start another whenever you like: each one is charged for what it uses, never more than the button showed.
+- A deep scan of a large repository typically takes 15 to 30 minutes, because every candidate is verified in a sandbox before it is reported.
 - The scan's page shows a live feed of what Sandchest is doing, and findings appear as they survive verification.
 - When it finishes, people with access get an email with what it found, unless an admin has turned emails off.
 
