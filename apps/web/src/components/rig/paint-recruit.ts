@@ -5,10 +5,10 @@
  * `neofetch` while you customize their kit, and the terms as a man page they
  * sign.
  */
-import { CREDIT_PACK, CREDIT_PRICE, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_PACK, creditsWorth, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { linesLabel, type BriefingRepo } from "@/lib/briefing";
-import { creditCount, creditsText } from "@/lib/format";
-import { perCredit } from "@/lib/pricing";
+import { money, usd } from "@/lib/format";
+import { A_FEW } from "@/lib/pricing";
 import { aside, HOODIES, PHOSPHORS, ROOMS, SHELLS, shellUser, swatch, VOICES } from "@/lib/hacker";
 import type { HackerProfile } from "@/lib/hacker";
 import type { Kit, Painter } from "./screen";
@@ -205,8 +205,8 @@ function neofetch(kit: Kit, t: number, since: number, m: RecruitModel) {
 
 /** What the work usually costs, as the terms put it: each scan is charged for what it uses. */
 const RATES = [
-  "A pull request review: a few credits or less, most of the time.",
-  `A deep scan of a whole repository: usually well under ${creditsText(CREDIT_PACK)}.`,
+  `A pull request review: ${A_FEW} or less, most of the time.`,
+  `A deep scan of a whole repository: usually well under ${usd(creditsWorth(CREDIT_PACK))}.`,
 ];
 
 /** The terms as a man page, signed at the bottom once they're hired. */
@@ -229,15 +229,15 @@ function contract(kit: Kit, t: number, since: number, m: RecruitModel) {
     section("SCOPE", [`${names.join(", ")}${m.repos.length > 3 ? ` and ${m.repos.length - 3} more` : ""}`]);
   }
   if (!m.billing) {
-    section("TERMS", ["Self-hosted. No plan, no credits, no limit but your own servers."]);
+    section("TERMS", ["Self-hosted. No plan, no bill, no limit but your own servers."]);
   } else if (!m.currentPlan && m.claim) {
-    section("SYNOPSIS", [`${creditCount(m.claim)} credits on the house. No card, nothing to pay.`]);
+    section("SYNOPSIS", [`${usd(creditsWorth(m.claim))} on the house. No card, nothing to pay.`]);
     section("DESCRIPTION", RATES);
-    section("AFTER", [`Work stops when they run out. $${PLAN.price} a month keeps it going.`]);
+    section("AFTER", [`Work stops when it runs out. $${PLAN.price} a month keeps it going.`]);
   } else if (!m.currentPlan) {
-    section("SYNOPSIS", [`$${PLAN.price} a month. Credits ${perCredit(CREDIT_PRICE)}, ${creditCount(m.credits)} to start.`]);
+    section("SYNOPSIS", [`$${PLAN.price} a month. ${money(m.credits)} to start.`]);
     section("DESCRIPTION", RATES);
-    section("TOP-UP", [m.autoTopUp ? `${creditCount(m.credits)} more whenever fewer than ${creditCount(TOP_UP_BELOW)} are left.` : "Off. Reviews stop when credits run out."]);
+    section("TOP-UP", [m.autoTopUp ? `${money(m.credits)} more when the balance falls below ${money(TOP_UP_BELOW)}.` : "Off. Reviews stop when the balance runs out."]);
   }
 
   y += 64;

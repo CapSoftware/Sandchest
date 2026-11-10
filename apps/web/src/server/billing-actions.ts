@@ -46,7 +46,7 @@ const Purchase = z.discriminatedUnion("kind", [
 export type PurchaseInput = z.infer<typeof Purchase>;
 
 const NOT_ADMIN = "Only an admin of this account can change its billing.";
-const FAILED = "Billing didn’t go through. Check your plan and credits before trying again.";
+const FAILED = "Billing didn’t go through. Check your plan and balance before trying again.";
 // A confirmed charge that wasn't answered may have gone through, but sending it again charges it once.
 const UNCONFIRMED = "Billing didn’t confirm this purchase, so it may or may not have been charged. Trying again here won’t charge it twice.";
 
@@ -109,7 +109,7 @@ export async function purchase(orgId: string, _previous: BillingOutcome, form: F
   if (input.data.kind === "plan" && planId === input.data.plan) return tracked("purchase_started", context, { error: "That’s already your plan." }, "same_plan");
   // No plan, or only the free one: no card on file, so the plan (with its credits) is bought on Stripe Checkout.
   if (!planId || isTrial(planId)) {
-    if (input.data.kind === "top_up") return tracked("purchase_started", context, { error: "Join the plan first: credits are bought with it." }, "needs_plan");
+    if (input.data.kind === "top_up") return tracked("purchase_started", context, { error: "Join the plan first, then add funds." }, "needs_plan");
     // Kept with the org's settings: Autumn gets it once the plan is active.
     if (input.data.autoTopUp) {
       const quantity = input.data.credits ?? DEFAULT_CREDITS;
@@ -132,7 +132,7 @@ export async function confirmPurchase(orgId: string, _previous: BillingOutcome, 
   const context = { orgId, input: input.data };
   // Free credits don't sell credits on their own: joining the plan comes first, as from Settings.
   if (input.data.kind === "top_up" && (!row.billing?.planId || isTrial(row.billing.planId))) {
-    return tracked("purchase_confirmed", context, { error: "Join the plan first: credits are bought with it." }, "needs_plan");
+    return tracked("purchase_confirmed", context, { error: "Join the plan first, then add funds." }, "needs_plan");
   }
   // A page opened before purchases had ids: reloading it gives it one.
   const purchaseId = Id.safeParse(form.get("purchase"));

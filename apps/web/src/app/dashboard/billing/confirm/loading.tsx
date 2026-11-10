@@ -1,5 +1,6 @@
 import { CREDIT_AMOUNTS } from "@sandchest/billing/plans";
 import { PageSkeleton } from "@/components/app/skeleton";
+import { money } from "@/lib/format";
 import { SAMPLE_ORG_ID } from "@/lib/samples";
 import { ConfirmView } from "./confirm-view";
 
@@ -12,9 +13,9 @@ export default function Loading() {
     <PageSkeleton id="confirm" label="Pricing the change">
       <ConfirmView
         orgId={SAMPLE_ORG_ID}
-        title={`Buy ${CREDITS.toLocaleString("en-US")} credits for acme`}
+        title={`Add ${money(CREDITS)} to acme’s balance`}
         preview={{ dueToday: 49, nextCycle: null }}
-        help="Charged to the card on file. Bought credits never expire."
+        help="Charged to the card on file. Funds you add never expire."
         fields={{ kind: "top_up", credits: String(CREDITS) }}
       />
     </PageSkeleton>

@@ -24,7 +24,7 @@ import { purchase } from "./billing-actions";
 import { briefing } from "./briefing";
 import { config } from "./config";
 import { db } from "./db";
-import { CLAIM_COOKIE, closedMessage } from "@/lib/free-credits";
+import { CLAIM_COOKIE, claimClosed, FREE_MONEY } from "@/lib/free-credits";
 import { claimFreeCredits, codeOffer } from "./free-credits";
 import { HackerSchema } from "./hacker-schema";
 import { applyInvoiceDetails, InvoiceDetails, type InvoiceDetailsInput } from "./invoice-details";
@@ -116,11 +116,11 @@ export async function recruit(orgId: string, _previous: RecruitOutcome, form: Fo
           return { error: NOT_ADMIN };
         case "failed":
         case "no_github_id":
-          return { error: "The free credits couldn’t be added just now, and nothing was charged. Try again in a minute." };
+          return { error: `The free ${FREE_MONEY} couldn’t be added just now, and nothing was charged. Try again in a minute.` };
         case "frozen":
           return { error: BILLING_FROZEN };
         default:
-          return { error: `${closedMessage(result, org)} You can still join below.`, claimClosed: true };
+          return { error: `${claimClosed(result, org)} You can still join below.`, claimClosed: true };
       }
     }
     (await cookies()).delete(CLAIM_COOKIE);
@@ -234,7 +234,7 @@ export async function checkDiscount(orgId: string, rawCode: string, rawOrder: Re
   const offer = await codeOffer(user, orgId, code.data);
   if (offer) {
     await record(offer.open ? "free_credits" : "free_credits_closed");
-    return offer.open ? { code: code.data.toUpperCase(), freeCredits: offer.credits } : { error: closedMessage(offer, row.org.githubLogin) };
+    return offer.open ? { code: code.data.toUpperCase(), freeCredits: offer.credits } : { error: claimClosed(offer, row.org.githubLogin) };
   }
   try {
     const preview = await autumn()!.preview({ customerId: row.org.id, planId: PLAN.id, credits: order.data.credits, promotionCode: code.data });

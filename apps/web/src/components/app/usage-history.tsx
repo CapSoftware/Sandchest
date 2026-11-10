@@ -1,5 +1,5 @@
 import type { UsageHistoryRow } from "@sandchest/db";
-import { creditsText, shortDate } from "@/lib/format";
+import { money, shortDate } from "@/lib/format";
 import { HoverLink } from "./hover-link";
 import { scanName } from "./scan-rows";
 
@@ -19,7 +19,7 @@ export function UsageHistory({ rows }: { rows: UsageHistoryRow[] }) {
                 {row.kind === "pr_review" && <span className="scan-row-kind"> review</span>}
               </span>
               <span className="usage-row-repo">{row.repoFullName}</span>
-              <span className="usage-row-credits">{row.status === "waived" ? "Not charged" : creditsText(row.credits)}</span>
+              <span className="usage-row-credits">{row.status === "waived" ? "Not charged" : money(row.credits)}</span>
             </HoverLink>
           </li>
         ))}

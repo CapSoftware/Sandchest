@@ -1,14 +1,14 @@
 "use client";
 import { CREDIT_AMOUNTS, creditsPrice, creditsSaving, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, PLAN, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { useActionState, useState } from "react";
-import { creditCount, usd } from "@/lib/format";
-import { PRICES } from "@/lib/pricing";
+import { money, usd } from "@/lib/format";
+import { fundsFor, PRICES } from "@/lib/pricing";
 import { purchase, type BillingOutcome } from "@/server/billing-actions";
 import { Submit } from "./submit";
 
 /**
- * Joining the plan, with the credits to start on; or, for an org on a plan
- * that is no longer sold, switching to it (credits already bought stay).
+ * Joining the plan, with the balance to start on; or, for an org on a plan
+ * that is no longer sold, switching to it (funds already added stay).
  * Opens Stripe Checkout, or a confirm page when the org already pays.
  */
 export function PlanPicker({ orgId, current, admin }: { orgId: string; current: string | null; admin: boolean }) {
@@ -37,7 +37,7 @@ export function PlanPicker({ orgId, current, admin }: { orgId: string; current: 
             <select id={`start-${orgId}`} name="credits" className="select" value={credits} onChange={(event) => setCredits(Number(event.target.value))}>
               {CREDIT_AMOUNTS.map((amount) => (
                 <option key={amount} value={amount}>
-                  {creditCount(amount)} credits, {usd(creditsPrice(amount))}
+                  {fundsFor(amount)}
                   {creditsSaving(amount) > 0 && ` (save ${usd(creditsSaving(amount))})`}
                 </option>
               ))}
@@ -52,8 +52,8 @@ export function PlanPicker({ orgId, current, admin }: { orgId: string; current: 
               Auto top-up
             </label>{" "}
             {autoTopUp
-              ? `adds ${creditCount(credits)} credits for ${usd(creditsPrice(credits))} whenever fewer than ${creditCount(TOP_UP_BELOW)} are left, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Once joined, you can change the limit here.`
-              : "is off, so pull request reviews stop when the credits run out."}
+              ? `adds ${fundsFor(credits)} when the balance falls below ${money(TOP_UP_BELOW)}, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Once joined, you can change the limit here.`
+              : "is off, so pull request reviews stop when the balance runs out."}
           </p>
         )}
         {admin && (

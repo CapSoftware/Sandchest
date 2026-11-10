@@ -1,7 +1,7 @@
 import type { DashboardRepo } from "@sandchest/db";
 import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { digState } from "@/lib/dig-state";
-import { creditCount, creditsText } from "@/lib/format";
+import { notEnoughBalance, sizePrice, usagePrice } from "@/lib/pricing";
 import type { OrgPlan } from "@/server/org-plans";
 import { DigButton } from "./dig-button";
 import { HoverLink } from "./hover-link";
@@ -10,9 +10,9 @@ import { HoverLink } from "./hover-link";
 const MAX_DEEP_SCAN_CREDITS = DEEP_SCAN_TIERS.at(-1)!.credits;
 
 /**
- * A repo's deep scan control: the key with its price, or why there is none.
+ * A repo's deep scan control: the key with what it costs, or why there is none.
  * A repo can be scanned again as soon as the last scan ends; each one is paid
- * for with credits, and the price is confirmed before it starts.
+ * from the account's balance, and confirmed before it starts.
  */
 export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
   const state = digState(repo);
@@ -46,17 +46,17 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
       // Billed from its usage: the most it can be charged is held, whatever the repo's size, and named as a maximum.
       if (plan.usage) {
         const hold = plan.usage.hold;
-        if (plan.credits < hold) return <DigButton repoId={repo.id} label={label} note={`Needs ${creditsText(hold)}; ${creditCount(plan.credits)} left`} account={account} need={hold} short />;
+        if (plan.credits < hold) return <DigButton repoId={repo.id} label={label} note={notEnoughBalance("scan", hold, repo.orgLogin, plan.credits)} account={account} need={hold} short />;
         const fast = plan.usage.fast;
         return (
           <DigButton
             repoId={repo.id}
             label={label}
-            note={`Up to ${creditCount(hold)} of your ${creditsText(plan.credits)}`}
-            confirm={`Scan for up to ${creditsText(hold)}`}
+            note={usagePrice(hold)}
+            confirm="Start scan"
             account={account}
             need={hold}
-            {...(fast !== undefined && { fast: { confirm: `Scan for up to ${creditsText(fast)}`, need: fast, note: `Up to ${creditCount(fast)} of your ${creditsText(plan.credits)}` } })}
+            {...(fast !== undefined && { fast: { confirm: "Start fast scan", need: fast, note: usagePrice(fast) } })}
           />
         );
       }
@@ -69,10 +69,8 @@ export function Dig({ repo, plan }: { repo: DashboardRepo; plan: OrgPlan }) {
             <span className="repo-dig-note">Priced once mapped, about a minute</span>
           </div>
         );
-      if (plan.credits < cost) return <DigButton repoId={repo.id} label={label} note={`Needs ${creditsText(cost)}; ${creditCount(plan.credits)} left`} account={account} need={cost} short />;
-      const upTo = state.credits === undefined;
-      const note = `${upTo ? "Up to " : ""}${creditCount(cost)} of your ${creditsText(plan.credits)}`;
-      return <DigButton repoId={repo.id} label={label} note={note} confirm={`Scan for ${upTo ? "up to " : ""}${creditsText(cost)}`} account={account} need={cost} />;
+      if (plan.credits < cost) return <DigButton repoId={repo.id} label={label} note={notEnoughBalance("scan", cost, repo.orgLogin, plan.credits)} account={account} need={cost} short />;
+      return <DigButton repoId={repo.id} label={label} note={sizePrice(cost, state.credits === undefined)} confirm="Start scan" account={account} need={cost} />;
     }
   }
 }

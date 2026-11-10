@@ -4,7 +4,7 @@
  * Illustrative only: never paste real scan output here (see AGENTS.md).
  */
 
-import { creditsText } from "@/lib/format";
+import { money } from "@/lib/format";
 import { EXAMPLE_REVIEW_CREDITS } from "@/lib/pricing";
 import { brandAsset } from "@/lib/site";
 
@@ -141,7 +141,7 @@ export function FindingStrip() {
         <span>
           <strong>Sandchest</strong> <span className="text-dust">found 1 high-severity issue</span>
         </span>
-        <span className="check-cost">Reviewed · {creditsText(EXAMPLE_REVIEW_CREDITS)}</span>
+        <span className="check-cost">Reviewed · {money(EXAMPLE_REVIEW_CREDITS)}</span>
       </div>
     </figure>
   );

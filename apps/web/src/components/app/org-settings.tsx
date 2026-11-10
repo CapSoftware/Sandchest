@@ -30,7 +30,7 @@ export function OrgSettingsForm({ orgId, threshold, email, admin }: { orgId: str
         <legend className="field-legend">Email</legend>
         <p className="field-help">
           Findings go to people who can push to the repository and have signed in within 30 days; paused scans go to admins who have.
-          Billing emails, such as low credits or a failed top-up, go to admins too and can’t be turned off. If no admin has signed in
+          Billing emails, such as a low balance or a failed top-up, go to admins too and can’t be turned off. If no admin has signed in
           lately, Sandchest asks GitHub which earlier ones still are.
         </p>
         <label className="toggle">

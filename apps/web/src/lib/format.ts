@@ -1,5 +1,5 @@
 /** Words and numbers the dashboard shows. Server-side only: no locale or clock differences reach the browser. */
-import { CREDIT_PACK } from "@sandchest/billing/plans";
+import { CREDIT_PACK, CREDIT_PRICE } from "@sandchest/billing/plans";
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -118,24 +118,21 @@ export function shortDate(date: Date): string {
   return SHORT_DATE.format(date);
 }
 
-/** A number of credits: grouped ("2,500") when credits are sold by the 100 and run to five figures, else as it is. */
-export function creditCount(count: number): string {
-  return CREDIT_PACK > 1 ? count.toLocaleString("en-US") : String(count);
+const MONEY = [2, 4].map((digits) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: digits, maximumFractionDigits: digits }));
+
+/**
+ * What a number of credits is worth, in US dollars: "$3.00", "$0.48", "$1,234.56". Credits stay the unit that is
+ * stored and charged; this is how every amount of them is shown. Worked from the catalog (a pack of credits and
+ * its price), so it holds in either credit unit. `precise`: to four decimals, for the lines of a usage bill,
+ * which are parts of a credit ("$0.1512").
+ */
+export function money(credits: number, precise = false): string {
+  return MONEY[precise ? 1 : 0]!.format((credits * CREDIT_PRICE) / CREDIT_PACK);
 }
 
-/** "1 credit", "3 credits", "2,500 credits". */
-export function creditsText(count: number): string {
-  return `${creditCount(count)} ${count === 1 ? "credit" : "credits"}`;
-}
-
-/** Hundredths of a credit, as a usage bill shows them: "4.27", or "1,204.50" where credits are grouped. */
-export function creditHundredths(hundredths: number): string {
-  return `${creditCount(Math.floor(hundredths / 100))}.${String(hundredths % 100).padStart(2, "0")}`;
-}
-
-/** "$20" or "$12.50". */
-export function usd(amount: number): string {
-  return `$${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
+/** A price in US dollars: "$20" or "$12.50". `cents`: always to the cent ("$20.00"), beside an amount shown that way. */
+export function usd(amount: number, cents = false): string {
+  return `$${Number.isInteger(amount) && !cents ? amount : amount.toFixed(2)}`;
 }
 
 const DAY_MONTH = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });

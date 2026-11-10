@@ -6,7 +6,7 @@ import { HoverLink, Link } from "@/components/app/hover-link";
 import { PlanPicker } from "@/components/app/plan-picker";
 import { ScanRows } from "@/components/app/scan-rows";
 import { Tally } from "@/components/app/tally";
-import { compactNumber, plural, SEVERITIES, SEVERITY_LABEL } from "@/lib/format";
+import { compactNumber, money, plural, SEVERITIES, SEVERITY_LABEL } from "@/lib/format";
 import { MANY_REPOS } from "@/lib/installation";
 import { PRICES } from "@/lib/pricing";
 import type { FirstScan as FirstScanData } from "@/lib/first-scan";
@@ -99,10 +99,10 @@ export function OverviewView({
         <Kpi label="Fixed" value={now.fixed} spark={days.map((d) => d.fixed)} foot={versus(now, before, "fixed")} sparkLabel="Fixes per day" />
         {paid.length > 0 ? (
           <div className="kpi">
-            <dt>Credits left</dt>
-            <dd className="kpi-value">{compactNumber(credits)}</dd>
+            <dt>Balance</dt>
+            <dd className="kpi-value">{money(credits)}</dd>
             <dd className="kpi-foot">
-              {now.credits} used in {DAYS} days ·{" "}
+              {money(now.credits)} spent in {DAYS} days ·{" "}
               {paid.length === 1 ? (
                 <AddCreditsLink account={{ id: paid[0]!.orgId, login: paid[0]!.orgLogin, credits, admin: paid[0]!.orgAdmin }} className="quiet link-button">
                   Top up
@@ -293,7 +293,7 @@ function Paywall({ repo }: { repo: DashboardRepo }) {
         <Link href={`/dashboard/recruit?org=${repo.orgId}`} className="recruit-cta">
           <span>
             <span className="recruit-cta-title">Recruit {repo.orgLogin}’s hacker</span>
-            <span className="recruit-cta-note">Tell them about {repo.orgLogin} and where to look first, give them a name and a look, then load their credits. You’ll watch them work on every scan.</span>
+            <span className="recruit-cta-note">Tell them about {repo.orgLogin} and where to look first, give them a name and a look, then add funds for their work. You’ll watch them work on every scan.</span>
           </span>
           <span className="recruit-cta-go">Start recruiting</span>
         </Link>

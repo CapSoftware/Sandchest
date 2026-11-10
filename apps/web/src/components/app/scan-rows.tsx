@@ -1,5 +1,5 @@
 import type { ScanListItem } from "@sandchest/db";
-import { creditsText, duration, plural, SCAN_KIND_LABEL, SCAN_STATUS_LABEL, SEVERITIES } from "@/lib/format";
+import { duration, money, plural, SCAN_KIND_LABEL, SCAN_STATUS_LABEL, SEVERITIES } from "@/lib/format";
 import { Heat } from "./heat";
 import { HoverLink } from "./hover-link";
 import { When } from "./when";
@@ -66,6 +66,6 @@ function Result({ scan }: { scan: ScanListItem }) {
 }
 
 function cost(scan: ScanListItem): string {
-  if (scan.credits > 0) return creditsText(scan.credits);
+  if (scan.credits > 0) return money(scan.credits);
   return scan.status === "completed" ? "Free" : "–";
 }

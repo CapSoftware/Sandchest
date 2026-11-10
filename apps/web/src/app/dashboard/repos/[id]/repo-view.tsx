@@ -9,7 +9,7 @@ import { RepoSettingsForm } from "@/components/app/repo-settings";
 import { ScanRows } from "@/components/app/scan-rows";
 import { When } from "@/components/app/when";
 import { digState } from "@/lib/dig-state";
-import { compactNumber, creditsText, SEVERITIES } from "@/lib/format";
+import { compactNumber, money, SEVERITIES } from "@/lib/format";
 import type { OrgPlan } from "@/server/org-plans";
 import "../../../rig.css";
 
@@ -42,10 +42,10 @@ export function RepoView({
     ? null
     : dig.state === "ready"
       ? plan.usage
-        ? `up to ${creditsText(plan.usage.hold)}`
+        ? `at most ${money(plan.usage.hold)}`
         : dig.credits === undefined
-          ? `up to ${creditsText(DEEP_SCAN_TIERS.at(-1)!.credits)}`
-          : creditsText(dig.credits)
+          ? `at most ${money(DEEP_SCAN_TIERS.at(-1)!.credits)}`
+          : money(dig.credits)
       : null;
 
   return (

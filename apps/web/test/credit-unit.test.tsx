@@ -1,13 +1,14 @@
 /**
- * Every price and credit amount the app says, in the credit unit it runs in. The cent unit is the default; in the
- * dollar unit every price is the same and every amount of credits from the catalog is 100 times smaller.
- * Each test checks the unit this process was built for (NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT).
+ * Every price and amount the app says, in the credit unit it runs in. People read amounts in US dollars, so the
+ * pages say the same in either unit; the agent API speaks in credits, which are 100 times as many in the cent
+ * unit (the default) as in the dollar unit. Each test checks the unit this process was built for
+ * (NEXT_PUBLIC_SANDCHEST_CREDIT_UNIT).
  */
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CREDIT_UNIT } from "@sandchest/billing";
-import { creditCount, creditsText } from "@/lib/format";
-import { perCredit, PR_REVIEW_COST, PRICE_NOTE, PRICES } from "@/lib/pricing";
+import { money, usd } from "@/lib/format";
+import { fundsFor, lastScanCost, notEnoughBalance, perCredit, PR_REVIEW_COST, PR_REVIEW_PRICE, PRICE_NOTE, PRICES, sizePrice, usagePrice } from "@/lib/pricing";
 import { resetConfig } from "@/server/config";
 
 const cent = CREDIT_UNIT === "cent";
@@ -36,26 +37,45 @@ async function withSettings<T>(run: () => Promise<T>): Promise<T> {
 describe("the price list in words", () => {
   test("sentences", () => {
     expect(PRICES).toEqual({
-      plan: says("$1 a month, and credits are $1 each, less in bulk.", "$1 a month, and credits are $1 per 100, less in bulk."),
-      credits: says(
-        "Credits are $1 each; 25 or more at once are $0.90 each, 50 or more $0.85, and 100 or more $0.80.",
-        "Credits are $1 per 100; 2,500 or more at once are $0.90 per 100, 5,000 or more $0.85, and 10,000 or more $0.80.",
+      plan: "$1 a month, plus what your scans use, paid from your balance.",
+      credits: "Add $25 or more at once for 10% less, $50 or more for 15% less, and $100 or more for 20% less.",
+      review: says(
+        "A pull request review is charged for what it uses: usually a few dollars or less, and nothing when it changes nothing security-relevant.",
+        "A pull request review is charged for what it uses: usually a few cents or less, and nothing when it changes nothing security-relevant.",
       ),
-      review: "A pull request review is charged for what it uses: usually a few credits or less, and nothing when it changes nothing security-relevant.",
-      dig: says(
-        "A deep scan of a whole repository usually costs well under 1 credit, and shows the most it can cost before it starts.",
-        "A deep scan of a whole repository usually costs well under 100 credits, and shows the most it can cost before it starts.",
-      ),
-      free: "Recon and fix checks are free while there are credits left.",
+      dig: "A deep scan of a whole repository usually costs well under $1, and shows the most it can cost before it starts.",
+      free: "Recon and fix checks are free while there is balance left.",
     });
     expect(PRICE_NOTE).toBe(`${PRICES.review} ${PRICES.dig} ${PRICES.free}`);
+    expect(PR_REVIEW_PRICE).toBe(says("charged for what it uses, usually a few dollars or less", "charged for what it uses, usually a few cents or less"));
+    // The agent API's words, still in credits.
     expect(PR_REVIEW_COST).toBe("charged for what it uses, usually a few credits or less");
     expect(perCredit(0.9)).toBe(says("$0.90 each", "$0.90 per 100"));
   });
 
-  test("credit counts are grouped only where they run to five figures", () => {
-    expect([1, 3, 1_000, 2_500].map(creditsText)).toEqual(cent ? ["1 credit", "3 credits", "1,000 credits", "2,500 credits"] : ["1 credit", "3 credits", "1000 credits", "2500 credits"]);
-    expect(creditCount(100_000)).toBe(says("100000", "100,000"));
+  test("an amount of credits is said in dollars: always to the cent, thousands grouped", () => {
+    expect([1, 3, 48, 300, 1_000, 2_500, 123_456].map((credits) => money(credits))).toEqual(
+      cent ? ["$0.01", "$0.03", "$0.48", "$3.00", "$10.00", "$25.00", "$1,234.56"] : ["$1.00", "$3.00", "$48.00", "$300.00", "$1,000.00", "$2,500.00", "$123,456.00"],
+    );
+    expect(money(0)).toBe("$0.00");
+    // A usage bill's lines are parts of a credit: four decimals.
+    expect(money(15.12, true)).toBe(says("$15.1200", "$0.1512"));
+    expect(money(0.46, true)).toBe(says("$0.4600", "$0.0046"));
+    expect([usd(20), usd(12.5), usd(20, true)]).toEqual(["$20", "$12.50", "$20.00"]);
+  });
+
+  test("what a scan costs, before it starts and when the balance is short", () => {
+    const hold = cent ? 300 : 3;
+    expect(usagePrice(hold)).toBe("You pay for what the scan uses, never more than $3.00.");
+    expect(sizePrice(cent ? 500 : 5, false)).toBe("This scan costs $5.00.");
+    expect(sizePrice(cent ? 2_500 : 25, true)).toBe("You pay by the repository’s size, never more than $25.00.");
+    expect(lastScanCost(cent ? 48 : 1)).toBe(says("The last scan of this repository cost $1.00.", "The last scan of this repository cost $0.48."));
+    expect(notEnoughBalance("scan", hold, "acme", cent ? 200 : 2)).toBe("Not enough balance: this scan needs $3.00 available, acme has $2.00.");
+    // What the account holds is said only when it is known and really is less.
+    expect(notEnoughBalance("review", hold, "acme")).toBe("Not enough balance: this review needs $3.00 available.");
+    expect(notEnoughBalance("scan", hold, "acme", hold)).toBe("Not enough balance: this scan needs $3.00 available.");
+    // Funds as they are sold: what is added, and its price where a bigger purchase costs less.
+    expect([10, 25].map((dollars) => fundsFor(dollars * (cent ? 100 : 1)))).toEqual(["$10.00", "$25.00 for $22.50"]);
   });
 });
 
@@ -64,45 +84,87 @@ describe("pages and forms", () => {
     const { HowItWorks } = await import("@/components/how-it-works");
     const { FindingStrip } = await import("@/components/finding-strip");
     const how = text(renderToStaticMarkup(<HowItWorks />));
-    expect(how).toContain(says("|Usually well under 1 credit|", "|Usually well under 100 credits|"));
-    expect(how).toContain("|2 credits|");
-    expect(text(renderToStaticMarkup(<FindingStrip />))).toContain("|Reviewed · 2 credits|");
+    expect(how).toContain("|Usually well under $1|");
+    expect(how).toContain(says("|$2.00|", "|$0.02|"));
+    expect(how).not.toMatch(/credit/i);
+    expect(text(renderToStaticMarkup(<FindingStrip />))).toContain(says("|Reviewed · $2.00|", "|Reviewed · $0.02|"));
   });
 
   test("review settings", async () => {
     const { OrgReviewsForm } = await import("@/components/app/org-reviews");
     const { RepoSettingsForm } = await import("@/components/app/repo-settings");
-    expect(renderToStaticMarkup(<OrgReviewsForm orgId="o" mode="auto" admin />)).toContain("Every push to a pull request is reviewed. A review is charged for what it uses, usually a few credits or less.");
+    expect(renderToStaticMarkup(<OrgReviewsForm orgId="o" mode="auto" admin />)).toContain(says("Every push to a pull request is reviewed. A review is charged for what it uses, usually a few dollars or less.", "Every push to a pull request is reviewed. A review is charged for what it uses, usually a few cents or less."));
     expect(renderToStaticMarkup(<RepoSettingsForm repoId="r" branch="main" prReviews="auto" schedule="off" nextDeepScanAt={null} price={null} />)).toContain(
-      "Each push to an open pull request is reviewed. A review is charged for what it uses, usually a few credits or less.",
+      says("Each push to an open pull request is reviewed. A review is charged for what it uses, usually a few dollars or less.", "Each push to an open pull request is reviewed. A review is charged for what it uses, usually a few cents or less."),
     );
   });
 
-  test("buying credits", async () => {
+  test("adding funds", async () => {
     const { TopUpForm } = await import("@/components/app/top-up-form");
     const { AddCredits } = await import("@/components/app/add-credits");
     const options = [...renderToStaticMarkup(<TopUpForm orgId="o" />).matchAll(/<option[^>]*>(.*?)<\/option>/g)].map((m) => m[1]!.replace(/<!-- -->/g, ""));
-    expect(options).toEqual(
-      cent
-        ? ["1,000 credits, $10", "2,500 credits, $22.50 (save $2.50)", "5,000 credits, $42.50 (save $7.50)", "10,000 credits, $80 (save $20)", "25,000 credits, $200 (save $50)", "50,000 credits, $400 (save $100)"]
-        : ["10 credits, $10", "25 credits, $22.50 (save $2.50)", "50 credits, $42.50 (save $7.50)", "100 credits, $80 (save $20)", "250 credits, $200 (save $50)", "500 credits, $400 (save $100)"],
-    );
-    const dialog = text(renderToStaticMarkup(<AddCredits account={{ id: "o", login: "acme", credits: 2, admin: true }} need={cent ? 500 : 5} open={false} onClose={() => {}} />));
-    expect(dialog).toContain(says("This needs 5 credits; acme has 2.", "This needs 500 credits; acme has 2."));
-    expect(dialog).toContain(says("|Add 10 credits|", "|Add 1,000 credits|"));
+    // The same in either unit: the balance added, and its price where they differ.
+    expect(options).toEqual(["$10.00", "$25.00 for $22.50 (save $2.50)", "$50.00 for $42.50 (save $7.50)", "$100.00 for $80.00 (save $20)", "$250.00 for $200.00 (save $50)", "$500.00 for $400.00 (save $100)"]);
+    const form = text(renderToStaticMarkup(<TopUpForm orgId="o" />));
+    expect(form).toContain("|Funds to add|");
+    expect(form).toContain("|Add funds|");
+    const dialog = text(renderToStaticMarkup(<AddCredits account={{ id: "o", login: "acme", credits: cent ? 200 : 2, admin: true }} need={cent ? 500 : 5} open={false} onClose={() => {}} />));
+    expect(dialog).toContain("|Top up to keep going|");
+    expect(dialog).toContain("This needs $5.00 available, acme has $2.00.");
+    expect(dialog).toContain("Funds you add never expire.");
+    expect(dialog).toContain("|$25.00|for $22.50|Save $2.50|");
+    expect(dialog).toContain("|Add $10.00|");
+    const plain = text(renderToStaticMarkup(<AddCredits account={{ id: "o", login: "acme", credits: cent ? 123_456 : 1_234, admin: true }} open={false} onClose={() => {}} />));
+    expect(plain).toContain("|Add funds|");
+    expect(plain).toContain(says("Balance $1,234.00.", "Balance $1,234.56."));
+    for (const shown of [form, dialog, plain]) expect(shown).not.toMatch(/credit/i);
   });
 
-  test("the free credits page", async () => {
+  test("the billing panel: the balance, and auto top-up in what it adds and may spend", async () => {
+    const { BillingPanel } = await import("@/components/app/billing-panel");
+    const pack = cent ? 100 : 1;
+    const billing = {
+      orgId: "o",
+      planId: "standard",
+      pastDue: false,
+      endsAt: null,
+      renewsAt: null,
+      nextPlanId: null,
+      credits: 1_234 * pack,
+      creditsResetAt: null,
+      autoTopUp: { enabled: true, threshold: 5 * pack, quantity: 10 * pack, perMonth: 50 },
+      activatedAt: null,
+      checkedAt: new Date(0),
+      creditLevel: 0,
+      creditLevelAt: null,
+      creditLevelRev: 0,
+    };
+    const org = { id: "o", login: "acme", admin: true, settings: {} as never };
+    const panel = text(renderToStaticMarkup(<BillingPanel org={org} billing={billing as never} />));
+    expect(panel).toContain("|Balance|$1,234.00|");
+    expect(panel).toContain("Funds you add never expire.");
+    expect(panel).toContain("On: adds $10.00 when the balance falls below $5.00, up to $500 a month.");
+    expect(panel).toContain("|Add|Funds each time|$10.00|$25.00 for $22.50|$50.00 for $42.50|$100.00 for $80.00|when the balance falls below $5.00|");
+    expect(panel).not.toMatch(/credit/i);
+    // On free balance: what is left, and what happens when it is spent.
+    const free = text(renderToStaticMarkup(<BillingPanel org={org} billing={{ ...billing, planId: "trial", credits: 20 * pack, autoTopUp: null } as never} />));
+    expect(free).toContain("|Plan|Free| no card, nothing to pay|Balance|$20.00| free balance left|");
+    expect(free).toContain("When it runs out, Sandchest stops scanning until acme joins Standard. Anything left carries across.");
+    expect(free).not.toMatch(/credit/i);
+  });
+
+  test("the free balance page", async () => {
     const claim = await import("@/app/claim/page");
-    expect(claim.metadata.title).toBe("Claim $20 of free credits · Sandchest");
-    expect(claim.metadata.description).toStartWith(says("Test Sandchest on your own code: 20 free credits, no card.", "Test Sandchest on your own code: 2,000 free credits, no card."));
+    expect(claim.metadata.title).toBe("Claim your free $20 · Sandchest");
+    expect(claim.metadata.description).toStartWith("Test Sandchest on your own code: $20 free, no card.");
     const page = text(renderToStaticMarkup(<claim.default />));
     for (const line of [
-      "Claim $20 of free credits.",
-      says("Claim 20 free credits", "Claim 2,000 free credits"),
-      says("What 20 credits usually get you", "What 2,000 credits usually get you"),
-      "Most reviews cost a few credits or less.",
-      says("every file, and usually costs well under 1 credit.", "every file, and usually costs well under 100 credits."),
+      "Claim your free $20.",
+      "Claim $20 free",
+      "What $20 usually gets you",
+      says("Most reviews cost a few dollars or less.", "Most reviews cost a few cents or less."),
+      "every file, and usually costs well under $1.",
+      "When the $20 runs out, join for $1 a month and keep any left over.",
       "|200+|pull request reviews|",
       "|20+|deep scans|",
     ])
@@ -120,10 +182,11 @@ describe("pages and forms", () => {
     const paint = recruitPainter({ current: { step: "plan", profile: DEFAULT_HACKER, viewer: "v", accounts: ["acme"], repos: [], org: "acme", credits: start, autoTopUp: true, currentPlan: null, billing: true } });
     paint(kit as never, 0);
     paint(kit as never, 100);
-    expect(lines).toContain(says("$1 a month. Credits $1 each, 25 to start.", "$1 a month. Credits $1 per 100, 2,500 to start."));
-    expect(lines).toContain("A pull request review: a few credits or less, most of the time.");
-    expect(lines).toContain(says("A deep scan of a whole repository: usually well under 1 credit.", "A deep scan of a whole repository: usually well under 100 credits."));
-    expect(lines).toContain(says("25 more whenever fewer than 5 are left.", "2,500 more whenever fewer than 500 are left."));
+    expect(lines).toContain("$1 a month. $25.00 to start.");
+    expect(lines).toContain(says("A pull request review: a few dollars or less, most of the time.", "A pull request review: a few cents or less, most of the time."));
+    expect(lines).toContain("A deep scan of a whole repository: usually well under $1.");
+    expect(lines).toContain("$25.00 more when the balance falls below $5.00.");
+    expect(lines.join(" ")).not.toMatch(/credit/i);
   });
 });
 

@@ -1,11 +1,11 @@
 "use client";
 import { creditsPrice, creditsSaving, PLAN, TOP_UP_AMOUNTS } from "@sandchest/billing/plans";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import { creditCount, creditsText, usd } from "@/lib/format";
+import { money, usd } from "@/lib/format";
 import { addCredits, quoteCredits, type CreditsQuote } from "@/server/billing-actions";
 import "./add-credits.css";
 
-/** The packs offered, the larger ones cheaper per credit. */
+/** The amounts offered, the larger ones costing less than they add. */
 const AMOUNTS = TOP_UP_AMOUNTS;
 
 export interface CreditsAccount {
@@ -18,8 +18,8 @@ export interface CreditsAccount {
 }
 
 /**
- * Adding credits where they ran short, without leaving the page: the packs, the smallest that covers what's
- * needed already chosen, the exact price today, and one key. On a paid plan the card on file is charged at
+ * Adding funds where the balance ran short, without leaving the page: the amounts, the smallest that covers
+ * what's needed already chosen, the exact price today, and one key. On a paid plan the card on file is charged at
  * once; without one, Stripe Checkout joins the plan with them. `then` runs once they're added (start the scan
  * that needed them), and names it on the key.
  */
@@ -31,7 +31,7 @@ export function AddCredits({
   then,
 }: {
   account: CreditsAccount;
-  /** Credits the action needs, when there is one waiting on them. */
+  /** Credits the action needs available, when there is one waiting on them. */
   need?: number;
   open: boolean;
   onClose: () => void;
@@ -96,11 +96,11 @@ export function AddCredits({
 
         {added !== undefined ? (
           <div className="add-credits-done" role="status">
-            <p className="add-credits-done-n">+{added.toLocaleString("en-US")}</p>
+            <p className="add-credits-done-n">+{money(added)}</p>
             <h2 id="add-credits-title" className="add-credits-title">
-              Credits added
+              Funds added
             </h2>
-            <p className="add-credits-lede">{account.login} has them now. Bought credits never expire.</p>
+            <p className="add-credits-lede">They’re in {account.login}’s balance now, and never expire.</p>
             <button type="button" className="key key-secondary" onClick={onClose}>
               <span className="key-face">Done</span>
             </button>
@@ -108,34 +108,34 @@ export function AddCredits({
         ) : (
           <>
             <h2 id="add-credits-title" className="add-credits-title">
-              {short > 0 ? "Top up to keep going" : "Add credits"}
+              {short > 0 ? "Top up to keep going" : "Add funds"}
             </h2>
             <p className="add-credits-lede">
               {short > 0 ? (
                 <>
-                  This needs {creditsText(need!)}; {account.login} has {creditCount(account.credits)}.
+                  This needs {money(need!)} available, {account.login} has {money(account.credits)}.
                 </>
               ) : (
                 <>
-                  {account.login} has {creditsText(account.credits)} left.
+                  Balance {money(account.credits)}.
                 </>
               )}{" "}
-              Bought credits never expire.
+              Funds you add never expire.
             </p>
 
             {!account.admin ? (
-              <p className="add-credits-note">Only an admin of {account.login} can add credits. Ask one of them to top up.</p>
+              <p className="add-credits-note">Only an admin of {account.login} can add funds. Ask one of them to top up.</p>
             ) : (
               <>
                 <fieldset className="add-credits-packs">
-                  <legend className="sr-only">Credits to add</legend>
+                  <legend className="sr-only">Funds to add</legend>
                   {AMOUNTS.map((pack) => (
                     <label key={pack} className="add-credits-pack" data-on={pack === amount || undefined}>
                       <input type="radio" name="credits" value={pack} checked={pack === amount} onChange={() => setAmount(pack)} />
-                      <span className="add-credits-pack-n">{creditCount(pack)}</span>
-                      <span className="add-credits-pack-price">{usd(creditsPrice(pack))}</span>
+                      <span className="add-credits-pack-n">{money(pack)}</span>
+                      {creditsSaving(pack) > 0 && <span className="add-credits-pack-price">for {usd(creditsPrice(pack), true)}</span>}
                       {creditsSaving(pack) > 0 ? (
-                        <span className="add-credits-pack-tag">Save {usd(creditsSaving(pack))}</span>
+                        <span className="add-credits-pack-tag">Save {usd(creditsSaving(pack), true)}</span>
                       ) : pack === fits && short > 0 ? (
                         <span className="add-credits-pack-tag add-credits-pack-fits">Covers it</span>
                       ) : null}
@@ -145,17 +145,17 @@ export function AddCredits({
 
                 <div className="add-credits-total">
                   <span>{joins ? `Today, with the ${PLAN.name} plan` : "Today"}</span>
-                  <strong aria-live="polite">{priced ? usd(quote.dueToday!) : quote.error && quote.for === amount ? "-" : "…"}</strong>
+                  <strong aria-live="polite">{priced ? usd(quote.dueToday!, true) : quote.error && quote.for === amount ? "-" : "…"}</strong>
                 </div>
                 <p className="add-credits-fine">
                   {joins
-                    ? `Joins ${PLAN.name}, $${PLAN.price} a month, on Stripe. Any free credits left carry across.`
+                    ? `Joins ${PLAN.name}, $${PLAN.price} a month, on Stripe. Any free balance left carries across.`
                     : "Charged now to the card on file."}
                 </p>
 
                 <button type="button" className="key key-primary key-large key-glow add-credits-go" onClick={buy} disabled={buying || !priced} aria-busy={buying || undefined} data-track="add-credits">
                   <span className="key-face">
-                    {buying ? "Adding…" : joins ? `Continue to pay ${priced ? usd(quote.dueToday!) : ""}` : then ? `Add ${creditCount(amount)} credits and ${then.label}` : `Add ${creditCount(amount)} credits`}
+                    {buying ? "Adding…" : joins ? `Continue to pay ${priced ? usd(quote.dueToday!, true) : ""}` : then ? `Add ${money(amount)} and ${then.label}` : `Add ${money(amount)}`}
                   </span>
                 </button>
                 {(error ?? (quote.for === amount ? quote.error : undefined)) && (
@@ -172,7 +172,7 @@ export function AddCredits({
   );
 }
 
-/** A link-styled key that opens the dialog, for wherever credits are shown. */
+/** A link-styled key that opens the dialog, for wherever the balance is shown. */
 export function AddCreditsLink({ account, className, children }: { account: CreditsAccount; className?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (

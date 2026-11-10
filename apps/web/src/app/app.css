@@ -567,15 +567,19 @@ a.quiet:hover {
 }
 
 .repo-dig-note {
+  max-width: 26rem;
   font-size: 0.75rem;
   color: var(--color-dust);
   text-align: right;
+  text-wrap: balance;
 }
 
 .repo-dig-error {
+  max-width: 26rem;
   font-size: 0.75rem;
   color: var(--critical);
   text-align: right;
+  text-wrap: balance;
 }
 
 .digging {

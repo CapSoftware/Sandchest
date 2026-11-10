@@ -1,8 +1,9 @@
 /** A usage bill as customers see it: grouped, adding up exactly, only credits, and only the bills they should see. */
 import { describe, expect, test } from "bun:test";
+import { CREDIT_UNIT } from "@sandchest/billing";
 import type { ScanBillLine } from "@sandchest/db";
 import { billView, largestRemainder, type BillSource } from "@/lib/bill-view";
-import { creditHundredths } from "@/lib/format";
+import { money } from "@/lib/format";
 import { sampleBill } from "@/lib/samples";
 import { billApiView } from "@/server/agent/views";
 
@@ -84,13 +85,16 @@ describe("billView", () => {
     // Rounded one by one these would be a hundredth apart: the carry in is shown so the bill adds up as shown.
     const odd = billView(bill({ lines: [line("slice_hunt", 4_449)], carryInMicroUsd: 5_549 }))!;
     expect(odd.usage + odd.carriedIn).toBe(odd.charged * 100 + odd.carriedOut);
-    expect(creditHundredths(odd.usage)).toBe("0.44");
+    // 0.44 of a credit, as its line shows it: to four decimals of a dollar.
+    expect(odd.usage).toBe(44);
+    expect(money(odd.usage / 100, true)).toBe(CREDIT_UNIT === "cent" ? "$0.0044" : "$0.4400");
   });
 
-  test("a capped bill says what it was capped at, and charges the credits held", () => {
+  test("a capped bill is marked capped, at the credits held, and charges them", () => {
     const view = billView(bill({ lines: [line("slice_hunt", 900_000)], reservedCredits: 40, credits: 40, carryInMicroUsd: 1_200, carryOutMicroUsd: 1_200, capped: true }))!;
     expect(view).toMatchObject({ usage: 9_000, carriedIn: 12, charged: 40, carriedOut: 12, capped: true, held: 40 });
-    expect(view.note).toBe("Capped at the 40 credits held.");
+    // The page says what it was capped at from these: the view itself carries no amount of money.
+    expect(view).toMatchObject({ capped: true, held: 40, charged: 40, note: null });
   });
 
   test("a waived bill charges nothing and says why", () => {

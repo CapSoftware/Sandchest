@@ -1,4 +1,5 @@
 "use client";
+import { FREE_CREDITS } from "@sandchest/billing/plans";
 import { useEffect, useState } from "react";
 import { LiveContext, ScanFeed, type FeedEvent, type Live } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
@@ -74,7 +75,7 @@ export function RigPreview({ view, room, shot, hoodie, phosphor, step, claim }: 
         demo
         claim={
           claim === "1" || claim === "closed"
-            ? { credits: 20, offers: Object.fromEntries(ACCOUNTS.map((a) => [a.id, claim === "1" ? { open: true, credits: 20 } : { open: false, reason: "org_claimed" }])) }
+            ? { credits: FREE_CREDITS.credits, offers: Object.fromEntries(ACCOUNTS.map((a) => [a.id, claim === "1" ? { open: true, credits: FREE_CREDITS.credits } : { open: false, reason: "org_claimed" }])) }
             : null
         }
       />

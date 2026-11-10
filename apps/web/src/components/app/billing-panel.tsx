@@ -1,15 +1,15 @@
 import { autoTopUpSize, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, isTrial, PLAN, planById } from "@sandchest/billing/plans";
 import type { OrgBillingRow, OrgSettings } from "@sandchest/db";
 import { Link } from "@/components/app/hover-link";
-import { creditCount, creditsText, plural, shortDate, usd } from "@/lib/format";
-import { PRICE_NOTE, PRICES } from "@/lib/pricing";
+import { money, shortDate, usd } from "@/lib/format";
+import { fundsFor, PRICE_NOTE, PRICES } from "@/lib/pricing";
 import { openPortal } from "@/server/billing-actions";
 import { AutoTopUpForm } from "./auto-top-up-form";
 import { PlanPicker } from "./plan-picker";
 import { Submit } from "./submit";
 import { TopUpForm } from "./top-up-form";
 
-/** One org's plan, credits and auto top-up. Admins change them; everyone else sees them. */
+/** One org's plan, balance and auto top-up. Admins change them; everyone else sees them. */
 export function BillingPanel({ org, billing }: { org: { id: string; login: string; admin: boolean; settings: OrgSettings }; billing: OrgBillingRow | null }) {
   const plan = planById(billing?.planId);
   if (!billing || !plan) {
@@ -17,7 +17,7 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
       <div>
         <p className="field-legend">Plan</p>
         <p className="field-help">
-          {billing?.credits ? `${creditsText(billing.credits)} left, but no plan. ` : ""}
+          {billing?.credits ? `Balance ${money(billing.credits)}, but no plan. ` : ""}
           Sandchest starts scanning {org.login}’s repositories once it joins the plan: {PRICES.plan} {PRICE_NOTE}
           {!org.admin && " Only an admin of this account can join."}
         </p>
@@ -30,7 +30,7 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
     );
   }
 
-  // Free credits: nothing to charge, so no top-ups or auto top-up. Joining Standard keeps what's left.
+  // A free balance: nothing to charge, so no top-ups or auto top-up. Joining Standard keeps what's left.
   if (isTrial(plan.id)) {
     const out = billing.credits <= 0;
     return (
@@ -38,18 +38,18 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
         <div>
           <p className="field-legend">Plan</p>
           <p className="plan-line">
-            <span className="plan-line-name">{plan.name}</span> no card, nothing to pay
+            <span className="plan-line-name">Free</span> no card, nothing to pay
           </p>
         </div>
         <div>
-          <p className="field-legend">Credits</p>
+          <p className="field-legend">Balance</p>
           <p className="credits">
-            <span className="credits-left">{billing.credits.toLocaleString("en-US")}</span> free {billing.credits === 1 ? "credit" : "credits"} left
+            <span className="credits-left">{money(billing.credits)}</span> free balance left
           </p>
           <p className={out ? "form-error" : "field-help"} role={out ? "alert" : undefined}>
             {out
-              ? `The free credits are spent, so Sandchest has stopped scanning ${org.login}. Join ${PLAN.name} to keep going.`
-              : `When they run out, Sandchest stops scanning until ${org.login} joins ${PLAN.name}. Credits left over carry across.`}
+              ? `The free balance is spent, so Sandchest has stopped scanning ${org.login}. Join ${PLAN.name} to keep going.`
+              : `When it runs out, Sandchest stops scanning until ${org.login} joins ${PLAN.name}. Anything left carries across.`}
           </p>
         </div>
         <div>
@@ -87,13 +87,13 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
       </div>
 
       <div>
-        <p className="field-legend">Credits</p>
+        <p className="field-legend">Balance</p>
         <p className="credits">
-          <span className="credits-left">{billing.credits.toLocaleString("en-US")}</span> left
-          {plan.credits > 0 && billing.creditsResetAt && <span className="field-help"> · {plan.name}’s monthly credits reset {shortDate(billing.creditsResetAt)}</span>}
+          <span className="credits-left">{money(billing.credits)}</span>
+          {plan.credits > 0 && billing.creditsResetAt && <span className="field-help"> · {plan.name}’s monthly {money(plan.credits)} resets {shortDate(billing.creditsResetAt)}</span>}
         </p>
         <p className="field-help">
-          {PRICES.credits} Bought credits never expire{plan.credits > 0 ? " and are spent after the month’s credits" : ""}. {PRICE_NOTE}
+          {PRICES.credits} Funds you add never expire{plan.credits > 0 ? ` and are spent after the month’s ${money(plan.credits)}` : ""}. {PRICE_NOTE}
         </p>
         {org.admin && <TopUpForm orgId={org.id} />}
       </div>
@@ -102,8 +102,8 @@ export function BillingPanel({ org, billing }: { org: { id: string; login: strin
         <p className="field-legend">Auto top-up</p>
         <p className="field-help">
           {auto && autoSize
-            ? `On: adds ${creditsText(autoSize.credits)} for ${usd(autoSize.price)} when your balance falls below ${creditCount(auto.threshold)}, ${auto.perMonth === null ? "with no monthly limit" : `up to ${plural(auto.perMonth, "time")} a month`}.`
-            : "Off. Pull request reviews stop when credits run out."}
+            ? `On: adds ${fundsFor(autoSize.credits, autoSize.price)} when the balance falls below ${money(auto.threshold)}, ${auto.perMonth === null ? "with no monthly limit" : `up to ${usd(Math.round(auto.perMonth * autoSize.price * 100) / 100)} a month`}.`
+            : "Off. Pull request reviews stop when the balance runs out."}
         </p>
         {org.admin && <AutoTopUpForm orgId={org.id} planId={plan.id} enabled={autoOn} quantity={quantity} limit={choice ? choice.monthlyLimitUsd : DEFAULT_TOP_UP_LIMIT_USD} />}
       </div>

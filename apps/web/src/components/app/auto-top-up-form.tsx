@@ -1,11 +1,12 @@
 "use client";
 import { autoTopUpSize, CREDIT_AMOUNTS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { useActionState } from "react";
-import { creditCount, usd } from "@/lib/format";
+import { money } from "@/lib/format";
+import { fundsFor } from "@/lib/pricing";
 import { saveAutoTopUp, type BillingOutcome } from "@/server/billing-actions";
 import { Submit } from "./submit";
 
-/** Auto top-up: on or off, how many credits it buys, and the most it may spend in a month (empty: no limit). */
+/** Auto top-up: on or off, how much it adds, and the most it may spend in a month (empty: no limit). */
 export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { orgId: string; planId: string; enabled: boolean; quantity: number; limit: number | null }) {
   // Priced only on the current plan: earlier plans round up to their packs, and the panel says what that buys.
   const plan = planById(planId) ?? PLAN;
@@ -16,20 +17,19 @@ export function AutoTopUpForm({ orgId, planId, enabled, quantity, limit }: { org
       <p className="inline-form">
         <label className="toggle">
           <input type="checkbox" name="enabled" defaultChecked={enabled} />
-          Buy
+          Add
         </label>
         <label className="sr-only" htmlFor={`quantity-${orgId}`}>
-          Credits each time
+          Funds each time
         </label>
         <select id={`quantity-${orgId}`} name="quantity" className="select" defaultValue={String(quantity)}>
           {amounts.map((amount) => (
             <option key={amount} value={amount}>
-              {creditCount(amount)} credits
-              {plan.id === PLAN.id && `, ${usd(autoTopUpSize(plan, amount).price)}`}
+              {plan.id === PLAN.id ? fundsFor(amount, autoTopUpSize(plan, amount).price) : money(amount)}
             </option>
           ))}
         </select>
-        <span className="field-help">when fewer than {creditCount(TOP_UP_BELOW)} are left</span>
+        <span className="field-help">when the balance falls below {money(TOP_UP_BELOW)}</span>
       </p>
       <div className="inline-form">
         <label htmlFor={`limit-${orgId}`} className="field-help">

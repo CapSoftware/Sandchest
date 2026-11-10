@@ -5,12 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useActionState, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { DEEP_SCAN_TIERS, PR_REVIEW_TIERS } from "@sandchest/billing/costs";
 import { taxIdFor } from "@sandchest/billing/tax-ids";
-import { CREDIT_AMOUNTS, CREDIT_PRICE as PLAN_CREDIT_PRICE, creditsDiscount, creditsPrice, creditsSaving, creditsWorth, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
+import { CREDIT_AMOUNTS, creditsDiscount, creditsPrice, creditsSaving, creditsWorth, DEFAULT_CREDITS, DEFAULT_TOP_UP_LIMIT_USD, FREE_CREDITS, isTrial, PLAN, planById, TOP_UP_BELOW } from "@sandchest/billing/plans";
 import { digAllCredits, type Briefing, type RecruitAccount } from "@/lib/briefing";
-import { creditCount, creditsText } from "@/lib/format";
-import { perCredit } from "@/lib/pricing";
+import { money, usd as dollars } from "@/lib/format";
+import { fundsFor } from "@/lib/pricing";
 import { MANY_REPOS } from "@/lib/installation";
-import { closedMessage, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
+import { claimClosed, type ClaimIntent, type ClaimOffer } from "@/lib/free-credits";
 import { draftKey, readDraft, type RecruitDraft, type RecruitStepId } from "@/lib/recruit-draft";
 import { site } from "@/lib/site";
 import {
@@ -51,7 +51,7 @@ const STEP_INFO: Record<StepId, { name: string; shot: ShotName }> = {
   connect: { name: "GitHub", shot: "preview" },
   company: { name: "Company", shot: "preview" },
   hacker: { name: "Hacker", shot: "preview" },
-  plan: { name: "Credits", shot: "preview" },
+  plan: { name: "Funds", shot: "preview" },
   pay: { name: "Pay", shot: "preview" },
 };
 
@@ -460,7 +460,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
     if (current === "plan") {
       if (!billing) return `Add ${name} to ${org}`;
       if (brief?.currentPlan) return "Save";
-      if (claiming) return `Claim ${creditCount(intent!.credits)} free credits`;
+      if (claiming) return `Claim ${dollars(creditsWorth(intent!.credits))} free`;
       if (!payOnPage) return `Pay ${usd(total)} on Stripe`;
       return "Continue to payment";
     }
@@ -542,7 +542,7 @@ export function Recruit({ accounts, initial, startAt, viewer, installUrl, billin
                 payOnPage={payOnPage}
                 claim={claiming ? intent!.credits : null}
                 code={claiming && code ? { code: code.code, remove: () => setCodeClaim(null) } : null}
-                closed={billing && intent && brief && !brief.currentPlan && !claiming ? (offer && !offer.open ? closedMessage(offer, org) : null) : null}
+                closed={billing && intent && brief && !brief.currentPlan && !claiming ? (offer && !offer.open ? claimClosed(offer, org) : null) : null}
               />
             )}
             {current === "pay" && (
@@ -681,11 +681,11 @@ function Title({ heading, children }: { heading: RefObject<HTMLHeadingElement | 
   );
 }
 
-/** The free credits waiting at the end, shown from the first step for someone who came to claim them. */
+/** The free balance waiting at the end, shown from the first step for someone who came to claim it. */
 function FreeCreditsBadge({ credits }: { credits: number }) {
   return (
     <p className="onboard-badge">
-      <span className="onboard-badge-n">{creditCount(credits)}</span> free credits, no card
+      <span className="onboard-badge-n">{dollars(creditsWorth(credits))}</span> free, no card
     </p>
   );
 }
@@ -726,7 +726,7 @@ function Connect({
       <div className="onboard-connect">
         <Title heading={heading}>Connect GitHub</Title>
         {gift}
-        <p className="onboard-lead">{claim ? `Your hacker works from your repositories. Connect them to claim ${creditCount(claim.credits)} free credits, no card needed.` : "Your hacker works from your repositories."}</p>
+        <p className="onboard-lead">{claim ? `Your hacker works from your repositories. Connect them to claim ${dollars(creditsWorth(claim.credits))} free, no card needed.` : "Your hacker works from your repositories."}</p>
         <ol className="onboard-path">
           {path.map((item) => (
             <li key={item.label} data-state={item.state}>
@@ -743,7 +743,7 @@ function Connect({
     <>
       <Title heading={heading}>Connect GitHub</Title>
       {gift}
-      <p className="onboard-lead">{claim ? "Pick the account your hacker works for. Its free credits come with it." : "Pick the account your hacker works for."}</p>
+      <p className="onboard-lead">{claim ? `Pick the account your hacker works for. Its free ${dollars(creditsWorth(claim.credits))} comes with it.` : "Pick the account your hacker works for."}</p>
       <fieldset className="onboard-set" aria-busy={switching || undefined}>
         <legend className="onboard-label">Account</legend>
         <ul className="onboard-menu">
@@ -911,9 +911,9 @@ function Hacker({
 
 /** What auto top-up charges, and when: said in full wherever it can be turned off. */
 function autoTopUpTerms(credits: number): string {
-  return `Auto top-up adds ${creditCount(credits)} credits for ${usd(creditsPrice(credits))} whenever fewer than ${creditCount(TOP_UP_BELOW)} are left, up to ${usd(DEFAULT_TOP_UP_LIMIT_USD)} a month. Change the limit any time in Settings. `;
+  return `Auto top-up adds ${fundsFor(credits)} when the balance falls below ${money(TOP_UP_BELOW)}, up to ${dollars(DEFAULT_TOP_UP_LIMIT_USD)} a month. Change the limit any time in Settings. `;
 }
-const AUTO_TOP_UP_OFF = "Auto top-up is off, so pull request reviews stop when the credits run out. ";
+const AUTO_TOP_UP_OFF = "Auto top-up is off, so pull request reviews stop when the balance runs out. ";
 
 /**
  * Auto top-up is on unless they turn it off: a quiet link rather than a switch, so it reads as part of the
@@ -953,7 +953,7 @@ function Credits({
   setAutoTopUp: (on: boolean) => void;
   /** A Pay step follows, which says what auto top-up charges and has the way to turn it off. */
   payOnPage: boolean;
-  /** Free credits to claim instead of paying. */
+  /** Free credits to claim instead of paying, shown as money. */
   claim: number | null;
   /** The code at checkout that gave them, which can be taken back to pay instead. */
   code: { code: string; remove: () => void } | null;
@@ -975,7 +975,7 @@ function Credits({
       <>
         <Title heading={heading}>You’re ready</Title>
         <p className="onboard-lead">
-          {org} is already on {planById(brief.currentPlan)?.name ?? "a plan"}, so there’s nothing to pay. Save, and {name} picks up {org}’s next pull request.
+          {org} is already on {isTrial(brief.currentPlan) ? "its free balance" : (planById(brief.currentPlan)?.name ?? "a plan")}, so there’s nothing to pay. Save, and {name} picks up {org}’s next pull request.
         </p>
       </>
     );
@@ -989,15 +989,15 @@ function Credits({
     <dl className="onboard-rates">
       <div>
         <dt>Pull request review</dt>
-        <dd>{usage ? `Up to ${creditsText(usage.prReview)}` : creditsText(PR_REVIEW_TIERS[0]!.credits)}</dd>
+        <dd>{usage ? `At most ${money(usage.prReview)}` : money(PR_REVIEW_TIERS[0]!.credits)}</dd>
       </div>
       <div>
         <dt>Deep scan</dt>
         {usage ? (
-          <dd>Up to {creditsText(usage.deepScan)}</dd>
+          <dd>At most {money(usage.deepScan)}</dd>
         ) : (
           <dd>
-            {creditCount(scans[0]!)}–{creditCount(scans.at(-1)!)} credits
+            {money(scans[0]!)} to {money(scans.at(-1)!)}
           </dd>
         )}
       </div>
@@ -1007,11 +1007,11 @@ function Credits({
   if (claim !== null) {
     return (
       <>
-        <Title heading={heading}>Claim your credits</Title>
+        <Title heading={heading}>Claim your {dollars(creditsWorth(claim))}</Title>
         <div className="onboard-gift">
-          <span className="onboard-gift-n">{creditCount(claim)}</span>
+          <span className="onboard-gift-n">{dollars(creditsWorth(claim))}</span>
           <span className="onboard-gift-what">
-            <span className="onboard-gift-name">free credits</span>
+            <span className="onboard-gift-name">free balance</span>
             <span className="onboard-gift-price">
               <s>{usd(creditsWorth(claim))}</s> $0.00 · no card
             </span>
@@ -1026,11 +1026,11 @@ function Credits({
           </p>
         )}
         <p className="onboard-lead onboard-gift-lead">
-          On us, to test {name} on {org}’s code. They work like any credits.
+          On us, to test {name} on {org}’s code. It pays for scans like any balance.
         </p>
         {rates}
         <p className="onboard-help">
-          When they’re spent, {name} stops until {org} joins: ${PLAN.price} a month, and credits from {perCredit(PLAN_CREDIT_PRICE)}. Anything left over carries across.
+          When it’s spent, {name} stops until {org} joins: ${PLAN.price} a month, plus what the scans use. Anything left carries across.
         </p>
       </>
     );
@@ -1040,7 +1040,7 @@ function Credits({
     <>
       {closed && <p className="onboard-notice">{closed} You can still join below.</p>}
       <p className="onboard-lead">
-        ${PLAN.price} a month, plus credits for the work. Credits never expire.
+        ${PLAN.price} a month, plus what the scans use, paid from your balance. Funds you add never expire.
       </p>
       {rates}
       <fieldset className="onboard-set">
@@ -1049,15 +1049,15 @@ function Credits({
           {CREDIT_AMOUNTS.map((amount) => (
             <label key={amount} className="onboard-amount" data-on={credits === amount || undefined}>
               <input type="radio" name="credits-pick" checked={credits === amount} onChange={() => setCredits(amount)} />
-              <span className="onboard-amount-n">{creditCount(amount)}</span>
-              <span className="onboard-amount-usd">{usd(creditsPrice(amount))}</span>
+              <span className="onboard-amount-n">{money(amount)}</span>
+              {creditsSaving(amount) > 0 && <span className="onboard-amount-usd">for {usd(creditsPrice(amount))}</span>}
               {creditsSaving(amount) > 0 && <span className="onboard-amount-save">Save {usd(creditsSaving(amount))}</span>}
             </label>
           ))}
         </div>
         {all > 0 && repos.length <= MANY_REPOS && (
           <p className="onboard-help">
-            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} takes {usage ? `up to ${creditCount(all)}` : creditCount(all)} credits.
+            Deep scanning {repos.length === 1 ? `${org}’s repository` : `all ${repos.length} of ${org}’s repositories`} costs {usage ? `at most ${money(all)}` : money(all)}.
           </p>
         )}
       </fieldset>
@@ -1069,7 +1069,7 @@ function Credits({
   );
   return (
     <>
-      <Title heading={heading}>Add credits</Title>
+      <Title heading={heading}>Add funds</Title>
       {picker}
     </>
   );
@@ -1145,7 +1145,7 @@ function Pay({
           </div>
           <div>
             <dt>
-              {creditCount(credits)} credits
+              {money(credits)} balance
               {creditsSaving(credits) > 0 && (
                 <span className="onboard-bill-saving">
                   , {usd(creditsSaving(credits))} off ({creditsDiscount(credits)}%)
@@ -1173,7 +1173,7 @@ function Pay({
         {!discount && <DiscountCode apply={applyDiscount} />}
         <div className="onboard-bill-toggle onboard-bill-auto">
           <span>
-            <span className="onboard-bill-toggle-name">Then, as you use them</span>
+            <span className="onboard-bill-toggle-name">Then, as you use it</span>
             <span className="onboard-bill-toggle-note">{autoTopUp ? autoTopUpTerms(credits) : AUTO_TOP_UP_OFF}</span>
           </span>
           <AutoTopUpSwitch on={autoTopUp} set={setAutoTopUp} />
@@ -1217,7 +1217,7 @@ function Pay({
   );
 }
 
-/** "Have a code?": a link until it's wanted, then a field and Apply. A discount code, or a tester's code for free credits. */
+/** "Have a code?": a link until it's wanted, then a field and Apply. A discount code, or a tester's code for a free balance. */
 function DiscountCode({ apply }: { apply: (code: string) => Promise<string | null> }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -1260,7 +1260,7 @@ function DiscountCode({ apply }: { apply: (code: string) => Promise<string | nul
             }
           }}
           placeholder="Code"
-          aria-label="Discount or free credits code"
+          aria-label="Discount or free balance code"
           aria-invalid={!!error || undefined}
           aria-describedby={error ? "discount-error" : undefined}
           maxLength={64}

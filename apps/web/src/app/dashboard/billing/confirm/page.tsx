@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { PageShape } from "@/components/app/skeleton";
+import { money } from "@/lib/format";
 import { isUuid } from "@/lib/uuid";
 import { viewer } from "@/server/access";
 import { autumn } from "@/server/billing";
@@ -12,7 +13,7 @@ import { ConfirmView } from "./confirm-view";
 
 export const metadata: Metadata = { title: "Confirm · Sandchest" };
 
-/** Shows exactly what a plan change or credits will charge the card on file, before charging it. */
+/** Shows exactly what a plan change or adding funds will charge the card on file, before charging it. */
 export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ org?: string; plan?: string; credits?: string; topup?: string; purchase?: string }> }) {
   const params = await searchParams;
   const user = await viewer();
@@ -26,7 +27,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     return purchasable(n) ? n : undefined;
   };
   const credits = amount(plan ? params.credits : params.topup);
-  // Free credits aren't a plan anything is charged on: joining from them goes through Settings, to Stripe Checkout.
+  // A free balance isn't a plan anything is charged on: joining from them goes through Settings, to Stripe Checkout.
   const current = isTrial(row.billing?.planId) ? undefined : planById(row.billing?.planId);
   if ((plan ? !plan.offered : !credits) || !current || plan?.id === current.id) redirect("/dashboard/settings/billing");
   // The purchase is charged under this id, kept in the address so a reload or a second tab can't charge it twice.
@@ -38,18 +39,18 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
 
   const preview = await client.preview({ customerId: row.org.id, planId: plan ? plan.id : TOP_UP.id, credits }).catch(() => undefined);
   const downgrade = plan && plan.price < current.price;
-  const title = plan ? `Switch ${row.org.githubLogin} to ${plan.name}` : `Buy ${credits!.toLocaleString("en-US")} credits for ${row.org.githubLogin}`;
+  const title = plan ? `Switch ${row.org.githubLogin} to ${plan.name}` : `Add ${money(credits!)} to ${row.org.githubLogin}’s balance`;
   const fields: Record<string, string> = {
     ...(plan ? { kind: "plan", plan: plan.id, ...(credits ? { credits: String(credits) } : {}) } : { kind: "top_up", credits: String(credits) }),
     purchase: purchase.data,
   };
-  const monthly = (p: { credits: number }) => (p.credits > 0 ? ` with ${p.credits.toLocaleString("en-US")} credits a month` : "");
+  const monthly = (p: { credits: number }) => (p.credits > 0 ? ` with ${money(p.credits)} a month included` : "");
 
   const help = plan
     ? downgrade
-      ? `${current.name} stays until the end of this period, then ${plan.name} starts${monthly(plan)}. Credits you bought stay yours.`
+      ? `${current.name} stays until the end of this period, then ${plan.name} starts${monthly(plan)}. Funds you added stay yours.`
       : `${plan.name} starts now${monthly(plan)}. You pay the difference for the rest of this period.`
-    : "Charged to the card on file. Bought credits never expire.";
+    : "Charged to the card on file. Funds you add never expire.";
   return (
     <PageShape id="confirm">
       <ConfirmView orgId={row.org.id} title={title} preview={preview && { ...preview, nextCycle: plan ? preview.nextCycle : null }} help={help} fields={fields} />

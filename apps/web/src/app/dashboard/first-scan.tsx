@@ -5,8 +5,9 @@ import { AddCredits } from "@/components/app/add-credits";
 import { HackerMark } from "@/components/hacker/hacker-mark";
 import { Submit } from "@/components/app/submit";
 import { linesLabel } from "@/lib/briefing";
-import { creditCount, creditsText } from "@/lib/format";
+import { money } from "@/lib/format";
 import type { FirstScan as FirstScanData } from "@/lib/first-scan";
+import { notEnoughBalance, sizePrice, usagePrice } from "@/lib/pricing";
 import { dig, type DigOutcome } from "@/server/dig-action";
 import "./first-scan.css";
 
@@ -46,9 +47,9 @@ export function FirstScan({ data }: { data: FirstScanData }) {
   const credits = (r: (typeof data.repos)[number]) => {
     const holds = data.orgs.find((o) => o.id === r.orgId)?.credits ?? null;
     if (holds === null) return "";
-    if (r.usage) return `up to ${creditsText(r.credits)}`;
+    if (r.usage) return `at most ${money(r.credits)}`;
     if (r.unsized && holds < r.credits) return "being priced";
-    return `${r.unsized ? "up to " : ""}${creditsText(r.credits)}`;
+    return `${r.unsized ? "at most " : ""}${money(r.credits)}`;
   };
 
   return (
@@ -119,7 +120,7 @@ export function FirstScan({ data }: { data: FirstScanData }) {
                   {state.error}{" "}
                   {state.topUp && org.credits !== null && (
                     <button type="button" className="first-scan-link" onClick={() => setTopping(true)}>
-                      Add credits
+                      Add funds
                     </button>
                   )}
                 </span>
@@ -132,20 +133,15 @@ export function FirstScan({ data }: { data: FirstScanData }) {
                 </>
               ) : short ? (
                 <>
-                  Needs {creditsText(repo.credits)}; {org.login} has {creditCount(org.credits)}.{" "}
+                  {notEnoughBalance("scan", repo.credits, org.login, org.credits)}{" "}
                   <button type="button" className="first-scan-link" onClick={() => setTopping(true)}>
-                    Add credits
+                    Add funds
                   </button>
                 </>
               ) : (
                 <>
-                  {repo.unsized || repo.usage ? "Up to " : ""}
-                  {creditsText(repo.credits)} of {many ? `${org.login}’s` : "your"} {creditCount(org.credits)}
-                  {repo.usage ? (
-                    <span className="first-scan-fine">Held while it runs, then charged what it uses.</span>
-                  ) : (
-                    repo.unsized && <span className="first-scan-fine">Held while it’s mapped, then charged what it measures.</span>
-                  )}
+                  {repo.usage ? usagePrice(repo.credits) : sizePrice(repo.credits, repo.unsized)}
+                  {many && <span className="first-scan-fine">Paid from {org.login}’s balance.</span>}
                 </>
               )}
             </p>

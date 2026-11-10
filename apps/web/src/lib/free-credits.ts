@@ -2,6 +2,11 @@
  * Free credits from `/claim`, as the pages describe them. Pure, so client
  * components can use it; claiming itself is in `server/free-credits.ts`.
  */
+import { creditsWorth, FREE_CREDITS } from "@sandchest/billing/plans";
+import { usd } from "./format";
+
+/** What a claim gives, as people read it: "$20". */
+export const FREE_MONEY = usd(creditsWorth(FREE_CREDITS.credits));
 
 /** The cookie that says the person came to claim, so it survives signing in and installing on GitHub. */
 export const CLAIM_COOKIE = "sandchest_claim";
@@ -29,6 +34,20 @@ export interface ClaimIntent {
 }
 
 /** Why an account can't claim, in words for the person. */
+export function claimClosed(closed: ClaimClosed, org: string): string {
+  switch (closed.reason) {
+    case "claimed_elsewhere":
+      return closed.login && closed.login !== org ? `You’ve already claimed your free ${FREE_MONEY}, for ${closed.login}.` : `You’ve already claimed your free ${FREE_MONEY}.`;
+    case "org_claimed":
+      return `${org}’s free ${FREE_MONEY} has already been claimed.`;
+    case "has_plan":
+      return `${org} already has, or has had, a plan, so it can’t claim the free ${FREE_MONEY}.`;
+    case "exhausted":
+      return `Every free ${FREE_MONEY} has been claimed.`;
+  }
+}
+
+/** The same, as the agent API says it: in credits. */
 export function closedMessage(closed: ClaimClosed, org: string): string {
   switch (closed.reason) {
     case "claimed_elsewhere":

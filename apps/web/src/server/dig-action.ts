@@ -3,10 +3,11 @@
  * The Dig button's action, in its own module so pages that only show
  * findings or settings never trace the workflow runtime it needs.
  */
-import { repoForUser } from "@sandchest/db";
+import { orgBillingRow, repoForUser } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { notEnoughBalance } from "@/lib/pricing";
 import { viewer } from "./access";
 import { track } from "./analytics";
 import { BILLING_FROZEN, SCANS_PAUSED } from "./billing";
@@ -36,7 +37,7 @@ export async function dig(repoId: string, options?: { fast?: boolean }): Promise
   try {
     result = await requestDeepScan({ ...row.repo, org: row.org }, "manual", options?.fast === true ? { fast: true } : {});
   } catch (error) {
-    // GitHub or billing unreachable. Credits held for a scan that never started are given back.
+    // GitHub or billing unreachable. What was held for a scan that never started is given back.
     console.error(`Dig failed: ${describeError(error)}`);
     await captureException(error, { source: "dig", handled: true });
     await record("error");
@@ -45,12 +46,14 @@ export async function dig(repoId: string, options?: { fast?: boolean }): Promise
   if (!result.ok) {
     await record(result.reason, { credits: result.credits, scanId: result.scanId });
     revalidatePath("/dashboard");
+    // What the account holds, as billing last said: the refusal has just stored it.
+    const has = result.reason === "out_of_credits" && result.credits ? (await orgBillingRow(db(), row.org.id).catch(() => undefined))?.credits : undefined;
     const messages = {
       not_installed: "Sandchest is no longer installed on this repository.",
       running: "A deep scan is already running.",
       too_large: "This repository is over a million lines. Get in touch to scan it.",
       no_plan: `${row.org.githubLogin} needs a plan before Sandchest can scan.`,
-      out_of_credits: result.credits ? `Out of credits: this deep scan needs ${result.credits}.` : `${row.org.githubLogin} is out of credits. Top up to keep scanning.`,
+      out_of_credits: result.credits ? notEnoughBalance("scan", result.credits, row.org.githubLogin, has) : `${row.org.githubLogin} has no balance left. Add funds to keep scanning.`,
       fast_unavailable: "Fast scans aren’t available for this account.",
       frozen: BILLING_FROZEN,
       paused: SCANS_PAUSED,

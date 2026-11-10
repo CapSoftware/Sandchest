@@ -1,5 +1,5 @@
 /**
- * What a scan billed from its usage is quoted before it starts (the most it holds, as "up to"), the fast option
+ * What a scan billed from its usage is quoted before it starts (the most it holds, as "never more than"), the fast option
  * offered only where everything it needs is true, and every other account quoted exactly as before.
  */
 import { describe, expect, test } from "bun:test";
@@ -11,7 +11,7 @@ import { UsageHistory } from "@/components/app/usage-history";
 import { ranFast } from "@/app/dashboard/scans/[id]/scan-view";
 import { digAllCredits, digCredits } from "@/lib/briefing";
 import { firstScan } from "@/lib/first-scan";
-import { creditsText } from "@/lib/format";
+import { money } from "@/lib/format";
 import { sampleBill, sampleRepos, sampleScan, sampleUsageHistory } from "@/lib/samples";
 import { deepScanPrice } from "@/server/agent/views";
 import { config, fastOffered, resetConfig } from "@/server/config";
@@ -101,25 +101,32 @@ describe("quoted before a scan", () => {
     expect(deepScanPrice({ loc: 5_000_000 }, { hold: 150 }).too_large).toBe(true);
   });
 
-  test("the deep scan key: a usage account's is named as a maximum, with fast where it is offered", () => {
+  test("the deep scan key: Start scan beside what it costs; a usage account's cost is a maximum, with fast where it is offered", () => {
     const repo = { ...sampleRepos()[0]!, activeDeepScanId: null, loc: 50_000, lastDeepScanAt: null };
     const props = (plan: Parameters<typeof Dig>[0]["plan"]) => (Dig({ repo, plan }) as ReactElement<Record<string, unknown>>).props;
 
     const tiered = props({ planId: "standard", credits: 1_000 });
-    expect(tiered.confirm).toBe(`Scan for ${creditsText(500)}`);
+    expect(tiered).toMatchObject({ confirm: "Start scan", need: 500, note: `This scan costs ${money(500)}.` });
     expect("fast" in tiered).toBe(false);
+    // Not sized yet: the top tier is held, and said as the most it can cost.
+    expect((Dig({ repo: { ...repo, loc: null }, plan: { planId: "standard", credits: 5_000 } }) as ReactElement<Record<string, unknown>>).props).toMatchObject({
+      confirm: "Start scan",
+      note: `You pay by the repository’s size, never more than ${money(2_500)}.`,
+    });
 
     const billed = props({ planId: "standard", credits: 1_000, usage: { hold: 150 } });
-    expect(billed).toMatchObject({ confirm: `Scan for up to ${creditsText(150)}`, need: 150 });
-    expect(billed.note).toBe(`Up to 150 of your ${creditsText(1_000)}`);
+    expect(billed).toMatchObject({ confirm: "Start scan", need: 150 });
+    expect(billed.note).toBe(`You pay for what the scan uses, never more than ${money(150)}.`);
     expect("fast" in billed).toBe(false);
+    // The old wording is gone: no credits, no "up to".
+    for (const said of [tiered, billed]) expect(`${String(said.confirm)} ${String(said.note)}`).not.toMatch(/credit|up to/i);
 
     const withFast = props({ planId: "standard", credits: 1_000, usage: { hold: 150, fast: 450 } });
-    expect(withFast.fast).toEqual({ confirm: `Scan for up to ${creditsText(450)}`, need: 450, note: `Up to 450 of your ${creditsText(1_000)}` });
+    expect(withFast.fast).toEqual({ confirm: "Start fast scan", need: 450, note: `You pay for what the scan uses, never more than ${money(450)}.` });
 
-    // Not enough for the hold: the key adds credits first, whatever the repository's size.
+    // Not enough for the hold: the key adds funds first, whatever the repository's size.
     const short = props({ planId: "standard", credits: 100, usage: { hold: 150 } });
-    expect(short).toMatchObject({ short: true, need: 150, note: `Needs ${creditsText(150)}; 100 left` });
+    expect(short).toMatchObject({ short: true, need: 150, note: `Not enough balance: this scan needs ${money(150)} available, acme has ${money(100)}.` });
     // Unsized and short: a usage scan is never "priced once mapped".
     expect(renderToStaticMarkup(Dig({ repo: { ...repo, loc: null }, plan: { planId: "standard", credits: 100, usage: { hold: 150 } } }))).not.toContain("Priced once mapped");
   });
@@ -130,12 +137,13 @@ describe("the bill on the page", () => {
 
   test("the bill: every group and total", () => {
     const billed = text(renderToStaticMarkup(<ScanBill bill={sampleBill()} />));
-    for (const words of ["|Bill|", "|Hunting|", "|Scoring|", "|Verifying in a sandbox|", "|Looking for variants|", "|Writing up|", "|Sandbox time|", "|Usage|37.89|", "|Carried from earlier scans|0.46|", "|Charged|38|", "|Carried to the next scan|0.35|", "|150 credits held|"]) {
+    for (const words of ["|Bill|", "|Hunting|", "|Scoring|", "|Verifying in a sandbox|", "|Looking for variants|", "|Writing up|", "|Sandbox time|", "|Amount|", `|Usage|${money(37.89, true)}|`, `|Carried from earlier scans|${money(0.46, true)}|`, `|Charged|${money(38)}|`, `|Carried to the next scan|${money(0.35, true)}|`, `|${money(150)} held|`]) {
       expect(billed).toContain(words);
     }
     expect(billed).toContain("|24 calls| · |410K tokens in| · |38K out|");
     expect(billed).toContain("6 min 53 s");
     expect(billed).not.toContain("Fast");
+    expect(billed).not.toMatch(/credit/i);
   });
 
   test("fast shows on the page and the bill, only for a scan started fast", () => {
@@ -150,28 +158,28 @@ describe("the bill on the page", () => {
     expect(ranFast(started, { fast: false })).toBe(false);
     // A flag in a bill alone never makes a scan not started fast say so.
     expect(ranFast(scan, { fast: true })).toBe(false);
-    expect(text(renderToStaticMarkup(<ScanBill bill={{ ...sampleBill(), fast: true }} />))).toContain("|Fast · 150 credits held|");
+    expect(text(renderToStaticMarkup(<ScanBill bill={{ ...sampleBill(), fast: true }} />))).toContain(`|Fast · ${money(150)} held|`);
   });
 
   test("open, capped and waived bills", () => {
     const open = text(renderToStaticMarkup(<ScanBill bill={{ ...sampleBill(), status: "open" }} />));
-    expect(open).toContain("|To be charged|38|");
-    const capped = text(renderToStaticMarkup(<ScanBill bill={{ ...sampleBill(), capped: true, note: "Capped at the 150 credits held." }} />));
-    expect(capped).toContain("|Capped at the 150 credits held.|");
+    expect(open).toContain(`|To be charged|${money(38)}|`);
+    const capped = text(renderToStaticMarkup(<ScanBill bill={{ ...sampleBill(), capped: true }} />));
+    expect(capped).toContain(`|Capped at the ${money(150)} held.|`);
     const waived = text(renderToStaticMarkup(<ScanBill bill={{ ...sampleBill(), status: "waived", charged: 0, carriedIn: 0, carriedOut: 0, note: "Not charged: this scan’s usage could not be measured exactly." }} />));
-    expect(waived).toContain("|Charged|0|");
+    expect(waived).toContain("|Charged|$0.00|");
     expect(waived).toContain("|Not charged: this scan’s usage could not be measured exactly.|");
     expect(waived).not.toContain("Carried");
   });
 
-  test("the usage history rows: date, scan, repository, credits; waived ones say so", () => {
+  test("the usage history rows: date, scan, repository, what it was charged; waived ones say so", () => {
     const rows = sampleUsageHistory(3);
     rows[1] = { ...rows[1]!, status: "waived", credits: 0 };
     const html = renderToStaticMarkup(<UsageHistory rows={rows} />);
     expect(html.match(/href="\/dashboard\/scans\//g)).toHaveLength(3);
     const shown = text(html);
     expect(shown).toContain("|Usage|");
-    expect(shown).toContain("|Deep scan|acme/api|38 credits|");
+    expect(shown).toContain(`|Deep scan|acme/api|${money(38)}|`);
     expect(shown).toContain(`|PR #${rows[1]!.prNumber}| review|acme/web|Not charged|`);
   });
 });

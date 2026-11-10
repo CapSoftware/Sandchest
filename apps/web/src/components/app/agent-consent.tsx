@@ -4,7 +4,7 @@ export function AgentAbilities() {
     <ul className="setup-list agent-abilities">
       <li>See the findings, scans and repositories you can see.</li>
       <li>Start deep scans, and change findings and settings, as you could.</li>
-      <li>Spend credits, and charge the card saved for accounts you administer. A first card payment is always made by you, on Stripe.</li>
+      <li>Spend your balance, and charge the card saved for accounts you administer. A first card payment is always made by you, on Stripe.</li>
     </ul>
   );
 }

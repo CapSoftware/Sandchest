@@ -6,10 +6,11 @@
  * never trace the workflow runtime.
  */
 import { CREDIT_PACK } from "@sandchest/billing/plans";
-import { repoForUser } from "@sandchest/db";
+import { orgBillingRow, repoForUser } from "@sandchest/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { notEnoughBalance } from "@/lib/pricing";
 import { viewer } from "./access";
 import { track } from "./analytics";
 import { BILLING_FROZEN, SCANS_PAUSED } from "./billing";
@@ -29,7 +30,7 @@ const MESSAGES = {
   not_open: "This pull request is closed.",
   reviewed: "This commit has already been reviewed.",
   no_plan: "This account needs a plan before Sandchest can review.",
-  out_of_credits: "Out of credits for this review.",
+  out_of_credits: "Not enough balance for this review.",
   frozen: BILLING_FROZEN,
   paused: SCANS_PAUSED,
 } as const;
@@ -70,7 +71,8 @@ async function run(step: "quote" | "start", input: { repoId: string; prNumber: n
     // A price that went up since it was shown (someone pushed) is shown again, to be confirmed.
     if (result.reason === "price_changed") return { credits: result.credits, ...(result.upTo && { upTo: true as const }), error: "The pull request changed: here’s the new price." };
     if (result.reason === "reviewed") revalidatePath(`/dashboard/repos/${row.repo.id}`);
-    const message = result.reason === "out_of_credits" && result.credits ? `Out of credits: this review needs ${result.credits}.` : MESSAGES[result.reason];
+    const has = result.reason === "out_of_credits" && result.credits ? (await orgBillingRow(db(), row.org.id).catch(() => undefined))?.credits : undefined;
+    const message = result.reason === "out_of_credits" && result.credits ? notEnoughBalance("review", result.credits, row.org.githubLogin, has) : MESSAGES[result.reason];
     return { error: message, topUp: result.reason === "no_plan" || result.reason === "out_of_credits", scanId: result.scanId };
   }
   await record("ok", { credits: result.credits, scanId: result.scanId || undefined });

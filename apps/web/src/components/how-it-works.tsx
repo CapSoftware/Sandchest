@@ -1,7 +1,7 @@
-import { CREDIT_PACK } from "@sandchest/billing/plans";
+import { CREDIT_PACK, creditsWorth } from "@sandchest/billing/plans";
 import type { CSSProperties, ReactNode } from "react";
 import { PlayOnView } from "@/components/play-on-view";
-import { creditsText } from "@/lib/format";
+import { money, usd } from "@/lib/format";
 import { EXAMPLE_REVIEW_CREDITS } from "@/lib/pricing";
 
 /**
@@ -349,7 +349,7 @@ function ScanVisual() {
       </ul>
       <p className="scan-foot">
         <span>Whole repository</span>
-        <span className="tag">Usually well under {creditsText(CREDIT_PACK)}</span>
+        <span className="tag">Usually well under {usd(creditsWorth(CREDIT_PACK))}</span>
         <span className="key-mini scan-again">Deep scan</span>
       </p>
     </Win>
@@ -365,7 +365,7 @@ function ReviewVisual() {
         <span className="pixel fx-blink" style={at(0.1)} />
         <span className="text-gold">{HANDLE}</span>
         <Swap d={1.4} from={<span className="text-dust">Reviewing…</span>} to={<span className="check-found">1 way in</span>} />
-        <span className="check-cost">{creditsText(EXAMPLE_REVIEW_CREDITS)}</span>
+        <span className="check-cost">{money(EXAMPLE_REVIEW_CREDITS)}</span>
       </p>
       <div className="mini-comment fx-in" style={at(1.6)}>
         <p className="text-dust">

@@ -5,10 +5,10 @@ import { AddCredits, type CreditsAccount } from "./add-credits";
 import { Submit } from "./submit";
 
 /**
- * Starts a deep scan, then opens its live feed. When it costs credits, the
- * first press only asks: the second, on a key that names the price, starts it.
- * Short of credits (`short`, or refused for them), the key opens the dialog to
- * add them, which starts the scan once they're in. `fast`: the account is offered a fast scan, chosen with a
+ * Starts a deep scan, then opens its live feed. When it is paid
+ * for, the first press only asks: the second, on a key beside what it costs,
+ * starts it. Short of balance (`short`, or refused for it), the key opens the
+ * dialog to add funds, which starts the scan once they're in. `fast`: the account is offered a fast scan, chosen with a
  * switch on the confirming key, unticked each time it opens.
  */
 export function DigButton({
@@ -27,14 +27,14 @@ export function DigButton({
   confirm?: string;
   /** The account that pays, when billing is on. */
   account?: CreditsAccount;
-  /** Credits the scan holds. */
+  /** Credits the scan holds: the most it can be charged. */
   need?: number;
   short?: boolean;
   /** A fast scan, where the account is offered one: its confirming key, the credits it holds, and its note. */
   fast?: { confirm: string; need: number; note: string };
 }) {
   const [fastOn, setFastOn] = useState(false);
-  // Read when the action runs, also when it runs again after credits were added.
+  // Read when the action runs, also when it runs again after funds were added.
   const fastChosen = useRef(false);
   const chooseFast = (on: boolean) => {
     fastChosen.current = on;
@@ -101,7 +101,7 @@ export function DigButton({
               <>
                 {" "}
                 <button type="button" className="dig-cancel" onClick={() => setTopping(true)}>
-                  Add credits
+                  Add funds
                 </button>
               </>
             ) : (

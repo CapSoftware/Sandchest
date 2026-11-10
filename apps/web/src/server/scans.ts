@@ -4,6 +4,7 @@
  * because a step that dies is retried from the start.
  */
 import { withUtm } from "@/lib/analytics";
+import { money } from "@/lib/format";
 import { RECON_WAIT } from "@/lib/scan-progress";
 import { DEEP_SCAN_TIERS, deepScanCredits, prReviewCredits } from "@sandchest/billing";
 import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
@@ -185,7 +186,7 @@ async function scanCredits(scan: LoadedScan): Promise<number> {
 
 /** A scan billing would not let run: recorded as refused, and a PR gets a neutral Check that never blocks merging. */
 async function refuse(scan: LoadedScan, gate: { reason: Exclude<Extract<Gate, { ok: false }>["reason"], "frozen">; credits: number }): Promise<void> {
-  const message = gate.reason === "no_plan" ? "Not run: this account has no plan." : `Not run: out of credits (needs ${gate.credits}).`;
+  const message = gate.reason === "no_plan" ? "Not run: this account has no plan." : `Not run: not enough balance (this scan needs ${money(gate.credits)}).`;
   // The Check first: once the scan is marked refused, a retried step would never post it.
   let checkRunId = scan.checkRunId;
   if (scan.kind === "pr_review" && scan.repo.org.installationId) {

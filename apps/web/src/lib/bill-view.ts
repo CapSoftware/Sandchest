@@ -4,7 +4,6 @@
  * any amount of money: only counts and credits.
  */
 import type { ScanBill } from "@sandchest/db";
-import { creditsText } from "./format";
 
 /** The bills a customer sees. A voided bill was withdrawn and a shadow bill was never charged: neither is shown. */
 const SHOWN = new Set(["open", "charged", "waived"]);
@@ -45,7 +44,7 @@ export interface BillView {
   fast: boolean;
   /** Credits held before the scan ran: the most it could be charged. */
   held: number;
-  /** What to say under the bill, if anything. */
+  /** What to say under the bill, if anything. A capped bill says so from `capped` and `held`. */
   note: string | null;
 }
 
@@ -101,12 +100,7 @@ export function billView(bill: BillSource): BillView | undefined {
     capped: bill.capped,
     fast: bill.fast,
     held: bill.reservedCredits,
-    note:
-      bill.status === "waived"
-        ? "Not charged: this scan’s usage could not be measured exactly."
-        : bill.capped
-          ? `Capped at the ${creditsText(bill.reservedCredits)} held.`
-          : null,
+    note: bill.status === "waived" ? "Not charged: this scan’s usage could not be measured exactly." : null,
   };
 }
 
