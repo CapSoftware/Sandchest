@@ -2,11 +2,13 @@
  * Usage bills, one per scan, and each account's carry under one credit. What a bill says is computed by the
  * caller (`usageBill` in @sandchest/billing); this stores it and moves the carry exactly once per bill, always
  * under a lock on the account's carry row, so two bills of one account never start from the same carry.
- * Nothing calls this yet.
  */
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { settleScan as settleScanRow } from "./billing";
 import type { Db } from "./client";
 import { scanBills, scans, scanUsage, usageCarry, type ScanBillLine, type ScanBillStatus, type UsageKind, type UsageStatus } from "./schema";
+
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export type ScanBill = typeof scanBills.$inferSelect;
 
@@ -140,7 +142,7 @@ export async function orgCarry(database: Db, orgId: string): Promise<number> {
 }
 
 /** An open bill becomes charged, once. False when it was not open. */
-export async function markBillCharged(database: Db, scanId: string): Promise<boolean> {
+export async function markBillCharged(database: Db | Tx, scanId: string): Promise<boolean> {
   const rows = await database
     .update(scanBills)
     .set({ status: "charged", settledAt: sql`now()` })
@@ -174,19 +176,61 @@ export function carryAfterVoid(carryMicroUsd: number, bill: Pick<ScanBill, "carr
  * there is no open bill for the scan.
  */
 export async function voidScanBill(database: Db, scanId: string, reason: string): Promise<boolean> {
+  return database.transaction((tx) => voidOpenBill(tx, scanId, reason));
+}
+
+async function voidOpenBill(tx: Tx, scanId: string, reason: string): Promise<boolean> {
+  const [found] = await tx.select({ orgId: scanBills.orgId }).from(scanBills).where(eq(scanBills.scanId, scanId));
+  if (!found) return false;
+  const [carry] = await tx.select({ microUsd: usageCarry.carryMicroUsd }).from(usageCarry).where(eq(usageCarry.orgId, found.orgId)).for("update");
+  const [voided] = await tx
+    .update(scanBills)
+    .set({ status: "voided", reason })
+    .where(and(eq(scanBills.scanId, scanId), eq(scanBills.status, "open")))
+    .returning();
+  if (!voided) return false;
+  // An open bill moved the carry when it was written, so its row exists.
+  if (!carry) throw new Error("The account's carry row is missing");
+  await tx.update(usageCarry).set({ carryMicroUsd: carryAfterVoid(carry.microUsd, voided) }).where(eq(usageCarry.orgId, found.orgId));
+  return true;
+}
+
+/** A waived bill's hold was given back: it stays waived, and says when. Once. False when there is no such bill. */
+export async function markWaivedBillSettled(database: Db | Tx, scanId: string): Promise<boolean> {
+  const rows = await database
+    .update(scanBills)
+    .set({ settledAt: sql`now()` })
+    .where(and(eq(scanBills.scanId, scanId), eq(scanBills.status, "waived"), isNull(scanBills.settledAt)))
+    .returning({ scanId: scanBills.scanId });
+  return rows.length === 1;
+}
+
+/** Notes on an open bill why its settling needs a look (an expired hold), leaving the rest of it as it is. True only when this call noted it. */
+export async function noteBillReason(database: Db, scanId: string, reason: string): Promise<boolean> {
+  const rows = await database
+    .update(scanBills)
+    .set({ reason })
+    .where(and(eq(scanBills.scanId, scanId), eq(scanBills.status, "open"), isNull(scanBills.reason)))
+    .returning({ scanId: scanBills.scanId });
+  return rows.length === 1;
+}
+
+/** Why a failed scan's bill was voided. */
+export const VOIDED_FAILED = "scan_failed";
+
+/**
+ * Settles a usage-billed scan in the database once its hold was confirmed or given back: the scan row moves from
+ * reserved to `outcome`, and its bill with it, in one transaction, so the two never disagree. Charged: an open
+ * bill becomes charged. Released: an open bill is voided and its carry given back. Either way a waived bill stays
+ * waived, settled. A charged, voided or shadow bill is never touched. Nothing moves, the bill included, unless the
+ * scan still held its credits: false then, so a retry never voids or restores the carry twice.
+ */
+export async function settleBilledScan(database: Db, scanId: string, outcome: "charged" | "released", credits = 0): Promise<boolean> {
   return database.transaction(async (tx) => {
-    const [found] = await tx.select({ orgId: scanBills.orgId }).from(scanBills).where(eq(scanBills.scanId, scanId));
-    if (!found) return false;
-    const [carry] = await tx.select({ microUsd: usageCarry.carryMicroUsd }).from(usageCarry).where(eq(usageCarry.orgId, found.orgId)).for("update");
-    const [voided] = await tx
-      .update(scanBills)
-      .set({ status: "voided", reason })
-      .where(and(eq(scanBills.scanId, scanId), eq(scanBills.status, "open")))
-      .returning();
-    if (!voided) return false;
-    // An open bill moved the carry when it was written, so its row exists.
-    if (!carry) throw new Error("The account's carry row is missing");
-    await tx.update(usageCarry).set({ carryMicroUsd: carryAfterVoid(carry.microUsd, voided) }).where(eq(usageCarry.orgId, found.orgId));
+    if (!(await settleScanRow(tx, scanId, outcome, credits))) return false;
+    if (outcome === "charged") await markBillCharged(tx, scanId);
+    else await voidOpenBill(tx, scanId, VOIDED_FAILED);
+    await markWaivedBillSettled(tx, scanId);
     return true;
   });
 }

@@ -6,6 +6,8 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { creditClaims, orgAdmins, orgBilling, orgNotices, orgs, repoMemory, repos, scans, users, type ScanPricing } from "./schema";
 
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 export type OrgBillingRow = typeof orgBilling.$inferSelect;
 export type OrgBillingInput = Omit<OrgBillingRow, "orgId" | "activatedAt" | "checkedAt" | "creditLevel" | "creditLevelAt" | "creditLevelRev">;
 
@@ -256,7 +258,7 @@ export async function markScanReserved(database: Db, scanId: string, credits: nu
 }
 
 /** Moves a reservation to charged or released. False if it was not reserved (already settled, or free). */
-export async function settleScan(database: Db, scanId: string, outcome: "charged" | "released", credits = 0): Promise<boolean> {
+export async function settleScan(database: Db | Tx, scanId: string, outcome: "charged" | "released", credits = 0): Promise<boolean> {
   const rows = await database
     .update(scans)
     .set({ billing: outcome, credits: outcome === "charged" ? credits : 0 })
@@ -268,7 +270,7 @@ export async function settleScan(database: Db, scanId: string, outcome: "charged
 /** Ended scans still holding credits: completed ones to charge, the rest to release. Run by the sweep. */
 export async function unsettledScans(database: Db, limit = 50) {
   return database
-    .select({ id: scans.id, orgId: scans.orgId, status: scans.status, billing: scans.billing, credits: scans.credits, creditsReserved: scans.creditsReserved })
+    .select({ id: scans.id, orgId: scans.orgId, status: scans.status, billing: scans.billing, credits: scans.credits, creditsReserved: scans.creditsReserved, pricing: scans.pricing, createdAt: scans.createdAt })
     .from(scans)
     .where(and(eq(scans.billing, "reserved"), inArray(scans.status, ["completed", "failed", "cancelled", "refused"])))
     .limit(limit);

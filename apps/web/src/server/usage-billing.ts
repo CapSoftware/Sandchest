@@ -4,7 +4,7 @@
  * its credits were reserved, never from the settings now. Returns ids, enums and counts only.
  */
 import { ledgerTrust, usageBill } from "@sandchest/billing/usage";
-import { billableUsageRows, scanBill, updateScan, usageBudgetState, writeScanBill, type ScanBill, type ScanBillDraft, type ScanBillStatus } from "@sandchest/db";
+import { billableUsageRows, scanBill, updateScan, usageBudgetState, voidScanBill, writeScanBill, type ScanBill, type ScanBillDraft, type ScanBillStatus } from "@sandchest/db";
 import { heldCredits } from "./billing";
 import { creditMicroUsd } from "./config";
 import { STALE_CALL_SECONDS } from "./gateway";
@@ -70,6 +70,14 @@ export async function billSlice(scanId: string, options: { final?: boolean } = {
       return { ...draft, status: shadow ? "shadow" : "waived", reason: trust.reason, credits: 0, carryOutMicroUsd: carryIn, capped: false };
     });
     bill = written.bill;
+    // The scan may have been failed (by the sweep, say) while the bill was being written: its hold is gone, so the bill must not stand.
+    if (written.created && bill.status === "open") {
+      const now = await requireScan(scanId);
+      if (now.billing !== "reserved" && (await voidScanBill(db(), scan.id, "scan_failed"))) {
+        console.error(`Usage bill for scan ${scan.id} voided: the scan was settled while it was billed`);
+        return { state: "skipped" };
+      }
+    }
     if (written.created && !trust.trusted) {
       console.error(`Usage bill for scan ${scan.id} not charged: ledger ${trust.reason}`);
       await captureException(Object.assign(new Error("A usage bill was waived"), { name: "UsageBillWaived" }), { source: "billing", tags: { scan_id: scan.id, reason: trust.reason }, handled: true });

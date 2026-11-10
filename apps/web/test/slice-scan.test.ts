@@ -17,6 +17,7 @@ import {
   scanUsageRows,
   schema,
   startUsageCall,
+  unsettledScans,
   upsertInstallation,
   upsertRepos,
   type Db,
@@ -29,7 +30,7 @@ import { slice } from "@sandchest/engine/scan";
 import { GitHubError, type CheckConclusion, type CheckOutput, type GitHubApp, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { ExecResult, RepoRef } from "@sandchest/workspace";
 import { usdToMicroUsd } from "@sandchest/billing/usage";
-import { setAutumn } from "@/server/billing";
+import { setAutumn, settleScan } from "@/server/billing";
 import { resetConfig } from "@/server/config";
 import { requestDeepScan } from "@/server/dig";
 import { verifyGatewayToken } from "@/server/gateway";
@@ -1270,6 +1271,11 @@ async function runBilled(scanId: string, expected: BeginResult): Promise<void> {
   await publishSlice(scanId);
 }
 
+/** What the sweep does for a scan that ended still holding credits, for this scan alone. */
+async function sweepSettle(scanId: string): Promise<void> {
+  for (const scan of (await unsettledScans(database, 1_000)).filter((row) => row.id === scanId)) await settleScan(scan, scan.status === "completed" ? "charge" : "release", scan.credits);
+}
+
 const ledgerMicroUsd = async (scanId: string) => (await usage(scanId)).reduce((sum, r) => sum + usdToMicroUsd(r.costUsd), 0);
 const resetCarry = () => database.$client`delete from usage_carry where org_id = ${orgId}`;
 
@@ -1452,7 +1458,7 @@ describe.skipIf(!available)("usage billing on", () => {
       expect(scan.creditsReserved).toBe(150);
       expect(scan.pricing).toEqual({ engine: "slice", mode: "usage", unit: "cent", multiplierThousandths: 3000, ceilingMicroUsd: 500_000, fast: false });
       const bill = (await scanBill(database, first))!;
-      expect(bill).toMatchObject({ status: "open", reason: null, creditMicroUsd: 10_000, multiplierThousandths: 3000, reservedCredits: 150, carryInMicroUsd: 0, capped: false });
+      expect(bill).toMatchObject({ status: "charged", settledAt: expect.any(Date), reason: null, creditMicroUsd: 10_000, multiplierThousandths: 3000, reservedCredits: 150, carryInMicroUsd: 0, capped: false });
       expect(bill.dueMicroUsd).toBe(bill.lines.reduce((sum, line) => sum + line.chargeMicroUsd, 0));
       expect(bill.credits * 10_000 + bill.carryOutMicroUsd).toBe(bill.dueMicroUsd);
       expect(bill.credits).toBeGreaterThan(0);
@@ -1486,7 +1492,7 @@ describe.skipIf(!available)("usage billing on", () => {
       expect(scan).toMatchObject({ status: "completed", billing: "charged", creditsReserved: 90 });
       expect(scan.pricing).toMatchObject({ ceilingMicroUsd: 300_000 });
       const bill = (await scanBill(database, review))!;
-      expect(bill).toMatchObject({ status: "open", reservedCredits: 90 });
+      expect(bill).toMatchObject({ status: "charged", reservedCredits: 90 });
       expect(scan.credits).toBe(bill.credits);
       expect(autumn.get(orgId).credits).toBe(10_000 - bill.credits);
 
@@ -1495,7 +1501,7 @@ describe.skipIf(!available)("usage billing on", () => {
       const nothing = await newScan("pr_review");
       await runBilled(nothing, { state: "running", engine: "slice", pricing: "usage" });
       expect(await scanById(database, nothing)).toMatchObject({ status: "completed", creditsReserved: 0, credits: 0 });
-      expect(await scanBill(database, nothing)).toMatchObject({ status: "open", reservedCredits: 0, credits: 0, dueMicroUsd: 0, lines: [] });
+      expect(await scanBill(database, nothing)).toMatchObject({ status: "charged", reservedCredits: 0, credits: 0, dueMicroUsd: 0, lines: [] });
       expect(autumn.get(orgId).credits).toBe(10_000 - bill.credits);
 
       // The dashboard quotes and holds the same.
@@ -1528,7 +1534,7 @@ describe.skipIf(!available)("usage billing on", () => {
       const review = await newScan("pr_review");
       await runBilled(review, { state: "running", engine: "slice", pricing: "usage" });
       const bill = (await scanBill(database, review))!;
-      expect(bill).toMatchObject({ status: "open", capped: true, credits: 90, reservedCredits: 90, carryInMicroUsd: 4_000, carryOutMicroUsd: 4_000 });
+      expect(bill).toMatchObject({ status: "charged", capped: true, credits: 90, reservedCredits: 90, carryInMicroUsd: 4_000, carryOutMicroUsd: 4_000 });
       expect(bill.dueMicroUsd).toBeGreaterThan(900_000);
       expect(await scanById(database, review)).toMatchObject({ status: "completed", billing: "charged", credits: 90 });
       expect(autumn.get(orgId).credits).toBe(10_000 - 90);
@@ -1642,7 +1648,7 @@ describe.skipIf(!available)("usage billing on", () => {
       await publishSlice(scanId);
       // Once published, it is left alone.
       expect(await billSlice(scanId)).toEqual({ state: "skipped" });
-      expect(await scanBill(database, scanId)).toEqual(stored);
+      expect(await scanBill(database, scanId)).toEqual({ ...stored!, status: "charged", settledAt: expect.any(Date) });
       await resetCarry();
     });
   });
@@ -1668,6 +1674,10 @@ describe.skipIf(!available)("usage billing on", () => {
     const stored = (await scanBill(database, scanId))!;
     expect(stored).toMatchObject({ status: "open", multiplierThousandths: 3000, creditMicroUsd: 10_000, reservedCredits: 150 });
     expect(stored.dueMicroUsd).toBe(stored.lines.reduce((sum, line) => sum + Math.round((line.costMicroUsd * 3000) / 1000), 0));
+    // Published with credits of a dollar set: a bill in cents is not finalized until the setting matches it again.
+    expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "reserved" });
+    await withSettings(USAGE_ENV, () => sweepSettle(scanId));
+    expect(await scanBill(database, scanId)).toMatchObject({ status: "charged" });
     expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: stored.credits });
     expect(autumn.get(orgId).credits).toBe(10_000 - stored.credits);
     await resetCarry();
@@ -1703,6 +1713,244 @@ describe.skipIf(!available)("usage billing on", () => {
       expect(await beginScan(outside)).toEqual({ state: "running" });
       expect((await scanById(database, outside))!.pricing).toEqual({ engine: "classic", mode: "tiered", unit: "cent" });
       await settle(outside);
+    });
+  });
+});
+
+describe.skipIf(!available)("usage billing settlement", () => {
+  type Finalize = Parameters<FakeAutumn["finalize"]>[0];
+
+  /** Every finalize sent to Autumn while `fn` runs, failed ones included. */
+  async function finalizes(fn: () => Promise<unknown>): Promise<Finalize[]> {
+    const seen: Finalize[] = [];
+    const original = autumn.finalize;
+    autumn.finalize = (input) => {
+      seen.push(input);
+      return original.call(autumn, input);
+    };
+    try {
+      await fn();
+    } finally {
+      autumn.finalize = original;
+    }
+    return seen;
+  }
+
+  /** A usage scan through its bill step, the account's carry at `carry` before it. */
+  async function billedScan(carry = 3_000) {
+    autumn.get(orgId).credits = 10_000;
+    await resetCarry();
+    await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: carry });
+    const scanId = await newScan();
+    await throughWriteUp(scanId, { state: "running", engine: "slice", pricing: "usage" });
+    await bill(scanId);
+    return { scanId, bill: (await scanBill(database, scanId))! };
+  }
+
+  const reasons = (reports: Array<Record<string, unknown>>) => reports.filter((tags) => tags.reason !== undefined);
+
+  it("Autumn failing at publish leaves the bill open and the scan reserved; the sweep charges the bill's credits once and the carry never moves again", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      const { scanId, bill: open } = await billedScan();
+      expect(open).toMatchObject({ status: "open", settledAt: null });
+      expect(open.credits).toBeGreaterThan(0);
+      expect(open.credits).toBeLessThan(150);
+      const carry = await orgCarry(database, orgId);
+      expect(carry).toBe(open.carryOutMicroUsd);
+
+      autumn.failNext.add("finalize");
+      expect(await finalizes(() => publishSlice(scanId))).toHaveLength(1);
+      expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "reserved" });
+      expect(await scanBill(database, scanId)).toEqual(open);
+      expect(autumn.get(orgId).locks.get(scanId)).toBe(150);
+      expect(await orgCarry(database, orgId)).toBe(carry);
+
+      // The sweep confirms exactly the bill's credits, and marks the scan and the bill together.
+      expect(await finalizes(() => sweepSettle(scanId))).toEqual([{ customerId: orgId, lockId: scanId, action: "confirm", credits: open.credits }]);
+      expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: open.credits });
+      const charged = (await scanBill(database, scanId))!;
+      expect(charged).toEqual({ ...open, status: "charged", settledAt: expect.any(Date) });
+      expect(autumn.get(orgId).credits).toBe(10_000 - open.credits);
+      expect(autumn.get(orgId).locks.has(scanId)).toBe(false);
+      expect(await orgCarry(database, orgId)).toBe(carry);
+
+      // A second sweep, and the publish step run again, change nothing.
+      expect(
+        await finalizes(async () => {
+          await sweepSettle(scanId);
+          await publishSlice(scanId);
+        }),
+      ).toEqual([]);
+      expect(await scanBill(database, scanId)).toEqual(charged);
+      expect(autumn.get(orgId).credits).toBe(10_000 - open.credits);
+      expect(await orgCarry(database, orgId)).toBe(carry);
+      await resetCarry();
+    });
+  });
+
+  it("a usage scan with no bill when it is charged: nothing charged, the hold released, reported once, the scan still completed", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      autumn.get(orgId).credits = 10_000;
+      await resetCarry();
+      const scanId = await newScan();
+      await throughWriteUp(scanId, { state: "running", engine: "slice", pricing: "usage" });
+      let calls: Finalize[] = [];
+      const reports = await withSentry(async () => {
+        calls = await finalizes(async () => {
+          await publishSlice(scanId);
+          await sweepSettle(scanId);
+        });
+      });
+      expect(calls).toEqual([{ customerId: orgId, lockId: scanId, action: "release" }]);
+      expect(reasons(reports)).toEqual([expect.objectContaining({ source: "billing", scan_id: scanId, reason: "no_bill" })]);
+      expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "released", credits: 0 });
+      expect(await scanBill(database, scanId)).toBeUndefined();
+      expect(autumn.get(orgId).credits).toBe(10_000);
+      expect(await orgCarry(database, orgId)).toBe(0);
+    });
+  });
+
+  it("a waived bill: its hold is released whether the scan completes or fails, and it stays waived, settled", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      for (const ending of ["published", "failed"] as const) {
+        autumn.get(orgId).credits = 10_000;
+        await resetCarry();
+        await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 3_000 });
+        const scanId = await newScan();
+        await throughWriteUp(scanId, { state: "running", engine: "slice", pricing: "usage" });
+        await database.insert(schema.scanUsage).values({ scanId, kind: "model", stage: "verify", costUsd: "0", costSource: "provider", step: "verify", status: "unpriced" });
+        expect(await bill(scanId)).toEqual({ state: "billed", status: "waived", credits: 0 });
+        const waived = (await scanBill(database, scanId))!;
+        expect(waived.settledAt).toBeNull();
+
+        const calls = await finalizes(() => (ending === "published" ? publishSlice(scanId) : failScan(scanId, "test over")));
+        expect(calls).toEqual([{ customerId: orgId, lockId: scanId, action: "release" }]);
+        expect(await scanBill(database, scanId)).toEqual({ ...waived, settledAt: expect.any(Date) });
+        expect(await scanById(database, scanId)).toMatchObject(ending === "published" ? { status: "completed", billing: "charged", credits: 0 } : { status: "failed", billing: "released", credits: 0 });
+        expect(autumn.get(orgId).credits).toBe(10_000);
+        expect(await orgCarry(database, orgId)).toBe(3_000);
+      }
+      await resetCarry();
+    });
+  });
+
+  it("a scan that fails after its bill was written voids it and gives the carry back exactly, once, however often the fail runs", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      const { scanId, bill: open } = await billedScan(3_000);
+      expect(await orgCarry(database, orgId)).toBe(open.carryOutMicroUsd);
+      await failScan(scanId, "test over");
+      const voided = (await scanBill(database, scanId))!;
+      expect(voided).toEqual({ ...open, status: "voided", reason: "scan_failed" });
+      expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+      expect(autumn.get(orgId).credits).toBe(10_000);
+      expect(await orgCarry(database, orgId)).toBe(3_000);
+
+      // The fail step run again, after a later bill moved the carry: nothing more is given back.
+      await database.$client`update usage_carry set carry_micro_usd = 5000 where org_id = ${orgId}`;
+      await failScan(scanId, "test over");
+      expect(await scanBill(database, scanId)).toEqual(voided);
+      expect(await orgCarry(database, orgId)).toBe(5_000);
+      await resetCarry();
+    });
+  });
+
+  it("a release Autumn refuses in the fail step leaves the bill open until the sweep releases it, then voids it once", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      const { scanId, bill: open } = await billedScan(3_000);
+      autumn.failNext.add("finalize");
+      await failScan(scanId, "The scan stopped responding.");
+      expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "reserved" });
+      expect(await scanBill(database, scanId)).toEqual(open);
+      expect(await orgCarry(database, orgId)).toBe(open.carryOutMicroUsd);
+
+      expect(await finalizes(() => sweepSettle(scanId))).toEqual([{ customerId: orgId, lockId: scanId, action: "release" }]);
+      expect(await scanById(database, scanId)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
+      expect(await scanBill(database, scanId)).toEqual({ ...open, status: "voided", reason: "scan_failed" });
+      expect(autumn.get(orgId).credits).toBe(10_000);
+      expect(await orgCarry(database, orgId)).toBe(3_000);
+
+      expect(await finalizes(() => sweepSettle(scanId))).toEqual([]);
+      expect(await orgCarry(database, orgId)).toBe(3_000);
+      await resetCarry();
+    });
+  });
+
+  it("a scan failed after its charge went through stays charged: its bill is not voided and the carry stays", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      const { scanId, bill: open } = await billedScan(3_000);
+      await publishSlice(scanId);
+      const charged = (await scanBill(database, scanId))!;
+      expect(charged.status).toBe("charged");
+      const carry = await orgCarry(database, orgId);
+      expect(await finalizes(() => failScan(scanId, "test over"))).toEqual([]);
+      expect(await scanBill(database, scanId)).toEqual(charged);
+      expect(await scanById(database, scanId)).toMatchObject({ billing: "charged", credits: open.credits });
+      expect(autumn.get(orgId).credits).toBe(10_000 - open.credits);
+      expect(await orgCarry(database, orgId)).toBe(carry);
+      await resetCarry();
+    });
+  });
+
+  it("a bill in another credit than the setting's is not finalized and is reported; it is charged once the setting matches", async () => {
+    let scanId = "";
+    let open: Awaited<ReturnType<typeof billedScan>>["bill"] | undefined;
+    await withSettings(USAGE_ENV, async () => {
+      ({ scanId, bill: open } = await billedScan());
+    });
+    // Usage billing off and credits of a dollar: the scan's pricing still says usage, its bill is in cents.
+    await withSettings({}, async () => {
+      let calls: Finalize[] = [];
+      const reports = await withSentry(async () => {
+        calls = await finalizes(async () => {
+          await publishSlice(scanId);
+          await sweepSettle(scanId);
+        });
+      });
+      expect(calls).toEqual([]);
+      expect(reasons(reports)).toContainEqual(expect.objectContaining({ source: "billing", scan_id: scanId, reason: "credit_unit" }));
+      expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "reserved" });
+      expect(await scanBill(database, scanId)).toEqual(open);
+      expect(autumn.get(orgId).locks.get(scanId)).toBe(150);
+    });
+    await withSettings(USAGE_ENV, async () => {
+      await sweepSettle(scanId);
+      expect(await scanById(database, scanId)).toMatchObject({ billing: "charged", credits: open!.credits });
+      expect(autumn.get(orgId).credits).toBe(10_000 - open!.credits);
+      await resetCarry();
+    });
+  });
+
+  it("a hold older than its lifetime is reported and noted on the bill before it is confirmed", async () => {
+    await withSettings(USAGE_ENV, async () => {
+      const { scanId, bill: open } = await billedScan();
+      await database.$client`update scans set created_at = now() - interval '7 hours' where id = ${scanId}`;
+      const reports = await withSentry(() => publishSlice(scanId));
+      expect(reasons(reports)).toEqual([expect.objectContaining({ source: "billing", scan_id: scanId, reason: "hold_expired" })]);
+      expect(await scanBill(database, scanId)).toEqual({ ...open, status: "charged", reason: "hold_expired", settledAt: expect.any(Date) });
+      expect(await scanById(database, scanId)).toMatchObject({ billing: "charged", credits: open.credits });
+      await resetCarry();
+    });
+  });
+
+  it("a shadow bill is never settled, voided or charged, and the carry is untouched", async () => {
+    await withSettings(SHADOW_ENV, async () => {
+      autumn.get(orgId).credits = 1_000;
+      await resetCarry();
+      await database.insert(schema.usageCarry).values({ orgId, carryMicroUsd: 7_000 });
+      const published = await newScan();
+      await runBilled(published, { state: "running", engine: "slice", pricing: "shadow" });
+      expect(await scanBill(database, published)).toMatchObject({ status: "shadow", reason: null, settledAt: null });
+
+      const failed = await newScan();
+      await throughWriteUp(failed, { state: "running", engine: "slice", pricing: "shadow" });
+      await bill(failed);
+      const stored = await scanBill(database, failed);
+      await failScan(failed, "test over");
+      expect(await scanBill(database, failed)).toEqual(stored);
+      expect(await scanById(database, failed)).toMatchObject({ status: "failed", billing: "released" });
+      expect(autumn.get(orgId).credits).toBe(995);
+      expect(await orgCarry(database, orgId)).toBe(7_000);
+      await resetCarry();
     });
   });
 });

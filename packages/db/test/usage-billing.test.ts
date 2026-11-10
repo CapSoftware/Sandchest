@@ -10,9 +10,12 @@ import {
   createDb,
   insertUsage,
   markBillCharged,
+  markWaivedBillSettled,
+  noteBillReason,
   orgCarry,
   scanBill,
   schema,
+  settleBilledScan,
   upsertInstallation,
   voidScanBill,
   writeScanBill,
@@ -354,6 +357,85 @@ describe("voidScanBill", () => {
     expect(await orgCarry(database, org.orgId)).toBe(3_000);
     expect((await scanBill(database, charged))?.status).toBe("charged");
     expect((await scanBill(database, waived))?.reason).toBe("ledger_untrusted");
+  });
+});
+
+describe("settleBilledScan", () => {
+  const reserve = (scanId: string) => database.$client`update scans set billing = 'reserved', credits_reserved = 100, credits = 7 where id = ${scanId}`;
+  const scanRow = async (scanId: string) => (await database.query.scans.findFirst({ where: (scans, { eq }) => eq(scans.id, scanId) }))!;
+
+  it("charged: the scan row and an open bill move together, once; the carry stays", async () => {
+    const org = await newOrg();
+    const scanId = await newScan(org);
+    const { bill } = await billed(scanId, 123_456, { reservedCredits: 100 });
+    await reserve(scanId);
+    const carry = await orgCarry(database, org.orgId);
+    expect(await settleBilledScan(database, scanId, "charged", bill.credits)).toBe(true);
+    expect(await scanRow(scanId)).toMatchObject({ billing: "charged", credits: bill.credits });
+    const charged = (await scanBill(database, scanId))!;
+    expect(charged).toEqual({ ...bill, status: "charged", settledAt: expect.any(Date) });
+    expect(await settleBilledScan(database, scanId, "charged", bill.credits)).toBe(false);
+    expect(await settleBilledScan(database, scanId, "released")).toBe(false);
+    expect(await scanBill(database, scanId)).toEqual(charged);
+    expect(await scanRow(scanId)).toMatchObject({ billing: "charged", credits: bill.credits });
+    expect(await orgCarry(database, org.orgId)).toBe(carry);
+  });
+
+  it("released: an open bill is voided and its carry given back, once", async () => {
+    const org = await newOrg();
+    await database.insert(schema.usageCarry).values({ orgId: org.orgId, carryMicroUsd: 4_000 });
+    const scanId = await newScan(org);
+    const { bill } = await billed(scanId, 23_456);
+    await reserve(scanId);
+    expect(await orgCarry(database, org.orgId)).toBe(bill.carryOutMicroUsd);
+    expect(await settleBilledScan(database, scanId, "released")).toBe(true);
+    expect(await scanRow(scanId)).toMatchObject({ billing: "released", credits: 0 });
+    expect(await scanBill(database, scanId)).toEqual({ ...bill, status: "voided", reason: "scan_failed" });
+    expect(await orgCarry(database, org.orgId)).toBe(4_000);
+    // Run again after the carry moved on: nothing is given back twice.
+    await database.$client`update usage_carry set carry_micro_usd = 9 where org_id = ${org.orgId}`;
+    expect(await settleBilledScan(database, scanId, "released")).toBe(false);
+    expect(await orgCarry(database, org.orgId)).toBe(9);
+  });
+
+  it("nothing moves, the bill included, for a scan no longer reserved", async () => {
+    const org = await newOrg();
+    const scanId = await newScan(org);
+    const { bill } = await billed(scanId, 23_456);
+    await database.$client`update scans set billing = 'charged' where id = ${scanId}`;
+    const carry = await orgCarry(database, org.orgId);
+    expect(await settleBilledScan(database, scanId, "released")).toBe(false);
+    expect(await scanBill(database, scanId)).toEqual(bill);
+    expect(await orgCarry(database, org.orgId)).toBe(carry);
+  });
+
+  it("a waived bill stays waived and is settled either way; a shadow bill is never touched", async () => {
+    const org = await newOrg();
+    for (const outcome of ["charged", "released"] as const) {
+      const scanId = await newScan(org);
+      const { bill } = await writeScanBill(database, scanId, (carry) => ({ ...draft(5_000, carry), status: "waived", reason: "unpriced", credits: 0, carryOutMicroUsd: carry }));
+      await reserve(scanId);
+      expect(await settleBilledScan(database, scanId, outcome)).toBe(true);
+      expect(await scanBill(database, scanId)).toEqual({ ...bill, settledAt: expect.any(Date) });
+      expect(await markWaivedBillSettled(database, scanId)).toBe(false);
+    }
+    const shadowed = await newScan(org);
+    const { bill: shadow } = await billed(shadowed, 5_000, { status: "shadow" });
+    await reserve(shadowed);
+    expect(await settleBilledScan(database, shadowed, "released")).toBe(true);
+    expect(await scanBill(database, shadowed)).toEqual(shadow);
+    expect(await markWaivedBillSettled(database, shadowed)).toBe(false);
+    expect(await noteBillReason(database, shadowed, "hold_expired")).toBe(false);
+    expect(await scanBill(database, shadowed)).toEqual(shadow);
+  });
+
+  it("noteBillReason notes an open bill once and leaves the rest of it as it is", async () => {
+    const org = await newOrg();
+    const scanId = await newScan(org);
+    const { bill } = await billed(scanId, 23_456);
+    expect(await noteBillReason(database, scanId, "hold_expired")).toBe(true);
+    expect(await noteBillReason(database, scanId, "hold_expired")).toBe(false);
+    expect(await scanBill(database, scanId)).toEqual({ ...bill, reason: "hold_expired" });
   });
 });
 

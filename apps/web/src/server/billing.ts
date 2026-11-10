@@ -33,10 +33,13 @@ import {
 } from "@sandchest/billing";
 import {
   markScanReserved,
+  noteBillReason,
   orgBillingRow,
   queuePendingRecons,
   saveOrgBilling,
+  scanBill,
   setOrgCredits,
+  settleBilledScan,
   settleScan as settleScanRow,
   type OrgBillingInput,
   type OrgBillingRow,
@@ -46,7 +49,7 @@ import {
 } from "@sandchest/db";
 import { chargeMicroUsd, creditsCovering } from "@sandchest/billing/usage";
 import { after } from "next/server";
-import { config, creditMicroUsd } from "./config";
+import { config, creditMicroUsd, creditUnit } from "./config";
 import { db } from "./db";
 import { describeError } from "./log";
 import { noticeCredits } from "./notices";
@@ -369,9 +372,15 @@ async function hasCredits(org: BillingOrg): Promise<boolean> {
 /**
  * Charges a completed scan (at most what it reserved) or releases a scan that
  * did not complete. Safe to repeat: only a scan still holding credits is
- * settled, and Autumn finalizes a lock once.
+ * settled, and Autumn finalizes a lock once. A scan billed from its usage is
+ * settled from its stored bill instead (`settleUsageScan`).
  */
-export async function settleScan(scan: { id: string; orgId: string; billing: string | null; creditsReserved: number | null }, outcome: "charge" | "release", credits = 0): Promise<void> {
+export async function settleScan(
+  scan: { id: string; orgId: string; billing: string | null; creditsReserved: number | null; pricing: ScanPricing | null; createdAt: Date },
+  outcome: "charge" | "release",
+  credits = 0,
+): Promise<void> {
+  if (scan.pricing?.mode === "usage") return settleUsageScan(scan, outcome);
   if (scan.billing !== "reserved") return;
   const reserved = scan.creditsReserved ?? 0;
   const charged = outcome === "charge" ? Math.min(Math.max(credits, 0), reserved) : 0;
@@ -380,6 +389,56 @@ export async function settleScan(scan: { id: string; orgId: string; billing: str
     await client.finalize({ customerId: scan.orgId, lockId: scan.id, action: outcome === "charge" ? "confirm" : "release", ...(outcome === "charge" && charged < reserved ? { credits: charged } : {}) });
   }
   await settleScanRow(db(), scan.id, outcome === "charge" ? "charged" : "released", charged);
+}
+
+/** What `settleUsageScan` leaves for a person to look at, reported with the scan's id and one of these, never amounts. */
+type UnsettledReason = "no_bill" | "bill_state" | "credit_unit" | "over_hold" | "hold_expired";
+
+/**
+ * Settles a scan billed from its usage, from its stored bill alone. Safe to repeat, as `settleScan`.
+ *
+ * - Charge, open bill: the bill's credits are confirmed (none: the hold is released), then the scan row and the
+ *   bill become charged together. A bill in another credit than the setting's, or over the hold, is not
+ *   finalized: it is reported and left for a person. A hold past its lifetime is reported and noted on the bill
+ *   first, since Autumn takes an expired lock as one already finalized.
+ * - Charge, waived bill or none: nothing is charged and the hold is released; a missing bill is reported. The scan
+ *   stays completed.
+ * - Release: the hold is released, then the scan row is released and an open bill voided (its carry given back)
+ *   together. A charged scan is not reserved, so its bill is never voided.
+ *
+ * A failure at Autumn leaves the scan reserved and its bill as it was, for the sweep. The carry moves only with
+ * the scan row, so a retry never moves it again.
+ */
+async function settleUsageScan(scan: { id: string; orgId: string; billing: string | null; creditsReserved: number | null; createdAt: Date }, outcome: "charge" | "release"): Promise<void> {
+  if (scan.billing !== "reserved") return;
+  const reserved = scan.creditsReserved ?? 0;
+  const client = autumn();
+  const bill = await scanBill(db(), scan.id);
+  // Settled already but the scan still reserved, or a shadow bill: neither should happen, and neither is touched.
+  if (bill && bill.status !== "open" && bill.status !== "waived") return reportUnsettled(scan.id, "bill_state");
+  if (outcome === "charge" && bill?.status === "open") {
+    if (bill.creditMicroUsd !== creditMicroUsd(creditUnit())) return reportUnsettled(scan.id, "credit_unit");
+    if (bill.credits > reserved) return reportUnsettled(scan.id, "over_hold");
+    // Reported, then noted, so a retry after the note reports nothing more. The scan was made before its hold, so this errs on reporting.
+    if (bill.credits > 0 && bill.reason === null && Date.now() - scan.createdAt.getTime() > RESERVATION_MS) {
+      await reportUnsettled(scan.id, "hold_expired");
+      await noteBillReason(db(), scan.id, "hold_expired");
+    }
+    if (client && reserved > 0) {
+      await client.finalize({ customerId: scan.orgId, lockId: scan.id, action: bill.credits > 0 ? "confirm" : "release", ...(bill.credits > 0 && bill.credits < reserved ? { credits: bill.credits } : {}) });
+    }
+    await settleBilledScan(db(), scan.id, "charged", bill.credits);
+    return;
+  }
+  if (client && reserved > 0) await client.finalize({ customerId: scan.orgId, lockId: scan.id, action: "release" });
+  // A completed scan whose bill was waived is charged nothing; one with no bill is released, and reported once.
+  const settled = await settleBilledScan(db(), scan.id, outcome === "charge" && bill ? "charged" : "released");
+  if (settled && outcome === "charge" && !bill) await reportUnsettled(scan.id, "no_bill");
+}
+
+async function reportUnsettled(scanId: string, reason: UnsettledReason): Promise<void> {
+  console.error(`Usage scan ${scanId} not settled as billed: ${reason}`);
+  await captureException(Object.assign(new Error("A usage scan was not settled as billed"), { name: "UsageUnsettled" }), { source: "billing", tags: { scan_id: scanId, reason }, handled: true });
 }
 
 function logFailure(what: string) {
