@@ -81,7 +81,20 @@ describe("private files", () => {
     for (const name of ["../escape", "a/b", ".hidden", "env-123"]) {
       await expect(workspace.writePrivateFiles([{ name, content: "x" }])).rejects.toThrow("Bad private file name");
       await expect(workspace.readPrivateFile(name)).rejects.toThrow("Bad private file name");
+      await expect(workspace.readPrivateBytes(name)).rejects.toThrow("Bad private file name");
     }
+  });
+
+  test("read back as bytes from the private directory", async () => {
+    const boat = fakeBoat();
+    const workspace = await BoatWorkspace.attach(ID, boat.options);
+    expect(workspace.privateFilesDir).toBe("/home/user/.sandchest");
+    const bytes = Buffer.from([0, 1, 0xfe, 0xff, 0x41]);
+    boat.files.set(`${workspace.privateFilesDir}/bulk-0`, bytes.toString("base64"));
+    expect(await workspace.readPrivateBytes("bulk-0")).toEqual(bytes);
+    expect(boat.calls.at(-1)!.query.get("encoding")).toBe("base64");
+    expect(boat.calls.at(-1)!.query.get("path")).toBe("/home/user/.sandchest/bulk-0");
+    expect(await workspace.readPrivateBytes("missing")).toBeUndefined();
   });
 
   test("a failed directory create is tried again on the next write", async () => {

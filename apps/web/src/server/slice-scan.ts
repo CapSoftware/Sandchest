@@ -33,7 +33,7 @@ import {
 import { LlmQuotaError } from "@sandchest/engine/llm";
 import { adoptKnownFingerprints, DEFAULT_LIMITS, ScanRefusedError, slice, UnpricedCallError, type Finding, type ScanEvent, type UsageSink } from "@sandchest/engine/scan";
 import type { IndexerBinary, IndexerHandle } from "@sandchest/workspace";
-import { agentSandboxSetupScript } from "@sandchest/workspace/boat";
+import { agentSandboxSetupScript, bulkReadFiles } from "@sandchest/workspace/boat";
 import { config } from "./config";
 import { captureFromScan } from "./cves";
 import { gatewayEndpoint, mintGatewayToken, STALE_CALL_SECONDS } from "./gateway";
@@ -593,14 +593,29 @@ async function sessionEndedAt(sandbox: SliceSandbox, startedAt: number): Promise
   return new Date();
 }
 
+/**
+ * The checkout's files for the hunt. Listing them also reads, in bulk, every file the selection step can
+ * read: those `isServerFile` could accept by path, the ones whose head it inspects included. Any other
+ * file (a sibling read for deviance, say) is read on its own when asked for, as is everything when the
+ * bulk read fails.
+ */
 function checkoutFiles(sandbox: SliceSandbox): { list: () => Promise<string[]>; read: (file: string) => Promise<string | undefined> } {
   const cache = new Map<string, Promise<string | undefined>>();
+  let listed: Promise<string[]> | undefined;
   return {
-    list: async () => {
-      const result = await sandbox.exec(["git", "ls-files", "-z"], { timeoutMs: 120_000 });
-      if (result.exitCode !== 0) throw new Error("Could not list the checkout's files");
-      return result.stdout.split("\0").filter(Boolean);
-    },
+    list: () =>
+      (listed ??= (async () => {
+        const result = await sandbox.exec(["git", "ls-files", "-z"], { timeoutMs: 120_000 });
+        if (result.exitCode !== 0) throw new Error("Could not list the checkout's files");
+        const files = result.stdout.split("\0").filter(Boolean);
+        try {
+          const read = await bulkReadFiles(sandbox, files.filter((file) => slice.isServerFile(file, "use server")));
+          for (const [file, text] of read.files) cache.set(file, Promise.resolve(text));
+        } catch (error) {
+          console.error(`Bulk read of the checkout failed, reading files one by one: ${describeError(error)}`);
+        }
+        return files;
+      })()),
     read: (file) => {
       let text = cache.get(file);
       if (!text) cache.set(file, (text = sandbox.readFile(file).catch(() => undefined)));

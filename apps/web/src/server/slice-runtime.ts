@@ -5,7 +5,7 @@
 import { createIndexerClient, type IndexerClient } from "@sandchest/engine/indexer";
 import { slice } from "@sandchest/engine/scan";
 import type { IndexerHandle, Workspace } from "@sandchest/workspace";
-import { BoatApiError, BoatWorkspace, type BoatUsage } from "@sandchest/workspace/boat";
+import { BoatApiError, BoatWorkspace, type BoatUsage, type BulkReadSandbox } from "@sandchest/workspace/boat";
 import { config } from "./config";
 
 /** A sandbox as the slice engine uses it. `BoatWorkspace` is one. */
@@ -17,7 +17,7 @@ export type SliceSandbox = Workspace &
     extendTtl(ttlSeconds: number): Promise<void>;
     writePrivateFiles(files: Array<{ name: string; content: string }>): Promise<void>;
     readPrivateFile(name: string): Promise<string | undefined>;
-  };
+  } & BulkReadSandbox;
 
 /** The scan's sandbox no longer exists (deleted, or stopped by its time-to-live). */
 export class SandboxGone extends Error {

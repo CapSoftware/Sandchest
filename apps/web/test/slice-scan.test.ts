@@ -164,6 +164,7 @@ const fakeLlm: LlmClient = {
     model.requests.push(request);
     const name = request.responseFormat?.json_schema.name;
     if (name === "duplicate_groups") return reply(JSON.stringify({ groups: [] }));
+    if (name === "severity_facts") return reply(JSON.stringify({ gain: "read_others_data", victimMustAct: false, unusualSetup: false }));
     if (name === "finding") {
       const id = request.messages.map((m) => String(m.content ?? "")).join("\n").match(/# Candidate (\S+):/)?.[1] ?? "?";
       return reply(JSON.stringify({ title: `Missing ownership check (${id})`, ...WRITE_UP }));
@@ -195,20 +196,43 @@ const host = {
   outcome: { refute: "finish", variants: "finish" } as Record<slice.AgentSessionKind, "finish" | "fail" | "throw">,
   /** Verify: sinks ruled real. Variants: one sibling of the first confirmed finding. */
   realSinks: [`${PATH}:3`],
+  /** The bulk read's pack command fails. */
+  packFails: false,
   nextId: 1,
   nextProcess: 100,
   reset() {
     this.outcome = { refute: "finish", variants: "finish" };
     this.realSinks = [`${PATH}:3`];
     this.started = [];
+    this.packFails = false;
   },
 };
+
+/** The bulk read's pack as the sandbox writes it: the wanted files of `REPO`, cut into parts. */
+function pack(files: string[], partBytes: number): { parts: Buffer[]; summary: string } {
+  const record = (kind: number, index: number, body = Buffer.alloc(0)) => {
+    const h = Buffer.alloc(9);
+    h[0] = kind;
+    h.writeUInt32BE(index, 1);
+    h.writeUInt32BE(body.length, 5);
+    return Buffer.concat([h, body]);
+  };
+  const records = files.map((file, i) => (REPO[file] === undefined ? record(0, i) : record(1, i, Buffer.from(REPO[file]!))));
+  const stream = Buffer.concat([Buffer.from("SCB1"), ...records, record(2, files.length)]);
+  const parts: Buffer[] = [];
+  for (let at = 0; at < stream.length; at += partBytes) parts.push(stream.subarray(at, at + partBytes));
+  return { parts, summary: JSON.stringify({ parts: parts.length, records: files.length, bytes: stream.length }) };
+}
 
 class FakeSandbox implements SliceSandbox {
   readonly root = "/home/user/repo";
   readonly agentDir = "/home/user/agent";
+  readonly privateFilesDir = "/home/user/.sandchest";
   readonly private = new Map<string, string>();
+  readonly privateBytes = new Map<string, Buffer>();
   readonly execs: string[][] = [];
+  /** Files read one call at a time. */
+  readonly singleReads: string[] = [];
   destroyed = false;
   gone = false;
   indexerStarts = 0;
@@ -231,11 +255,20 @@ class FakeSandbox implements SliceSandbox {
     if (cmd.join(" ") === "git rev-parse HEAD") return ok("0123456789abcdef0123456789abcdef01234567\n");
     if (cmd.join(" ") === "git ls-files -z") return ok(Object.keys(REPO).join("\0"));
     if (cmd[0] === "stat") return this.markerAt === undefined ? { ...ok(""), exitCode: 1 } : ok(`${Math.floor(this.markerAt / 1000)}\n`);
+    if (cmd[0] === "node" && cmd[3] === "--") {
+      if (host.packFails) return { ...ok(""), exitCode: 1 };
+      // `node -e <packer> -- <list> <part prefix> ...`, both in the private directory; parts of 16 bytes here.
+      const [list, prefix] = cmd.slice(4, 6).map((arg) => arg.slice(this.privateFilesDir.length + 1));
+      const packed = pack(JSON.parse(this.private.get(list!)!) as string[], 16);
+      packed.parts.forEach((part, n) => this.privateBytes.set(`${prefix}${n}`, part));
+      return ok(packed.summary);
+    }
     return ok("");
   }
   async startDetached(): Promise<void> {}
   async readFile(path: string): Promise<string> {
     this.check();
+    this.singleReads.push(path);
     const text = REPO[path];
     if (text === undefined) throw new Error(`File not found: ${path}`);
     return text;
@@ -265,6 +298,10 @@ class FakeSandbox implements SliceSandbox {
   async readPrivateFile(name: string): Promise<string | undefined> {
     this.check();
     return this.private.get(name);
+  }
+  async readPrivateBytes(name: string): Promise<Buffer | undefined> {
+    this.check();
+    return this.privateBytes.get(name);
   }
   async extendTtl(ttlSeconds: number): Promise<void> {
     this.check();
@@ -483,6 +520,10 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     expect(sandbox.indexerStarts).toBe(2);
     expect(sandbox.execs.some((cmd) => cmd.at(-1) === STOP_INDEXER)).toBe(true);
     expect(sandbox.ttl).toEqual([5400, 5400, 5400]);
+    // The server file came in the bulk read, asked for by name in a private list file; nothing was read one by one.
+    expect(sandbox.privateBytes.size).toBeGreaterThan(1);
+    expect([...sandbox.private.entries()].find(([name]) => name.startsWith("bulk-"))![1]).toBe(JSON.stringify([PATH]));
+    expect(sandbox.singleReads).toEqual([]);
 
     const metrics = (await database.query.scanMetrics.findFirst({ where: (m, { eq }) => eq(m.scanId, scanId) }))!;
     expect(metrics).toMatchObject({ requests: rows.filter((r) => r.kind === "model").length, candidates: 2, survivors: 2, computeCostUsd: "0.250000" });
@@ -509,6 +550,18 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     expect(new Set(feed.map((e) => e.type))).toEqual(new Set(["stage:setup", "stage:index", "stage:hunt", "stage:verify", "stage:done", "progress", "finding"]));
     expect(feed.filter((e) => e.type === "finding").map((e) => e.message.startsWith("Found: Missing ownership check"))).toEqual([true, true]);
     for (const event of feed) expect(event.message).not.toContain("req.params");
+  });
+
+  it("a bulk read that fails leaves the hunt to read files one by one, with the same result", async () => {
+    host.packFails = true;
+    const scanId = await newScan();
+    expect(await runSlice(scanId)).toBeUndefined();
+    const scan = (await scanById(database, scanId))!;
+    expect(scan.status).toBe("completed");
+    expect((scan.stats as { slice: Record<string, unknown> }).slice).toMatchObject({ selected: 2, findings: 2 });
+    const sandbox = await sandboxOf(scanId);
+    expect(sandbox.privateBytes.size).toBe(0);
+    expect(sandbox.singleReads).toEqual([PATH]);
   });
 
   it("with no candidates, completes with no findings and still records the sandbox", async () => {

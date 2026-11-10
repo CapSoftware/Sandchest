@@ -15,6 +15,7 @@ import { BASE_ENV, cloneCommand, DEFAULT_CLONE_TIMEOUT_MS, resolveInside } from 
 
 export { agentSandboxSetupScript, type AgentSandboxSetup } from "./boat-setup";
 export { AGENT_RELAY_ENV, AGENT_RELAY_MAX_BODY, agentRelayCommand, agentRelayScript, type AgentRelaySettings } from "./agent-relay";
+export { BULK_READ_LIMITS, bulkReadFiles, type BulkReadResult, type BulkReadSandbox } from "./bulk-read";
 
 export const BOAT_API_URL = "https://boat.dev/api/v1";
 
@@ -700,6 +701,23 @@ export class BoatWorkspace implements Workspace {
       if (isNotFound(error)) return undefined;
       throw fileError(error, name);
     }
+  }
+
+  /** Reads a file in the private directory as bytes, up to 5 MiB; undefined when there is none. */
+  async readPrivateBytes(name: string): Promise<Buffer | undefined> {
+    this.assertUsable();
+    if (!AGENT_FILE.test(name) || name.startsWith("env-")) throw new WorkspaceError(`Bad private file name: ${name}`);
+    try {
+      return Buffer.from((await this.client.readFile(this.id, `${PRIVATE_DIR}/${name}`, "base64")).content, "base64");
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw fileError(error, name);
+    }
+  }
+
+  /** The directory `writePrivateFiles` writes to, for a command that reads or writes files there. */
+  get privateFilesDir(): string {
+    return PRIVATE_DIR;
   }
 
   /** Moves the auto-stop deadline to now + `ttlSeconds`. */

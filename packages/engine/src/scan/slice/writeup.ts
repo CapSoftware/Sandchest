@@ -13,7 +13,7 @@ import type { IndexerClient } from "../../indexer/client";
 import type { LlmClient } from "../../llm";
 import { consolidateFindings, type MergedFinding } from "../consolidate";
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent } from "../context";
-import { isFatal } from "../errors";
+import { isFatal, untilDeadline } from "../errors";
 import { fixPrompt } from "../fix-prompt";
 import { CandidateRegistry, checkEvidence, fingerprint, normalizePath, type GatedCandidate } from "../gate";
 import { Limiter, stageClients, UsageMeter, type Pricing, type UsageSink } from "../metrics";
@@ -23,10 +23,11 @@ import { structure } from "../structure";
 import { createWrap, type Wrap } from "../tools";
 import { AGENT_PATHS, correctionText, type ConfirmedEntry, type FindingsEntry, type Verdict } from "./briefs";
 import { normKind, type Candidate } from "./candidates";
+import { rateFinding, SLICE_RATE } from "./rating";
 
 /**
- * This engine does not rate severity or confidence. Every finding starts at these, and `structure` may rate the
- * severity again from the code it reads.
+ * This engine does not rate confidence. Every finding starts at these; severity is then derived from the
+ * finding's rating (`rating.ts`), and `structure` may rate it again from the code it reads.
  */
 export const SLICE_SEVERITY: Severity = "medium";
 export const SLICE_CONFIDENCE: Confidence = "medium";
@@ -68,6 +69,8 @@ export interface WriteUpCounts {
   variantsNotReal: number;
   /** Variant rulings that name no confirmed finding. */
   variantsUnknown: number;
+  /** Findings whose rating call failed, written up at `SLICE_SEVERITY`. */
+  unrated: number;
   /** Findings written up, before merging. */
   written: number;
   dropped: number;
@@ -140,7 +143,7 @@ type Built = { item: Item } | { drop: DropReason };
 /** Turns the agent's verdicts into findings through the existing gate, write-up and merge stages. */
 export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpResult> {
   options.signal?.throwIfAborted();
-  const counts: WriteUpCounts = { real: 0, false: 0, unsure: 0, unknown: 0, variants: 0, variantsNotReal: 0, variantsUnknown: 0, written: 0, dropped: 0, merged: 0 };
+  const counts: WriteUpCounts = { real: 0, false: 0, unsure: 0, unknown: 0, variants: 0, variantsNotReal: 0, variantsUnknown: 0, unrated: 0, written: 0, dropped: 0, merged: 0 };
   const tag = `repo-data-${randomBytes(6).toString("hex")}`;
   const wrap = createWrap(tag);
   const root = options.checkoutRoot;
@@ -243,11 +246,23 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
       const b = built[i]!.built;
       if (!g || !("item" in b)) return undefined;
       try {
+        let rated = { gated: g, review: b.item.review };
+        try {
+          const { severity } = await limiter.run(
+            () => rateFinding(clientFor(SLICE_RATE.stage), { candidate: g.candidate, notes: b.item.review.verdict.reasoning, tag, signal: untilDeadline(signal, options.deadline) }),
+            "urgent",
+          );
+          rated = { gated: { ...g, candidate: { ...g.candidate, severity } }, review: { ...b.item.review, verdict: { ...b.item.review.verdict, severity } } };
+        } catch (error) {
+          if (isFatal(error, signal)) throw error;
+          // Written up at the constant instead.
+          counts.unrated++;
+        }
         // `structure` falls back to the candidate as written when the model fails, and says so in its one
         // warning. A slice candidate has no proof of concept of its own, so that fallback is dropped instead.
         let fellBack = false;
         const own: ScanContext = { ...ctx, emit: (event) => (event.type === "warning" ? (fellBack = true) : emit(event)) };
-        const finding = unwrapFinding(await structure(own, g, b.item.review), tag);
+        const finding = unwrapFinding(await structure(own, rated.gated, rated.review), tag);
         if (fellBack) {
           drops[i] = "write_up_failed";
           return undefined;
