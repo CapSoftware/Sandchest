@@ -200,8 +200,13 @@ export interface Finding {
    * outcomes (fixed, dismissed) can be attributed to the signal that raised them.
    */
   sources?: string[];
-  /** Other reports of this same issue folded into it (see `consolidate.ts`), with where they pointed. */
-  alsoReportedAs?: Array<{ title: string; category: Category; at: string; entry: string }>;
+  /**
+   * Other reports folded into this finding, with where they pointed (`file:line` of the sink and the entry).
+   * Two kinds. A repeat report of the same broken code, merged by `consolidate.ts`: one change fixes it and the
+   * finding. And, marked `variant`, another place the same flaw was confirmed (see `slice/writeup.ts`): a copy
+   * of the mistake that needs the fix too. Only the second kind is another place the finding affects.
+   */
+  alsoReportedAs?: Array<{ title: string; category: Category; at: string; entry: string; variant?: boolean }>;
 }
 
 /** A finding from an earlier scan of the same repository, with the team's verdict on it. */

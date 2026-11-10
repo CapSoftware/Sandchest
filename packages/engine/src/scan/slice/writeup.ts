@@ -4,6 +4,10 @@
  * same `structure` stage and merged by the same `consolidateFindings`, so the findings it returns have the shape
  * every reader of a scan already expects.
  *
+ * A confirmed finding and the variants found of it are one finding: the same flaw, at every place it was
+ * confirmed. The variants are written up like any other, then folded into their finding, which lists where each
+ * one lands (`alsoReportedAs`, marked `variant`) and names them in its fix prompt.
+ *
  * Verdict and hunt text was written by agents that read an untrusted repository. It only ever reaches a model
  * inside the scan's untrusted-data delimiters, and the delimiters are taken out again before a finding is
  * returned.
@@ -11,7 +15,7 @@
 import { randomBytes } from "node:crypto";
 import type { IndexerClient } from "../../indexer/client";
 import type { LlmClient } from "../../llm";
-import { consolidateFindings, type MergedFinding } from "../consolidate";
+import { consolidateFindings, mergeInto, type MergedFinding } from "../consolidate";
 import { DEFAULT_LIMITS, type ScanContext, type ScanEvent } from "../context";
 import { isFatal, untilDeadline } from "../errors";
 import { fixPrompt } from "../fix-prompt";
@@ -52,7 +56,7 @@ export interface WriteUpOptions {
   onUsage?: UsageSink;
   pricing?: Pricing;
   requireCost?: boolean;
-  /** `finding` once per written-up finding, plus the warnings and progress `structure` and merging emit. */
+  /** `finding` once per finding (a variant that folds into its finding emits none), plus the warnings and progress `structure` and merging emit. */
   onEvent?: (event: ScanEvent) => void;
 }
 
@@ -71,20 +75,25 @@ export interface WriteUpCounts {
   variantsUnknown: number;
   /** Findings whose rating call failed, written up at `SLICE_SEVERITY`. */
   unrated: number;
-  /** Findings written up, before merging. */
+  /** Write-ups that succeeded, variants included, before any is folded or merged: the findings returned, plus `folded`, plus `merged`. */
   written: number;
   dropped: number;
+  /** Written-up variants folded into the finding they repeat: the other places it lists. */
+  folded: number;
   /** Findings folded into another by consolidation. */
   merged: number;
 }
 
+/** Why a variant is not a finding of its own, as its `MergedFinding` record says it. */
+export const VARIANT_REASON = "Same flaw at another place, found by variant analysis.";
+
 export interface WriteUpResult {
-  /** Hunt rank order, each finding's variants after it. */
+  /** Hunt rank order. A finding's variants are folded into it and listed in its `alsoReportedAs`. */
   findings: Finding[];
   counts: WriteUpCounts;
   /** Candidates that came to nothing, with a short machine reason. */
   dropped: Array<{ id: string; reason: DropReason }>;
-  /** What consolidation folded in, kept for auditing as a scan report keeps it. */
+  /** The variants folded into their findings, then what consolidation folded in, kept for auditing as a scan report keeps it. */
   merged: MergedFinding[];
 }
 
@@ -188,7 +197,7 @@ type Built = { item: Item } | { drop: DropReason };
 /** Turns the agent's verdicts into findings through the existing gate, write-up and merge stages. */
 export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpResult> {
   options.signal?.throwIfAborted();
-  const counts: WriteUpCounts = { real: 0, false: 0, unsure: 0, unknown: 0, variants: 0, variantsNotReal: 0, variantsUnknown: 0, unrated: 0, written: 0, dropped: 0, merged: 0 };
+  const counts: WriteUpCounts = { real: 0, false: 0, unsure: 0, unknown: 0, variants: 0, variantsNotReal: 0, variantsUnknown: 0, unrated: 0, written: 0, dropped: 0, folded: 0, merged: 0 };
   const tag = `repo-data-${randomBytes(6).toString("hex")}`;
   const wrap = createWrap(tag);
   const root = options.checkoutRoot;
@@ -213,15 +222,16 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
   }
 
   const enclosing = enclosingFunctions(options.indexer, options.signal);
-  const built: Array<{ id: string; built: Built }> = [];
+  // `group` is where the confirmed finding sits in this list: its own index, and that of each of its variants.
+  const built: Array<{ id: string; built: Built; group: number }> = [];
   for (const [i, entry] of options.findings.entries()) {
     const v = ruled.get(entry.id);
     const slice = options.candidates[i];
     if (v?.verdict !== "real" || !slice) continue;
-    const parent = await fromVerdict(entry, slice, v, wrap, enclosing, root);
-    built.push({ id: entry.id, built: parent });
+    const group = built.length;
+    built.push({ id: entry.id, built: await fromVerdict(entry, slice, v, wrap, enclosing, root), group });
     for (const variant of variantsOf.get(entry.id) ?? []) {
-      built.push({ id: variant.id, built: await fromVariant(variant, categoryOf(slice.rows[0]!.kind), confirmed.get(entry.id)!, attackerFor(entry, slice), wrap, enclosing, root) });
+      built.push({ id: variant.id, built: await fromVariant(variant, categoryOf(slice.rows[0]!.kind), confirmed.get(entry.id)!, attackerFor(entry, slice), wrap, enclosing, root), group });
     }
   }
 
@@ -313,7 +323,8 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
           drops[i] = "write_up_failed";
           return undefined;
         }
-        if (!stopped()) emit({ type: "finding", finding });
+        // A variant is announced only if it turns out to be its group's finding, once every write-up is in.
+        if (!stopped() && built[i]!.group === i) emit({ type: "finding", finding });
         return finding;
       } catch (error) {
         if (!stopIfFatal(error)) drops[i] = "write_up_failed";
@@ -323,21 +334,42 @@ export async function writeUpVerdicts(options: WriteUpOptions): Promise<WriteUpR
   );
   if (stopped()) throw stopped()!.error;
 
-  let findings = written.filter((f): f is Finding => !!f);
-  counts.written = findings.length;
+  counts.written = written.filter(Boolean).length;
+  // One finding per flaw: each written-up variant is folded into its confirmed finding, or, when that one came
+  // to nothing, into the first of its variants that was written up. No model decides this: the variants session
+  // already ruled each one the same flaw.
+  const groups = new Map<number, Array<{ at: number; finding: Finding }>>();
+  written.forEach((finding, at) => {
+    if (finding) groups.set(built[at]!.group, [...(groups.get(built[at]!.group) ?? []), { at, finding }]);
+  });
+  let findings: Finding[] = [];
   let merged: MergedFinding[] = [];
+  for (const [group, members] of groups) {
+    const kept = members[0]!;
+    const rest = members.slice(1).map((member) => member.finding);
+    if (kept.at !== group) emit({ type: "finding", finding: kept.finding });
+    if (rest.length) {
+      const folded = mergeInto(kept.finding, rest);
+      // Each one is another place that needs the fix, not a second report of the same code: marked, so readers can tell.
+      findings.push({ ...folded, alsoReportedAs: folded.alsoReportedAs!.map((place) => ({ ...place, variant: true })) });
+    } else findings.push(kept.finding);
+    for (const finding of rest) merged.push({ into: kept.finding.fingerprint, finding, reason: VARIANT_REASON });
+  }
+  counts.folded = merged.length;
   // As the old pipeline merges: one issue reported from two angles becomes one finding.
   if (findings.length > 1 && !signal.aborted) {
     const result = await consolidateFindings({ client: clientFor("consolidate"), findings, wrap, signal, deadline: options.deadline, run: (task) => limiter.run(task, "urgent") });
     if (result.usage) meter.add("skeptic", result.usage.usage, result.usage.attempts, result.usage.retries);
     if (result.merged.length) emit({ type: "progress", message: `Merged ${result.merged.length} repeat report${result.merged.length === 1 ? "" : "s"} into the findings they repeat.` });
     findings = result.findings;
-    merged = result.merged;
+    merged = [...merged, ...result.merged];
+    counts.merged = result.merged.length;
   }
   options.signal?.throwIfAborted();
+  // A finding that covers other places names every one of them in its fix prompt. Any other finding keeps the prompt it was written with.
+  findings = findings.map((finding) => (finding.alsoReportedAs?.some((place) => place.variant) ? { ...finding, fixPrompt: fixPrompt(finding) } : finding));
   const dropped = built.flatMap(({ id }, i) => (drops[i] ? [{ id, reason: drops[i] }] : []));
   counts.dropped = dropped.length;
-  counts.merged = merged.length;
   return { findings, counts, dropped, merged };
 }
 

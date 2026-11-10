@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { IndexerClient } from "../src/indexer";
 import { CandidateRegistry, checkEvidence, fingerprint, type GatedCandidate, type Located } from "../src/scan/gate";
-import { fixPrompt } from "../src/scan/fix-prompt";
+import { findingSections, FIX_STEPS, fixPrompt, type PromptFinding } from "../src/scan/fix-prompt";
 import { planAssignments, planCoverage } from "../src/scan/hunt";
 import { Limiter, UsageMeter } from "../src/scan/metrics";
 import { runAgent } from "../src/scan/agent";
@@ -205,6 +205,94 @@ describe("fix prompt", () => {
     expect(fixPrompt({ ...finding, proofOfConcept: "```js\nx\n```" })).toContain("````\n```js\nx\n```\n````");
     expect(prompt).toContain("- User input never changes the query structure");
     expect(prompt).toContain("Write the regression test first");
+  });
+
+  const one: PromptFinding = {
+    title: "SQL injection in login",
+    severity: "critical",
+    cwe: "CWE-89",
+    impact: "Anyone can log in as any user.",
+    mitigations: "",
+    entryPoint: { file: "routes/login.ts", line: 10, description: "POST /login" },
+    attackPath: [{ file: "routes/login.ts", line: 14, note: "concatenated", excerpt: "14| db.query(`x ${email}`)" }],
+    preconditions: "Unauthenticated.",
+    proofOfConcept: "email=' OR 1=1--",
+    fixGuidance: "Use a bound parameter.",
+    guarantees: ["User input never changes the query structure"],
+    mustNotBreak: ["Login with valid credentials"],
+    regressionTest: "Log in with the payload and assert 401.",
+  };
+  /** The prompt of `one`, character for character, as it was before a finding could cover other places. */
+  const ONE_PLACE = [
+    "Fix this critical-severity security vulnerability: SQL injection in login (CWE-89).",
+    "",
+    "## The vulnerability",
+    "Anyone can log in as any user.",
+    "",
+    "It is reached through POST /login (`routes/login.ts:10`) and lands at `routes/login.ts:14`.",
+    "Who can exploit it: Unauthenticated.",
+    "",
+    "## Attack path",
+    `1. \`routes/login.ts:14\` ${String.fromCharCode(0x2014)} concatenated`,
+    "",
+    "```",
+    "14| db.query(`x ${email}`)",
+    "```",
+    "",
+    "## Proof of concept",
+    "```",
+    "email=' OR 1=1--",
+    "```",
+    "",
+    "## How to fix it",
+    "Use a bound parameter.",
+    "",
+    "## The fix must guarantee",
+    "- User input never changes the query structure",
+    "",
+    "## It must not break",
+    "- Login with valid credentials",
+    "",
+    "## Regression test",
+    "Log in with the payload and assert 401.",
+    "",
+    FIX_STEPS,
+  ];
+
+  test("a finding that covers no other place gets exactly the prompt it always did", () => {
+    expect(fixPrompt(one)).toBe(ONE_PLACE.join("\n"));
+    expect(fixPrompt({ ...one, alsoReportedAs: [] })).toBe(ONE_PLACE.join("\n"));
+    expect(fixPrompt({ ...one, alsoReportedAs: null })).toBe(ONE_PLACE.join("\n"));
+    expect(findingSections({ ...one, alsoReportedAs: [] }, { heading: "###" })).toBe(findingSections(one, { heading: "###" }));
+    // A repeat report of the same code, merged into it, is not another place: this fix closes it.
+    const repeat = { title: "Login query built from the email", category: "sql_injection" as const, at: "db/users.ts:40", entry: "routes/login.ts:10" };
+    expect(fixPrompt({ ...one, alsoReportedAs: [repeat] })).toBe(ONE_PLACE.join("\n"));
+    expect(fixPrompt({ ...one, alsoReportedAs: [{ ...repeat, variant: false }] })).toBe(ONE_PLACE.join("\n"));
+  });
+
+  test("a finding that covers other places names each one after the fix, and says the fix is needed there too", () => {
+    const places = [
+      { title: "SQL injection in signup", category: "sql_injection" as const, at: "routes/signup.ts:22", entry: "routes/signup.ts:18", variant: true },
+      { title: "SQL injection in password reset", category: "sql_injection" as const, at: "routes/reset.ts:9", entry: "routes/reset.ts:4", variant: true },
+    ];
+    const section = [
+      "## Also affects",
+      "The same flaw is at 2 other places. The fix is needed at each one, and the regression test should cover every one:",
+      "- `routes/signup.ts:22`: SQL injection in signup",
+      "- `routes/reset.ts:9`: SQL injection in password reset",
+      "",
+    ];
+    // The section sits between the fix and its guarantees; every other line is as it was.
+    const at = ONE_PLACE.indexOf("## The fix must guarantee");
+    expect(fixPrompt({ ...one, alsoReportedAs: places })).toBe([...ONE_PLACE.slice(0, at), ...section, ...ONE_PLACE.slice(at)].join("\n"));
+    expect(fixPrompt({ ...one, alsoReportedAs: places.slice(0, 1) })).toContain("The same flaw is at 1 other place. The fix is needed");
+    // Beside a repeat report of the same code, only the other places are named and counted.
+    const mixed = fixPrompt({ ...one, alsoReportedAs: [{ title: "Login query built from the email", at: "db/users.ts:40" }, ...places] });
+    expect(mixed).toBe(fixPrompt({ ...one, alsoReportedAs: places }));
+    // A report links each place like any other cited location; one stored without a line is left as written.
+    const linked = findingSections({ ...one, alsoReportedAs: [places[0]!, { title: "Somewhere in reset", at: "routes/reset.ts", variant: true }] }, { heading: "###", link: (file, line) => `https://example.com/${file}#L${line}` });
+    expect(linked).toContain("### Also affects\n");
+    expect(linked).toContain("- [`routes/signup.ts:22`](https://example.com/routes/signup.ts#L22): SQL injection in signup\n- `routes/reset.ts`: Somewhere in reset\n");
   });
 });
 

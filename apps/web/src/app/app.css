@@ -1028,6 +1028,56 @@ html:not([data-js]) .no-js-submit {
   text-wrap: pretty;
 }
 
+/* The other places a finding covers: each location as the path cites one, with what was found there. */
+
+.block-count {
+  margin-left: 0.35rem;
+  color: var(--color-dust);
+  font-variant-numeric: tabular-nums;
+}
+
+.places-note {
+  max-width: 68ch;
+  margin-bottom: 1rem;
+  color: var(--color-muted);
+  text-wrap: pretty;
+}
+
+.places {
+  display: grid;
+  border-top: 1px solid var(--color-seam);
+}
+
+.place {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--color-seam);
+}
+
+.place a,
+.place-at {
+  justify-self: start;
+  color: var(--color-gold);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.place-at {
+  color: var(--color-muted);
+}
+
+.place a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.place-title {
+  color: var(--color-sand);
+  text-wrap: pretty;
+}
+
 .code {
   margin-top: 0.75rem;
   overflow-x: auto;

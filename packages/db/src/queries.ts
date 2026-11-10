@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, gt, inArray, isNull, like, lt, ne, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries, type PrReviewMode } from "./schema";
+import { findingEvents, findings, orgs, repoMemory, repos, scanEvents, scanMetrics, scans, webhookDeliveries, type FindingPlace, type PrReviewMode } from "./schema";
 
 export type Org = typeof orgs.$inferSelect;
 export type Repo = typeof repos.$inferSelect;
@@ -479,6 +479,8 @@ export async function upsertFindings(database: Db, repoId: string, scan: Pick<Sc
           mitigations: sql`excluded.mitigations`,
           trust: sql`excluded.trust`,
           validation: sql`excluded.validation`,
+          // The places the latest scan says it covers, replacing what was stored. File and line only, no code, so a dismissed finding keeps them.
+          alsoReported: sql`excluded.also_reported`,
           // Every signal that has ever raised this finding, so outcomes credit all of them.
           sources: sql`array(select distinct unnest(${findings.sources} || excluded.sources) order by 1)`,
         },
@@ -532,14 +534,47 @@ export async function hasOpenFindings(database: Db, repoId: string): Promise<boo
 /**
  * Every finding stored for a repository, in the shape the engine needs to
  * recognise one again: open ones first, then the rest, most recently seen first.
+ * A finding carries the reports folded into it, so a later report of any one
+ * of them (another place it affects, or the same code seen from another angle)
+ * is recognised as this finding.
  */
-export async function knownFindings(database: Db, repoId: string): Promise<Array<{ fingerprint: string; category: string; entryPoint: { file: string; line: number }; attackPath: Array<{ file: string; line: number }> }>> {
+export async function knownFindings(
+  database: Db,
+  repoId: string,
+): Promise<Array<{ fingerprint: string; category: string; entryPoint: { file: string; line: number }; attackPath: Array<{ file: string; line: number }>; alsoReportedAs?: FindingPlace[] }>> {
   const rows = await database
-    .select({ fingerprint: findings.fingerprint, category: findings.category, entryPoint: findings.entryPoint, attackPath: findings.attackPath })
+    .select({ fingerprint: findings.fingerprint, category: findings.category, entryPoint: findings.entryPoint, attackPath: findings.attackPath, alsoReported: findings.alsoReported })
     .from(findings)
     .where(eq(findings.repoId, repoId))
     .orderBy(sql`${findings.status} <> 'open'`, desc(findings.lastSeenAt));
-  return rows.map((row) => ({ ...row, entryPoint: row.entryPoint as { file: string; line: number }, attackPath: row.attackPath as Array<{ file: string; line: number }> }));
+  return rows.map(({ alsoReported, ...row }) => {
+    const reports = foldedReports(alsoReported);
+    return { ...row, entryPoint: row.entryPoint as { file: string; line: number }, attackPath: row.attackPath as Array<{ file: string; line: number }>, ...(reports.length > 0 && { alsoReportedAs: reports }) };
+  });
+}
+
+/**
+ * Every report folded into a stored finding, as a list: empty for a finding with none, for one stored before
+ * the column existed, and for anything in the column that is not a list of reports.
+ */
+export function foldedReports(stored: unknown): FindingPlace[] {
+  if (!Array.isArray(stored)) return [];
+  return stored.filter((report): report is FindingPlace => !!report && typeof report === "object" && ["title", "category", "at", "entry"].every((key) => typeof (report as Record<string, unknown>)[key] === "string"));
+}
+
+/**
+ * The other places a stored finding affects: the same flaw, confirmed there too, each needing the fix. A
+ * repeat report of the finding's own code is not one. Empty for most findings.
+ */
+export function findingPlaces(stored: unknown): FindingPlace[] {
+  return foldedReports(stored).filter((report) => report.variant === true);
+}
+
+/** A stored place's `file:line` as a location; undefined when it is not one. */
+export function placeLocation(at: string): { file: string; line: number } | undefined {
+  const colon = at.lastIndexOf(":");
+  const line = Number(at.slice(colon + 1));
+  return colon > 0 && Number.isInteger(line) && line > 0 ? { file: at.slice(0, colon), line } : undefined;
 }
 
 export async function openFindings(database: Db, repoId: string): Promise<FindingRow[]> {

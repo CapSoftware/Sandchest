@@ -32,6 +32,7 @@ function row(id: string, change: Partial<ExportedFinding> = {}): ExportedFinding
     guarantees: ["Only the owner's org can read an invoice"],
     mustNotBreak: ["Owners still read their own invoices"],
     regressionTest: "Request another org's invoice and expect 404.",
+    alsoReported: null,
     prNumber: null,
     firstSeenAt: new Date("2026-11-01T10:00:00Z"),
     lastSeenAt: new Date("2026-11-02T10:00:00Z"),
@@ -111,6 +112,43 @@ describe("markdown report", () => {
     expect(report).toContain("[`db/invoices.ts:12`](https://github.com/acme/api/blob/main/db/invoices.ts#L12)");
     expect(report).toContain("### Proof of concept");
     expect(report).not.toContain("db.find(id)");
+  });
+});
+
+describe("a finding that covers other places", () => {
+  const places = [
+    { title: "Any signed-in user can cancel another org's invoice", category: "broken_access_control", at: "routes/invoices.ts:31", entry: "routes/invoices.ts:30", variant: true },
+    // A repeat report of the finding's own code: not another place.
+    { title: "Invoice lookup has no owner check", category: "broken_access_control", at: "db/invoices.ts:11", entry: "routes/invoices.ts:4" },
+    { title: "Any signed-in user can read another org's receipts", category: "broken_access_control", at: "routes/receipts.ts:9", entry: "routes/receipts.ts:8", variant: true },
+  ];
+
+  test("names every place in the prompt, linked in the report and listed in the data", () => {
+    const rows = [row("a", { alsoReported: places }), row("b")];
+    const prompt = agentPrompt(rows);
+    expect(prompt).toContain("## Also affects\nThe same flaw is at 2 other places. The fix is needed at each one, and the regression test should cover every one:\n- `routes/invoices.ts:31`: Any signed-in user can cancel another org's invoice\n- `routes/receipts.ts:9`: Any signed-in user can read another org's receipts\n");
+    // Only the finding that has them.
+    expect(prompt.match(/## Also affects/g)).toHaveLength(1);
+    const report = exportFindings(rows, "markdown", context);
+    expect(report).toContain("### Also affects\n");
+    expect(report).toContain("- [`routes/receipts.ts:9`](https://github.com/acme/api/blob/main/routes/receipts.ts#L9): Any signed-in user can read another org's receipts");
+    const data = JSON.parse(exportFindings(rows, "json", context));
+    expect(data.findings.map((f: { alsoAffects: unknown }) => f.alsoAffects)).toEqual([
+      [
+        { title: "Any signed-in user can cancel another org's invoice", at: "routes/invoices.ts:31" },
+        { title: "Any signed-in user can read another org's receipts", at: "routes/receipts.ts:9" },
+      ],
+      [],
+    ]);
+  });
+
+  test("a finding with none reads as it did, whether the column is null or an empty list", () => {
+    for (const format of ["prompt", "markdown"] as const) {
+      const none = exportFindings([row("a")], format, context);
+      expect(none).not.toContain("Also affects");
+      expect(exportFindings([row("a", { alsoReported: [] })], format, context)).toBe(none);
+      expect(exportFindings([row("a", { alsoReported: [places[1]!] })], format, context)).toBe(none);
+    }
   });
 });
 

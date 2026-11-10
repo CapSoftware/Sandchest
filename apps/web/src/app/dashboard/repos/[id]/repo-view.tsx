@@ -4,6 +4,7 @@ import { DEEP_SCAN_TIERS } from "@sandchest/billing";
 import { Dig } from "@/components/app/dig";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
+import { MorePlaces } from "@/components/app/more-places";
 import { MODE_NOTE } from "@/components/app/pull-rows";
 import { RepoSettingsForm } from "@/components/app/repo-settings";
 import { ScanRows } from "@/components/app/scan-rows";
@@ -131,6 +132,7 @@ export function RepoView({
                       </code>
                     )}
                     {finding.prNumber !== null && `${finding.sink ? " " : ""}in PR #${finding.prNumber}`}
+                    <MorePlaces count={finding.morePlaces} />
                   </span>
                 </HoverLink>
               </li>

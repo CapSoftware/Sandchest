@@ -2,6 +2,8 @@ import type { Finding } from "./schema";
 
 export type PromptFinding = Pick<Finding, "severity" | "title" | "cwe" | "impact" | "mitigations" | "entryPoint" | "preconditions" | "proofOfConcept" | "fixGuidance" | "guarantees" | "mustNotBreak" | "regressionTest"> & {
   attackPath: Array<Omit<Finding["attackPath"][number], "excerpt"> & { excerpt?: string }>;
+  /** `Finding.alsoReportedAs`: the ones marked `variant` are the other places the finding affects, each with its title and the `file:line` it lands at. */
+  alsoReportedAs?: Array<{ title: string; at: string; variant?: boolean }> | null;
 };
 
 /** How an agent should work a fix: prove the attack, close it, prove it closed. */
@@ -31,6 +33,8 @@ export interface SectionOptions {
  * Everything about a finding a reader or an agent needs to fix it, as
  * Markdown sections: the vulnerability, the attack path, the proof of
  * concept, the fix, its guarantees, what must not break and the regression test.
+ * A finding that affects other places names them after the fix; one that
+ * affects none reads exactly as it did before a finding could.
  */
 export function findingSections(finding: PromptFinding, options: SectionOptions = {}): string {
   const h = options.heading ?? "##";
@@ -41,6 +45,11 @@ export function findingSections(finding: PromptFinding, options: SectionOptions 
     .map((step, i) => `${i + 1}. ${at(step.file, step.line)} — ${step.note}${step.excerpt ? `\n\n${fence(step.excerpt)}` : ""}`)
     .join("\n\n");
   const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n");
+  // Only the copies of the flaw elsewhere: a repeat report of this same code is closed by this fix.
+  const places = (finding.alsoReportedAs ?? []).filter((report) => report.variant);
+  const also = places.length
+    ? `\n${h} Also affects\nThe same flaw is at ${places.length} other ${places.length === 1 ? "place" : "places"}. The fix is needed at each one, and the regression test should cover every one:\n${list(places.map((p) => `${place(p.at, at)}: ${p.title}`))}\n`
+    : "";
 
   return `${h} The vulnerability
 ${finding.impact}
@@ -56,12 +65,19 @@ ${fence(finding.proofOfConcept)}
 
 ${h} How to fix it
 ${finding.fixGuidance}
-
+${also}
 ${h} The fix must guarantee
 ${list(finding.guarantees)}
 ${finding.mustNotBreak.length ? `\n${h} It must not break\n${list(finding.mustNotBreak)}\n` : ""}
 ${h} Regression test
 ${finding.regressionTest}`;
+}
+
+/** A stored `file:line` as a cited location; left as written when it is not one. */
+function place(text: string, at: (file: string, line: number) => string): string {
+  const colon = text.lastIndexOf(":");
+  const line = Number(text.slice(colon + 1));
+  return colon > 0 && Number.isInteger(line) && line > 0 ? at(text.slice(0, colon), line) : `\`${text}\``;
 }
 
 function fence(text: string): string {

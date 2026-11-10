@@ -51,6 +51,13 @@ function fakeGithub(user: { id: number; login: string }, installations: Array<{ 
   }) as typeof fetch;
 }
 
+/** What was folded into finding f2: the same flaw at two more handlers, and one repeat report of f2's own code. */
+const OTHER_PLACES = [
+  { title: "Finding f2 again, in the export", category: "broken_access_control", at: "b.ts:14", entry: "b.ts:12", variant: true },
+  { title: "Finding f2, seen from the model", category: "broken_access_control", at: "model.ts:40", entry: "a.ts:1" },
+  { title: "Finding f2 again, in the archive", category: "broken_access_control", at: "src/c.ts:7", entry: "src/c.ts:7", variant: true },
+];
+
 function finding(fingerprint: string, severity: FindingInput["severity"], confidence: FindingInput["confidence"] = "high"): FindingInput {
   return {
     fingerprint,
@@ -106,7 +113,7 @@ beforeAll(async () => {
   const [alice] = await database.insert(schema.users).values({ name: "Alice", email: "alice@example.com", login: "alice" }).returning();
   const [bob] = await database.insert(schema.users).values({ name: "Bob", email: "bob@example.com", login: "bob" }).returning();
   const [scan] = await database.insert(schema.scans).values({ repoId: acme.repos[0]!.id, orgId: acme.org.id, kind: "deep", status: "completed", trigger: "manual", headSha: "abc" }).returning();
-  const { ids: findingIds } = await upsertFindings(database, acme.repos[0]!.id, scan!, [finding("f1", "critical"), finding("f2", "high"), finding("f3", "medium"), finding("f4", "low", "low")]);
+  const { ids: findingIds } = await upsertFindings(database, acme.repos[0]!.id, scan!, [finding("f1", "critical"), { ...finding("f2", "high"), fixPrompt: "", alsoReported: OTHER_PLACES }, finding("f3", "medium"), finding("f4", "low", "low")]);
   const { ids: secretIds } = await upsertFindings(database, acme.repos[1]!.id, scan!, [finding("s1", "critical")]);
   ids = { acme: acme.org.id, api: acme.repos[0]!.id, secret: acme.repos[1]!.id, alice: alice!.id, bob: bob!.id, findings: findingIds, secretFinding: secretIds[0]! };
 
@@ -338,6 +345,23 @@ describe.skipIf(!available)("REST API", () => {
     expect(detail).toMatchObject({ title: "Finding f1", status: "open", fix_prompt: "Fix the unscoped lookup at a.ts:2", attack_path: [{ file: "a.ts", line: 2, note: "sink", excerpt: "1| a\n2| b\n3| c" }] });
     expect((await api(aliceKey, "GET", `/findings/${id}/fix-prompt`)).body.prompt).toBe("Fix the unscoped lookup at a.ts:2");
 
+    // A finding that affects other places lists each one; one that affects none has an empty list.
+    // A repeat report of its own code is not another place.
+    expect(detail.also_at).toEqual([]);
+    const wide = (await api(aliceKey, "GET", `/findings/${ids.findings[1]!}`)).body;
+    expect(wide.also_at).toEqual([
+      { file: "b.ts", line: 14, title: "Finding f2 again, in the export" },
+      { file: "src/c.ts", line: 7, title: "Finding f2 again, in the archive" },
+    ]);
+    // Its own location is where it always was, and the prompt names every place.
+    expect(wide.attack_path).toEqual([{ file: "a.ts", line: 2, note: "sink", excerpt: "1| a\n2| b\n3| c" }]);
+    expect(wide.fix_prompt).toContain("## Also affects\nThe same flaw is at 2 other places.");
+    expect(wide.fix_prompt).toContain("- `b.ts:14`: Finding f2 again, in the export\n- `src/c.ts:7`: Finding f2 again, in the archive");
+    expect(wide.fix_prompt).not.toContain("model.ts");
+    expect((await api(aliceKey, "GET", `/findings/${ids.findings[1]!}/fix-prompt`)).body.prompt).toBe(wide.fix_prompt);
+    expect(Object.fromEntries(some.findings.map((f: { title: string; more_places: number }) => [f.title, f.more_places]))).toEqual({ "Finding f1": 0, "Finding f2": 2 });
+    expect(some.findings[1].location).toEqual({ file: "a.ts", line: 2 });
+
     expect((await api(aliceKey, "PATCH", `/findings/${id}`, { status: "dismissed" })).body.error.code).toBe("reason_required");
     expect((await api(aliceKey, "PATCH", `/findings/${id}`, { status: "dismissed", reason: "accepted_risk" })).body).toMatchObject({ status: "dismissed", dismiss_reason: "accepted_risk" });
     // Resolving deletes the excerpts and the prompt.
@@ -351,6 +375,7 @@ describe.skipIf(!available)("REST API", () => {
     const many = (await api(aliceKey, "GET", "/findings/prompt?repo=acme/api&severity=critical,high")).body;
     expect(many).toMatchObject({ format: "prompt", findings: 2, repos: ["acme/api"] });
     expect(many.text).toContain("Finding f2");
+    expect(many.text).toContain("- `src/c.ts:7`: Finding f2 again, in the archive");
     expect((await api(aliceKey, "GET", "/findings/prompt?status=fixed")).body.error.code).toBe("not_open");
     expect(JSON.parse((await api(aliceKey, "GET", "/findings/prompt?format=json&repo=acme/api")).body.text)).toBeTruthy();
 

@@ -1,4 +1,4 @@
-import type { findingForUser } from "@sandchest/db";
+import { findingPlaces, placeLocation, type findingForUser } from "@sandchest/db";
 import { fixPrompt } from "@sandchest/engine/fix-prompt";
 import type { PathStep } from "@sandchest/engine/scan";
 import { CopyPrompt } from "@/components/app/copy-prompt";
@@ -30,7 +30,9 @@ export function FindingView({ row }: { row: FindingRow }) {
   const path = finding.attackPath as Step[];
   const entry = finding.entryPoint as Entry;
   const open = finding.status === "open";
-  const prompt = open ? finding.fixPrompt || fixPrompt({ ...finding, entryPoint: entry, attackPath: path }) : undefined;
+  // The other places the same flaw was confirmed, each needing the fix too. None on most findings.
+  const places = findingPlaces(finding.alsoReported);
+  const prompt = open ? finding.fixPrompt || fixPrompt({ ...finding, entryPoint: entry, attackPath: path, alsoReportedAs: places }) : undefined;
   const change = changeFinding.bind(null, finding.id);
   // "Found" repeats on every scan that sees it again; the first and the decisions are what matter.
   const timeline = history.filter((event, i) => event.type !== "seen" || history.slice(i + 1).every((later) => later.type !== "seen"));
@@ -96,6 +98,34 @@ export function FindingView({ row }: { row: FindingRow }) {
             </ol>
             {!open && <p className="resolved-note" style={{ marginTop: "1.5rem" }}>Code excerpts were deleted when this finding was resolved.</p>}
           </section>
+
+          {places.length > 0 && (
+            <section className="block" aria-labelledby="places-title">
+              <h2 id="places-title" className="block-title">
+                Also affects <span className="block-count">{places.length}</span>
+              </h2>
+              <p className="places-note">
+                The same flaw is at {places.length === 1 ? "one other place" : `${places.length} other places`}. The fix is needed at each one.
+              </p>
+              <ul className="places">
+                {places.map((place, i) => {
+                  const at = placeLocation(place.at);
+                  return (
+                    <li key={`${place.at}:${i}`} className="place">
+                      {at ? (
+                        <a href={githubLine(repo.fullName, repo.defaultBranch, at.file, at.line)} target="_blank" rel="noreferrer">
+                          {place.at}
+                        </a>
+                      ) : (
+                        <span className="place-at">{place.at}</span>
+                      )}
+                      <span className="place-title">{place.title}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
 
           <section className="block" aria-labelledby="poc-title">
             <h2 id="poc-title" className="block-title">

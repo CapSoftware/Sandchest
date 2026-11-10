@@ -3,6 +3,7 @@ import { AutoSubmitSelect } from "@/components/app/auto-submit";
 import { CopyFindings } from "@/components/app/copy-findings";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
+import { MorePlaces } from "@/components/app/more-places";
 import { When } from "@/components/app/when";
 import { SEVERITIES, SEVERITY_LABEL, type Severity } from "@/lib/format";
 import { isUuid } from "@/lib/uuid";
@@ -136,6 +137,7 @@ export function FindingsView({ current, list, counts, repos }: { current: Findin
                     </>
                   )}
                   {finding.prNumber !== null && ` in PR #${finding.prNumber}`}
+                  <MorePlaces count={finding.morePlaces} />
                 </span>
               </HoverLink>
             </li>

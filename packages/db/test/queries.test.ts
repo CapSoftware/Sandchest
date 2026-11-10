@@ -21,7 +21,15 @@ import {
   noteScanEvent,
   createDb,
   createScan,
+  dashboardFindings,
   earlierPrFindings,
+  findingForUser,
+  findingPlaces,
+  findingsForExport,
+  foldedReports,
+  knownFindings,
+  placeLocation,
+  scanForUser,
   disableRepos,
   eventsSince,
   EventWriter,
@@ -439,6 +447,95 @@ describe("findings", () => {
     await upsertFindings(database, repoId, scan, [{ ...finding("fp-ev"), trust: "corroborated", sources: ["missing_check"], mitigations: "Rate limited." }]);
     const [row] = await database.$client<Array<{ trust: string; sources: string[]; mitigations: string }>>`select trust, sources, mitigations from findings where repo_id = ${repoId} and fingerprint = 'fp-ev'`;
     expect(row).toEqual({ trust: "corroborated", sources: ["hunter", "missing_check"], mitigations: "Rate limited." });
+  });
+
+  it("keeps the other places a finding covers, reads them back everywhere, and replaces them on a rescan", async () => {
+    const { org, repos } = await upsertInstallation(database, 9060, { ...account, githubAccountId: 160 }, [repo(160)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const [user] = await database.insert(schema.users).values({ name: "Places", email: "places@example.com", login: "places" }).returning();
+    await database.insert(schema.permissionCache).values({ userId: user!.id, repoId, permission: "write" });
+    const place = (n: number) => ({ title: `Same flaw in handler ${n}`, category: "sql_injection", at: `src/h${n}.ts:${n}0`, entry: `src/h${n}.ts:${n}`, variant: true });
+
+    // One finding that affects three other places, and one that affects none.
+    const { ids } = await upsertFindings(database, repoId, scan, [{ ...finding("p-many"), alsoReported: [place(1), place(2), place(3)] }, finding("p-one")]);
+    const stored = async () => Object.fromEntries((await database.$client<Array<{ fingerprint: string; also_reported: unknown }>>`select fingerprint, also_reported from findings where repo_id = ${repoId}`).map((r) => [r.fingerprint, r.also_reported]));
+    expect(await stored()).toEqual({ "p-many": [place(1), place(2), place(3)], "p-one": null });
+
+    // What a scan matches against: the places ride along, and a finding without any carries no list.
+    const known = Object.fromEntries((await knownFindings(database, repoId)).map((k) => [k.fingerprint, k]));
+    expect(known["p-many"]).toMatchObject({ fingerprint: "p-many", category: "sql_injection", entryPoint: { file: "a.ts", line: 1 }, attackPath: [{ file: "a.ts", line: 3 }], alsoReportedAs: [place(1), place(2), place(3)] });
+    expect("alsoReportedAs" in known["p-one"]!).toBe(false);
+
+    // The finding page, the list, the scan page, the export and the fix check each read them.
+    expect((await findingForUser(database, user!.id, ids[0]!))!.finding.alsoReported).toEqual([place(1), place(2), place(3)]);
+    expect((await findingForUser(database, user!.id, ids[1]!))!.finding.alsoReported).toBeNull();
+    const list = await dashboardFindings(database, user!.id);
+    expect(Object.fromEntries(list.map((f) => [f.id, f.morePlaces]))).toEqual({ [ids[0]!]: 3, [ids[1]!]: 0 });
+    expect(list.map((f) => f.sink)).toEqual([{ file: "a.ts", line: 3 }, { file: "a.ts", line: 3 }]);
+    await updateScan(database, scan.id, { stats: { findingIds: ids } });
+    const page = (await scanForUser(database, user!.id, scan.id))!;
+    expect(Object.fromEntries(page.findings.map((f) => [f.id, f.morePlaces]))).toEqual({ [ids[0]!]: 3, [ids[1]!]: 0 });
+    const exported = await findingsForExport(database, user!.id, { repoId });
+    expect(Object.fromEntries(exported.map((f) => [f.id, f.alsoReported]))).toEqual({ [ids[0]!]: [place(1), place(2), place(3)], [ids[1]!]: null });
+    expect(Object.fromEntries((await openFindings(database, repoId)).map((f) => [f.fingerprint, f.alsoReported]))).toEqual({ "p-many": [place(1), place(2), place(3)], "p-one": null });
+
+    // A rescan replaces the list with what it found: fewer places, more places, or none.
+    const again = await upsertFindings(database, repoId, scan, [{ ...finding("p-many"), alsoReported: [place(2), place(4)] }, { ...finding("p-one"), alsoReported: [place(5)] }]);
+    expect(again).toEqual({ newIds: [], ids });
+    expect(await stored()).toEqual({ "p-many": [place(2), place(4)], "p-one": [place(5)] });
+    expect(Object.fromEntries((await dashboardFindings(database, user!.id)).map((f) => [f.id, f.morePlaces]))).toEqual({ [ids[0]!]: 2, [ids[1]!]: 1 });
+    await upsertFindings(database, repoId, scan, [finding("p-many"), { ...finding("p-one"), alsoReported: null }]);
+    expect(await stored()).toEqual({ "p-many": null, "p-one": null });
+    expect((await knownFindings(database, repoId)).some((k) => "alsoReportedAs" in k)).toBe(false);
+
+    // The places name files and lines, never code: a finding keeps them when it is fixed, and when it is dismissed and seen again.
+    await upsertFindings(database, repoId, scan, [{ ...finding("p-many"), alsoReported: [place(1)] }, { ...finding("p-one"), alsoReported: [place(5)] }]);
+    await markFixed(database, [ids[0]!], scan.id);
+    await database.$client`update findings set status = 'dismissed', dismiss_reason = 'accepted_risk' where id = ${ids[1]!}`;
+    expect(await stored()).toEqual({ "p-many": [place(1)], "p-one": [place(5)] });
+    await upsertFindings(database, repoId, scan, [{ ...finding("p-one"), alsoReported: [place(5), place(6)] }]);
+    expect((await stored())["p-one"]).toEqual([place(5), place(6)]);
+  });
+
+  it("counts only the other places a finding affects, not repeat reports of its own code, and matches by both", async () => {
+    const { org, repos } = await upsertInstallation(database, 9062, { ...account, githubAccountId: 162 }, [repo(162)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "pr_review", trigger: "webhook", headSha: "x", prNumber: 4 });
+    const [user] = await database.insert(schema.users).values({ name: "Repeats", email: "repeats@example.com", login: "repeats" }).returning();
+    await database.insert(schema.permissionCache).values({ userId: user!.id, repoId, permission: "write" });
+    // As a scan's merge of two reports of one bug records it: no `variant`.
+    const repeat = { title: "The same query, reported at the model", category: "sql_injection", at: "db/model.ts:40", entry: "a.ts:1" };
+    const elsewhere = { title: "Same flaw in another handler", category: "sql_injection", at: "src/other.ts:12", entry: "src/other.ts:9", variant: true };
+    const { ids } = await upsertFindings(database, repoId, scan, [{ ...finding("r-repeat"), alsoReported: [repeat] }, { ...finding("r-mixed"), alsoReported: [repeat, elsewhere, { ...repeat, variant: false }] }]);
+    expect(Object.fromEntries((await dashboardFindings(database, user!.id)).map((f) => [f.id, f.morePlaces]))).toEqual({ [ids[0]!]: 0, [ids[1]!]: 1 });
+    const rows = Object.fromEntries((await openFindings(database, repoId)).map((f) => [f.fingerprint, f.alsoReported]));
+    expect(findingPlaces(rows["r-repeat"])).toEqual([]);
+    expect(findingPlaces(rows["r-mixed"])).toEqual([elsewhere]);
+    expect(foldedReports(rows["r-mixed"])).toHaveLength(3);
+    // Matching a later scan's report uses every one of them.
+    const known = Object.fromEntries((await knownFindings(database, repoId)).map((k) => [k.fingerprint, k.alsoReportedAs]));
+    expect(known).toEqual({ "r-repeat": [repeat], "r-mixed": [repeat, elsewhere, { ...repeat, variant: false }] });
+  });
+
+  it("reads a finding whose places are missing or malformed as covering none", async () => {
+    const { org, repos } = await upsertInstallation(database, 9061, { ...account, githubAccountId: 161 }, [repo(161)]);
+    const repoId = repos[0]!.id;
+    const { scan } = await createScan(database, { repoId, orgId: org.id, kind: "deep", trigger: "manual", headSha: "x" });
+    const [user] = await database.insert(schema.users).values({ name: "Old rows", email: "old-rows@example.com", login: "old-rows" }).returning();
+    await database.insert(schema.permissionCache).values({ userId: user!.id, repoId, permission: "write" });
+    const { ids } = await upsertFindings(database, repoId, scan, [finding("old-null"), finding("old-scalar"), finding("old-object"), finding("old-empty")]);
+    // As rows written before the column existed, and as nothing the code writes: a JSON null, an object, an empty list.
+    await database.$client`update findings set also_reported = 'null'::jsonb where id = ${ids[1]!}`;
+    await database.$client`update findings set also_reported = '{"title":"x"}'::jsonb where id = ${ids[2]!}`;
+    await database.$client`update findings set also_reported = '[]'::jsonb where id = ${ids[3]!}`;
+    expect((await dashboardFindings(database, user!.id)).map((f) => f.morePlaces)).toEqual([0, 0, 0, 0]);
+    expect((await knownFindings(database, repoId)).some((k) => "alsoReportedAs" in k)).toBe(false);
+    for (const id of ids) expect(findingPlaces((await findingForUser(database, user!.id, id))!.finding.alsoReported)).toEqual([]);
+    expect(foldedReports([{ title: "t", category: "c", at: "a.ts:1", entry: "a.ts:1" }, { title: "no location" }, null, "text"])).toEqual([{ title: "t", category: "c", at: "a.ts:1", entry: "a.ts:1" }]);
+    expect(findingPlaces([{ title: "t", category: "c", at: "a.ts:1", entry: "a.ts:1", variant: "yes" }, { title: "no location", variant: true }])).toEqual([]);
+    expect(placeLocation("src/a.ts:12")).toEqual({ file: "src/a.ts", line: 12 });
+    expect([placeLocation("src/a.ts"), placeLocation("src/a.ts:0"), placeLocation("src/a.ts:x"), placeLocation(":3")]).toEqual([undefined, undefined, undefined, undefined]);
   });
 
   it("returns a repo's resolved findings with the team's verdict, and nothing open", async () => {

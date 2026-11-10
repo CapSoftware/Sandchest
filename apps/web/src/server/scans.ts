@@ -12,6 +12,7 @@ import {
   claimNotification,
   claimScanSlot,
   EventWriter,
+  foldedReports,
   knownFindings,
   markDeepScanned,
   markFixed,
@@ -645,10 +646,13 @@ export function toFindingInput(finding: Finding): FindingInput {
     trust: finding.trust ?? null,
     sources: finding.sources ?? [],
     validation: finding.validation ?? null,
+    // The reports folded into it, the other places it affects among them; null when there are none, so a rescan that finds only the one clears the list.
+    alsoReported: finding.alsoReportedAs?.length ? finding.alsoReportedAs : null,
   };
 }
 
-function toEngineFinding(row: FindingRow): Finding & { id: string } {
+export function toEngineFinding(row: FindingRow): Finding & { id: string } {
+  const reports = foldedReports(row.alsoReported);
   return {
     id: row.id,
     fingerprint: row.fingerprint,
@@ -674,6 +678,7 @@ function toEngineFinding(row: FindingRow): Finding & { id: string } {
     trust: row.trust ?? undefined,
     sources: row.sources ?? [],
     validation: (row.validation as Finding["validation"]) ?? undefined,
+    ...(reports.length > 0 && { alsoReportedAs: reports as Finding["alsoReportedAs"] }),
   };
 }
 

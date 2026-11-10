@@ -1,5 +1,5 @@
 /** Findings: what the hacker found, the evidence for it, the fix prompt, and the person's decisions. */
-import { applyFindingAction, dashboardFindings, dashboardOverview, findingForUser, findingsForExport, findingStatusCounts, recordPromptCopied, recordPromptsCopied } from "@sandchest/db";
+import { applyFindingAction, dashboardFindings, dashboardOverview, findingForUser, findingPlaces, findingsForExport, findingStatusCounts, placeLocation, recordPromptCopied, recordPromptsCopied } from "@sandchest/db";
 import { exportFindings } from "@/lib/findings-export";
 import { fixPrompt } from "@sandchest/engine/fix-prompt";
 import type { PathStep } from "@sandchest/engine/scan";
@@ -31,7 +31,15 @@ async function loadFinding(userId: string, id: string) {
 /** The prompt a coding agent fixes the finding from: stored at scan time, rebuilt for findings stored before prompts were. */
 function promptOf(finding: Awaited<ReturnType<typeof loadFinding>>["finding"]): string | null {
   if (finding.status !== "open") return null;
-  return finding.fixPrompt || fixPrompt({ ...finding, entryPoint: finding.entryPoint as Entry, attackPath: finding.attackPath as Step[] });
+  return finding.fixPrompt || fixPrompt({ ...finding, entryPoint: finding.entryPoint as Entry, attackPath: finding.attackPath as Step[], alsoReportedAs: findingPlaces(finding.alsoReported) });
+}
+
+/** The other places a finding covers, as locations: the same flaw, confirmed there too. Empty for most findings. */
+function alsoAt(finding: Awaited<ReturnType<typeof loadFinding>>["finding"]): Array<{ file: string; line: number; title: string }> {
+  return findingPlaces(finding.alsoReported).flatMap((place) => {
+    const at = placeLocation(place.at);
+    return at ? [{ file: at.file, line: at.line, title: place.title }] : [];
+  });
 }
 
 function findingView(row: Awaited<ReturnType<typeof loadFinding>>, appUrl: string) {
@@ -54,6 +62,7 @@ function findingView(row: Awaited<ReturnType<typeof loadFinding>>, appUrl: strin
     preconditions: finding.preconditions,
     entry_point: entry,
     attack_path: path.map((step) => ({ file: step.file, line: step.line, note: step.note, ...(step.excerpt && { excerpt: step.excerpt }) })),
+    also_at: alsoAt(finding),
     proof_of_concept: finding.proofOfConcept,
     fix: {
       guidance: finding.fixGuidance,
@@ -78,7 +87,7 @@ export const findingOps = [
     name: "list_findings",
     title: "List findings",
     description:
-      "Findings across every repository the person can see, most severe first. Defaults to open findings with low-confidence ones hidden, as the dashboard shows them. Each has a location (the vulnerable line); call get_finding for the attack path, proof of concept and fix prompt.",
+      "Findings across every repository the person can see, most severe first. Defaults to open findings with low-confidence ones hidden, as the dashboard shows them. Each has a location (the vulnerable line) and `more_places`, how many other places the same flaw was found; call get_finding for the attack path, proof of concept and fix prompt.",
     method: "GET",
     path: "/findings",
     input: z.object({
@@ -134,7 +143,7 @@ export const findingOps = [
     name: "get_finding",
     title: "Get a finding",
     description:
-      "Everything about one finding: impact, who can exploit it and how (entry point, attack path with code excerpts, proof of concept), how to fix it without breaking anything, and `fix_prompt`, a ready-to-run prompt for a coding agent. Excerpts and the prompt are removed once a finding is fixed or dismissed.",
+      "Everything about one finding: impact, who can exploit it and how (entry point, attack path with code excerpts, proof of concept), how to fix it without breaking anything, and `fix_prompt`, a ready-to-run prompt for a coding agent. `also_at` lists every other place the same flaw was found: the fix is needed at each. Excerpts and the prompt are removed once a finding is fixed or dismissed.",
     method: "GET",
     path: "/findings/{id}",
     input: z.object({ id: Uuid("finding") }),

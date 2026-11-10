@@ -11,6 +11,7 @@ import {
   eventsSince,
   finishUsageCall,
   insertUsage,
+  knownFindings,
   orgCarry,
   scanBill,
   scanById,
@@ -27,7 +28,7 @@ import { migrate } from "@sandchest/db/migrate";
 import type { IndexerClient } from "@sandchest/engine/indexer";
 import type { ChatRequest, ChatResult, LlmClient } from "@sandchest/engine/llm";
 import { prReviewCredits } from "@sandchest/billing";
-import { slice } from "@sandchest/engine/scan";
+import { adoptKnownFingerprints, slice } from "@sandchest/engine/scan";
 import { GitHubError, type CheckConclusion, type CheckOutput, type GitHubApp, type PullFile, type ReviewComment } from "@sandchest/github";
 import type { ExecResult, RepoRef } from "@sandchest/workspace";
 import { usdToMicroUsd } from "@sandchest/billing/usage";
@@ -564,14 +565,26 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
     expect(autumn.get(orgId).credits).toBe(credits - 500);
     const stats = scan.stats as { findingIds: string[]; newFindingIds: string[]; loc: number; slice: Record<string, unknown> };
-    expect(stats.findingIds).toHaveLength(2);
-    expect(stats.newFindingIds).toHaveLength(2);
+    // The confirmed finding and its variant are one finding.
+    expect(stats.findingIds).toHaveLength(1);
+    expect(stats.newFindingIds).toEqual(stats.findingIds);
     expect(stats.loc).toBe(LOC);
     // State between steps is ids and numbers only.
     expect(JSON.stringify(stats.slice)).not.toMatch(/ownership|projects|idor|Missing/);
-    expect(stats.slice).toMatchObject({ selected: 2, loc: LOC, written: true, findings: 2 });
+    expect(stats.slice).toMatchObject({ selected: 2, loc: LOC, written: true, findings: 1 });
     const findings = await database.query.findings.findMany({ where: (f, { inArray }) => inArray(f.id, stats.findingIds) });
-    expect(findings.map((f) => (f.attackPath as Array<{ line: number }>).at(-1)!.line).sort((a, b) => a - b)).toEqual([3, 23]);
+    // It lands where the confirmed finding does, and lists the variant's place, stored with it.
+    expect(findings.map((f) => (f.attackPath as Array<{ line: number }>).at(-1)!.line)).toEqual([3]);
+    const place = { title: "Missing ownership check (V1)", category: "broken_access_control", at: `${PATH}:23`, entry: `${PATH}:23`, variant: true };
+    expect(findings[0]!.alsoReported).toEqual([place]);
+    expect(findings[0]!.fixPrompt).toContain(`## Also affects\nThe same flaw is at 1 other place. The fix is needed at each one, and the regression test should cover every one:\n- \`${PATH}:23\`: Missing ownership check (V1)\n`);
+    expect(await database.query.findings.findMany({ where: (f, { eq }) => eq(f.repoId, scan.repoId) })).toHaveLength(1);
+    // A later scan that reports only the variant's place is recognised as this finding, not stored as a new one.
+    const stored = await knownFindings(database, scan.repoId);
+    expect(stored.map((k) => k.alsoReportedAs)).toEqual([[place]]);
+    const elsewhere = { fingerprint: "another", category: "broken_access_control", entryPoint: { file: PATH, line: 21 }, attackPath: [{ file: PATH, line: 23 }] };
+    expect(adoptKnownFingerprints([elsewhere], stored)[0]!.fingerprint).toBe(findings[0]!.fingerprint);
+    expect(adoptKnownFingerprints([elsewhere], stored.map(({ alsoReportedAs: _, ...k }) => k))[0]!.fingerprint).toBe("another");
     expect((await database.query.repos.findFirst({ where: (r, { eq }) => eq(r.id, scan.repoId) }))!.loc).toBe(LOC);
 
     // Every call in the ledger: the hunt's and the write-up's under their steps, the agent's from the gateway, the sandbox once.
@@ -597,7 +610,7 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     expect(sandbox.singleReads).toEqual([]);
 
     const metrics = (await database.query.scanMetrics.findFirst({ where: (m, { eq }) => eq(m.scanId, scanId) }))!;
-    expect(metrics).toMatchObject({ requests: rows.filter((r) => r.kind === "model").length, candidates: 2, survivors: 2, computeCostUsd: "0.250000" });
+    expect(metrics).toMatchObject({ requests: rows.filter((r) => r.kind === "model").length, candidates: 2, survivors: 1, computeCostUsd: "0.250000" });
 
     // Every stage, started and ended.
     const stages = await stagesOf(scanId);
@@ -619,7 +632,9 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     const known = new Set(TRACKS.deep!.map((s) => s.key));
     for (const event of feed.filter((e) => e.type.startsWith("stage:"))) expect(known.has(stepOf(event.type)!)).toBe(true);
     expect(new Set(feed.map((e) => e.type))).toEqual(new Set(["stage:setup", "stage:index", "stage:hunt", "stage:verify", "stage:done", "progress", "finding"]));
-    expect(feed.filter((e) => e.type === "finding").map((e) => e.message.startsWith("Found: Missing ownership check"))).toEqual([true, true]);
+    // One finding, announced once: the variant is a place it lists, not a finding of its own.
+    expect(feed.filter((e) => e.type === "finding").map((e) => e.message)).toEqual(["Found: Missing ownership check (F1)"]);
+    expect(feed.find((e) => e.type === "stage:done")!.message).toBe("Found 1 finding: 1 high.");
     for (const event of feed) expect(event.message).not.toContain("req.params");
   });
 
@@ -629,7 +644,7 @@ describe.skipIf(!available)("slice engine, step by step", () => {
     expect(await runSlice(scanId)).toBeUndefined();
     const scan = (await scanById(database, scanId))!;
     expect(scan.status).toBe("completed");
-    expect((scan.stats as { slice: Record<string, unknown> }).slice).toMatchObject({ selected: 2, findings: 2 });
+    expect((scan.stats as { slice: Record<string, unknown> }).slice).toMatchObject({ selected: 2, findings: 1 });
     const sandbox = await sandboxOf(scanId);
     expect(sandbox.privateBytes.size).toBe(0);
     expect(sandbox.singleReads).toEqual([PATH]);
@@ -1041,8 +1056,8 @@ describe.skipIf(!available)("fast deep scans", () => {
       const scan = (await scanById(database, scanId))!;
       expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 500, fast: true });
       expect(autumn.get(orgId).credits).toBe(credits - 500);
-      expect((scan.stats as { findingIds: string[] }).findingIds).toHaveLength(2);
-      expect(sliceState(scan)).toMatchObject({ fast: true, written: true, findings: 2 });
+      expect((scan.stats as { findingIds: string[] }).findingIds).toHaveLength(1);
+      expect(sliceState(scan)).toMatchObject({ fast: true, written: true, findings: 1 });
       // Hunt, scoring and write-up all went through the fast client.
       expect(model.requests.length).toBeGreaterThan(0);
       expect(model.fastRequests).toEqual(model.requests);

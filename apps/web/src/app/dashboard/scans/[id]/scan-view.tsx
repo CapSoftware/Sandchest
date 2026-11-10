@@ -2,6 +2,7 @@ import type { DashboardRepo, scanForUser } from "@sandchest/db";
 import { Dig } from "@/components/app/dig";
 import { Heat } from "@/components/app/heat";
 import { HoverLink, Link } from "@/components/app/hover-link";
+import { MorePlaces } from "@/components/app/more-places";
 import { ScanBill } from "@/components/app/scan-bill";
 import { Reveal, ScanClock, ScanFeed, ScanLive, ScanStatus, ScanTrack, type LiveLoop } from "@/components/app/scan-live";
 import { ScanWatch } from "@/components/app/scan-watch";
@@ -177,6 +178,7 @@ export function ScanView({
                             <code>
                               {finding.sink.file}:{finding.sink.line}
                             </code>
+                            <MorePlaces count={finding.morePlaces} />
                           </span>
                         )}
                       </HoverLink>

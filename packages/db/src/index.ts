@@ -1,7 +1,7 @@
 export { createDb, db, type Db, type DbOptions } from "./client";
 export * from "./queries";
 export * as schema from "./schema";
-export type { EventName, EventProps, HackerProfile, OrgSettings } from "./schema";
+export type { EventName, EventProps, FindingPlace, HackerProfile, OrgSettings } from "./schema";
 export { ADVISORY_SEVERITIES, DEPENDENCY_USAGES, type AdvisorySeverity, type DependencyUsage } from "./schema";
 export { DEEP_SCAN_SCHEDULES, EVENT_NAMES, PR_REVIEW_MODES, TEAM_ROLES, type DeepScanSchedule, type PrReviewMode, type TeamRole } from "./schema";
 export * from "./dashboard";

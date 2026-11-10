@@ -392,6 +392,19 @@ export const scanBills = pgTable(
 export const findingStatus = pgEnum("finding_status", ["open", "fixed", "dismissed", "verified"]);
 export const dismissReason = pgEnum("dismiss_reason", ["false_positive", "accepted_risk", "wont_fix"]);
 
+/**
+ * A report folded into a finding, as the engine records it (`alsoReportedAs`): `at` and `entry` are the
+ * `file:line` of where it lands and enters. One marked `variant` is another place the same flaw was confirmed,
+ * which needs the fix too; one that is not is a repeat report of the finding's own code.
+ */
+export interface FindingPlace {
+  title: string;
+  category: string;
+  at: string;
+  entry: string;
+  variant?: boolean;
+}
+
 export const findings = pgTable(
   "findings",
   {
@@ -427,6 +440,11 @@ export const findings = pgTable(
     sources: text("sources").array().notNull().default(sql`'{}'::text[]`),
     /** The validation outcome, if the finding went through it: { status, method, detail }. No code or secrets. */
     validation: jsonb("validation").$type<{ status: string; method: string; detail: string }>(),
+    /**
+     * The reports folded into this finding, each with its title and the `file:line` of where it lands and
+     * enters: the other places it affects among them. No code. Null when there are none, and on findings stored before this was kept.
+     */
+    alsoReported: jsonb("also_reported").$type<FindingPlace[]>(),
     sourceScanId: uuid("source_scan_id").references(() => scans.id, { onDelete: "set null" }),
     sourceKind: scanKind("source_kind").notNull(),
     prNumber: integer("pr_number"),

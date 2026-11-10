@@ -6,7 +6,7 @@
  * right code even when lines have moved. A report pasted into an issue or a
  * chat, or JSON piped into other tools, should not carry source code.
  */
-import type { ExportedFinding } from "@sandchest/db";
+import { findingPlaces, type ExportedFinding } from "@sandchest/db";
 import { findingSections, type PromptFinding } from "@sandchest/engine/fix-prompt";
 import { agentCommand } from "./agent-links";
 import { categoryLabel, DISMISS_REASON_LABEL, githubLine, plural, SEVERITY_LABEL, shortDate, type Severity } from "./format";
@@ -137,6 +137,7 @@ export function jsonExport(rows: ExportedFinding[], context: ExportContext): str
           guarantees: row.guarantees,
           mustNotBreak: row.mustNotBreak,
           regressionTest: row.regressionTest,
+          alsoAffects: findingPlaces(row.alsoReported).map((place) => ({ title: place.title, at: place.at })),
           prNumber: row.prNumber,
           codeMoved: row.stale,
           firstSeenAt: row.firstSeenAt.toISOString(),
@@ -157,7 +158,7 @@ type Entry = { file: string; line: number; description: string };
 function promptFinding(row: ExportedFinding, options: { excerpts?: boolean } = {}): PromptFinding {
   const path = (row.attackPath as Hop[]).map(({ file, line, note, excerpt }) => ({ file, line, note, ...(options.excerpts && excerpt ? { excerpt } : {}) }));
   const entry = row.entryPoint as Entry;
-  return { ...row, severity: row.severity as Severity, entryPoint: { file: entry.file, line: entry.line, description: entry.description }, attackPath: path };
+  return { ...row, severity: row.severity as Severity, entryPoint: { file: entry.file, line: entry.line, description: entry.description }, attackPath: path, alsoReportedAs: findingPlaces(row.alsoReported) };
 }
 
 function sinkOf(row: ExportedFinding): string {

@@ -3,7 +3,9 @@ import { IndexerError, type IndexerClient } from "../src/indexer";
 import { LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient } from "../src/llm";
 import { CandidateSchema, WriteUpSchema, type ScanEvent } from "../src/scan";
 import { UnpricedCallError, type UsageEvent } from "../src/scan/metrics";
-import { attackerOf, categoryOf, categoryOfCwe, confirmedEntries, findingsEntry, parseVerdicts, SLICE_SEVERITY, writeUpVerdicts, type Candidate, type HuntRow, type Rating, type Verdict, type WriteUpOptions } from "../src/scan/slice";
+import { fixPrompt } from "../src/scan/fix-prompt";
+import type { Severity } from "../src/scan/schema";
+import { attackerOf, categoryOf, categoryOfCwe, confirmedEntries, findingsEntry, parseVerdicts, SLICE_SEVERITY, VARIANT_REASON, writeUpVerdicts, type Candidate, type HuntRow, type Rating, type Verdict, type WriteUpOptions } from "../src/scan/slice";
 
 /** An invented service: four handlers, one per weakness the tests confirm. */
 const GAP = ["// ...", "// ...", "// ..."];
@@ -125,6 +127,8 @@ interface FakeOptions {
   throwOnRate?: unknown;
   /** The weakness a candidate id's write-up cites. Default CWE-639. */
   cwe?: (id: string) => string | null;
+  /** The severity a candidate id's write-up gives. Default high. */
+  severity?: (id: string) => Severity;
 }
 
 const READS: Rating = { gain: "read_others_data", victimMustAct: false, unusualSetup: false };
@@ -155,7 +159,7 @@ function fakeClient(options: FakeOptions = {}): LlmClient & { requests: ChatRequ
         return reply(
           JSON.stringify({
             title: `Write-up of ${id}`,
-            severity: "high",
+            severity: options.severity?.(id) ?? "high",
             cwe: options.cwe ? options.cwe(id) : "CWE-639",
             impact: "Reads and changes other workspaces' projects.",
             mitigations: "",
@@ -329,7 +333,10 @@ describe("writeUpVerdicts", () => {
     expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F1", "Write-up of F4"]);
     expect(result.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of F2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:8` }]);
     expect(result.merged).toHaveLength(1);
-    expect(result.counts).toMatchObject({ written: 3, merged: 1 });
+    expect(result.counts).toMatchObject({ written: 3, folded: 0, merged: 1 });
+    // A repeat report of the same code is not another place to fix: the prompt is the one the finding was written with.
+    const alone = await run(fakeClient(), [verdict("F1", "real")]);
+    expect(result.findings[0]!.fixPrompt).toBe(alone.findings[0]!.fixPrompt);
   });
 
   test("a repeat of a better-ranked candidate at the same sink is dropped before it is written up", async () => {
@@ -340,7 +347,7 @@ describe("writeUpVerdicts", () => {
     expect(result.dropped).toEqual([{ id: "F2", reason: "duplicate" }]);
   });
 
-  test("output is in hunt rank order with variants after their parent, whatever finishes first", async () => {
+  test("output is in hunt rank order with each variant folded into its parent, whatever finishes first", async () => {
     const verdicts = [verdict("F4", "real"), verdict("F1", "real"), verdict("F2", "real")];
     const h = hunt();
     const confirmed = confirmedEntries(h.findings, verdicts);
@@ -357,14 +364,167 @@ describe("writeUpVerdicts", () => {
       [1, 2, 3].map(() => writeUpVerdicts({ client: fakeClient({ jitter: true }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } })),
     );
     for (const result of runs) {
-      expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F1", "Write-up of V1", "Write-up of F2", "Write-up of F4"]);
+      expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F1", "Write-up of F2", "Write-up of F4"]);
+      // The one variant written up is a place its parent lists, not a finding. A variant that was dropped stays dropped.
+      expect(result.findings.map((f) => f.alsoReportedAs?.map((place) => place.title))).toEqual([["Write-up of V1"], undefined, undefined]);
+      expect(result.merged.map((m) => m.finding.title)).toEqual(["Write-up of V1"]);
       expect(result.dropped).toEqual([{ id: "V4", reason: "invalid_location" }]);
-      expect(result.counts).toMatchObject({ variants: 2, variantsNotReal: 1, variantsUnknown: 1 });
+      expect(result.counts).toMatchObject({ variants: 2, variantsNotReal: 1, variantsUnknown: 1, written: 4, folded: 1, merged: 0 });
     }
-    const variant = runs[0]!.findings[1]!;
+    const variant = runs[0]!.merged[0]!.finding;
     expect(variant).toMatchObject({ category: "broken_access_control", attacker: "any_user", entryPoint: { file: PATH, line: 29 } });
     expect(variant.attackPath.map((s) => s.line)).toEqual([29]);
     expect(runs.map((r) => r.findings.map((f) => f.fingerprint).join())).toEqual(Array(3).fill(runs[0]!.findings.map((f) => f.fingerprint).join()));
+  });
+
+  /** A real variant ruling of `parent`, at a line of the invented file. */
+  const variantAt = (id: string, parent: string, line: number) => ({ id, variant_of: parent, verdict: "real", attacker: "any signed-in user", location: `${PATH}:${line}`, victim: "other workspaces", reason: `The same missing check at ${PATH}:${line}` });
+  const foundTitles = (events: ScanEvent[]) => events.filter((e): e is Extract<ScanEvent, { type: "finding" }> => e.type === "finding").map((e) => e.finding.title).sort();
+
+  test("a confirmed finding and its variants are one finding that lists every place", async () => {
+    const h = hunt();
+    const verdicts = [verdict("F1", "real"), verdict("F4", "real")];
+    const confirmed = confirmedEntries(h.findings, verdicts);
+    const variants = parseVerdicts(JSON.stringify([variantAt("V1", "F1", 29), variantAt("V2", "F1", 10)]));
+    const events: ScanEvent[] = [];
+    // The second variant is the worst of the three.
+    const client = fakeClient({ severity: (id) => (id === "V2" ? "critical" : id === "V1" ? "low" : "high") });
+    const result = await writeUpVerdicts({ client, indexer: withDefinitions(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed }, onEvent: (e) => events.push(e) });
+    const alone = await run(fakeClient(), verdicts);
+
+    expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F1", "Write-up of F4"]);
+    const f = result.findings[0]!;
+    // Each variant's sink and entry point, in the order the variants session ruled them.
+    expect(f.alsoReportedAs).toEqual([
+      { title: "Write-up of V1", category: "broken_access_control", at: `${PATH}:29`, entry: `${PATH}:28`, variant: true },
+      { title: "Write-up of V2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:8`, variant: true },
+    ]);
+    // The finding is still the confirmed one: its identity, its own path and write-up, at the worst severity of the group.
+    expect(f.fingerprint).toBe(alone.findings[0]!.fingerprint);
+    expect(f.attackPath.map((s) => s.line)).toEqual([1, 3]);
+    expect(f.severity).toBe("critical");
+    expect({ ...f, severity: "high", alsoReportedAs: undefined, fixPrompt: "" }).toEqual({ ...alone.findings[0]!, alsoReportedAs: undefined, fixPrompt: "" });
+    // The variants are kept for auditing, each under the finding it went into.
+    expect(result.merged.map((m) => [m.into, m.finding.title, m.finding.severity, m.reason])).toEqual([
+      [f.fingerprint, "Write-up of V1", "low", VARIANT_REASON],
+      [f.fingerprint, "Write-up of V2", "critical", VARIANT_REASON],
+    ]);
+    expect(result.counts).toMatchObject({ real: 2, variants: 2, written: 4, folded: 2, merged: 0, dropped: 0 });
+    expect(result.dropped).toEqual([]);
+    // The prompt is built again from the merged finding: its severity, and every place.
+    expect(f.fixPrompt).toBe(fixPrompt(f));
+    expect(f.fixPrompt).toStartWith("Fix this critical-severity security vulnerability: Write-up of F1");
+    expect(f.fixPrompt).toContain(`## Also affects\nThe same flaw is at 2 other places. The fix is needed at each one, and the regression test should cover every one:\n- \`${PATH}:29\`: Write-up of V1\n- \`${PATH}:10\`: Write-up of V2\n`);
+    expect(JSON.stringify(result)).not.toContain("repo-data");
+    // Announced once per finding, never once per place.
+    expect(foundTitles(events)).toEqual(["Write-up of F1", "Write-up of F4"]);
+  });
+
+  test("a finding with no variants is byte for byte what it was, fix prompt included", async () => {
+    const h = hunt();
+    const verdicts = [verdict("F1", "real"), verdict("F4", "real")];
+    const confirmed = confirmedEntries(h.findings, verdicts);
+    const variants = parseVerdicts(JSON.stringify([variantAt("V1", "F1", 29)]));
+    const before = await run(fakeClient(), verdicts);
+    const withVariants = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } });
+    // No variants session at all: nothing is folded, and no finding carries the field.
+    expect(before.counts).toMatchObject({ written: 2, folded: 0, merged: 0 });
+    expect(before.merged).toEqual([]);
+    for (const finding of before.findings) {
+      expect("alsoReportedAs" in finding).toBe(false);
+      expect(finding.fixPrompt).not.toContain("Also affects");
+    }
+    // F4 has no variant: beside a finding that has one, it is the finding it is on its own.
+    expect(JSON.stringify(withVariants.findings[1])).toBe(JSON.stringify(before.findings[1]));
+    expect(withVariants.findings[1]!.fixPrompt).toBe(before.findings[1]!.fixPrompt);
+    expect(withVariants.findings[0]!.alsoReportedAs).toHaveLength(1);
+  });
+
+  test("when the confirmed finding comes to nothing, its first written-up variant is the finding and the rest fold into it", async () => {
+    const h = hunt();
+    const verdicts = [verdict("F1", "real")];
+    const confirmed = confirmedEntries(h.findings, verdicts);
+    const variants = parseVerdicts(JSON.stringify([variantAt("V1", "F1", 29), variantAt("V2", "F1", 10), { ...variantAt("V3", "F1", 16), location: "nowhere" }]));
+    const events: ScanEvent[] = [];
+    // The parent's write-up fails.
+    const failed = await writeUpVerdicts({ client: fakeClient({ invalidFor: ["F1"] }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed }, onEvent: (e) => events.push(e) });
+    expect(failed.findings.map((f) => f.title)).toEqual(["Write-up of V1"]);
+    expect(failed.findings[0]!.attackPath.at(-1)!.line).toBe(29);
+    expect(failed.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of V2", category: "broken_access_control", at: `${PATH}:10`, entry: `${PATH}:10`, variant: true }]);
+    expect(failed.findings[0]!.fixPrompt).toContain(`- \`${PATH}:10\`: Write-up of V2`);
+    // The finding's identity is the kept variant's, and the folded one is recorded under it.
+    expect(failed.merged.map((m) => [m.into, m.finding.title])).toEqual([[failed.findings[0]!.fingerprint, "Write-up of V2"]]);
+    expect(failed.merged[0]!.finding.fingerprint).not.toBe(failed.findings[0]!.fingerprint);
+    // What was dropped stays dropped: the parent, and the variant that cites no place.
+    expect(failed.dropped).toEqual([
+      { id: "F1", reason: "write_up_failed" },
+      { id: "V3", reason: "invalid_location" },
+    ]);
+    expect(failed.counts).toMatchObject({ real: 1, variants: 3, written: 2, folded: 1, merged: 0, dropped: 2 });
+    expect(foundTitles(events)).toEqual(["Write-up of V1"]);
+
+    // The parent fails the evidence gate (it cites a line past the end of the file): the same.
+    const gone = hunt([row("idor", 1, 99, "cites a line past the end of the file", "GET /projects/:id")]);
+    const gated = await writeUpVerdicts({ client: fakeClient(), indexer: fakeIndexer(), findings: gone.findings, candidates: gone.candidates, verdicts, variants: { verdicts: variants, confirmed: confirmedEntries(gone.findings, verdicts) } });
+    expect(gated.findings.map((f) => [f.title, f.alsoReportedAs?.map((place) => place.at)])).toEqual([["Write-up of V1", [`${PATH}:10`]]]);
+    expect(gated.dropped).toEqual([
+      { id: "F1", reason: "evidence_gate" },
+      { id: "V3", reason: "invalid_location" },
+    ]);
+
+    // Only one variant survives: it is the finding, with nothing folded into it.
+    const lone = await writeUpVerdicts({ client: fakeClient({ invalidFor: ["F1", "V2"] }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } });
+    expect(lone.findings.map((f) => f.title)).toEqual(["Write-up of V1"]);
+    expect("alsoReportedAs" in lone.findings[0]!).toBe(false);
+    expect(lone.counts).toMatchObject({ written: 1, folded: 0, dropped: 3 });
+  });
+
+  test("two confirmed findings each keep their own variants, in hunt rank order", async () => {
+    const h = hunt();
+    const verdicts = [verdict("F4", "real"), verdict("F2", "real"), verdict("F1", "real")];
+    const confirmed = confirmedEntries(h.findings, verdicts);
+    // Ruled out of order: each variant goes to the finding it names.
+    const variants = parseVerdicts(JSON.stringify([variantAt("V1", "F2", 16), variantAt("V2", "F1", 29)]));
+    const runs = await Promise.all([1, 2, 3].map(() => writeUpVerdicts({ client: fakeClient({ jitter: true }), indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } })));
+    for (const result of runs) {
+      expect(result.findings.map((f) => [f.title, f.alsoReportedAs?.map((place) => `${place.title} at ${place.at}`)])).toEqual([
+        ["Write-up of F1", [`Write-up of V2 at ${PATH}:29`]],
+        ["Write-up of F2", [`Write-up of V1 at ${PATH}:16`]],
+        ["Write-up of F4", undefined],
+      ]);
+      expect(result.merged.map((m) => [m.finding.title, m.into])).toEqual([
+        ["Write-up of V2", result.findings[0]!.fingerprint],
+        ["Write-up of V1", result.findings[1]!.fingerprint],
+      ]);
+      expect(result.counts).toMatchObject({ real: 3, variants: 2, written: 5, folded: 2, merged: 0, dropped: 0 });
+    }
+  });
+
+  test("consolidation still merges across findings, and the kept one lists every place of both", async () => {
+    const h = hunt();
+    const verdicts = [verdict("F1", "real"), verdict("F2", "real"), verdict("F4", "real")];
+    const confirmed = confirmedEntries(h.findings, verdicts);
+    const variants = parseVerdicts(JSON.stringify([variantAt("V1", "F2", 16), variantAt("V2", "F1", 29)]));
+    // The merge review sees one finding per flaw, and calls the first two the same issue.
+    const client = fakeClient({ groups: [{ findings: ["F1", "F2"], keep: "F1" }] });
+    const result = await writeUpVerdicts({ client, indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } });
+    const review = userText(client.requests.find((r) => r.responseFormat?.json_schema.name === "duplicate_groups")!);
+    expect(review.match(/^### F\d+: .*$/gm)).toEqual(["### F1: Write-up of F1", "### F2: Write-up of F2", "### F3: Write-up of F4"]);
+    expect(result.findings.map((f) => f.title)).toEqual(["Write-up of F1", "Write-up of F4"]);
+    const f = result.findings[0]!;
+    // The finding it absorbed is a repeat report of the same code; the variants of both are other places to fix.
+    expect(f.alsoReportedAs!.map((place) => `${place.title} at ${place.at}${place.variant ? ", a variant" : ""}`)).toEqual([`Write-up of V2 at ${PATH}:29, a variant`, `Write-up of F2 at ${PATH}:10`, `Write-up of V1 at ${PATH}:16, a variant`]);
+    expect(f.fixPrompt).toBe(fixPrompt(f));
+    expect(f.fixPrompt).toContain(`The same flaw is at 2 other places. The fix is needed at each one, and the regression test should cover every one:\n- \`${PATH}:29\`: Write-up of V2\n- \`${PATH}:16\`: Write-up of V1\n`);
+    expect(f.fixPrompt).not.toContain("Write-up of F2");
+    // Folded variants first, then what consolidation merged: each count is its own.
+    expect(result.merged.map((m) => [m.finding.title, m.reason])).toEqual([
+      ["Write-up of V2", VARIANT_REASON],
+      ["Write-up of V1", VARIANT_REASON],
+      ["Write-up of F2", "One missing check."],
+    ]);
+    expect(result.counts).toMatchObject({ written: 5, folded: 2, merged: 1 });
+    expect(result.findings.length + result.counts.folded + result.counts.merged).toBe(result.counts.written);
   });
 
   /** The file's functions, as the indexer lists them. */
@@ -429,10 +589,13 @@ describe("writeUpVerdicts", () => {
     const confirmed = confirmedEntries(h.findings, verdicts);
     const variants = parseVerdicts(JSON.stringify([{ id: "V1", variant_of: "F1", verdict: "real", attacker: "any signed-in user", location: `${PATH}:29`, victim: "x", reason: "Same missing check." }]));
     const result = await writeUpVerdicts({ client: fakeClient(), indexer: withDefinitions(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } });
-    expect(result.findings.map((f) => [f.entryPoint.line, f.entryPoint.description, f.attackPath.map((s) => s.line)])).toEqual([
+    // The variant is written up at its own entry, then listed by the finding it repeats.
+    expect([...result.findings, ...result.merged.map((m) => m.finding)].map((f) => [f.entryPoint.line, f.entryPoint.description, f.attackPath.map((s) => s.line)])).toEqual([
       [1, "GET /projects/:id", [1, 3]],
       [28, "archiveProject", [28, 29]],
     ]);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.alsoReportedAs).toEqual([{ title: "Write-up of V1", category: "broken_access_control", at: `${PATH}:29`, entry: `${PATH}:28`, variant: true }]);
   });
 
   test("a finding is filed under the category its write-up's weakness names, with that category's fingerprint", async () => {
@@ -501,7 +664,8 @@ describe("severity rating", () => {
     const confirmed = confirmedEntries(h.findings, verdicts);
     const variants = parseVerdicts(JSON.stringify([{ id: "V1", variant_of: "F1", verdict: "real", attacker: "any signed-in user", location: `${PATH}:29`, victim: "x", reason: "Same missing check." }]));
     const result = await writeUpVerdicts({ client, indexer: fakeIndexer(), findings: h.findings, candidates: h.candidates, verdicts, variants: { verdicts: variants, confirmed } });
-    expect(result.counts.written).toBe(4);
+    expect(result.counts).toMatchObject({ written: 4, folded: 1 });
+    expect(result.findings).toHaveLength(3);
     const settled = client.requests.filter(isRate).map((r) => [rateIdOf(r), userText(r).match(/^Attacker \(settled\): (\S+)$/m)?.[1]]);
     expect(Object.fromEntries(settled)).toEqual({ F1: "anyone", V1: "any_user", F2: "limited_role", F4: "full_admin" });
     expect(writeUpOf(client.requests, "F4")).toContain("(severity medium,");

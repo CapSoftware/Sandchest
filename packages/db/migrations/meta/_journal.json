@@ -176,6 +176,13 @@
       "when": 1794311905534,
       "tag": "0024_usage_spend_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794341047523,
+      "tag": "0025_finding_also_reported",
+      "breakpoints": true
     }
   ]
 }

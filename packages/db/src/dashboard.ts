@@ -246,11 +246,19 @@ export interface FindingListItem {
   repoId: string;
   repoFullName: string;
   sink: { file: string; line: number } | null;
+  /** How many other places the finding affects, beside the one at `sink`. */
+  morePlaces: number;
   sourceKind: string;
   prNumber: number | null;
   lastSeenAt: Date;
   stale: boolean;
 }
+
+/**
+ * How many other places a finding affects, as `findingPlaces` counts them: the folded reports marked as
+ * variants. 0 when the column is null, as it is on findings stored before it existed.
+ */
+const MORE_PLACES = sql<number>`case when jsonb_typeof(${findings.alsoReported}) = 'array' then (select count(*)::int from jsonb_array_elements(${findings.alsoReported}) report where report -> 'variant' = 'true'::jsonb) else 0 end`;
 
 const SEVERITY_ORDER = sql`case ${findings.severity} when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end`;
 
@@ -280,6 +288,7 @@ export async function dashboardFindings(database: Db, userId: string, filters: F
       repoId: findings.repoId,
       repoFullName: repos.fullName,
       sink: sql<{ file: string; line: number } | null>`${findings.attackPath} -> -1`,
+      morePlaces: MORE_PLACES,
       sourceKind: findings.sourceKind,
       prNumber: findings.prNumber,
       lastSeenAt: findings.lastSeenAt,
@@ -335,6 +344,7 @@ export async function findingsForExport(database: Db, userId: string, filters: F
       guarantees: findings.guarantees,
       mustNotBreak: findings.mustNotBreak,
       regressionTest: findings.regressionTest,
+      alsoReported: findings.alsoReported,
       prNumber: findings.prNumber,
       firstSeenAt: findings.firstSeenAt,
       lastSeenAt: findings.lastSeenAt,
@@ -453,7 +463,7 @@ export async function scanForUser(database: Db, userId: string, scanId: string, 
       .where(and(eq(scans.id, scanId), canSee(userId))),
     // The scan's findings are listed in its stats.
     database
-      .select({ id: findings.id, title: findings.title, severity: findings.severity, confidence: findings.confidence, status: findings.status, sink: sql<{ file: string; line: number } | null>`${findings.attackPath} -> -1` })
+      .select({ id: findings.id, title: findings.title, severity: findings.severity, confidence: findings.confidence, status: findings.status, sink: sql<{ file: string; line: number } | null>`${findings.attackPath} -> -1`, morePlaces: MORE_PLACES })
       .from(findings)
       .where(and(sql`${findings.id} in (select jsonb_array_elements_text(coalesce(stats -> 'findingIds', '[]'::jsonb))::uuid from ${scans} where id = ${scanId})`, visibleScan))
       .orderBy(SEVERITY_ORDER),

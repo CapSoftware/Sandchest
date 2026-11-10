@@ -75,6 +75,8 @@ export function sampleFindings(count = FINDINGS.length): FindingListItem[] {
       repoId: id(100),
       repoFullName: `acme/${repo}`,
       sink: { file: file!, line: Number(line) },
+      // One of them covers other places, as a deep scan's finding can.
+      morePlaces: i === 1 ? 3 : 0,
       sourceKind: "deep",
       prNumber: null,
       lastSeenAt: ago(120 + i * 600),
@@ -162,6 +164,10 @@ export function sampleFinding(): NonNullable<Awaited<ReturnType<typeof findingFo
       trust: "confirmed",
       sources: [],
       validation: null,
+      alsoReported: [
+        { title: "Any signed-in user can download another account’s invoice as a PDF", category: "broken_access_control", at: "src/routes/invoices.ts:67", entry: "src/routes/invoices.ts:66", variant: true },
+        { title: "Any signed-in user can read another account’s credit notes", category: "broken_access_control", at: "src/routes/credit-notes.ts:23", entry: "src/routes/credit-notes.ts:22", variant: true },
+      ],
       sourceScanId: id(301),
       sourceKind: "deep",
       prNumber: null,
@@ -232,7 +238,7 @@ export function sampleScan(): NonNullable<Awaited<ReturnType<typeof scanForUser>
     metrics: null,
     findings: sampleFindings(8)
       .filter((_, i) => i === 0 || i === 1 || i === 5)
-      .map(({ id, title, severity, confidence, status, sink }) => ({ id, title, severity, confidence, status: status as "open", sink })),
+      .map(({ id, title, severity, confidence, status, sink, morePlaces }) => ({ id, title, severity, confidence, status: status as "open", sink, morePlaces })),
     events: FEED.map((message, i) => ({ seq: i + 1, type: message.startsWith("Finding") ? "finding" : "step", message, createdAt: new Date(started.getTime() + i * 63_000) })),
   };
 }

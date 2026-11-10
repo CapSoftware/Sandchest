@@ -231,6 +231,22 @@ describe("render", () => {
     expect(comment).toContain("````\nFix this ```weird``` thing\n````");
     expect(reviewBody([finding("high")], [finding("high")], "https://app/x")).toContain("A high bug with &lt;html&gt;");
   });
+
+  test("a finding that lists other places is posted exactly as one that lists none, and never names them", () => {
+    const place = (n: number, variant?: boolean) => ({ title: `Same bug, place ${n}`, category: "sql_injection" as const, at: `b.ts:${n}`, entry: `b.ts:${n}`, ...(variant && { variant }) });
+    const plain = [finding("high"), finding("medium")];
+    const wide = [{ ...finding("high"), alsoReportedAs: [place(1, true), place(2, true), place(3)] }, { ...finding("medium"), alsoReportedAs: [] }];
+    const linked = (list: Finding[]) => list.map((f) => ({ ...f, url: "https://app/f/1" }));
+    for (const isPublic of [false, true]) {
+      const check = checkResult({ findings: wide, threshold: "high", isPublic, detailsUrl: "https://app/x" });
+      expect(check).toEqual(checkResult({ findings: plain, threshold: "high", isPublic, detailsUrl: "https://app/x" }));
+      const summary = prSummary({ findings: linked(wide), isPublic, headSha: "0123456789abcdef", detailsUrl: "https://app/scans/1" });
+      expect(summary).toBe(prSummary({ findings: linked(plain), isPublic, headSha: "0123456789abcdef", detailsUrl: "https://app/scans/1" }));
+      expect(JSON.stringify(check) + summary).not.toContain("b.ts");
+    }
+    expect(reviewComment(wide[0]!)).toBe(reviewComment(plain[0]!));
+    expect(reviewBody(wide, wide, "https://app/x")).toBe(reviewBody(plain, plain, "https://app/x"));
+  });
 });
 
 describe("PR summary comment", () => {

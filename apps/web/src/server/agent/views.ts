@@ -125,6 +125,7 @@ export function findingListView(finding: FindingListItem, appUrl: string) {
     category: finding.category,
     repo: { id: finding.repoId, full_name: finding.repoFullName },
     location: finding.sink,
+    more_places: finding.morePlaces,
     found_by: finding.sourceKind === "pr_review" ? { kind: "pr_review", pr_number: finding.prNumber } : { kind: finding.sourceKind },
     last_seen_at: iso(finding.lastSeenAt),
     stale: finding.stale,
