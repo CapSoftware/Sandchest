@@ -74,6 +74,8 @@ export interface ChatResult {
   toolCalls: ToolCall[];
   finishReason: string;
   usage: Usage;
+  /** What this call cost in USD, when the endpoint reported it in its usage. */
+  costUsd?: number;
   /** The reply as a message, ready to append to the conversation. */
   message: AssistantMessage;
   /** Transient failures retried before this result. */

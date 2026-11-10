@@ -11,7 +11,7 @@ import type { IndexerClient } from "../indexer/client";
 import type { LlmClient } from "../llm";
 import type { ChangedFile } from "./changes";
 import type { ScanLimits } from "./context";
-import type { Pricing, RoleUsage } from "./metrics";
+import type { Pricing, RoleUsage, UsageSink } from "./metrics";
 import type { OsvClient } from "./osv";
 import { verifyFindings } from "./pipeline";
 import type { Finding, ThreatModel } from "./schema";
@@ -29,6 +29,8 @@ export interface FixCheckOptions {
   limits?: Partial<ScanLimits>;
   pricing?: Pricing;
   signal?: AbortSignal;
+  /** Called once for every model call that finishes (see `ScanOptions.onUsage`). Optional. */
+  onUsage?: UsageSink;
 }
 
 export interface FixCheckResult {
@@ -75,6 +77,7 @@ export async function checkFixes(options: FixCheckOptions): Promise<{ results: F
       limits: options.limits,
       pricing: options.pricing,
       signal: options.signal,
+      onUsage: options.onUsage,
     });
   const first = await verify(located);
   const verdicts = [...first.results];

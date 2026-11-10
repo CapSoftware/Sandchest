@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { IndexerError, type IndexerClient } from "../src/indexer";
 import { LlmError, LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient, type ToolCall } from "../src/llm";
-import { runScan, type ScanEvent, type ThreatModel } from "../src/scan";
+import { priceUsage, runRecon, runScan, verifyFindings, type Candidate, type ScanEvent, type ThreatModel, type UsageEvent } from "../src/scan";
+import { stageClients } from "../src/scan/metrics";
 import type { Classifier } from "../src/llm/classifier";
 
 const FILE = ["export function login(req) {", "  const email = req.body.email;", "  return db.query(\"SELECT * FROM users WHERE email = '\" + email + \"'\");", "}"];
@@ -439,5 +440,85 @@ describe("repository-derived summaries reach agents as untrusted data", () => {
       expect(inside).toContain(candidate.title);
       expect(outside).not.toContain(steer);
     }
+  });
+});
+
+describe("usage sink", () => {
+  const pricing = { input: 2, cachedInput: 0.5, output: 8 };
+
+  /** Counts every call the scan makes, by role, and can make the endpoint report a cost. */
+  function countingClient(providerCost?: number): LlmClient & { roles: ChatRequest["role"][] } {
+    const inner = fakeClient();
+    const roles: ChatRequest["role"][] = [];
+    return {
+      config: inner.config,
+      roles,
+      async chat(request) {
+        roles.push(request.role);
+        const result = await inner.chat(request);
+        return providerCost === undefined ? result : { ...result, costUsd: providerCost };
+      },
+    };
+  }
+
+  test("hears every model call once, with its role, its stage and a priced cost", async () => {
+    const client = countingClient();
+    const events: UsageEvent[] = [];
+    const report = await runScan({ client, indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing, onUsage: (event) => events.push(event) });
+
+    expect(events).toHaveLength(client.roles.length);
+    expect(events.map((e) => e.role).sort()).toEqual([...client.roles].sort());
+    expect(events.length).toBe(report.usage.total.requests);
+    const stageRole = new Set(events.map((e) => `${e.stage}:${e.role}`));
+    expect([...stageRole].sort()).toEqual(["auth_model:skeptic", "coverage:hunt", "hunt:hunt", "recon:recon", "review:skeptic", "structure:structure"]);
+    for (const event of events) {
+      expect(event).toMatchObject({ inputTokens: 100, cachedTokens: 80, outputTokens: 10, reasoningTokens: 0, costSource: "priced" });
+      expect(event.costUsd).toBeCloseTo(priceUsage(event, pricing), 12);
+    }
+    expect(events.reduce((sum, e) => sum + e.costUsd, 0)).toBeCloseTo(report.usage.costUsd!, 9);
+  });
+
+  test("a cost the endpoint reports is used as it is", async () => {
+    const events: UsageEvent[] = [];
+    await runScan({ client: countingClient(0.0042), indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing, onUsage: (event) => events.push(event) });
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.costSource === "provider" && e.costUsd === 0.0042)).toBe(true);
+  });
+
+  test("no prices and no reported cost: priced at zero", async () => {
+    const events: UsageEvent[] = [];
+    await runScan({ client: countingClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 }, onUsage: (event) => events.push(event) });
+    expect(events.every((e) => e.costSource === "priced" && e.costUsd === 0)).toBe(true);
+  });
+
+  test("the report is the same with or without a sink, and a sink that throws changes nothing", async () => {
+    const plain = await runScan({ client: fakeClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing });
+    const heard = await runScan({ client: fakeClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing, onUsage: () => {} });
+    const broken = await runScan({ client: fakeClient(), indexer: fakeIndexer(), limits: { maxHunters: 3 }, pricing, onUsage: () => { throw new Error("sink down"); } });
+    for (const report of [heard, broken]) {
+      expect(report.usage).toEqual(plain.usage);
+      expect(report.findings.map((f) => f.fingerprint)).toEqual(plain.findings.map((f) => f.fingerprint));
+      expect(report.warnings).toEqual(plain.warnings);
+    }
+  });
+
+  test("without a sink every stage gets the caller's own client", () => {
+    const client = fakeClient();
+    const clientFor = stageClients(client, undefined, pricing);
+    expect(clientFor("hunt")).toBe(client);
+    expect(clientFor()).toBe(client);
+  });
+
+  test("recon alone and re-verification report their calls too", async () => {
+    const recon: UsageEvent[] = [];
+    await runRecon({ client: fakeClient(), indexer: fakeIndexer(), onUsage: (event) => recon.push(event) });
+    expect(recon.length).toBeGreaterThan(0);
+    expect(recon.every((e) => e.stage === "recon" && e.role === "recon")).toBe(true);
+
+    const verify: UsageEvent[] = [];
+    const client = countingClient();
+    await verifyFindings({ client, indexer: fakeIndexer(), threatModel, findings: [candidate as Candidate], investigateAuth: true, onUsage: (event) => verify.push(event) });
+    expect(verify).toHaveLength(client.roles.length);
+    expect(new Set(verify.map((e) => e.stage))).toEqual(new Set(["auth_model", "review"]));
   });
 });

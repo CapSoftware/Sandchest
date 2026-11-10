@@ -204,3 +204,25 @@ describe("timeouts", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("usage", () => {
+  const withUsage = (usage: Record<string, unknown>) => [
+    { choices: [{ delta: { content: "ok" } }] },
+    { choices: [{ delta: {}, finish_reason: "stop" }] },
+    { choices: [], usage },
+  ];
+
+  test("reads the cost the endpoint reports, and reasoning tokens", async () => {
+    endpoint.respond(() => sse(withUsage({ prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: { reasoning_tokens: 7 }, cost: 0.000123 })));
+    const result = await endpoint.client().chat(ask);
+    expect(result.usage).toEqual({ inputTokens: 40, cachedTokens: 0, outputTokens: 12, reasoningTokens: 7 });
+    expect(result.costUsd).toBe(0.000123);
+  });
+
+  test("no cost reported, or not a number: the result has none", async () => {
+    endpoint.respond(() => sse(withUsage({ prompt_tokens: 40, completion_tokens: 12 })), () => sse(withUsage({ prompt_tokens: 1, completion_tokens: 1, cost: "0.5" })));
+    const client = endpoint.client();
+    expect(await client.chat(ask)).not.toHaveProperty("costUsd");
+    expect(await client.chat(ask)).not.toHaveProperty("costUsd");
+  });
+});

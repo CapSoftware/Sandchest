@@ -1,4 +1,4 @@
-import { ROLES, type Role, type Usage } from "../llm";
+import { ROLES, type LlmClient, type Role, type Usage } from "../llm";
 
 export interface RoleUsage extends Usage {
   requests: number;
@@ -47,6 +47,68 @@ export class UsageMeter {
     const { inputTokens, cachedTokens, outputTokens } = this.total();
     return ((inputTokens - cachedTokens) * pricing.input + cachedTokens * pricing.cachedInput + outputTokens * pricing.output) / 1_000_000;
   }
+}
+
+/** One model call, as it is billed: its role, the pipeline stage that made it, its tokens and what it cost. */
+export interface UsageEvent extends Usage {
+  role: Role;
+  /** Short machine name of the stage that made the call (`recon`, `hunt`, `review`…). Absent when not known. */
+  stage?: string;
+  costUsd: number;
+  /** `provider`: the endpoint reported the cost. `priced`: computed from `LLM_PRICE_*`, or 0 when they are not set. */
+  costSource: "provider" | "priced";
+}
+
+/** Receives every model call a scan makes, once each, as it finishes. */
+export type UsageSink = (event: UsageEvent) => void;
+
+/** One call's cost from the price settings, by the same formula as `UsageMeter.cost`. */
+export function priceUsage(usage: Usage, pricing: Pricing): number {
+  return ((usage.inputTokens - usage.cachedTokens) * pricing.input + usage.cachedTokens * pricing.cachedInput + usage.outputTokens * pricing.output) / 1_000_000;
+}
+
+/** One call as a usage event. `providerCostUsd` is what the endpoint reported, if it did. */
+export function usageEvent(role: Role, stage: string | undefined, usage: Usage, providerCostUsd: number | undefined, pricing: Pricing | undefined): UsageEvent {
+  const provider = providerCostUsd !== undefined;
+  return {
+    role,
+    ...(stage !== undefined && { stage }),
+    inputTokens: usage.inputTokens,
+    cachedTokens: usage.cachedTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: usage.reasoningTokens,
+    costUsd: provider ? providerCostUsd : pricing ? priceUsage(usage, pricing) : 0,
+    costSource: provider ? "provider" : "priced",
+  };
+}
+
+/**
+ * Clients that report every call they finish to `onUsage`, tagged with a stage. With no sink, the
+ * client itself for every stage, so a scan without one runs exactly as before. A sink that throws
+ * never fails the call.
+ */
+export function stageClients(client: LlmClient, onUsage: UsageSink | undefined, pricing: Pricing | undefined): (stage?: string) => LlmClient {
+  if (!onUsage) return () => client;
+  const clients = new Map<string | undefined, LlmClient>();
+  return (stage) => {
+    let staged = clients.get(stage);
+    if (!staged) {
+      staged = {
+        config: client.config,
+        async chat(request, onDelta) {
+          const result = await client.chat(request, onDelta);
+          try {
+            onUsage(usageEvent(request.role, stage, result.usage, result.costUsd, pricing));
+          } catch {
+            // Recording usage never costs the scan a model call.
+          }
+          return result;
+        },
+      };
+      clients.set(stage, staged);
+    }
+    return staged;
+  };
 }
 
 /** Reads optional `LLM_PRICE_*` variables (USD per million tokens). */

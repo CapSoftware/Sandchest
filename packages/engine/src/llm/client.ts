@@ -157,6 +157,8 @@ interface Chunk {
     completion_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number } | null;
     completion_tokens_details?: { reasoning_tokens?: number } | null;
+    /** What the call cost in USD, on endpoints that report it. */
+    cost?: unknown;
   } | null;
 }
 
@@ -166,6 +168,7 @@ class StreamAccumulator {
   private finishReason = "";
   private readonly toolCalls: ToolCall[] = [];
   private usage: Usage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+  private costUsd: number | undefined;
 
   constructor(private readonly onDelta?: (delta: ChatDelta) => void) {}
 
@@ -188,6 +191,8 @@ class StreamAccumulator {
         outputTokens: chunk.usage.completion_tokens ?? 0,
         reasoningTokens: chunk.usage.completion_tokens_details?.reasoning_tokens ?? 0,
       };
+      const cost = chunk.usage.cost;
+      this.costUsd = typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : undefined;
     }
 
     const choice = chunk.choices?.[0];
@@ -231,6 +236,7 @@ class StreamAccumulator {
       toolCalls,
       finishReason: this.finishReason,
       usage: this.usage,
+      ...(this.costUsd !== undefined && { costUsd: this.costUsd }),
       message,
       retries: 0,
     };

@@ -21,7 +21,7 @@ import { isFatal, errorMessage } from "./errors";
 import { capChanges, changedLines, changeTool, relevantChanges, touchesChange, type ChangedFile } from "./changes";
 import { planAssignments, planCoverage, planPrAssignments, planRoaming, runHunter, type Assignment, type HunterLimits, type HunterStats } from "./hunt";
 import { buildLeads, codeSignals, dependencyFindings, persistentLeads, vulnerabilities, type Signals } from "./leads";
-import { Limiter, UsageMeter, type Pricing, type RoleUsage } from "./metrics";
+import { Limiter, UsageMeter, stageClients, type Pricing, type RoleUsage, type UsageSink } from "./metrics";
 import type { OsvClient } from "./osv";
 import { DEPENDENCY_CHECKS, renderAuthModel, renderHistoryForHunt, renderHistoryForSkeptic, renderThreatModel } from "./prompts";
 import { recon, type Overview } from "./recon";
@@ -51,6 +51,8 @@ export interface ScanOptions {
   limits?: Partial<ScanLimits>;
   pricing?: Pricing;
   onEvent?: (event: ScanEvent) => void;
+  /** Called once for every model call that finishes, with its role, stage, tokens and cost. Optional. */
+  onUsage?: UsageSink;
   signal?: AbortSignal;
   /**
    * Opt-in dynamic validation: boot the app in the workspace and reproduce
@@ -241,8 +243,11 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const tag = `repo-data-${randomBytes(6).toString("hex")}`;
   const wrap = createWrap(tag);
   const read = new Set<string>();
+  // Each stage's calls are reported under its name. Without a sink this is the client itself, everywhere.
+  const clientFor = stageClients(options.client, options.onUsage, options.pricing);
+  const staged = <T extends { client: LlmClient }>(context: T, stage: string): T => (options.onUsage ? { ...context, client: clientFor(stage) } : context);
   const base: Omit<ScanContext, "threatModelText"> = {
-    client: options.client,
+    client: clientFor(),
     indexer,
     tools: [...repoTools({ indexer, wrap, signals, onRead: (path) => read.add(path) }), ...(change ? [changeTool(change, wrap)] : [])],
     limiter: new Limiter(limits.concurrency),
@@ -260,7 +265,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   emit({ type: "stage", stage: "recon", message: "Mapping the attack surface…" });
   const [threatModel, reconMs] = options.threatModel
     ? [options.threatModel, 0]
-    : await time(() => recon(base, overview, routes, signals.leads));
+    : await time(() => recon(staged(base, "recon"), overview, routes, signals.leads));
   const sweepMs = await advisories;
   // Merge the deterministic authorization-consistency leads (after advisories, which rebuilds signals.leads).
   const authz = await authzLeads;
@@ -276,7 +281,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   const authModelPromise: Promise<string | undefined> =
     change || signal.aborted
       ? Promise.resolve(undefined)
-      : investigateAuthModel({ ...base, threatModelText })
+      : investigateAuthModel(staged({ ...base, threatModelText }, "auth_model"))
           .then((model) => (model ? renderAuthModel(model, wrap) : undefined))
           .catch(() => undefined);
   const ctx: ScanContext = {
@@ -299,7 +304,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       try {
         // Ground the review in the auth model once it is ready (usually finished during hunting).
         if (ctx.authModelText === undefined) ctx.authModelText = await authModelPromise;
-        ruling = await review(ctx, gated, at(0.95));
+        ruling = await review(staged(ctx, "review"), gated, at(0.95));
       } catch (error) {
         ruling = unreviewed(gated, `Review failed (${contain(error, `Review of ${gated.id} failed`)})`);
         if (fatal) return;
@@ -317,7 +322,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       emit({ type: "progress", message: `Ruled out ${gated.id}${ruling.verdict.verdict === "not_a_vulnerability" ? " (no attacker can use it)" : ""}: ${gated.candidate.title}.` });
       return;
     }
-    const finding = await structure(ctx, gated, ruling);
+    const finding = await structure(staged(ctx, "structure"), gated, ruling);
     findings.push(finding);
     emit({ type: "finding", finding });
   };
@@ -328,10 +333,10 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
     verifying.push(verify(gated).catch((error) => void contain(error, `Could not finish ${gated.id}`)));
   };
 
-  const hunt = (assignments: Assignment[], hunterLimits: HunterLimits) =>
+  const hunt = (assignments: Assignment[], hunterLimits: HunterLimits, stage = "hunt") =>
     Promise.all(
       assignments.map((assignment) =>
-        runHunter(ctx, assignment, registry, hunterLimits, onCandidate).catch((error): HunterStats => {
+        runHunter(staged(ctx, stage), assignment, registry, hunterLimits, onCandidate).catch((error): HunterStats => {
           const message = contain(error, `The ${assignment.name} hunter stopped early`);
           return { name: assignment.name, turns: 0, toolCalls: 0, reported: 0, accepted: 0, ms: 0, error: message };
         }),
@@ -363,7 +368,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
         : planCoverage(routes, signals.leads, read, registry.cited(), wrap);
   if (gaps.length > 0) {
     emit({ type: "stage", stage: "coverage", message: `Checking code the first pass never opened with ${gaps.length} more ${gaps.length === 1 ? "hunter" : "hunters"}…` });
-    const [extra, ms] = await time(() => hunt(gaps, { turns: limits.coverageTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.75) }));
+    const [extra, ms] = await time(() => hunt(gaps, { turns: limits.coverageTurns, turnsPerFinding: limits.turnsPerFinding, maxTurns: limits.hunterMaxTurns, deadline: at(0.75) }, "coverage"));
     hunters.push(...extra);
     coverageMs = ms;
   }
@@ -412,7 +417,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       deps.map(async (finding, i) => {
         const gated = dependencyCandidate(finding, `D${i + 1}`);
         try {
-          return { finding, gated, ruling: await review(ctx, gated, at(0.95)) };
+          return { finding, gated, ruling: await review(staged(ctx, "dependency_review"), gated, at(0.95)) };
         } catch (error) {
           return { finding, gated, ruling: unreviewed(gated, `Review failed (${contain(error, `Review of ${gated.id} failed`)})`) };
         }
@@ -437,7 +442,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
   let merged: MergedFinding[] = [];
   if (findings.length > 1 && !signal.aborted) {
     emit({ type: "stage", stage: "verify", message: "Merging repeat reports of the same issue…" });
-    const result = await consolidateFindings({ client: ctx.client, findings, wrap: ctx.wrap, signal, deadline: at(1), run: (task) => ctx.limiter.run(task, "urgent") });
+    const result = await consolidateFindings({ client: clientFor("consolidate"), findings, wrap: ctx.wrap, signal, deadline: at(1), run: (task) => ctx.limiter.run(task, "urgent") });
     if (result.usage) ctx.meter.add("skeptic", result.usage.usage, result.usage.attempts, result.usage.retries);
     if (result.merged.length) emit({ type: "progress", message: `Merged ${result.merged.length} repeat report${result.merged.length === 1 ? "" : "s"} into the findings they repeat.` });
     findings.splice(0, findings.length, ...result.findings);
@@ -525,7 +530,7 @@ export async function runRecon(options: Omit<ScanOptions, "threatModel" | "pullR
   emit({ type: "stage", stage: "recon", message: "Mapping the attack surface…" });
   const threatModel = await recon(
     {
-      client: options.client,
+      client: stageClients(options.client, options.onUsage, options.pricing)("recon"),
       indexer,
       tools: repoTools({ indexer, wrap, signals }),
       limiter: new Limiter(limits.concurrency),
@@ -607,6 +612,8 @@ export interface VerifyOptions {
   investigateAuth?: boolean;
   /** Per finding (same order): what a push changed, when this is a re-check after it. */
   rechecks?: Array<string | undefined>;
+  /** Called once for every model call that finishes (see `ScanOptions.onUsage`). Optional. */
+  onUsage?: UsageSink;
 }
 
 export interface Verification {
@@ -627,8 +634,9 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
   const tag = `repo-data-${randomBytes(6).toString("hex")}`;
   const wrap = createWrap(tag);
   const signal = options.signal;
+  const clientFor = stageClients(options.client, options.onUsage, options.pricing);
   const ctx: ScanContext = {
-    client: options.client,
+    client: clientFor(),
     indexer: options.indexer,
     tools: repoTools({ indexer: options.indexer, wrap, signals: { leads: [], vulns: [] } }),
     limiter: new Limiter(limits.concurrency),
@@ -643,7 +651,7 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
     threatModelText: renderThreatModel(options.threatModel, wrap),
   };
   if (options.investigateAuth) {
-    const authModel = await investigateAuthModel(ctx);
+    const authModel = await investigateAuthModel(options.onUsage ? { ...ctx, client: clientFor("auth_model") } : ctx);
     if (authModel) ctx.authModelText = renderAuthModel(authModel, wrap);
   }
 
@@ -663,7 +671,7 @@ export async function verifyFindings(options: VerifyOptions): Promise<{ results:
           hunter: "verify",
           recheck: options.rechecks?.[i],
         };
-        return { candidate, review: await review(ctx, gated) };
+        return { candidate, review: await review(options.onUsage ? { ...ctx, client: clientFor("review") } : ctx, gated) };
       } catch (error) {
         if (isFatal(error, signal)) throw error;
         return { candidate, error: errorMessage(error) };

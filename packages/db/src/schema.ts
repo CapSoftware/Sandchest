@@ -215,6 +215,41 @@ export const scanMetrics = pgTable("scan_metrics", {
   survivors: integer("survivors").notNull(),
 });
 
+export const USAGE_KINDS = ["model", "sandbox"] as const;
+export type UsageKind = (typeof USAGE_KINDS)[number];
+export const USAGE_COST_SOURCES = ["provider", "priced", "sandbox"] as const;
+export type UsageCostSource = (typeof USAGE_COST_SOURCES)[number];
+
+/**
+ * What a scan spent, one row per model call and one per sandbox: the ledger usage-based bills are
+ * computed from. Counts and costs only, never prompts or output.
+ */
+export const scanUsage = pgTable(
+  "scan_usage",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    scanId: uuid("scan_id")
+      .notNull()
+      .references(() => scans.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: USAGE_KINDS }).notNull(),
+    /** Short machine name of the pipeline stage: `recon`, `hunt`, `review`, `sandbox`… */
+    stage: text("stage").notNull(),
+    /** The model role. Null for sandbox rows. */
+    role: text("role"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    cachedTokens: integer("cached_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+    /** Machine time, for sandbox rows. */
+    seconds: numeric("seconds", { precision: 12, scale: 3 }),
+    costUsd: numeric("cost_usd", { precision: 18, scale: 10 }).notNull(),
+    /** `provider`: the model endpoint reported it. `priced`: computed from the price settings. `sandbox`: the sandbox host's meter. */
+    costSource: text("cost_source", { enum: USAGE_COST_SOURCES }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index("scan_usage_scan_idx").on(table.scanId)],
+);
+
 export const findingStatus = pgEnum("finding_status", ["open", "fixed", "dismissed", "verified"]);
 export const dismissReason = pgEnum("dismiss_reason", ["false_positive", "accepted_risk", "wont_fix"]);
 

@@ -20,6 +20,7 @@ import {
   notificationRecipients,
   openFindings,
   earlierPrFindings,
+  insertUsage,
   pendingRecon,
   prComment,
   recordMetrics,
@@ -27,6 +28,7 @@ import {
   savePrComment,
   saveThreatModel,
   scanById,
+  setComputeCost,
   setRepoLoc,
   threatModel as storedThreatModel,
   updateScan,
@@ -64,6 +66,7 @@ import { captureFromScan } from "./cves";
 import { noticeScanPaused } from "./notices";
 import { classifier, db, githubApp, llmClient, mailer, osvClient, pricing } from "./services";
 import { captureException } from "./sentry";
+import { readSandboxUsage, UsageLedger } from "./usage-ledger";
 
 /** Concurrent scans per org (SPEC §4), in each lane: recon, PR reviews, and everything else (see `claimScanSlot`). */
 export const ORG_CONCURRENCY = 2;
@@ -178,6 +181,8 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
   const { findings: affected, changes } = scan.kind === "fix_check" ? await affectedFindings(scan, installation) : { findings: [], changes: [] };
   if (scan.kind === "fix_check" && affected.length === 0) return { findings: 0 };
   const events = new EventWriter(db(), scan.id);
+  // Every model call and the sandbox, with what each cost. Records only; a failed write is logged and dropped.
+  const ledger = new UsageLedger({ scanId: scan.id, write: (rows) => insertUsage(db(), scan.id, rows) });
   // A stage's name travels with it ("stage:hunt"), so the page can light its step on the track.
   const onEvent = (event: ScanEvent) =>
     events.write(event.type === "stage" ? `stage:${event.stage}` : event.type, event.type === "finding" ? `Found: ${event.finding.title}` : event.message);
@@ -214,7 +219,7 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     inventory = scan.kind === "pr_review" ? undefined : captureFromScan(scan.repo.id, headSha, scan.headSha === "HEAD" ? new Date(started) : scan.createdAt, indexer);
     const model = parseThreatModel(memory?.threatModel);
     // Setup already spent part of the step's time.
-    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };
+    const common = { client: llmClient(), classifier: classifier(), indexer, osv: osvClient(), pricing: pricing(), onEvent, onUsage: ledger.onUsage, limits: { timeBudgetMs: SCAN_BUDGET_MS - (Date.now() - started) } };
 
     if (scan.kind === "recon") {
       const result = await runRecon(common);
@@ -284,7 +289,16 @@ export async function executeScan(scanId: string): Promise<{ findings: number }>
     // A setup that failed has already destroyed its own workspace. The inventory is read before the indexer goes.
     const prepared = await preparing.catch(() => undefined);
     await inventory?.read;
-    await Promise.allSettled([events.flush(), prepared?.workspace.destroy(), inventory?.done]);
+    // A Boat sandbox's meter is read before it goes: a deleted sandbox has no usage to read.
+    const sandbox = prepared?.workspace instanceof BoatWorkspace ? await readSandboxUsage(prepared.workspace, { scanId: scan.id }) : undefined;
+    if (sandbox) ledger.sandbox(sandbox);
+    await Promise.allSettled([
+      events.flush(),
+      prepared?.workspace.destroy(),
+      inventory?.done,
+      ledger.close(),
+      sandbox && setComputeCost(db(), scan.id, sandbox.usd).catch((error: unknown) => console.error(`Compute cost for scan ${scan.id} failed: ${describeError(error)}`)),
+    ]);
   }
 }
 
