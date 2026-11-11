@@ -46,7 +46,7 @@ import { captureFromScan } from "./cves";
 import { gatewayEndpoint, mintGatewayToken, STALE_CALL_SECONDS } from "./gateway";
 import { describeError } from "./log";
 import { noticeScanPaused } from "./notices";
-import { sliceIndexerBinary, isEmptyRepoError, prepareWorkspace, publishScan, requireScan, ScanFinished, toChangedFile, toFindingInput, type LoadedScan } from "./scans";
+import { sliceIndexerBinary, prepareWorkspace, publishScan, refusalOf, requireScan, ScanFinished, toChangedFile, toFindingInput, type LoadedScan } from "./scans";
 import { captureException } from "./sentry";
 import { db, githubApp, sliceClient, sliceRuntime } from "./services";
 import { SandboxGone, type SliceSandbox } from "./slice-runtime";
@@ -670,10 +670,10 @@ export async function cleanUpSlice(scanId: string): Promise<void> {
 async function stopped(scan: LoadedScan, error: unknown, signal?: AbortSignal): Promise<never> {
   if (error instanceof SpendCeilingReached || (signal?.aborted && signal.reason instanceof SpendCeilingReached)) throw new ScanFinished(CEILING_MESSAGE);
   if (error instanceof ScanFinished) throw error;
-  if (error instanceof ScanRefusedError || (scan.headSha === "HEAD" && isEmptyRepoError(error))) {
-    const message = error instanceof ScanRefusedError ? error.message : "Nothing to scan yet: the repository has no commits.";
-    await updateScan(db(), scan.id, { status: "refused", error: message, finishedAt: new Date() });
-    throw new ScanFinished(message);
+  const refusal = await refusalOf(scan, error);
+  if (refusal !== undefined) {
+    await updateScan(db(), scan.id, { status: "refused", error: refusal, finishedAt: new Date() });
+    throw new ScanFinished(refusal);
   }
   if (error instanceof LlmQuotaError) {
     await noticeScanPaused(scan).catch((failure: unknown) => console.error(`Scan-paused email for scan ${scan.id} failed: ${describeError(failure)}`));

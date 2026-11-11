@@ -11,6 +11,7 @@ import { criticalFindingEmail, deepScanEmail } from "@sandchest/email";
 import {
   claimNotification,
   claimScanSlot,
+  disableUnlistedRepos,
   EventWriter,
   findingPlaces,
   foldedReports,
@@ -318,10 +319,10 @@ export async function executeScan(scanId: string, run: { /** How many times the 
     if (scan.kind === "deep") await markDeepScanned(db(), scan.repo.id, new Date(), report.repo.loc);
     return { findings: ids.length };
   } catch (error) {
-    if (error instanceof ScanRefusedError || (scan.headSha === "HEAD" && isEmptyRepoError(error))) {
-      const message = error instanceof ScanRefusedError ? error.message : "Nothing to scan yet: the repository has no commits.";
-      await updateScan(db(), scan.id, { status: "refused", error: message, finishedAt: new Date() });
-      throw new ScanFinished(message);
+    const refusal = await refusalOf(scan, error);
+    if (refusal !== undefined) {
+      await updateScan(db(), scan.id, { status: "refused", error: refusal, finishedAt: new Date() });
+      throw new ScanFinished(refusal);
     }
     if (error instanceof LlmQuotaError) {
       // The fail step that follows gives the credits back. Email is best effort and at most once per scan.
@@ -356,6 +357,43 @@ export function isEmptyRepoError(error: unknown): boolean {
   return error instanceof Error && /couldn't find remote ref HEAD\b/.test(error.message);
 }
 
+/** What GitHub says when an installation cannot read a repository: at the clone, or when a token for it is asked for. */
+export function isUnreadableRepoError(error: unknown): boolean {
+  return error instanceof Error && /Repository not found|not accessible to the parent installation/.test(error.message);
+}
+
+export const REPO_UNREADABLE = "Sandchest no longer has access to this repository on GitHub. Add it back to the Sandchest app's repositories to scan it.";
+
+/**
+ * What to tell the person when a scan cannot go ahead for a reason of the repository's: it is over the size
+ * limit, it has no commits, or the installation can no longer read it. Undefined for any other error.
+ */
+export async function refusalOf(scan: LoadedScan, error: unknown): Promise<string | undefined> {
+  if (error instanceof ScanRefusedError) return error.message;
+  if (scan.headSha === "HEAD" && isEmptyRepoError(error)) return "Nothing to scan yet: the repository has no commits.";
+  if (isUnreadableRepoError(error) && (await lostAccess(scan))) return REPO_UNREADABLE;
+  return undefined;
+}
+
+/**
+ * Whether the installation has lost the scan's repository. GitHub's listing of the installation's repositories
+ * decides, never the error alone; when the repository is gone from it, every repository of the org the listing
+ * no longer has is disabled, as its removal would have. A listing that cannot be read says nothing was lost.
+ */
+async function lostAccess(scan: LoadedScan): Promise<boolean> {
+  const installationId = scan.repo.org.installationId;
+  if (!installationId) return true;
+  try {
+    const listed = await githubApp().installation(installationId).repositories();
+    if (listed.some((repo) => repo.id === scan.repo.githubRepoId)) return false;
+    await disableUnlistedRepos(db(), scan.repo.org.id, listed.map((repo) => repo.id));
+    return true;
+  } catch (error) {
+    console.error(`Repository access for scan ${scan.id} could not be checked: ${describeError(error)}`);
+    return false;
+  }
+}
+
 /**
  * A fresh workspace with the code checked out and the indexer answering. The
  * indexer downloads while the code is fetched. A failed attempt is thrown away
@@ -382,7 +420,8 @@ export async function prepareWorkspace(input: {
     } catch (error) {
       await workspace?.destroy().catch(() => {});
       const delay = SETUP_RETRY_DELAYS_MS[attempt];
-      if (delay === undefined || isEmptyRepoError(error) || Date.now() + delay - input.started > SETUP_DEADLINE_MS) throw error;
+      // Neither a repository with no commits nor one the installation cannot read gets better with another try here.
+      if (delay === undefined || isEmptyRepoError(error) || isUnreadableRepoError(error) || Date.now() + delay - input.started > SETUP_DEADLINE_MS) throw error;
       input.onRetry(`Setup failed (${describeError(error)}); trying again in ${delay / 1000} s.`);
       await wait(delay);
     }
@@ -473,6 +512,11 @@ async function charge(scan: LoadedScan): Promise<void> {
   }
 }
 
+/** A step's failure as the workflow words it once the step's retries are spent, without the workflow's own words in front. */
+export function failureText(message: string): string {
+  return message.replace(/^Step "[^"]*" failed after \d+ retr(?:y|ies): /, "");
+}
+
 /** Records a failure, gives back the scan's credits and never leaves a PR Check spinning. */
 export async function failScan(scanId: string, message: string): Promise<void> {
   const scan = await requireScan(scanId);
@@ -480,7 +524,7 @@ export async function failScan(scanId: string, message: string): Promise<void> {
     console.error(`Releasing scan ${scan.id} failed: ${describeError(error)}`);
     await captureException(error, { source: "billing", tags: { action: "release", scan_id: scan.id }, handled: true });
   });
-  if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: message.slice(0, 2_000), finishedAt: new Date() });
+  if (scan.status !== "refused") await updateScan(db(), scan.id, { status: "failed", error: failureText(message).slice(0, 2_000), finishedAt: new Date() });
   if (scan.kind === "pr_review" && scan.checkRunId && scan.repo.org.installationId) {
     const installation = githubApp().installation(scan.repo.org.installationId);
     await installation.completeCheckRun(scan.repo.fullName, scan.checkRunId, "neutral", {

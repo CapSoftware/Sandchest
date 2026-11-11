@@ -6,6 +6,7 @@ import {
   claimDelivery,
   createScan,
   disableRepos,
+  disableUnlistedRepos,
   hasOpenFindings,
   lastPrReviewRefused,
   orgByInstallation,
@@ -124,13 +125,18 @@ export async function recordInstallation(
 async function onInstallationRepositories(deps: WebhookDeps, payload: InstallationRepositoriesEvent): Promise<WebhookOutcome> {
   await disableRepos(deps.db, payload.repositories_removed.map((r) => r.id));
   const known = await orgByInstallation(deps.db, payload.installation.id);
+  const added = new Set(payload.repositories_added.map((r) => r.id));
+  // The installation's own listing: what the payload lacks about the repos added, and which repos it still reaches.
+  const listed = added.size > 0 ? await deps.github.installation(payload.installation.id).repositories() : undefined;
+  // An installation narrowed from every repository to chosen ones arrives as the chosen ones added, with none
+  // removed. A repo this delivery adds is kept even when the listing does not show it yet.
+  const dropped = known && listed ? await disableUnlistedRepos(deps.db, known.id, [...listed.map((r) => r.id), ...added]) : 0;
   if (known) {
-    const props = { added: payload.repositories_added.length, removed: payload.repositories_removed.length };
+    const props = { added: payload.repositories_added.length, removed: payload.repositories_removed.length, dropped };
     await recordEvent(deps.db, { name: "repos_changed", orgId: known.id, props }).catch(() => {});
   }
-  if (payload.repositories_added.length === 0) return { status: "handled" };
-  const added = new Set(payload.repositories_added.map((r) => r.id));
-  const details = (await deps.github.installation(payload.installation.id).repositories()).filter((r) => added.has(r.id));
+  if (!listed) return { status: "handled" };
+  const details = listed.filter((r) => added.has(r.id));
   const existing = await repoByGithubId(deps.db, payload.repositories_added[0]!.id);
   const org = existing?.org ?? known;
   if (!org) return { status: "ignored", detail: "unknown installation" };

@@ -98,6 +98,19 @@ export async function disableRepos(database: Db, githubRepoIds: number[]): Promi
 }
 
 /**
+ * Disables the org's repos that its installation no longer lists, as their removal would, and returns how
+ * many. An installation narrowed from every repository to chosen ones is reported by GitHub as the chosen
+ * ones added, with none removed: only the listing says which are gone.
+ */
+export async function disableUnlistedRepos(database: Db, orgId: string, listedGithubRepoIds: number[]): Promise<number> {
+  const listed = new Set(listedGithubRepoIds);
+  const enabled = await database.select({ githubRepoId: repos.githubRepoId }).from(repos).where(and(eq(repos.orgId, orgId), eq(repos.enabled, true)));
+  const gone = enabled.map((repo) => repo.githubRepoId).filter((id) => !listed.has(id));
+  await disableRepos(database, gone);
+  return gone.length;
+}
+
+/**
  * Uninstall (or suspension): forget the installation, disable its repos and
  * delete the code their findings quote. Findings stay until data deletion.
  */

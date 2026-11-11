@@ -17,7 +17,7 @@ import { LlmQuotaError, type ChatRequest, type ChatResult, type LlmClient, type 
 import { GitHubError, type GitHubApp } from "@sandchest/github";
 import { setAutumn } from "@/server/billing";
 import { setMailer } from "@/server/mailer";
-import { beginScan, executeScan, failScan, publishScan } from "@/server/scans";
+import { beginScan, executeScan, failScan, publishScan, REPO_UNREADABLE } from "@/server/scans";
 import { resetConfig } from "@/server/config";
 import { setServices } from "@/server/services";
 import { setScanStarter } from "@/server/start";
@@ -84,10 +84,22 @@ const repos = [
 ];
 const patch = "@@ -1,7 +1,7 @@\n const express = require(\"express\")\n const app = express()\n app.post(\"/login\", async (req, res) => {\n-  const rows = await db.query(\"SELECT 1\")\n+  const rows = await db.query(\"SELECT * FROM users WHERE email = '\" + req.body.email + \"'\")\n   res.json(rows)\n })\n module.exports = app";
 
+/** How many times the installation's repositories were listed. */
+let listings = 0;
+/** Repositories GitHub gives no token for, by id: the installation can no longer read them. */
+const unreadable = new Set<number>();
+const NO_ACCESS = "GitHub 422: There is at least one repository that does not exist or is not accessible to the parent installation.";
+
 const fakeGithub = {
   installation: () => ({
-    repositories: async () => repos,
-    cloneToken: async () => "token",
+    repositories: async () => {
+      listings++;
+      return repos;
+    },
+    cloneToken: async (repoId: number) => {
+      if (unreadable.has(repoId)) throw new GitHubError(NO_ACCESS, 422, false);
+      return "token";
+    },
     pullFiles: async () => [{ filename: "app.js", status: "modified", additions: 1, deletions: 1, patch }],
     compare: async () => [{ filename: "app.js", status: "modified", additions: 1, deletions: 1 }],
     createCheckRun: async (repo: string, input: { headSha: string; output: { title: string } }) => {
@@ -485,5 +497,75 @@ describe.skipIf(!available)("GitHub App, end to end", () => {
     const reviewed = await command("/sandchest review", "d-c2");
     expect(reviewed.status).toBe("handled");
     expect(reviewed.scans).toHaveLength(1);
+  });
+
+  test("an installation narrowed to chosen repositories arrives as those added: the ones it no longer lists are disabled", async () => {
+    const { org } = (await repoByGithubId(database, repos[0]!.id))!;
+    await database.insert(schema.repos).values([
+      { orgId: org.id, githubRepoId: 9001, fullName: "acme/dropped-app", private: true, defaultBranch: "main" },
+      { orgId: org.id, githubRepoId: 9003, fullName: "acme/late-app", private: true, defaultBranch: "main" },
+    ]);
+    const enabled = async () => (await database.query.repos.findMany({ where: (r, { and, eq }) => and(eq(r.orgId, org.id), eq(r.enabled, true)) })).map((r) => r.githubRepoId).sort((a, b) => a - b);
+    const before = await enabled();
+    expect(before).toEqual(expect.arrayContaining([1, 2, 9001, 9003]));
+
+    // A removal names what went: the listing is not read, and nothing else changes.
+    const read = listings;
+    expect((await handleWebhook(deps(), "installation_repositories", "narrow-0", { action: "removed", installation: { id: 77 }, repositories_added: [], repositories_removed: [] })).status).toBe("handled");
+    expect(listings).toBe(read);
+    expect(await enabled()).toEqual(before);
+
+    repos.push({ id: 9002, full_name: "acme/chosen-app", private: true, default_branch: "main" });
+    try {
+      // 9003 is added by this delivery, but the listing does not show it yet: it is kept.
+      const narrowed = { action: "added", installation: { id: 77 }, repositories_added: [{ id: 9002, full_name: "acme/chosen-app" }, { id: 9003, full_name: "acme/late-app" }], repositories_removed: [] };
+      expect((await handleWebhook(deps(), "installation_repositories", "narrow-1", narrowed)).status).toBe("handled");
+      expect(listings).toBe(read + 1);
+      expect(await enabled()).toEqual([1, 2, 9002, 9003]);
+      expect((await repoByGithubId(database, 9001))!.enabled).toBe(false);
+      const [event] = await database.$client<Array<{ props: Record<string, number> }>>`select props from events where org_id = ${org.id} and name = 'repos_changed' order by created_at desc limit 1`;
+      expect(event!.props).toEqual({ added: 2, removed: 0, dropped: before.length - 3 });
+    } finally {
+      repos.pop();
+    }
+  });
+
+  test("a scan of a repository the installation can no longer read is refused once, with a plain reason, and the repository is disabled", async () => {
+    const { org } = (await repoByGithubId(database, repos[0]!.id))!;
+    const [gone, listed] = await database
+      .insert(schema.repos)
+      .values([
+        { orgId: org.id, githubRepoId: 4343, fullName: "acme/gone-app", private: true, defaultBranch: "main" },
+        { orgId: org.id, githubRepoId: 4344, fullName: "acme/listed-app", private: true, defaultBranch: "main" },
+      ])
+      .returning();
+    unreadable.add(4343).add(4344);
+    repos.push({ id: 4344, full_name: "acme/listed-app", private: true, default_branch: "main" });
+    try {
+      const [recon] = await database.insert(schema.scans).values({ repoId: gone!.id, orgId: org.id, kind: "recon", trigger: "webhook", headSha: "HEAD" }).returning();
+      expect((await beginScan(recon!.id)).state).toBe("running");
+      const read = listings;
+      await expect(executeScan(recon!.id)).rejects.toThrow(REPO_UNREADABLE);
+      // GitHub's listing decided, read once: no setup retry.
+      expect(listings).toBe(read + 1);
+      expect(await scanById(database, recon!.id)).toMatchObject({ status: "refused", error: REPO_UNREADABLE });
+      expect((await repoByGithubId(database, 4343))!.enabled).toBe(false);
+      // The fail step that follows keeps the refusal.
+      await failScan(recon!.id, REPO_UNREADABLE);
+      expect(await scanById(database, recon!.id)).toMatchObject({ status: "refused", error: REPO_UNREADABLE });
+
+      // The same answer for a repository GitHub still lists is a failure like any other: nothing refused, nothing disabled.
+      const [again] = await database.insert(schema.scans).values({ repoId: listed!.id, orgId: org.id, kind: "recon", trigger: "webhook", headSha: "HEAD" }).returning();
+      expect((await beginScan(again!.id)).state).toBe("running");
+      await expect(executeScan(again!.id)).rejects.toThrow(NO_ACCESS);
+      expect(await scanById(database, again!.id)).toMatchObject({ status: "running", error: null });
+      expect((await repoByGithubId(database, 4344))!.enabled).toBe(true);
+      // What the page shows is the failure itself, without the workflow's words in front of it.
+      await failScan(again!.id, `Step "step//./src/workflows/scan//executeStep" failed after 1 retry: ${NO_ACCESS}`);
+      expect(await scanById(database, again!.id)).toMatchObject({ status: "failed", error: NO_ACCESS });
+    } finally {
+      repos.pop();
+      unreadable.clear();
+    }
   });
 });

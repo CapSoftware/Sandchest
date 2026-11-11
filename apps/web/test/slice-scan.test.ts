@@ -40,7 +40,7 @@ import { verifyGatewayToken } from "@/server/gateway";
 import { billView } from "@/lib/bill-view";
 import { stepOf, TRACKS } from "@/lib/scan-progress";
 import { quotePrReview, startPrReview } from "@/server/pr-review";
-import { beginScan, failScan, PAUSED_WAIT, publishScan, ScanFinished, type BeginResult } from "@/server/scans";
+import { beginScan, failScan, PAUSED_WAIT, publishScan, REPO_UNREADABLE, ScanFinished, type BeginResult } from "@/server/scans";
 import { resetSentry } from "@/server/sentry";
 import { setServices } from "@/server/services";
 import { resetSliceLimit } from "@/server/slice-limit";
@@ -260,6 +260,8 @@ const host = {
   second: "finish" as SecondOutcome,
   /** How many of the next first verification sessions end by themselves having written no verdicts. */
   emptyFirst: 0,
+  /** What every clone fails with. */
+  cloneFails: undefined as string | undefined,
   /** Sessions started and collected, in order, each by its token's stage. */
   log: [] as string[],
   /** Verify: sinks ruled real. Variants: one sibling of the first confirmed finding. */
@@ -276,6 +278,7 @@ const host = {
     this.outcome = { refute: "finish", variants: "finish" };
     this.second = "finish";
     this.emptyFirst = 0;
+    this.cloneFails = undefined;
     this.log = [];
     this.realSinks = [`${PATH}:3`];
     this.extraFiles = 0;
@@ -341,6 +344,7 @@ class FakeSandbox implements SliceSandbox {
   }
   async clone(source: RepoRef): Promise<void> {
     this.check();
+    if (host.cloneFails !== undefined) throw new Error(host.cloneFails);
     this.cloned.push(source.ref);
   }
   async exec(cmd: string[]): Promise<ExecResult> {
@@ -505,7 +509,10 @@ const gh = {
   checks: [] as Array<{ conclusion: CheckConclusion; output: CheckOutput }>,
   reviews: [] as Array<{ commitId: string; comments: ReviewComment[] }>,
   comments: [] as string[],
+  /** The repositories the installation lists, by GitHub id. */
+  listed: [] as number[],
   reset() {
+    this.listed = [];
     this.files = [];
     this.contents = { ...REPO };
     this.failing = new Set();
@@ -518,6 +525,7 @@ const gh = {
 
 const fakeGithub = {
   installation: () => ({
+    repositories: async () => gh.listed.map((id) => ({ id, full_name: `acme/listed-${id}`, private: true, default_branch: "main" })),
     cloneToken: async () => "token",
     pullFiles: async () => gh.files,
     pull: async (_repo: string, number: number) => ({ state: "open", head: { sha: `pull${number}` }, base: { sha: "base" } }),
@@ -2567,6 +2575,36 @@ describe.skipIf(!available)("two verification sessions", () => {
       expect(autumn.get(orgId).credits).toBe(10_000 - stored.credits);
       await resetCarry();
     });
+  });
+
+  it("a deep scan of a repository the installation can no longer read is refused with a plain reason: one sandbox, no retry, nothing charged, the repository disabled", async () => {
+    const NOT_FOUND = "Clone failed: remote: Repository not found.\nfatal: repository 'https://github.com/acme/app.git/' not found";
+    const enabledIds = async () => (await database.query.repos.findMany({ where: (r, { and, eq }) => and(eq(r.orgId, orgId), eq(r.enabled, true)) })).map((r) => r.githubRepoId);
+    const repoOf = async (scanId: string) => (await scanById(database, scanId))!.repo;
+
+    // GitHub still lists the repository: the failure is a failure like any other, left to the step's retry.
+    host.cloneFails = NOT_FOUND;
+    const listed = await newScan();
+    gh.listed = await enabledIds();
+    let sandboxes = sandboxCount();
+    expect((await runSlice(listed))?.message).toBe(NOT_FOUND);
+    expect(sandboxCount()).toBe(sandboxes + 1);
+    expect(await scanById(database, listed)).toMatchObject({ status: "failed", error: NOT_FOUND, billing: "released", credits: 0 });
+    expect((await repoOf(listed)).enabled).toBe(true);
+
+    // GitHub no longer lists it: refused, and disabled as its removal would have.
+    const gone = await newScan();
+    const lost = (await repoOf(gone)).githubRepoId;
+    gh.listed = (await enabledIds()).filter((id) => id !== lost);
+    const credits = autumn.get(orgId).credits;
+    sandboxes = sandboxCount();
+    expect((await runSlice(gone))?.message).toBe(REPO_UNREADABLE);
+    expect(sandboxCount()).toBe(sandboxes + 1);
+    expect(await scanById(database, gone)).toMatchObject({ status: "refused", error: REPO_UNREADABLE, billing: "released", credits: 0 });
+    expect(autumn.get(orgId).credits).toBe(credits);
+    expect((await repoOf(gone)).enabled).toBe(false);
+    expect(await enabledIds()).toEqual(expect.arrayContaining(gh.listed));
+    expect((await sandboxOf(gone)).destroyed).toBe(true);
   });
 
   it("a first session that runs out of time with no verdicts is not started again: the scan fails", async () => {
