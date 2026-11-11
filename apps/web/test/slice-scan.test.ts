@@ -2269,7 +2269,8 @@ describe.skipIf(!available)("two verification sessions", () => {
       autumn.get(orgId).credits = 10_000;
       await resetCarry();
       const { scanId, result, findings } = await hunted(43, { state: "running", engine: "slice", pricing: "usage" });
-      expect(result).toEqual({ selected: 45, variants: true, secondBand: true });
+      // The second session takes the variants session's place.
+      expect(result).toEqual({ selected: 45, variants: false, secondBand: true });
       expect(idsOf(findings)).toEqual(fromTo(1, 45));
       // The agent may reach the two relays, and nothing else.
       const sandbox = await sandboxOf(scanId);
@@ -2304,12 +2305,13 @@ describe.skipIf(!available)("two verification sessions", () => {
       expect(idsOf((await kept<slice.Verdict[]>(scanId, "slice-verify2.json"))!)).toEqual(fromTo(31, 45));
       expect(idsOf((await kept<slice.ConfirmedEntry[]>(scanId, "slice-confirmed.json"))!)).toEqual(["F3", "F41"]);
 
-      // The variants session starts from both, and both are written up.
-      await sessions(scanId, ["variants"]);
-      expect(idsOf(sessionsOf(scanId)[2]!.findings)).toEqual(["F3", "F41"]);
+      // Both are written up, and no variants session ran.
+      await verifyThenVariants(scanId, result);
+      expect(sessionsOf(scanId).map((s) => s.kind)).toEqual(["refute", "refute"]);
       expect(await writeUpSlice(scanId)).toEqual({ findings: 2 });
       expect(await findingSinks(scanId)).toEqual([...host.realSinks].sort());
-      expect(sandbox.ttl).toEqual([5400, 5400, 5400, 5400]);
+      // Made, then kept alive once for each session started.
+      expect(sandbox.ttl).toEqual([5400, 5400, 5400]);
 
       // The ledger: each session's calls under its own step.
       expect(await agentRows(scanId, "verify")).toEqual([["model", "verify", "agent", 0, "ok", "0.0020000000"]]);
@@ -2342,7 +2344,6 @@ describe.skipIf(!available)("two verification sessions", () => {
         ["score", 0, true, "ok"],
         ["verify", 0, true, "ok"],
         ["verify2", 0, true, "ok"],
-        ["variants", 0, true, "ok"],
         ["writeup", 0, true, "ok"],
         ["publish", 0, true, "ok"],
       ]);
@@ -2417,8 +2418,8 @@ describe.skipIf(!available)("two verification sessions", () => {
           ["verify", 0, true, "ok"],
           ["verify2", 0, true, stage],
         ]);
-        // The variants session had the first band's finding to start from.
-        expect(idsOf(sessionsOf(scanId).at(-1)!.findings)).toEqual(["F3"]);
+        // No variants session follows a scan with a second band, whatever became of it.
+        expect(sessionsOf(scanId).map((s) => s.kind)).not.toContain("variants");
         const feed = await feedOf(scanId);
         expect(feed.filter((message) => message.includes("second verification"))).toEqual([says]);
         expect(feed.filter((message) => message.startsWith("Verif"))).toEqual(["Verifying 45 candidates against the code in the sandbox…", "Verified 30: 1 confirmed."]);
@@ -2501,7 +2502,7 @@ describe.skipIf(!available)("two verification sessions", () => {
     expect(await scanById(database, unstarted)).toMatchObject({ status: "failed", billing: "released", credits: 0 });
   });
 
-  it("a candidate only the second session confirmed leads to a variants session and a finding", async () => {
+  it("a candidate only the second session confirmed is written up, with no variants session", async () => {
     const { scanId, result, findings } = await hunted(43);
     host.realSinks = [findings[35]!.sink];
     await verifyThenVariants(scanId, result);
@@ -2511,17 +2512,15 @@ describe.skipIf(!available)("two verification sessions", () => {
     expect(sessionsOf(scanId).map((s) => [s.kind, s.slot])).toEqual([
       ["refute", undefined],
       ["refute", "band2"],
-      ["variants", undefined],
     ]);
-    expect(idsOf(sessionsOf(scanId)[2]!.findings)).toEqual(["F36"]);
     expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
     await publishSlice(scanId);
     const scan = (await scanById(database, scanId))!;
     expect(scan).toMatchObject({ status: "completed", billing: "charged", credits: 500 });
     expect(await findingSinks(scanId)).toEqual([findings[35]!.sink]);
-    // The variant found of it is a place the finding lists.
+    // No variants were looked for, so the finding lists no other place.
     const [finding] = await database.query.findings.findMany({ where: (f, { eq }) => eq(f.repoId, scan.repoId) });
-    expect((finding!.alsoReported as Array<{ at: string; variant: boolean }>).map((place) => [place.at, place.variant])).toEqual([[`${PATH}:23`, true]]);
+    expect(finding!.alsoReported).toBeNull();
     expect((await feedOf(scanId)).filter((message) => message.startsWith("Verified"))).toEqual(["Verified 45: 1 confirmed."]);
   });
 
@@ -2562,10 +2561,7 @@ describe.skipIf(!available)("two verification sessions", () => {
     host.realSinks = [findings[2]!.sink, findings[40]!.sink];
     // That run reads how many were selected and whether variants follow from the hunt step's result, and nothing else.
     await verifyThenVariants(scanId, { selected: result.selected, variants: result.variants });
-    expect(sessionsOf(scanId).map((s) => [s.kind, s.slot, s.findings.length])).toEqual([
-      ["refute", undefined, 30],
-      ["variants", undefined, 1],
-    ]);
+    expect(sessionsOf(scanId).map((s) => [s.kind, s.slot, s.findings.length])).toEqual([["refute", undefined, 30]]);
     expect(await writeUpSlice(scanId)).toEqual({ findings: 1 });
     await publishSlice(scanId);
     expect(await scanById(database, scanId)).toMatchObject({ status: "completed", billing: "charged", credits: 500 });

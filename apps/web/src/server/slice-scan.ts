@@ -127,7 +127,7 @@ const FAST_UNAVAILABLE = "Fast mode is not available right now, so this scan run
  * A pull request is hunted from its change on GitHub first, and gets a sandbox only when something was
  * selected. A run of this step that is retried first deletes the sandbox the earlier run left. Returns how
  * many candidates were selected for verification, whether they fill a second band (verified by a second
- * session), and whether a variants session follows.
+ * session), and whether a variants session follows: it does for a deep scan with one band only.
  */
 export async function huntSlice(scanId: string, run: { attempt?: number; /** For tests. Default the engine's. */ passDelayMs?: number } = {}): Promise<{ selected: number; variants: boolean; secondBand: boolean }> {
   const scan = await requireScan(scanId);
@@ -188,7 +188,10 @@ export async function huntSlice(scanId: string, run: { attempt?: number; /** For
     const selected = result.findings.length;
     await saveSlice(scan.id, { loc, selected });
     events.write("progress", selected === 0 ? "Nothing worth verifying turned up." : `${selected} ${selected === 1 ? "candidate goes" : "candidates go"} to verification.`);
-    return { selected, variants, secondBand: verifyBands(scan, result.findings).verify2.length > 0 };
+    // The candidates fill a second band: the second verification session takes the place of the variants session,
+    // so a large repository's scan costs and lasts about what it did with one band and variants.
+    const secondBand = verifyBands(scan, result.findings).verify2.length > 0;
+    return { selected, variants: variants && !secondBand, secondBand };
   } catch (error) {
     return await stopped(scan, error, guard.signal);
   } finally {
