@@ -92,7 +92,8 @@ async function sliceSteps(scanId: string, pricing?: "usage" | "shadow"): Promise
  * or the time runs out, then collects them in the order given. Returns how many verdicts were real across them.
  *
  * The first verification session decides: nothing else starts when it does not, and the scan fails as soon as
- * it does. Any other session that fails or runs out of time is collected for what it wrote.
+ * it does. One that ends by itself having ruled on nothing is started again, once. Any other session that
+ * fails or runs out of time is collected for what it wrote.
  */
 async function sliceSessions(scanId: string, kinds: SessionKind[]): Promise<number> {
   const states = new Map<SessionKind, string>();
@@ -108,7 +109,11 @@ async function sliceSessions(scanId: string, kinds: SessionKind[]): Promise<numb
   }
   if (failed()) throw new Error("The verification in the sandbox stopped before it finished. Nothing was charged.");
   let real = 0;
-  for (const [kind, state] of states) real += (await sliceCollectStep(scanId, kind, state === "running")).real;
+  for (const [kind, state] of states) {
+    const collected = await sliceCollectStep(scanId, kind, state === "running");
+    // The first verification session ended with nothing: it runs once more, before the next session is collected.
+    real += collected.restart ? await sliceSessions(scanId, [kind]) : collected.real;
+  }
   return real;
 }
 

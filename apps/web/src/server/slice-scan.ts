@@ -107,7 +107,12 @@ export interface SliceState {
   fast?: boolean;
   /** For a scan billed from its usage: ledger rows each step run (`hunt:0`, `writeup:1`...) could not write. */
   unwritten?: Record<string, number>;
+  /** Times the first verification session was started again, after one that ended by itself with no verdicts. */
+  restarts?: number;
 }
+
+/** How many times a first verification session that ended by itself with no verdicts is started again. */
+const VERIFY_RESTARTS = 1;
 
 /** The scan's spend reached SANDCHEST_SLICE_CEILING_USD. */
 export class SpendCeilingReached extends Error {
@@ -384,7 +389,9 @@ export async function startSliceSession(scanId: string, kind: SessionKind): Prom
     }
     // Keeps the sandbox alive for the whole session: it would otherwise stop at its first deadline.
     await sandbox.extendTtl(SLICE_TTL_SECONDS);
-    attempt = await nextUsageAttempt(db(), scan.id, kind);
+    // A session started again records under an attempt of its own, even when the one before it made no call:
+    // the bill counts the last attempt only, and each attempt keeps its stage.
+    attempt = Math.max(await nextUsageAttempt(db(), scan.id, kind), kind === "verify" ? (state.restarts ?? 0) : 0);
     const token = mintGatewayToken({ scanId: scan.id, stage: kind, attempt, ceilingMicroUsd, ttlSeconds: SESSION_TOKEN_TTL_SECONDS, ...(fast && { fast: true }) }, secret);
     const startedAt = Date.now();
     stages.start(kind, attempt, new Date(startedAt));
@@ -442,19 +449,22 @@ export async function sliceSessionStatus(scanId: string, kind: SessionKind): Pro
 /**
  * Stops the session (if it still runs) and keeps its verdicts in the sandbox's private directory. Collected
  * once: a repeat returns what was counted. `timedOut` ends the session's stage as failed. A first
- * verification session that left no usable verdicts fails the scan; a second one, or a variants session,
- * never does: the scan carries on with what the first confirmed.
+ * verification session that ended by itself with no usable verdicts is set aside and `restart` returned, once:
+ * the workflow starts it again, under the next attempt, so the bill counts the session that ruled. One that
+ * ran out of time, or a restarted one that leaves none either, fails the scan; a second one, or a variants
+ * session, never does: the scan carries on with what the first confirmed.
  *
  * A verification session keeps its rulings on its own band, and the confirmed findings of every band
  * collected so far, in rank order, for the variants session. The workflow collects the first band, then the
  * second.
  */
-export async function collectSliceSession(scanId: string, kind: SessionKind, options: { timedOut?: boolean } = {}): Promise<{ real: number }> {
+export async function collectSliceSession(scanId: string, kind: SessionKind, options: { timedOut?: boolean } = {}): Promise<{ real: number; restart?: boolean }> {
   const scan = await requireScan(scanId);
   if (scan.status !== "running") return { real: 0 };
   const state = sliceState(scan);
   const session = state.sessions?.[kind];
-  if (!session) return { real: 0 };
+  // Set aside for a restart that has not started yet (this step, run again): the answer is the same.
+  if (!session) return kind === "verify" && (state.restarts ?? 0) > 0 ? { real: 0, restart: true } : { real: 0 };
   if (session.collected) return { real: session.real ?? 0 };
   const stages = new StageRecorder(scan.id);
   const events = new EventWriter(db(), scan.id);
@@ -469,6 +479,12 @@ export async function collectSliceSession(scanId: string, kind: SessionKind, opt
     if (kind !== "variants") {
       if (kind === "verify" && result.verdicts.length === 0 && result.error !== undefined) {
         console.error(`Verification for scan ${scan.id} left no verdicts: ${result.error.slice(0, 200)}`);
+        if (!options.timedOut && (state.restarts ?? 0) < VERIFY_RESTARTS) {
+          const others = Object.fromEntries(Object.entries(state.sessions ?? {}).filter(([name]) => name !== kind));
+          await saveSlice(scan.id, { sessions: others, restarts: (state.restarts ?? 0) + 1 });
+          events.write("progress", "The verification ended without a result; running it again.");
+          return { real: 0, restart: true };
+        }
         throw new ScanFinished("The verification in the sandbox ended without a result. Nothing was charged.");
       }
       const hunt = await readHunt(sandbox);
